@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv venv:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv pip install:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(source:*)",
+      "Bash(ls:*)",
+      "Bash(netstat:*)",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -Property OwningProcess\")",
+      "Bash(powershell.exe -Command \"Get-Process -Id 51540 | Select-Object -Property ProcessName,Id\")",
+      "Bash(curl:*)"
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+# Core framework
+fastapi
+uvicorn
+python-multipart
+python-dotenv
+pydantic
+pydantic-settings
+Werkzeug
+
+# LangChain ecosystem
+langchain
+langchain-chroma
+langchain-community
+langchain-core
+langchain-google-genai
+langchain-huggingface
+langchain-openai
+langchain-perplexity
+langchain-text-splitters
+langchain-classic
+
+# Vector store & search
+chromadb
+elasticsearch
+
+# LLM providers
+openai
+google-genai
+
+# ML / Embeddings
+sentence-transformers
+transformers
+torch
+huggingface-hub
+InstructorEmbedding
+numpy
+scikit-learn
+onnxruntime
+
+# PDF processing
+PyMuPDF
+PyPDF2
+pillow
+
+# HTTP & networking
+requests
+httpx
+aiohttp
+
+# Utilities
+tiktoken
+tqdm
+regex
+PyYAML
+rank-bm25
+orjson
+colorama
+rich

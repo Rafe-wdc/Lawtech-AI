@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(python *)",
+      "Bash(uvicorn *)",
+      "Bash(pip freeze *)",
+      "Bash(git *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(* --force *)"
+    ]
+  }
+}

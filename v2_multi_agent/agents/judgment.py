@@ -268,6 +268,10 @@ async def judgment_node(state: LegalAgentState) -> dict:
             content = src["page_content"]
             court = src.get("court_name", "")
             source_file = src.get("source", "unknown")
+            year = src.get("year")
+            keywords = src.get("keywords", [])
+            acts_sections = src.get("acts_or_sections_invoked", [])
+            score = hit.get("_score")
 
             petitioner = src.get("petitioner_names", ["Unknown"])
             respondent = src.get("respondent_names", ["Unknown"])
@@ -282,19 +286,25 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 first_file = source_file if isinstance(source_file, str) else str(source_file)
                 first_title = title
 
-            sources.append(SourceMetadata(
-                title=title,
-                content=[content[:200]],
-                file_name=str(source_file) if isinstance(source_file, dict) else source_file,
-            ))
+            # Generate S3 link for each hit
+            file_str = str(source_file) if isinstance(source_file, dict) else source_file
+            s3_link = _generate_s3_link(court, file_str, title) if court and file_str else None
 
-        # Step 4: Generate S3 link for first result
-        doc_link = None
-        if first_court and first_file:
-            doc_link = _generate_s3_link(first_court, first_file, first_title)
-            log.debug("S3 link generated", link=doc_link)
-            if sources:
-                sources[0].doc_link = doc_link
+            sources.append(SourceMetadata(
+                source_type="judgment",
+                title=title,
+                content=[content[:300]],
+                file_name=file_str,
+                doc_link=s3_link,
+                agent_name="Judgment",
+                relevance_score=score,
+                court_name=court,
+                year=year,
+                petitioner_names=petitioner if isinstance(petitioner, list) else [petitioner],
+                respondent_names=respondent if isinstance(respondent, list) else [respondent],
+                keywords=keywords if isinstance(keywords, list) else [],
+                acts_or_sections_invoked=acts_sections if isinstance(acts_sections, list) else [],
+            ))
 
         # Step 5: Generate response
         docs_text = "\n\n".join(docs_text_parts)

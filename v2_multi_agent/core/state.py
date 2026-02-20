@@ -23,10 +23,44 @@ TaskType = Literal[
 @dataclass
 class SourceMetadata:
     """Metadata about a retrieved source document."""
+    # Common fields (all agents)
+    source_type: str = ""              # "judgment", "legislation", "newacts", "drafting",
+                                       # "sci_judgment", "scenario", "constitution",
+                                       # "maxim", "legal_concepts", "document"
     title: str | None = None
     content: list[str] = field(default_factory=list)
     doc_link: str | None = None
     file_name: str | None = None
+    agent_name: str = ""
+    relevance_score: float | None = None
+
+    # Judgment fields
+    court_name: str | None = None
+    year: int | None = None
+    petitioner_names: list[str] = field(default_factory=list)
+    respondent_names: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
+    acts_or_sections_invoked: list[str] = field(default_factory=list)
+
+    # SCI Judgment fields
+    case_no: str | None = None
+    judgment_date: str | None = None
+    bench: str | None = None
+    judgment_by: str | None = None
+    pdf_links: list[dict] = field(default_factory=list)
+    parties: str | None = None
+    db_id: str | None = None
+
+    # Legislation / Newacts fields
+    section_number: str | None = None
+    act_name: str | None = None
+
+    # Drafting fields
+    template_type: str | None = None
+
+    # Scenario fields (web search grounding)
+    web_url: str | None = None
+    web_title: str | None = None
 
 
 @dataclass
@@ -81,5 +115,5 @@ class LegalAgentState(MessagesState):
 
     # Final output
     final_response: str
-    source_metadata: dict[str, Any]
+    source_metadata: list[dict[str, Any]]
     tokens_consumed: Annotated[int, _sum_tokens]

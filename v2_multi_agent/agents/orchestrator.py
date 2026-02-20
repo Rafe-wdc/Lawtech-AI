@@ -187,7 +187,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         log.warning("No agent results to synthesize")
         return {
             "final_response": "No results were found for your query. Please try rephrasing.",
-            "source_metadata": {"title": "No Results", "content": [], "docLink": None},
+            "source_metadata": [],
         }
 
     # Filter out empty/errored results
@@ -213,7 +213,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         log.warning("All agent results were empty or errored")
         return {
             "final_response": "The agents could not find relevant information. Please try a different query.",
-            "source_metadata": {"title": "No Results", "content": [], "docLink": None},
+            "source_metadata": [],
         }
 
     # Single agent — pass through directly (no synthesis overhead)
@@ -222,10 +222,9 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         log.info("Single agent pass-through",
                  agent=name, content_len=len(result.content),
                  tokens=result.tokens_consumed)
-        source_meta = _build_source_metadata(result)
         return {
             "final_response": result.content,
-            "source_metadata": source_meta,
+            "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
         }
 
@@ -236,12 +235,12 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 
     agent_results_text = ""
     total_tokens = 0
-    all_sources = []
+    all_serialized_sources = []
 
     for name, result in valid_results.items():
         agent_results_text += f"\n\n### {name.upper()} AGENT RESULTS:\n{result.content}"
         total_tokens += result.tokens_consumed
-        all_sources.extend(result.sources)
+        all_serialized_sources.extend(_serialize_sources(result))
 
     try:
         with log_time(log, "LLM synthesis"):
@@ -271,32 +270,41 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             parts.append(result.content)
         synthesized = "\n\n---\n\n".join(parts)
 
-    # Build merged source metadata
-    source_meta = {
-        "title": all_sources[0].title if all_sources else "Legal Analysis",
-        "content": [s.title for s in all_sources if s.title],
-        "docLink": next((s.doc_link for s in all_sources if s.doc_link), None),
-    }
-
     return {
         "final_response": synthesized,
-        "source_metadata": source_meta,
+        "source_metadata": all_serialized_sources,
         "tokens_consumed": total_tokens,
     }
 
 
-def _build_source_metadata(result: AgentResult) -> dict:
-    """Build source metadata dict from a single agent result."""
+def _serialize_sources(result: AgentResult) -> list[dict]:
+    """Serialize all SourceMetadata objects from an agent result into dicts."""
     if not result.sources:
-        return {
-            "title": "Disclaimer",
-            "content": ["AI-generated response based on Legal Intelligence"],
-            "docLink": None,
-        }
+        return []
 
-    primary = result.sources[0]
-    return {
-        "title": primary.title or "Legal Analysis",
-        "content": [s.title for s in result.sources if s.title] or primary.content,
-        "docLink": primary.doc_link,
-    }
+    serialized = []
+    for s in result.sources:
+        d = {
+            "source_type": s.source_type,
+            "title": s.title,
+            "content": s.content,
+            "doc_link": s.doc_link,
+            "file_name": s.file_name,
+            "agent_name": s.agent_name or result.agent_name,
+            "relevance_score": s.relevance_score,
+        }
+        # Add type-specific fields only when populated
+        for field_name in [
+            "court_name", "year", "petitioner_names", "respondent_names",
+            "keywords", "acts_or_sections_invoked",
+            "case_no", "judgment_date", "bench", "judgment_by",
+            "pdf_links", "parties", "db_id",
+            "section_number", "act_name",
+            "template_type",
+            "web_url", "web_title",
+        ]:
+            val = getattr(s, field_name, None)
+            if val is not None and val != "" and val != []:
+                d[field_name] = val
+        serialized.append(d)
+    return serialized

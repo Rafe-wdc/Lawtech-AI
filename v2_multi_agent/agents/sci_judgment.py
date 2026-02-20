@@ -14,6 +14,8 @@ Data Source: Elasticsearch "supreme_court_judgement" index
 
 from __future__ import annotations
 
+import re
+
 from langchain_core.messages import SystemMessage
 from langgraph.prebuilt import create_react_agent
 
@@ -90,13 +92,54 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             if hasattr(msg, "usage_metadata") and msg.usage_metadata:
                 tokens += msg.usage_metadata.get("total_tokens", 0)
 
-        # Build source metadata from answer (extract PDF links if present)
+        # Parse tool response messages to extract structured case data
         sources = []
-        if answer:
-            sources.append(SourceMetadata(
-                title="Supreme Court of India Judgments",
-                content=[f"Tools used: {', '.join(tools_used)}"] if tools_used else [],
-            ))
+        for msg in messages:
+            if hasattr(msg, "type") and msg.type == "tool" and msg.content:
+                text = msg.content
+                # Split on case headers: **Parties** (DB ID: 123)
+                case_blocks = re.split(r'\n\n(?=\*\*)', text)
+                for block in case_blocks:
+                    if not block.strip() or "No matching" in block:
+                        continue
+                    parties_m = re.search(r'\*\*(.+?)\*\*\s*\(DB ID:\s*(\S+)\)', block)
+                    case_no_m = re.search(r'Case No:\s*(.+)', block)
+                    date_m = re.search(r'Date:\s*(.+)', block)
+                    bench_m = re.search(r'Bench:\s*(.+)', block)
+                    judge_m = re.search(r'Judgment By:\s*(.+)', block)
+                    pdf_m = re.search(r'PDF:\s*(https?://\S+)', block)
+
+                    if parties_m:
+                        p_title = parties_m.group(1).strip()
+                        p_dbid = parties_m.group(2).strip()
+                        pdf_url = pdf_m.group(1).strip() if pdf_m else None
+                        sources.append(SourceMetadata(
+                            source_type="sci_judgment",
+                            title=p_title,
+                            db_id=p_dbid,
+                            parties=p_title,
+                            case_no=case_no_m.group(1).strip() if case_no_m else None,
+                            judgment_date=date_m.group(1).strip() if date_m else None,
+                            bench=bench_m.group(1).strip() if bench_m else None,
+                            judgment_by=judge_m.group(1).strip() if judge_m else None,
+                            doc_link=pdf_url,
+                            pdf_links=[{"label": "Judgment PDF", "url": pdf_url}] if pdf_url and pdf_url != "N/A" else [],
+                            agent_name="SCI_Judgment",
+                        ))
+
+        # Deduplicate by db_id
+        seen_ids = set()
+        unique_sources = []
+        for s in sources:
+            if s.db_id and s.db_id in seen_ids:
+                continue
+            if s.db_id:
+                seen_ids.add(s.db_id)
+            unique_sources.append(s)
+        sources = unique_sources
+
+        log.info("Sources parsed from tool messages",
+                 source_count=len(sources))
 
         result = AgentResult(
             agent_name="SCI_Judgment",

@@ -11,6 +11,7 @@ Data Source: Elasticsearch "drafting" index
 
 from __future__ import annotations
 
+import os
 from datetime import date
 
 from pydantic import BaseModel, Field
@@ -155,13 +156,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
                  template=selected_source,
                  response_len=len(llm_response.content), tokens=tokens)
 
+        template_display = os.path.splitext(os.path.basename(selected_source))[0]
         result = AgentResult(
             agent_name="Drafting",
             content=llm_response.content,
             sources=[SourceMetadata(
-                title=selected_source,
+                source_type="drafting",
+                title=template_display,
                 content=[template_text[:300]],
                 file_name=selected_source,
+                agent_name="Drafting",
+                template_type=template_display,
             )],
             tokens_consumed=tokens,
         )

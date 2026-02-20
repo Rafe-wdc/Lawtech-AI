@@ -132,9 +132,9 @@ def process_and_store_text(
 
 def _retrieve_and_answer(
     unique_string: str, query: str, chat_history_messages: list[dict]
-) -> tuple[str, int]:
+) -> tuple[str, int, list[Document]]:
     """Retrieve from user's collection and generate answer.
-    Returns (answer_text, tokens_consumed).
+    Returns (answer_text, tokens_consumed, retrieved_docs).
     """
     vectordb = _get_or_create_collection(unique_string)
 
@@ -148,7 +148,7 @@ def _retrieve_and_answer(
 
     if not docs:
         log.warning("No relevant docs found", collection=unique_string)
-        return "No relevant content found in the uploaded document(s) for this query.", 0
+        return "No relevant content found in the uploaded document(s) for this query.", 0, []
 
     log.debug("Documents retrieved",
               collection=unique_string, docs_found=len(docs))
@@ -182,7 +182,7 @@ def _retrieve_and_answer(
     if hasattr(response, "usage_metadata") and response.usage_metadata:
         tokens = response.usage_metadata.get("total_tokens", 0)
 
-    return response.content, tokens
+    return response.content, tokens, docs
 
 
 # --- Agent Node ---
@@ -222,7 +222,7 @@ async def document_node(state: LegalAgentState) -> dict:
 
         # Retrieve and answer
         with log_time(log, "Full document QA pipeline"):
-            answer, tokens = _retrieve_and_answer(unique_string, query, recent_history)
+            answer, tokens, retrieved_docs = _retrieve_and_answer(unique_string, query, recent_history)
 
         # Save chat history
         _save_pdf_chat_history(unique_string, query, answer, all_chats)
@@ -231,13 +231,28 @@ async def document_node(state: LegalAgentState) -> dict:
                  collection=unique_string,
                  response_len=len(answer), tokens=tokens)
 
+        sources = []
+        for d in retrieved_docs[:5]:
+            src_file = d.metadata.get("source", "PDF")
+            sources.append(SourceMetadata(
+                source_type="document",
+                title=f"Uploaded: {src_file}",
+                content=[d.page_content[:200]],
+                file_name=src_file,
+                agent_name="Document",
+            ))
+        if not sources:
+            sources.append(SourceMetadata(
+                source_type="document",
+                title="Uploaded Document",
+                content=["Response based on uploaded PDF content"],
+                agent_name="Document",
+            ))
+
         result = AgentResult(
             agent_name="Document",
             content=answer,
-            sources=[SourceMetadata(
-                title="Uploaded Document",
-                content=["Response based on uploaded PDF content"],
-            )],
+            sources=sources,
             tokens_consumed=tokens,
         )
 

@@ -71,7 +71,7 @@ class SearchResponse(BaseModel):
     globalThreadId: Optional[str]
     result: str
     total_tokens_consumed: int
-    source: dict
+    source: list[dict]
     agents_used: list[str]
 
 
@@ -98,7 +98,7 @@ def _build_initial_state(query: str, thread_id: str, unique_string: str | None =
         "is_blocked": False,
         "block_reason": None,
         "final_response": "",
-        "source_metadata": {},
+        "source_metadata": [],
         "tokens_consumed": 0,
     }
 
@@ -150,7 +150,7 @@ async def search(data: SearchRequest, request: Request):
             globalThreadId=thread_id,
             result=final_state.get("block_reason", "Query blocked by safety filter."),
             total_tokens_consumed=0,
-            source={"title": "Blocked", "content": ["Query blocked by safety filter"], "docLink": None},
+            source=[{"source_type": "blocked", "title": "Blocked", "content": ["Query blocked by safety filter"]}],
             agents_used=[],
         )
 
@@ -168,7 +168,7 @@ async def search(data: SearchRequest, request: Request):
         globalThreadId=thread_id,
         result=final_state.get("final_response", ""),
         total_tokens_consumed=total_tokens,
-        source=final_state.get("source_metadata", {}),
+        source=final_state.get("source_metadata", []),
         agents_used=agents_used,
     )
 
@@ -224,6 +224,7 @@ async def search_stream(data: SearchRequest, request: Request):
         final_response = ""
         agents_used = []
         total_tokens = 0
+        all_source_metadata = []
 
         try:
             async for chunk in agent_graph.astream(
@@ -259,6 +260,10 @@ async def search_stream(data: SearchRequest, request: Request):
                             if hasattr(r, "tokens_consumed"):
                                 total_tokens += r.tokens_consumed or 0
 
+                    # Capture source_metadata when it appears
+                    if "source_metadata" in update and update["source_metadata"]:
+                        all_source_metadata = update["source_metadata"]
+
         except Exception as e:
             log.error("Stream error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
@@ -270,6 +275,14 @@ async def search_stream(data: SearchRequest, request: Request):
                 "content": final_response,
             }
             yield f"data: {json.dumps(response_event)}\n\n"
+
+        # Send sources
+        if all_source_metadata:
+            sources_event = {
+                "type": "sources",
+                "data": all_source_metadata,
+            }
+            yield f"data: {json.dumps(sources_event)}\n\n"
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         log.info("Stream completed",

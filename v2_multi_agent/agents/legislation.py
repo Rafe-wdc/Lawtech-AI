@@ -335,14 +335,26 @@ async def legislation_node(state: LegalAgentState) -> dict:
                  source=source_display, response_len=len(response.content),
                  tokens=tokens)
 
+        parsed_info = _extract_section_info(query)
+        sources = []
+        for h in hits:
+            hit_source = h["_source"].get("source", "unknown")
+            hit_display = os.path.splitext(os.path.basename(hit_source))[0]
+            sources.append(SourceMetadata(
+                source_type="legislation",
+                title=hit_display,
+                content=[h["_source"]["page_content"][:300]],
+                file_name=hit_source,
+                agent_name="Legislation",
+                relevance_score=h.get("_score"),
+                section_number=parsed_info["section_number"] if parsed_info else None,
+                act_name=parsed_info["act_name"] if parsed_info else hit_display,
+            ))
+
         result = AgentResult(
             agent_name="Legislation",
             content=response.content,
-            sources=[SourceMetadata(
-                title=source_display,
-                content=[h["_source"]["page_content"][:200] for h in hits],
-                file_name=source_file,
-            )],
+            sources=sources,
             tokens_consumed=tokens,
         )
 

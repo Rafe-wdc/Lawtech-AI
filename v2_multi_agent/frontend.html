@@ -463,6 +463,68 @@
     text-align: left;
   }
   .msg.ai th { background: var(--bg); }
+
+  /* --- Citation Cards --- */
+  .citations-section { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .citations-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; padding: 8px 0; font-size: 13px; font-weight: 600;
+    color: var(--text2); user-select: none;
+  }
+  .citations-header:hover { color: var(--text); }
+  .citations-header .chevron { transition: transform 0.2s; font-size: 12px; }
+  .citations-header .chevron.open { transform: rotate(180deg); }
+  .citations-count {
+    background: var(--accent); color: #fff; font-size: 10px;
+    padding: 1px 7px; border-radius: 10px; margin-left: 8px;
+  }
+  .citations-list {
+    display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+    max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out;
+  }
+  .citations-list.expanded { max-height: 2000px; }
+  .citation-card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; font-size: 12px; display: flex; gap: 10px;
+    align-items: flex-start; transition: border-color 0.15s;
+  }
+  .citation-card:hover { border-color: var(--accent); }
+  .citation-icon {
+    width: 32px; height: 32px; border-radius: 6px; display: flex;
+    align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
+  }
+  .citation-icon.judgment    { background: rgba(248,113,113,0.15); }
+  .citation-icon.sci_judgment { background: rgba(251,191,36,0.15); }
+  .citation-icon.legislation  { background: rgba(96,165,250,0.15); }
+  .citation-icon.newacts      { background: rgba(52,211,153,0.15); }
+  .citation-icon.drafting     { background: rgba(168,85,247,0.15); }
+  .citation-icon.scenario     { background: rgba(236,72,153,0.15); }
+  .citation-icon.constitution { background: rgba(251,191,36,0.15); }
+  .citation-icon.maxim        { background: rgba(96,165,250,0.15); }
+  .citation-icon.document     { background: rgba(52,211,153,0.15); }
+  .citation-icon.legal_concepts { background: rgba(108,99,255,0.15); }
+  .citation-body { flex: 1; min-width: 0; }
+  .citation-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .citation-title a { color: var(--blue); text-decoration: none; }
+  .citation-title a:hover { text-decoration: underline; }
+  .citation-meta {
+    color: var(--text2); font-size: 11px; display: flex;
+    flex-wrap: wrap; gap: 4px 12px; margin-bottom: 4px;
+  }
+  .citation-meta span { display: flex; align-items: center; gap: 3px; }
+  .citation-excerpt {
+    color: var(--text2); font-size: 11px; line-height: 1.5;
+    margin-top: 4px; max-height: 40px; overflow: hidden; text-overflow: ellipsis;
+  }
+  .citation-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--blue); font-size: 11px; text-decoration: none; margin-top: 4px;
+  }
+  .citation-link:hover { text-decoration: underline; }
+  .citation-agent-tag {
+    font-size: 9px; padding: 1px 6px; border-radius: 8px;
+    background: rgba(108,99,255,0.15); color: var(--accent2); font-weight: 600;
+  }
 </style>
 </head>
 <body>
@@ -493,7 +555,7 @@
     <div style="padding: 12px; border-top: 1px solid var(--border);">
       <div class="field-group" style="margin-bottom: 8px;">
         <label>API Base URL</label>
-        <input type="text" id="apiBase" value="http://localhost:5005" />
+        <input type="text" id="apiBase" value="http://localhost:5000" />
       </div>
       <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="checkHealth()">
         Test Connection
@@ -753,8 +815,8 @@ async function sendChatBatch(query, threadId) {
   document.getElementById('chatMeta').textContent =
     `Thread: ${currentThreadId.substring(0, 8)}... | Agents: ${data.agents_used.join(', ') || 'none'}`;
 
-  addChatMsg('ai', data.result, data.agents_used, data.total_tokens_consumed, elapsed);
-  addLog('success', `Response: ${data.agents_used.join(',')} | ${data.total_tokens_consumed} tokens | ${elapsed}s`);
+  addChatMsg('ai', data.result, data.agents_used, data.total_tokens_consumed, elapsed, data.source);
+  addLog('success', `Response: ${data.agents_used.join(',')} | ${data.total_tokens_consumed} tokens | ${elapsed}s | ${(data.source || []).length} sources`);
 }
 
 async function sendChatStream(query, threadId) {
@@ -793,6 +855,7 @@ async function sendChatStream(query, threadId) {
   let agents = [];
   let totalTokens = 0;
   let lastStepId = null;
+  let sourcesData = [];
 
   while (true) {
     const { done, value } = await reader.read();
@@ -853,6 +916,10 @@ async function sendChatStream(query, threadId) {
           }
           scrollChat();
 
+        } else if (event.type === 'sources') {
+          sourcesData = event.data || [];
+          addLog('info', `Received ${sourcesData.length} citation sources`);
+
         } else if (event.type === 'done') {
           agents = event.agents_used || [];
           totalTokens = event.total_tokens || 0;
@@ -882,11 +949,18 @@ async function sendChatStream(query, threadId) {
     }
   }
 
+  // Add citations
+  if (sourcesData.length > 0) {
+    const citDiv = document.createElement('div');
+    citDiv.innerHTML = renderCitations(sourcesData);
+    msgDiv.appendChild(citDiv);
+  }
+
   // Add tokens footer
   if (totalTokens > 0) {
     const tokensDiv = document.createElement('div');
     tokensDiv.className = 'tokens';
-    tokensDiv.textContent = `${totalTokens} tokens`;
+    tokensDiv.textContent = `${totalTokens} tokens | ${sourcesData.length} sources`;
     msgDiv.appendChild(tokensDiv);
   }
 
@@ -913,7 +987,7 @@ async function sendChatStream(query, threadId) {
     `Thread: ${(currentThreadId || '').substring(0, 8)}... | Agents: ${agents.join(', ') || 'none'} | Streamed`;
 }
 
-function addChatMsg(type, text, agents, tokens, elapsed) {
+function addChatMsg(type, text, agents, tokens, elapsed, sources) {
   const div = document.createElement('div');
   div.className = `msg ${type}`;
 
@@ -925,6 +999,9 @@ function addChatMsg(type, text, agents, tokens, elapsed) {
         '</div>';
     }
     html += renderMarkdown(text);
+    if (sources && sources.length) {
+      html += renderCitations(sources);
+    }
     if (tokens || elapsed) {
       html += `<div class="tokens">${tokens ? tokens + ' tokens' : ''}${elapsed ? ' | ' + elapsed + 's' : ''}</div>`;
     }
@@ -1199,6 +1276,98 @@ function clearLogs() {
 
 function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ============================================================
+// Citation Rendering
+// ============================================================
+const SOURCE_ICONS = {
+  judgment:       { icon: '\u2696\uFE0F', label: 'Court Judgment' },
+  sci_judgment:   { icon: '\u2696\uFE0F', label: 'Supreme Court Judgment' },
+  legislation:    { icon: '\uD83D\uDCDC', label: 'Legislation' },
+  newacts:        { icon: '\uD83D\uDCCB', label: 'Act / Code' },
+  drafting:       { icon: '\u270F\uFE0F', label: 'Legal Template' },
+  scenario:       { icon: '\uD83C\uDF10', label: 'Web Source' },
+  constitution:   { icon: '\uD83C\uDFDB\uFE0F', label: 'Constitutional Provision' },
+  maxim:          { icon: '\uD83D\uDCD6', label: 'Legal Maxim' },
+  document:       { icon: '\uD83D\uDCC4', label: 'Uploaded Document' },
+  legal_concepts: { icon: '\uD83D\uDCA1', label: 'Legal Concept' },
+};
+
+function renderCitations(sources) {
+  if (!sources || !Array.isArray(sources) || sources.length === 0) return '';
+
+  const cardsHtml = sources.map(function(s) {
+    const type = s.source_type || 'legal_concepts';
+    const iconInfo = SOURCE_ICONS[type] || SOURCE_ICONS.legal_concepts;
+
+    var metaHtml = '';
+    if (s.court_name) metaHtml += '<span>\uD83C\uDFDB ' + escapeHtml(s.court_name) + '</span>';
+    if (s.year) metaHtml += '<span>\uD83D\uDCC5 ' + s.year + '</span>';
+    if (s.case_no) metaHtml += '<span># ' + escapeHtml(s.case_no) + '</span>';
+    if (s.judgment_date) metaHtml += '<span>\uD83D\uDCC5 ' + escapeHtml(s.judgment_date) + '</span>';
+    if (s.bench) metaHtml += '<span>\uD83D\uDC64 ' + escapeHtml((s.bench || '').substring(0, 80)) + '</span>';
+    if (s.judgment_by) metaHtml += '<span>Judge: ' + escapeHtml(s.judgment_by) + '</span>';
+    if (s.section_number) metaHtml += '<span>\u00A7 Section ' + escapeHtml(s.section_number) + '</span>';
+    if (s.act_name) metaHtml += '<span>\uD83D\uDCDC ' + escapeHtml(s.act_name) + '</span>';
+    if (s.template_type) metaHtml += '<span>Template: ' + escapeHtml(s.template_type) + '</span>';
+    if (s.agent_name) metaHtml += '<span class="citation-agent-tag">' + escapeHtml(s.agent_name) + '</span>';
+
+    var linkHtml = '';
+    if (s.doc_link && s.doc_link !== 'N/A') {
+      linkHtml = '<a class="citation-link" href="' + escapeHtml(s.doc_link) + '" target="_blank" rel="noopener">\uD83D\uDCC4 View PDF</a>';
+    } else if (s.web_url) {
+      linkHtml = '<a class="citation-link" href="' + escapeHtml(s.web_url) + '" target="_blank" rel="noopener">\uD83C\uDF10 ' + escapeHtml(s.web_title || 'View Source') + '</a>';
+    }
+    if (s.pdf_links && s.pdf_links.length > 0) {
+      linkHtml = s.pdf_links.map(function(pl) {
+        return '<a class="citation-link" href="' + escapeHtml(pl.url) + '" target="_blank" rel="noopener">\uD83D\uDCC4 ' + escapeHtml(pl.label || 'PDF') + '</a>';
+      }).join(' ');
+    }
+
+    var excerptHtml = '';
+    if (s.content && s.content.length && s.content[0]) {
+      var excerpt = s.content[0].substring(0, 150);
+      excerptHtml = '<div class="citation-excerpt">' + escapeHtml(excerpt) + '...</div>';
+    }
+
+    var titleHtml = escapeHtml(s.title || 'Source');
+    if (s.doc_link && s.doc_link !== 'N/A') {
+      titleHtml = '<a href="' + escapeHtml(s.doc_link) + '" target="_blank">' + titleHtml + '</a>';
+    } else if (s.web_url) {
+      titleHtml = '<a href="' + escapeHtml(s.web_url) + '" target="_blank">' + titleHtml + '</a>';
+    }
+
+    return '<div class="citation-card">' +
+      '<div class="citation-icon ' + type + '">' + iconInfo.icon + '</div>' +
+      '<div class="citation-body">' +
+        '<div class="citation-title">' + titleHtml + '</div>' +
+        (metaHtml ? '<div class="citation-meta">' + metaHtml + '</div>' : '') +
+        excerptHtml +
+        linkHtml +
+      '</div></div>';
+  }).join('');
+
+  var uid = 'cite_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+  return '<div class="citations-section">' +
+    '<div class="citations-header" onclick="toggleCitations(\'' + uid + '\')">' +
+      '<span>Sources & Citations <span class="citations-count">' + sources.length + '</span></span>' +
+      '<span class="chevron" id="' + uid + '_chevron">\u25BC</span>' +
+    '</div>' +
+    '<div class="citations-list" id="' + uid + '">' + cardsHtml + '</div>' +
+  '</div>';
+}
+
+function toggleCitations(id) {
+  var list = document.getElementById(id);
+  var chevron = document.getElementById(id + '_chevron');
+  if (list.classList.contains('expanded')) {
+    list.classList.remove('expanded');
+    chevron.classList.remove('open');
+  } else {
+    list.classList.add('expanded');
+    chevron.classList.add('open');
+  }
 }
 
 // ============================================================

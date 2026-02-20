@@ -13,6 +13,7 @@ Data Source: ChromaDB vectorstores (constitution db, legal maxim db)
 
 from __future__ import annotations
 
+import os
 from datetime import date
 from typing import List
 
@@ -233,8 +234,10 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
                 agent_name="Legal_Concepts",
                 content=response.content,
                 sources=[SourceMetadata(
-                    title="Disclaimer",
-                    content=["AI-generated response based on Legal Intelligence"],
+                    source_type="legal_concepts",
+                    title="AI-Generated Legal Explanation",
+                    content=["Response generated from AI legal knowledge"],
+                    agent_name="Legal_Concepts",
                 )],
                 tokens_consumed=tokens,
             )
@@ -293,14 +296,20 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
                  task=task, source=source_name,
                  response_len=len(response.content), tokens=tokens)
 
+        sources = []
+        for d in docs[:5]:
+            src_name = d.metadata.get("source", "unknown")
+            sources.append(SourceMetadata(
+                source_type=task.lower(),
+                title=os.path.splitext(os.path.basename(src_name))[0] if src_name != "unknown" else task,
+                content=[d.page_content[:300]],
+                file_name=src_name,
+                agent_name=task,
+            ))
         result = AgentResult(
             agent_name=task,
             content=response.content,
-            sources=[SourceMetadata(
-                title=source_name,
-                content=[d.page_content[:200] for d in docs[:3]],
-                file_name=source_name,
-            )],
+            sources=sources,
             tokens_consumed=tokens,
         )
 

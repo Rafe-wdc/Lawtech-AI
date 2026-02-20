@@ -236,14 +236,26 @@ async def newacts_node(state: LegalAgentState) -> dict:
                  act=act_display, response_len=len(llm_response.content),
                  tokens=tokens, hits=len(hits))
 
+        sources = []
+        for h in hits[:10]:
+            src = h["_source"]
+            sec_num = src.get("section_number", "")
+            sec_str = str(sec_num) if sec_num else None
+            sources.append(SourceMetadata(
+                source_type="newacts",
+                title=f"{act_display} - Section {sec_str}" if sec_str else act_display,
+                content=[src["page_content"][:300]],
+                file_name=src.get("source", "unknown"),
+                agent_name="Newacts",
+                relevance_score=h.get("_score"),
+                section_number=sec_str,
+                act_name=metadata.act_name,
+            ))
+
         result = AgentResult(
             agent_name="Newacts",
             content=llm_response.content,
-            sources=[SourceMetadata(
-                title=act_display,
-                content=[h["_source"]["page_content"][:200] for h in hits[:5]],
-                file_name=source_file,
-            )],
+            sources=sources,
             tokens_consumed=tokens,
         )
 

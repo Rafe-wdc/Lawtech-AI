@@ -22,19 +22,22 @@ from core.clients import (
     get_es_client, get_gpt4o, get_gemini_flash, get_retriever_embeddings,
 )
 from core.settings import ES_INDICES
+from core.logger import get_logger, log_time
 from config.prompts import NEWACTS_SYSTEM_PROMPT
+
+log = get_logger("Newacts")
 
 
 # --- Act Name → Source Path Mapping ---
 # These paths must match the 'source' field in ES "newacts_v1" index.
 
 ACTS_PATHS = {
-    "The Bharatiya Nyaya Sanhita, 2023": "Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
-    "The Bharatiya Nagarik Suraksha Sanhita, 2023": "Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv",
-    "The Bharatiya Sakshya Adhiniyam, 2023": "Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
-    "The Code of Criminal Procedure 1973": "Bharitya New Acts/Code of Criminal Procedure 1974.csv",
-    "The Indian Penal Code, 1860": "Bharitya New Acts/Indian Penal Code 1860.csv",
-    "Indian Evidence Act 1872": "Bharitya New Acts/Indian Evidence Act 1872.csv",
+    "The Bharatiya Nyaya Sanhita, 2023": "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+    "The Bharatiya Nagarik Suraksha Sanhita, 2023": "/content/Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv",
+    "The Bharatiya Sakshya Adhiniyam, 2023": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
+    "The Code of Criminal Procedure 1973": "/content/Bharitya New Acts/Code of Criminal Procedure 1974.csv",
+    "The Indian Penal Code, 1860": "/content/Bharitya New Acts/Indian Penal Code 1860.csv",
+    "Indian Evidence Act 1872": "/content/Bharitya New Acts/Indian Evidence Act 1872.csv",
 }
 
 
@@ -82,10 +85,16 @@ Return only valid JSON:
 
 def _extract_act_metadata(query: str) -> ActQueryMetadata:
     """Use GPT-4o to extract act metadata from a newacts query."""
-    llm = get_gpt4o().with_structured_output(ActQueryMetadata)
-    prompt = ChatPromptTemplate.from_template(METADATA_PROMPT)
-    chain = prompt | llm
-    return chain.invoke({"query": query})
+    with log_time(log, "Act metadata extraction"):
+        llm = get_gpt4o().with_structured_output(ActQueryMetadata)
+        prompt = ChatPromptTemplate.from_template(METADATA_PROMPT)
+        chain = prompt | llm
+        result = chain.invoke({"query": query})
+
+    log.info("Metadata extracted",
+             act=result.act_name, sections=result.section_number,
+             hybrid=result.hybrid_search)
+    return result
 
 
 # --- ES Query Builder ---
@@ -102,6 +111,7 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
 
     # Hybrid search: BM25 + cosine similarity on embedding field
     if metadata.hybrid_search and query_text:
+        log.debug("Building hybrid BM25+vector query")
         embeddings = get_retriever_embeddings()
         query_vector = embeddings.embed_query(query_text)
 
@@ -138,6 +148,7 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
         }
 
     # Non-hybrid: exact filter search
+    log.debug("Building exact filter query", filters_count=len(filters))
     return {
         "query": {
             "bool": {
@@ -164,22 +175,22 @@ async def newacts_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     chat_history = state.get("chat_history", [])
-    print(f"[Newacts] Retrieving provisions for: {query[:80]}...")
+    log.info("Agent started", query=query[:100])
 
     try:
         # Step 1: Extract metadata
         metadata = _extract_act_metadata(query)
-        print(f"[Newacts] Metadata: act={metadata.act_name}, "
-              f"sections={metadata.section_number}, hybrid={metadata.hybrid_search}")
 
         # Step 2: Build and execute query
         es_query = _build_newacts_query(metadata, query)
-        es = get_es_client()
-        response = es.search(index=ES_INDICES["newacts"], body=es_query)
+
+        with log_time(log, "ES search"):
+            es = get_es_client()
+            response = es.search(index=ES_INDICES["newacts"], body=es_query)
 
         hits = response["hits"]["hits"]
         if not hits:
-            print("[Newacts] No results found")
+            log.warning("No results found")
             return {
                 "agent_results": {"Newacts": AgentResult(
                     agent_name="Newacts",
@@ -189,27 +200,30 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 )},
             }
 
+        log.info("ES results found", hit_count=len(hits))
+
         # Step 3: Convert hits to documents
         docs_text = "\n\n".join(h["_source"]["page_content"] for h in hits)
         source_file = hits[0]["_source"].get("source", "unknown")
 
         # Step 4: Generate response
-        llm = get_gemini_flash(temperature=0.1)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", NEWACTS_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "Act Provisions:\n{docs}"),
-            ("user", "Current Date: {date}"),
-            ("user", "User Query: {query}"),
-        ])
-        chain = prompt | llm
+        with log_time(log, "LLM generation"):
+            llm = get_gemini_flash(temperature=0.1)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", NEWACTS_SYSTEM_PROMPT),
+                MessagesPlaceholder(variable_name="chat_history", optional=True),
+                ("user", "Act Provisions:\n{docs}"),
+                ("user", "Current Date: {date}"),
+                ("user", "User Query: {query}"),
+            ])
+            chain = prompt | llm
 
-        llm_response = chain.invoke({
-            "query": query,
-            "docs": docs_text,
-            "chat_history": chat_history,
-            "date": str(date.today()),
-        })
+            llm_response = chain.invoke({
+                "query": query,
+                "docs": docs_text,
+                "chat_history": chat_history,
+                "date": str(date.today()),
+            })
 
         tokens = 0
         if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
@@ -217,6 +231,10 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
         # Determine display name for the act
         act_display = metadata.act_name or source_file
+
+        log.info("Agent completed",
+                 act=act_display, response_len=len(llm_response.content),
+                 tokens=tokens, hits=len(hits))
 
         result = AgentResult(
             agent_name="Newacts",
@@ -230,7 +248,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[Newacts] Error: {e}")
+        log.error("Agent failed", error=str(e), exc_info=True)
         result = AgentResult(
             agent_name="Newacts",
             content="",

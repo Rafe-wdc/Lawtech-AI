@@ -14,6 +14,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Send
 
 from .state import LegalAgentState
+from .logger import get_logger
+
+log = get_logger("Graph")
 
 # Agent imports
 from agents.guardrail import guardrail_input_node, guardrail_output_node
@@ -49,6 +52,8 @@ AGENT_NODE_MAP = {
 
 async def blocked_response_node(state: LegalAgentState) -> dict:
     """Convert block_reason into final_response for blocked queries."""
+    log.info("Blocked response generated",
+             reason=state.get("block_reason", "unknown")[:80])
     return {
         "final_response": state.get("block_reason", "Your query was blocked."),
     }
@@ -59,7 +64,9 @@ async def blocked_response_node(state: LegalAgentState) -> dict:
 def route_after_guardrail(state: LegalAgentState) -> str:
     """After input guardrail: block or continue to memory."""
     if state.get("is_blocked"):
+        log.info("Routing to blocked_response (guardrail blocked)")
         return "blocked_response"
+    log.debug("Routing to memory (guardrail passed)")
     return "memory"
 
 
@@ -72,11 +79,13 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
     """
     # Handle blocked queries (Non_legal)
     if state.get("is_blocked"):
+        log.info("Routing to blocked_response (non-legal)")
         return [Send("blocked_response", state)]
 
     planned = state.get("tasks_planned", [])
 
     if not planned:
+        log.warning("No tasks planned, falling back to scenario")
         return [Send("scenario", state)]
 
     # Map task types to node names, deduplicating
@@ -87,6 +96,11 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
         if node not in seen_nodes:
             seen_nodes.add(node)
             sends.append(Send(node, state))
+
+    node_names = list(seen_nodes)
+    log.info("Fan-out routing",
+             tasks_planned=planned, nodes=node_names,
+             parallel_count=len(sends))
 
     return sends if sends else [Send("scenario", state)]
 
@@ -117,6 +131,7 @@ def build_graph() -> StateGraph:
                                        │
                                       END
     """
+    log.info("Building agent graph")
     graph = StateGraph(LegalAgentState)
 
     # --- Add Nodes ---
@@ -165,16 +180,22 @@ def build_graph() -> StateGraph:
     graph.add_edge("blocked_response", "guardrail_output")
 
     # All domain agents converge → orchestrator_synthesize
-    for agent_name in [
+    domain_agents = [
         "legislation", "judgment", "newacts", "drafting",
         "scenario", "constitution_maxim", "document",
         "sci_judgment",
-    ]:
+    ]
+    for agent_name in domain_agents:
         graph.add_edge(agent_name, "orchestrator_synthesize")
 
     # Synthesize → Output guardrail → END
     graph.add_edge("orchestrator_synthesize", "guardrail_output")
     graph.add_edge("guardrail_output", END)
+
+    total_nodes = 6 + len(domain_agents)  # infra + domain
+    log.info("Graph built",
+             infrastructure_nodes=6, domain_agents=len(domain_agents),
+             total_nodes=total_nodes)
 
     return graph
 
@@ -190,4 +211,7 @@ def compile_graph(checkpointer=None):
         checkpointer = MemorySaver()
 
     graph = build_graph()
-    return graph.compile(checkpointer=checkpointer)
+    compiled = graph.compile(checkpointer=checkpointer)
+    log.info("Graph compiled successfully",
+             nodes=len(compiled.nodes))
+    return compiled

@@ -19,7 +19,10 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_es_client, get_gpt4o_mini, get_drafting_llm
 from core.settings import ES_INDICES
+from core.logger import get_logger, log_time
 from config.prompts import DRAFTING_SYSTEM_PROMPT
+
+log = get_logger("Drafting")
 
 
 # --- Template Selection ---
@@ -40,10 +43,11 @@ Return only the most relevant file path."""
 
 def _select_best_template(query: str, file_paths: list[str]) -> str:
     """Use GPT-4o-mini to select the most relevant template from search results."""
-    llm = get_gpt4o_mini().with_structured_output(TemplateSource)
-    prompt = ChatPromptTemplate.from_template(TEMPLATE_SELECTION_PROMPT)
-    chain = prompt | llm
-    result = chain.invoke({"query": query, "files_path": "\n".join(file_paths)})
+    with log_time(log, "Template selection (LLM)"):
+        llm = get_gpt4o_mini().with_structured_output(TemplateSource)
+        prompt = ChatPromptTemplate.from_template(TEMPLATE_SELECTION_PROMPT)
+        chain = prompt | llm
+        result = chain.invoke({"query": query, "files_path": "\n".join(file_paths)})
     return result.source.strip()
 
 
@@ -60,22 +64,23 @@ async def drafting_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     chat_history = state.get("chat_history", [])
-    print(f"[Drafting] Finding template for: {query[:80]}...")
+    log.info("Agent started", query=query[:100])
 
     try:
         es = get_es_client()
         index = ES_INDICES["drafting"]
 
         # Step 1: Search for matching templates
-        search_query = {
-            "size": 100,
-            "query": {"match": {"page_content": query}},
-        }
-        response = es.search(index=index, body=search_query)
-        hits = response["hits"]["hits"]
+        with log_time(log, "Template search (ES)"):
+            search_query = {
+                "size": 100,
+                "query": {"match": {"page_content": query}},
+            }
+            response = es.search(index=index, body=search_query)
+            hits = response["hits"]["hits"]
 
         if not hits:
-            print("[Drafting] No templates found")
+            log.warning("No templates found")
             return {
                 "agent_results": {"Drafting": AgentResult(
                     agent_name="Drafting",
@@ -89,10 +94,11 @@ async def drafting_node(state: LegalAgentState) -> dict:
         file_paths = list(dict.fromkeys(
             h["_source"]["source"] for h in hits
         ))
-        print(f"[Drafting] Found {len(file_paths)} template sources")
+        log.info("Template candidates found",
+                 total_hits=len(hits), unique_templates=len(file_paths))
 
         selected_source = _select_best_template(query, file_paths)
-        print(f"[Drafting] Selected template: {selected_source}")
+        log.info("Template selected", template=selected_source)
 
         # Step 3: Fetch the full template document
         source_query = {
@@ -103,7 +109,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
         source_hits = source_response["hits"]["hits"]
 
         if not source_hits:
-            print(f"[Drafting] Template source '{selected_source}' not found")
+            log.error("Selected template not found in ES",
+                      template=selected_source)
             return {
                 "agent_results": {"Drafting": AgentResult(
                     agent_name="Drafting",
@@ -115,24 +122,27 @@ async def drafting_node(state: LegalAgentState) -> dict:
             }
 
         template_text = source_hits[0]["_source"]["page_content"]
+        log.debug("Template loaded",
+                  template=selected_source, template_len=len(template_text))
 
         # Step 4: Generate the draft using GPT-4o
-        llm = get_drafting_llm()
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", DRAFTING_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "Original Draft Template:\n{docs}"),
-            ("user", "Current Date: {date}"),
-            ("user", "User Query:\n{query}"),
-        ])
-        chain = prompt | llm
+        with log_time(log, "Draft generation (LLM)"):
+            llm = get_drafting_llm()
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", DRAFTING_SYSTEM_PROMPT),
+                MessagesPlaceholder(variable_name="chat_history", optional=True),
+                ("user", "Original Draft Template:\n{docs}"),
+                ("user", "Current Date: {date}"),
+                ("user", "User Query:\n{query}"),
+            ])
+            chain = prompt | llm
 
-        llm_response = chain.invoke({
-            "query": query,
-            "docs": template_text,
-            "chat_history": chat_history,
-            "date": str(date.today()),
-        })
+            llm_response = chain.invoke({
+                "query": query,
+                "docs": template_text,
+                "chat_history": chat_history,
+                "date": str(date.today()),
+            })
 
         tokens = 0
         if hasattr(llm_response, "response_metadata"):
@@ -140,6 +150,10 @@ async def drafting_node(state: LegalAgentState) -> dict:
             tokens = token_usage.get("total_tokens", 0)
         if tokens == 0 and hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
             tokens = llm_response.usage_metadata.get("total_tokens", 0)
+
+        log.info("Agent completed",
+                 template=selected_source,
+                 response_len=len(llm_response.content), tokens=tokens)
 
         result = AgentResult(
             agent_name="Drafting",
@@ -153,7 +167,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[Drafting] Error: {e}")
+        log.error("Agent failed", error=str(e), exc_info=True)
         result = AgentResult(
             agent_name="Drafting",
             content="",

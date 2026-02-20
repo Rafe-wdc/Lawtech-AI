@@ -21,7 +21,10 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_es_client, get_gpt4o, get_gemini_flash
 from core.settings import ES_INDICES, S3_BUCKET, S3_REGION
+from core.logger import get_logger, log_time
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
+
+log = get_logger("Judgment")
 
 
 # --- Case Metadata Extraction (migrated from v1 judgement_retriever.py) ---
@@ -87,10 +90,20 @@ Output only valid JSON."""
 
 def _extract_case_metadata(query: str) -> CaseMetadata:
     """Use GPT-4o to extract structured metadata from a judgment query."""
-    llm = get_gpt4o().with_structured_output(CaseMetadata)
-    prompt = ChatPromptTemplate.from_template(METADATA_EXTRACTION_PROMPT)
-    chain = prompt | llm
-    return chain.invoke({"query": query})
+    with log_time(log, "Case metadata extraction"):
+        llm = get_gpt4o().with_structured_output(CaseMetadata)
+        prompt = ChatPromptTemplate.from_template(METADATA_EXTRACTION_PROMPT)
+        chain = prompt | llm
+        result = chain.invoke({"query": query})
+
+    log.info("Metadata extracted",
+             court=result.court_name,
+             petitioners=result.petitioner_names,
+             respondents=result.respondent_names,
+             year=result.year,
+             topics=result.topics,
+             size=result.size)
+    return result
 
 
 # --- Multi-Tier ES Query Builder ---
@@ -157,6 +170,20 @@ def _build_judgment_query(metadata: CaseMetadata, query_text: str) -> dict:
     if metadata.court_name:
         filters.append({"term": {"court_name": metadata.court_name.lower()}})
 
+    tiers_used = []
+    if petitioner_names and respondent_names:
+        tiers_used.append("party_match")
+    if topics:
+        tiers_used.append("topics")
+    if acts_or_sections:
+        tiers_used.append("acts_sections")
+    if lexical_query:
+        tiers_used.append("lexical")
+
+    log.debug("ES query built",
+              tiers=tiers_used, clauses=len(should_clauses),
+              filters=len(filters), size=min(metadata.size or 3, 50))
+
     return {
         "size": min(metadata.size or 3, 50),
         "query": {
@@ -198,25 +225,24 @@ async def judgment_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     chat_history = state.get("chat_history", [])
-    print(f"[Judgment] Searching cases for: {query[:80]}...")
+    log.info("Agent started", query=query[:100])
 
     try:
         # Step 1: Extract metadata
         metadata = _extract_case_metadata(query)
-        print(f"[Judgment] Metadata: court={metadata.court_name}, "
-              f"parties={metadata.petitioner_names} vs {metadata.respondent_names}, "
-              f"topics={metadata.topics}")
 
         # Step 2: Build and execute query
         es_query = _build_judgment_query(metadata, query)
-        es = get_es_client()
-        response = es.options(request_timeout=50).search(
-            index=ES_INDICES["judgments"], body=es_query
-        )
+
+        with log_time(log, "ES search"):
+            es = get_es_client()
+            response = es.options(request_timeout=50).search(
+                index=ES_INDICES["judgments"], body=es_query
+            )
 
         hits = response["hits"]["hits"]
         if not hits:
-            print("[Judgment] No results found")
+            log.warning("No results found")
             return {
                 "agent_results": {"Judgment": AgentResult(
                     agent_name="Judgment",
@@ -225,6 +251,10 @@ async def judgment_node(state: LegalAgentState) -> dict:
                     tokens_consumed=0,
                 )},
             }
+
+        log.info("ES results found",
+                 hit_count=len(hits),
+                 top_score=hits[0]["_score"] if hits else 0)
 
         # Step 3: Convert hits to documents + extract metadata
         docs_text_parts = []
@@ -262,32 +292,38 @@ async def judgment_node(state: LegalAgentState) -> dict:
         doc_link = None
         if first_court and first_file:
             doc_link = _generate_s3_link(first_court, first_file, first_title)
-            print(f"[Judgment] S3 Link: {doc_link}")
+            log.debug("S3 link generated", link=doc_link)
             if sources:
                 sources[0].doc_link = doc_link
 
         # Step 5: Generate response
         docs_text = "\n\n".join(docs_text_parts)
-        llm = get_gemini_flash(temperature=0.1)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", JUDGMENT_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "Court Judgments:\n{docs}"),
-            ("user", "Current Date: {date}"),
-            ("user", "User Query: {query}"),
-        ])
-        chain = prompt | llm
 
-        llm_response = chain.invoke({
-            "query": query,
-            "docs": docs_text,
-            "chat_history": chat_history,
-            "date": str(date.today()),
-        })
+        with log_time(log, "LLM generation"):
+            llm = get_gemini_flash(temperature=0.1)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", JUDGMENT_SYSTEM_PROMPT),
+                MessagesPlaceholder(variable_name="chat_history", optional=True),
+                ("user", "Court Judgments:\n{docs}"),
+                ("user", "Current Date: {date}"),
+                ("user", "User Query: {query}"),
+            ])
+            chain = prompt | llm
+
+            llm_response = chain.invoke({
+                "query": query,
+                "docs": docs_text,
+                "chat_history": chat_history,
+                "date": str(date.today()),
+            })
 
         tokens = 0
         if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
             tokens = llm_response.usage_metadata.get("total_tokens", 0)
+
+        log.info("Agent completed",
+                 cases=len(hits), response_len=len(llm_response.content),
+                 tokens=tokens, first_case=first_title[:60])
 
         result = AgentResult(
             agent_name="Judgment",
@@ -297,7 +333,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[Judgment] Error: {e}")
+        log.error("Agent failed", error=str(e), exc_info=True)
         result = AgentResult(
             agent_name="Judgment",
             content="",

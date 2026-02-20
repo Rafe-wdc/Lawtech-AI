@@ -76,3 +76,7 @@ PORT = int(os.getenv("PORT", "5000"))
 
 # --- Rate Limits ---
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
+
+# --- Logging ---
+LOG_DIR = str(_PROJECT_ROOT / "logs")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()

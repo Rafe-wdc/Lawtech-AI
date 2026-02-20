@@ -309,12 +309,12 @@ def search_judgments(
 
 # Act Name → ES Source Path Mapping
 ACTS_PATHS = {
-    "The Bharatiya Nyaya Sanhita, 2023": "Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
-    "The Bharatiya Nagarik Suraksha Sanhita, 2023": "Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv",
-    "The Bharatiya Sakshya Adhiniyam, 2023": "Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
-    "The Code of Criminal Procedure 1973": "Bharitya New Acts/Code of Criminal Procedure 1974.csv",
-    "The Indian Penal Code, 1860": "Bharitya New Acts/Indian Penal Code 1860.csv",
-    "Indian Evidence Act 1872": "Bharitya New Acts/Indian Evidence Act 1872.csv",
+    "The Bharatiya Nyaya Sanhita, 2023": "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+    "The Bharatiya Nagarik Suraksha Sanhita, 2023": "/content/Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv",
+    "The Bharatiya Sakshya Adhiniyam, 2023": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
+    "The Code of Criminal Procedure 1973": "/content/Bharitya New Acts/Code of Criminal Procedure 1974.csv",
+    "The Indian Penal Code, 1860": "/content/Bharitya New Acts/Indian Penal Code 1860.csv",
+    "Indian Evidence Act 1872": "/content/Bharitya New Acts/Indian Evidence Act 1872.csv",
 }
 
 

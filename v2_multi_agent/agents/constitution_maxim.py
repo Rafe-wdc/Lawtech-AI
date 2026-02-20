@@ -27,6 +27,7 @@ from langchain_community.retrievers import BM25Retriever
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gpt4o, get_gemini_flash, get_retriever_embeddings
 from core.settings import CHROMA_PERSIST_DIRS
+from core.logger import get_logger, log_time
 from config.prompts import (
     CONSTITUTION_SYSTEM_PROMPT,
     MAXIM_SYSTEM_PROMPT,
@@ -34,6 +35,8 @@ from config.prompts import (
 )
 
 import chromadb
+
+log = get_logger("ConstitutionMaxim")
 
 
 # --- Multi-Query Output Parser ---
@@ -80,7 +83,7 @@ def _get_vectordb(task: str) -> Chroma:
             persist_directory=persist_dir,
             embedding_function=embeddings,
         )
-        print(f"[Constitution/Maxim] Initialized ChromaDB for {task} at {persist_dir}")
+        log.info("ChromaDB initialized", task=task, persist_dir=persist_dir)
 
     return _vectordbs[task]
 
@@ -101,24 +104,27 @@ def _retrieve_from_chromadb(task: str, query: str) -> list[Document]:
 
     # Step 1: MultiQuery retrieval
     try:
-        llm = get_gpt4o(temperature=0.0)
-        llm_chain = _MULTI_QUERY_PROMPT | llm | _output_parser
+        with log_time(log, "MultiQuery retrieval", task=task):
+            llm = get_gpt4o(temperature=0.0)
+            llm_chain = _MULTI_QUERY_PROMPT | llm | _output_parser
 
-        base_retriever = vectordb.as_retriever(search_kwargs={"k": 10})
-        multi_retriever = MultiQueryRetriever(
-            retriever=base_retriever,
-            llm_chain=llm_chain,
-            parser_key="lines",
-        )
-        unique_docs = multi_retriever.invoke(query)
+            base_retriever = vectordb.as_retriever(search_kwargs={"k": 10})
+            multi_retriever = MultiQueryRetriever(
+                retriever=base_retriever,
+                llm_chain=llm_chain,
+                parser_key="lines",
+            )
+            unique_docs = multi_retriever.invoke(query)
 
         if not unique_docs:
             raise ValueError("MultiQueryRetriever returned no documents")
 
-        print(f"[Constitution/Maxim] MultiQuery returned {len(unique_docs)} docs")
+        log.info("MultiQuery returned docs",
+                 count=len(unique_docs), task=task)
 
     except Exception as e:
-        print(f"[Constitution/Maxim] MultiQuery failed: {e}, using fallback")
+        log.warning("MultiQuery failed, using fallback",
+                    error=str(e), task=task)
         fallback = vectordb.as_retriever(search_kwargs={"k": 10})
         unique_docs = fallback.invoke(query)
         if not unique_docs:
@@ -135,7 +141,9 @@ def _retrieve_from_chromadb(task: str, query: str) -> list[Document]:
         return unique_docs[:5]
 
     top_source = max(source_counts, key=source_counts.get)
-    print(f"[Constitution/Maxim] Most frequent source: {top_source}")
+    log.info("Top source identified",
+             source=top_source, frequency=source_counts[top_source],
+             total_sources=len(source_counts))
 
     # Step 3: Get all docs from that source
     source_file = vectordb.get(where={"source": top_source})
@@ -149,22 +157,27 @@ def _retrieve_from_chromadb(task: str, query: str) -> list[Document]:
     if not source_docs:
         return unique_docs[:5]
 
+    log.debug("Source docs loaded",
+              source=top_source, doc_count=len(source_docs))
+
     # Step 4: BM25 + Chroma ensemble
-    bm25_retriever = BM25Retriever.from_documents(source_docs)
-    bm25_retriever.k = 4
+    with log_time(log, "BM25+Chroma ensemble"):
+        bm25_retriever = BM25Retriever.from_documents(source_docs)
+        bm25_retriever.k = 4
 
-    chroma_retriever = vectordb.as_retriever(
-        search_type="mmr",
-        search_kwargs={"filter": {"source": top_source}, "k": 4},
-    )
+        chroma_retriever = vectordb.as_retriever(
+            search_type="mmr",
+            search_kwargs={"filter": {"source": top_source}, "k": 4},
+        )
 
-    ensemble = EnsembleRetriever(
-        retrievers=[bm25_retriever, chroma_retriever],
-        weights=[0.5, 0.5],
-    )
+        ensemble = EnsembleRetriever(
+            retrievers=[bm25_retriever, chroma_retriever],
+            weights=[0.5, 0.5],
+        )
 
-    results = ensemble.invoke(query)
-    print(f"[Constitution/Maxim] Ensemble returned {len(results)} docs")
+        results = ensemble.invoke(query)
+
+    log.info("Ensemble retrieval done", result_count=len(results))
     return results
 
 
@@ -189,28 +202,32 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
         planned = state.get("tasks_planned", [])
         task = next((t for t in planned if t in our_tasks), "Legal_Concepts")
 
-    print(f"[Constitution/Maxim] Task={task}, Query: {query[:80]}...")
+    log.info("Agent started", task=task, query=query[:100])
 
     try:
         # Legal_Concepts → direct LLM response (no retrieval needed)
         if task == "Legal_Concepts":
-            llm = get_gemini_flash(temperature=0.3)
-            prompt = ChatPromptTemplate.from_messages([
-                ("user", LEGAL_CONCEPTS_PROMPT),
-                MessagesPlaceholder(variable_name="chat_history", optional=True),
-                ("user", "Current Date: {date}"),
-                ("user", "{query}"),
-            ])
-            chain = prompt | llm
-            response = chain.invoke({
-                "query": query,
-                "chat_history": chat_history,
-                "date": str(date.today()),
-            })
+            with log_time(log, "Legal concepts LLM generation"):
+                llm = get_gemini_flash(temperature=0.3)
+                prompt = ChatPromptTemplate.from_messages([
+                    ("user", LEGAL_CONCEPTS_PROMPT),
+                    MessagesPlaceholder(variable_name="chat_history", optional=True),
+                    ("user", "Current Date: {date}"),
+                    ("user", "{query}"),
+                ])
+                chain = prompt | llm
+                response = chain.invoke({
+                    "query": query,
+                    "chat_history": chat_history,
+                    "date": str(date.today()),
+                })
 
             tokens = 0
             if hasattr(response, "usage_metadata") and response.usage_metadata:
                 tokens = response.usage_metadata.get("total_tokens", 0)
+
+            log.info("Legal concepts completed",
+                     response_len=len(response.content), tokens=tokens)
 
             result = AgentResult(
                 agent_name="Legal_Concepts",
@@ -229,10 +246,11 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
             else MAXIM_SYSTEM_PROMPT
         )
 
-        docs = _retrieve_from_chromadb(task, query)
+        with log_time(log, "ChromaDB retrieval", task=task):
+            docs = _retrieve_from_chromadb(task, query)
 
         if not docs:
-            print(f"[Constitution/Maxim] No documents found for {task}")
+            log.warning("No documents found", task=task)
             return {
                 "agent_results": {task: AgentResult(
                     agent_name=task,
@@ -245,26 +263,35 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
         docs_text = "\n\n".join(d.page_content for d in docs)
         source_name = docs[0].metadata.get("source", "unknown")
 
-        llm = get_gemini_flash(temperature=0.1)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "Retrieved provisions:\n{docs}"),
-            ("user", "Current Date: {date}"),
-            ("user", "User Query: {query}"),
-        ])
-        chain = prompt | llm
+        log.debug("Generating response",
+                  task=task, docs_count=len(docs),
+                  source=source_name, context_len=len(docs_text))
 
-        response = chain.invoke({
-            "query": query,
-            "docs": docs_text,
-            "chat_history": chat_history,
-            "date": str(date.today()),
-        })
+        with log_time(log, "LLM generation", task=task):
+            llm = get_gemini_flash(temperature=0.1)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                MessagesPlaceholder(variable_name="chat_history", optional=True),
+                ("user", "Retrieved provisions:\n{docs}"),
+                ("user", "Current Date: {date}"),
+                ("user", "User Query: {query}"),
+            ])
+            chain = prompt | llm
+
+            response = chain.invoke({
+                "query": query,
+                "docs": docs_text,
+                "chat_history": chat_history,
+                "date": str(date.today()),
+            })
 
         tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             tokens = response.usage_metadata.get("total_tokens", 0)
+
+        log.info("Agent completed",
+                 task=task, source=source_name,
+                 response_len=len(response.content), tokens=tokens)
 
         result = AgentResult(
             agent_name=task,
@@ -278,7 +305,7 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[Constitution/Maxim] Error: {e}")
+        log.error("Agent failed", task=task, error=str(e), exc_info=True)
         result = AgentResult(
             agent_name=task or "Constitution",
             content="",

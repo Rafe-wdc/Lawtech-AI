@@ -18,7 +18,10 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_genai_client
+from core.logger import get_logger, log_time
 from config.prompts import SCENARIO_SYSTEM_PROMPT
+
+log = get_logger("Scenario")
 
 
 # --- Build prompt for GenAI client ---
@@ -44,7 +47,8 @@ async def scenario_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     chat_history = state.get("chat_history", [])
-    print(f"[Scenario] Analyzing: {query[:80]}...")
+    log.info("Agent started", query=query[:100],
+             has_history=len(chat_history) > 0)
 
     try:
         # Build prompt using the LangChain template → convert to single string
@@ -54,22 +58,28 @@ async def scenario_node(state: LegalAgentState) -> dict:
         )
         full_prompt = "\n".join(msg.content for msg in prompt_messages)
 
+        log.debug("Prompt built", prompt_len=len(full_prompt))
+
         # Invoke Gemini 2.5 Pro with Google Search grounding
-        client = get_genai_client()
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=[full_prompt],
-            config={
-                "tools": [{"google_search": {}}],
-                "max_output_tokens": 8000,
-                "temperature": 0.5,
-                "top_p": 0.95,
-            },
-        )
+        with log_time(log, "Gemini Pro + Google Search"):
+            client = get_genai_client()
+            response = client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=[full_prompt],
+                config={
+                    "tools": [{"google_search": {}}],
+                    "max_output_tokens": 8000,
+                    "temperature": 0.5,
+                    "top_p": 0.95,
+                },
+            )
 
         # Extract response text
         content = response.candidates[0].content.parts[0].text
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
+
+        log.info("Agent completed",
+                 response_len=len(content), tokens=tokens)
 
         result = AgentResult(
             agent_name="Scenario",
@@ -82,7 +92,7 @@ async def scenario_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[Scenario] Error: {e}")
+        log.error("Agent failed", error=str(e), exc_info=True)
         result = AgentResult(
             agent_name="Scenario",
             content="",

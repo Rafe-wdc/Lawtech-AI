@@ -22,7 +22,10 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_es_client, get_gpt4o_mini, get_gemini_flash
 from core.settings import ES_INDICES
+from core.logger import get_logger, log_time
 from config.prompts import LEGISLATION_SYSTEM_PROMPT
+
+log = get_logger("Legislation")
 
 
 # --- Section Parsing (migrated from v1 legislation_retriever.py) ---
@@ -74,11 +77,13 @@ def _extract_section_info(query: str) -> dict | None:
             act_name = re.sub(r'\s*,\s*\d{4}.*', '', act_name)
             break
 
-    return {
+    parsed = {
         'section_type': section_type,
         'section_number': section_number,
         'act_name': act_name or '',
     }
+    log.debug("Section info extracted", **parsed)
+    return parsed
 
 
 def _create_search_variations(original_query: str, parsed_info: dict | None) -> list[str]:
@@ -110,6 +115,8 @@ def _create_search_variations(original_query: str, parsed_info: dict | None) -> 
         if q_clean not in seen:
             seen.add(q_clean)
             unique.append(q)
+
+    log.debug("Search variations created", count=len(unique))
     return unique
 
 
@@ -162,7 +169,7 @@ def _search_legislation(query: str) -> tuple[list[dict], str | None]:
     all_hits = []
     sources_counter: Counter = Counter()
 
-    for query_text in search_queries:
+    for i, query_text in enumerate(search_queries):
         es_query = {
             "size": 20,
             "query": {
@@ -193,18 +200,27 @@ def _search_legislation(query: str) -> tuple[list[dict], str | None]:
                 sources_counter[hit["_source"]["source"]] += hit["_score"]
             all_hits.extend(current_hits)
 
+            log.debug("ES search iteration",
+                      iteration=i + 1, variation=query_text[:60],
+                      hits=len(current_hits))
+
             # Early exit on strong matches
             if len(current_hits) > 5 and any(h["_score"] > 5.0 for h in current_hits):
+                log.debug("Strong match found, early exit", iteration=i + 1)
                 break
         except Exception as e:
-            print(f"[Legislation] Search failed for '{query_text}': {e}")
+            log.error("ES search failed for variation",
+                      variation=query_text[:60], error=str(e))
             continue
 
     if not sources_counter:
         return [], None
 
     most_common_source = sources_counter.most_common(1)[0][0]
-    print(f"[Legislation] Most relevant source: {most_common_source}")
+    log.info("Most relevant source identified",
+             source=most_common_source,
+             total_hits=len(all_hits),
+             unique_sources=len(sources_counter))
 
     # Targeted search within the most common source
     if parsed_info:
@@ -246,7 +262,10 @@ def _search_legislation(query: str) -> tuple[list[dict], str | None]:
         }
 
     source_response = es.search(index=index, body=source_query)
-    return source_response["hits"]["hits"], most_common_source
+    final_hits = source_response["hits"]["hits"]
+    log.debug("Targeted source search done",
+              source=most_common_source, hits=len(final_hits))
+    return final_hits, most_common_source
 
 
 # --- Agent Node ---
@@ -263,13 +282,14 @@ async def legislation_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     chat_history = state.get("chat_history", [])
-    print(f"[Legislation] Retrieving for: {query[:80]}...")
+    log.info("Agent started", query=query[:100])
 
     try:
-        hits, source_name = _search_legislation(query)
+        with log_time(log, "ES retrieval"):
+            hits, source_name = _search_legislation(query)
 
         if not hits:
-            print("[Legislation] No results found")
+            log.warning("No results found")
             return {
                 "agent_results": {"Legislation": AgentResult(
                     agent_name="Legislation",
@@ -284,27 +304,36 @@ async def legislation_node(state: LegalAgentState) -> dict:
         source_file = hits[0]["_source"].get("source", "unknown")
         source_display = os.path.splitext(os.path.basename(source_file))[0]
 
-        # Generate response
-        llm = get_gemini_flash(temperature=0.1)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", LEGISLATION_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "Legislation provisions:\n{docs}"),
-            ("user", "Current Date: {date}"),
-            ("user", "User Query: {query}"),
-        ])
-        chain = prompt | llm
+        log.debug("Generating response",
+                  source=source_display, docs_count=len(hits),
+                  docs_text_len=len(docs_text))
 
-        response = chain.invoke({
-            "query": query,
-            "docs": docs_text,
-            "chat_history": chat_history,
-            "date": str(date.today()),
-        })
+        # Generate response
+        with log_time(log, "LLM generation"):
+            llm = get_gemini_flash(temperature=0.1)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", LEGISLATION_SYSTEM_PROMPT),
+                MessagesPlaceholder(variable_name="chat_history", optional=True),
+                ("user", "Legislation provisions:\n{docs}"),
+                ("user", "Current Date: {date}"),
+                ("user", "User Query: {query}"),
+            ])
+            chain = prompt | llm
+
+            response = chain.invoke({
+                "query": query,
+                "docs": docs_text,
+                "chat_history": chat_history,
+                "date": str(date.today()),
+            })
 
         tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             tokens = response.usage_metadata.get("total_tokens", 0)
+
+        log.info("Agent completed",
+                 source=source_display, response_len=len(response.content),
+                 tokens=tokens)
 
         result = AgentResult(
             agent_name="Legislation",
@@ -318,7 +347,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[Legislation] Error: {e}")
+        log.error("Agent failed", error=str(e), exc_info=True)
         result = AgentResult(
             agent_name="Legislation",
             content="",

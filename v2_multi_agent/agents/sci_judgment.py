@@ -19,8 +19,11 @@ from langgraph.prebuilt import create_react_agent
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gpt4o
+from core.logger import get_logger, log_time
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
 from tools.shared import AGENT_TOOLS
+
+log = get_logger("SCI_Judgment")
 
 
 async def sci_judgment_node(state: LegalAgentState) -> dict:
@@ -33,12 +36,14 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
     4. Extract final response and wrap in AgentResult
     """
     query = state.get("query", state["original_query"])
-    print(f"[SCI_Judgment] Searching SC judgments for: {query[:80]}...")
+    log.info("Agent started", query=query[:100])
 
     try:
         # Build ReAct agent with SCI tools
         llm = get_gpt4o(temperature=0)
         tools = AGENT_TOOLS["sci_judgment"]
+        log.debug("Building ReAct agent", tools_count=len(tools))
+
         agent = create_react_agent(
             llm,
             tools,
@@ -46,9 +51,10 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         )
 
         # Invoke the ReAct sub-agent
-        result = await agent.ainvoke(
-            {"messages": [("user", query)]}
-        )
+        with log_time(log, "ReAct agent execution"):
+            result = await agent.ainvoke(
+                {"messages": [("user", query)]}
+            )
 
         # Extract final AI message content and tools used
         messages = result.get("messages", [])
@@ -73,8 +79,10 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             if hasattr(last_msg, "content") and last_msg.content:
                 answer = last_msg.content
 
-        print(f"[SCI_Judgment] Tools used: {tools_used}")
-        print(f"[SCI_Judgment] Response length: {len(answer)} chars")
+        log.info("ReAct agent completed",
+                 tools_used=tools_used, tool_calls=len(tools_used),
+                 response_len=len(answer),
+                 total_messages=len(messages))
 
         # Estimate token usage from messages
         tokens = 0
@@ -98,7 +106,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[SCI_Judgment] Error: {e}")
+        log.error("Agent failed", error=str(e), exc_info=True)
         result = AgentResult(
             agent_name="SCI_Judgment",
             content="",

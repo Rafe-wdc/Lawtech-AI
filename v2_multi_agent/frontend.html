@@ -397,6 +397,28 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.3; }
   }
+  .stream-status {
+    font-size: 12px;
+    color: var(--text2);
+    padding: 4px 0;
+    transition: opacity 0.2s;
+  }
+  .stream-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 6px;
+  }
+  .stream-steps .step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text2);
+  }
+  .stream-steps .step.active { color: var(--blue); }
+  .stream-steps .step.done { color: var(--green); }
+  .stream-steps .step .check { font-size: 11px; }
 
   /* --- Log Panel --- */
   .log-panel {
@@ -471,7 +493,7 @@
     <div style="padding: 12px; border-top: 1px solid var(--border);">
       <div class="field-group" style="margin-bottom: 8px;">
         <label>API Base URL</label>
-        <input type="text" id="apiBase" value="http://localhost:5001" />
+        <input type="text" id="apiBase" value="http://localhost:5005" />
       </div>
       <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="checkHealth()">
         Test Connection
@@ -753,10 +775,14 @@ async function sendChatStream(query, threadId) {
     return;
   }
 
-  // Create streaming message element
+  // Create streaming message element with status + content areas
   const msgDiv = document.createElement('div');
   msgDiv.className = 'msg ai';
-  msgDiv.innerHTML = '<div class="agents-badge" id="streamAgents"></div><div id="streamContent"><span class="streaming-dot"></span> Thinking...</div>';
+  msgDiv.innerHTML =
+    '<div class="agents-badge" id="streamAgents"></div>' +
+    '<div id="streamStatus" class="stream-status"><span class="streaming-dot"></span> Connecting...</div>' +
+    '<div id="streamSteps" class="stream-steps"></div>' +
+    '<div id="streamContent" style="display:none;"></div>';
   document.getElementById('chatMessages').appendChild(msgDiv);
   scrollChat();
 
@@ -764,7 +790,9 @@ async function sendChatStream(query, threadId) {
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
-  let agents = new Set();
+  let agents = [];
+  let totalTokens = 0;
+  let lastStepId = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -782,51 +810,107 @@ async function sendChatStream(query, threadId) {
         if (event.type === 'thread_id') {
           currentThreadId = event.data;
           document.getElementById('threadId').value = currentThreadId;
-        } else if (event.type === 'agent_step') {
-          agents.add(event.agent);
+
+        } else if (event.type === 'status') {
+          // Update current status text
+          const statusEl = document.getElementById('streamStatus');
+          if (statusEl) {
+            statusEl.innerHTML = '<span class="streaming-dot"></span> ' + escapeHtml(event.message);
+          }
+          // Mark previous step as done, add new step
+          const stepsEl = document.getElementById('streamSteps');
+          if (stepsEl) {
+            if (lastStepId) {
+              const prev = document.getElementById(lastStepId);
+              if (prev) {
+                prev.classList.remove('active');
+                prev.classList.add('done');
+                prev.querySelector('.check').textContent = '\u2713';
+              }
+            }
+            const stepDiv = document.createElement('div');
+            const stepId = 'step_' + event.agent;
+            stepDiv.id = stepId;
+            stepDiv.className = 'step active';
+            stepDiv.innerHTML = '<span class="check">\u2022</span> ' + escapeHtml(event.message);
+            stepsEl.appendChild(stepDiv);
+            lastStepId = stepId;
+          }
+          scrollChat();
+          addLog('info', `${event.agent}: ${event.message}`);
+
+        } else if (event.type === 'response') {
+          // Show final response, hide status
+          content = event.content;
+          const statusEl = document.getElementById('streamStatus');
+          if (statusEl) statusEl.style.display = 'none';
+          const stepsEl = document.getElementById('streamSteps');
+          if (stepsEl) stepsEl.style.display = 'none';
+          const contentEl = document.getElementById('streamContent');
+          if (contentEl) {
+            contentEl.style.display = 'block';
+            contentEl.innerHTML = renderMarkdown(content);
+          }
+          scrollChat();
+
+        } else if (event.type === 'done') {
+          agents = event.agents_used || [];
+          totalTokens = event.total_tokens || 0;
+          // Show agents badge
           const agentsEl = document.getElementById('streamAgents');
-          if (agentsEl) {
-            agentsEl.innerHTML = [...agents].map(a =>
+          if (agentsEl && agents.length) {
+            agentsEl.innerHTML = agents.map(a =>
               `<span class="agent-tag">${a}</span>`
             ).join('');
           }
-          addLog('info', `Agent step: ${event.agent}`);
-        } else if (event.type === 'token') {
-          content += event.content;
-          const contentEl = document.getElementById('streamContent');
-          if (contentEl) contentEl.innerHTML = renderMarkdown(content);
-          scrollChat();
-        } else if (event.type === 'done') {
-          addLog('success', `Stream complete: ${agents.size} agents`);
-          // If no tokens streamed, get final response from last agent_step
-          if (!content) {
-            const finalData = event.data;
-            if (finalData && finalData.final_response) {
-              content = finalData.final_response;
-            }
-          }
+          addLog('success', `Stream complete: ${agents.join(', ')} | ${totalTokens} tokens`);
+
         } else if (event.type === 'error') {
-          content += `\n\n**Error:** ${event.data}`;
+          const statusEl = document.getElementById('streamStatus');
+          if (statusEl) statusEl.style.display = 'none';
+          const stepsEl = document.getElementById('streamSteps');
+          if (stepsEl) stepsEl.style.display = 'none';
+          content = `**Error:** ${event.data}`;
+          const contentEl = document.getElementById('streamContent');
+          if (contentEl) {
+            contentEl.style.display = 'block';
+            contentEl.innerHTML = renderMarkdown(content);
+          }
           addLog('error', `Stream error: ${event.data}`);
         }
       } catch (e) { /* ignore parse errors for partial lines */ }
     }
   }
 
-  // Finalize streaming message
-  if (!content && msgDiv) {
-    const contentEl = document.getElementById('streamContent');
-    if (contentEl) contentEl.innerHTML = '<em>Stream completed (response may have been sent as agent_step update)</em>';
+  // Add tokens footer
+  if (totalTokens > 0) {
+    const tokensDiv = document.createElement('div');
+    tokensDiv.className = 'tokens';
+    tokensDiv.textContent = `${totalTokens} tokens`;
+    msgDiv.appendChild(tokensDiv);
   }
 
-  // Remove temp IDs
-  const sa = document.getElementById('streamAgents');
-  if (sa) sa.removeAttribute('id');
-  const sc = document.getElementById('streamContent');
-  if (sc) sc.removeAttribute('id');
+  // Handle no response
+  if (!content) {
+    const statusEl = document.getElementById('streamStatus');
+    if (statusEl) statusEl.style.display = 'none';
+    const stepsEl = document.getElementById('streamSteps');
+    if (stepsEl) stepsEl.style.display = 'none';
+    const contentEl = document.getElementById('streamContent');
+    if (contentEl) {
+      contentEl.style.display = 'block';
+      contentEl.innerHTML = '<em>No response received</em>';
+    }
+  }
+
+  // Remove temp IDs to avoid conflicts with next stream
+  ['streamAgents', 'streamStatus', 'streamSteps', 'streamContent'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.removeAttribute('id');
+  });
 
   document.getElementById('chatMeta').textContent =
-    `Thread: ${(currentThreadId || '').substring(0, 8)}... | Agents: ${[...agents].join(', ') || 'none'} | Streamed`;
+    `Thread: ${(currentThreadId || '').substring(0, 8)}... | Agents: ${agents.join(', ') || 'none'} | Streamed`;
 }
 
 function addChatMsg(type, text, agents, tokens, elapsed) {

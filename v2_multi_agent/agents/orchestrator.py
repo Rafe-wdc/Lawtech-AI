@@ -16,7 +16,10 @@ from langchain_core.output_parsers import StrOutputParser
 
 from core.state import LegalAgentState, AgentResult
 from core.clients import get_gpt4o, get_gemini_flash
+from core.logger import get_logger, log_time
 from config.prompts import TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT
+
+log = get_logger("Orchestrator")
 
 
 # --- Task Classification (migrated from v1 task_identifer.py) ---
@@ -32,12 +35,13 @@ class IdentifyTaskSchema(BaseModel):
 
 def _classify_task(query: str, chat_summary: str | None = None) -> str:
     """Classify query into a task type using GPT-4o structured output."""
-    prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-    llm = get_gpt4o().with_structured_output(IdentifyTaskSchema)
+    with log_time(log, "Task classification"):
+        prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
+        llm = get_gpt4o().with_structured_output(IdentifyTaskSchema)
 
-    formatted = prompt.format(query=query, chat_summary=chat_summary or "")
-    result = llm.invoke(formatted)
-    print(f"[Orchestrator] Task classified: {result.task}")
+        formatted = prompt.format(query=query, chat_summary=chat_summary or "")
+        result = llm.invoke(formatted)
+    log.info("Task classified", task=result.task, query=query[:80])
     return result.task
 
 
@@ -93,23 +97,31 @@ def _plan_agents(query: str, task: str) -> list[str]:
         "Legal_Concepts": ["Legal_Concepts"],
     }
     if task in simple_mapping:
+        log.debug("Simple task mapping used", task=task,
+                  agents=simple_mapping[task])
         return simple_mapping[task]
 
     # For queries with 100+ words, always go to Scenario (complex scenario)
-    if len(query.split()) >= 100:
+    word_count = len(query.split())
+    if word_count >= 100:
+        log.info("Long query detected, routing to Scenario",
+                 word_count=word_count)
         return ["Scenario"]
 
     # Try multi-agent planning with LLM
     try:
-        llm = get_gpt4o().with_structured_output(AgentPlan)
-        prompt = ChatPromptTemplate.from_template(PLAN_PROMPT)
-        chain = prompt | llm
-        plan = chain.invoke({"query": query, "task": task})
+        with log_time(log, "Multi-agent planning"):
+            llm = get_gpt4o().with_structured_output(AgentPlan)
+            prompt = ChatPromptTemplate.from_template(PLAN_PROMPT)
+            chain = prompt | llm
+            plan = chain.invoke({"query": query, "task": task})
         agents = plan.agents[:3]  # max 3 agents
-        print(f"[Orchestrator] Plan: {agents} — {plan.reasoning}")
+        log.info("Agent plan created",
+                 agents=agents, reasoning=plan.reasoning[:120])
         return agents if agents else [task]
     except Exception as e:
-        print(f"[Orchestrator] Planning failed, using single agent: {e}")
+        log.error("Planning failed, falling back to single agent",
+                  error=str(e), fallback=task)
         return [task]
 
 
@@ -126,17 +138,20 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     summary = state.get("summary_text", "")
-    print(f"[Orchestrator Plan] Analyzing: {query[:80]}...")
+    log.info("Plan phase started", query=query[:100],
+             has_summary=bool(summary))
 
     # Step 1: Classify task
-    if len(query.split()) >= 100:
+    word_count = len(query.split())
+    if word_count >= 100:
         task = "Scenario"
-        print("[Orchestrator] Long query (100+ words) -> Scenario")
+        log.info("Long query bypass", word_count=word_count, task=task)
     else:
         task = _classify_task(query, chat_summary=summary if summary else None)
 
     # Step 2: Handle non-legal
     if task == "Non_legal":
+        log.warning("Non-legal query blocked", query=query[:80])
         return {
             "task": task,
             "tasks_planned": [],
@@ -146,7 +161,9 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
 
     # Step 3: Plan agents
     tasks_planned = _plan_agents(query, task)
-    print(f"[Orchestrator Plan] Task={task}, Agents={tasks_planned}")
+    log.info("Plan phase completed",
+             task=task, agents_planned=tasks_planned,
+             agent_count=len(tasks_planned))
 
     return {
         "task": task,
@@ -163,7 +180,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     agent_results: dict[str, AgentResult] = state.get("agent_results", {})
     query = state.get("query", state["original_query"])
 
+    log.info("Synthesize phase started",
+             agents_received=list(agent_results.keys()))
+
     if not agent_results:
+        log.warning("No agent results to synthesize")
         return {
             "final_response": "No results were found for your query. Please try rephrasing.",
             "source_metadata": {"title": "No Results", "content": [], "docLink": None},
@@ -174,8 +195,22 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         name: r for name, r in agent_results.items()
         if r.content and not r.error
     }
+    errored = {
+        name: r.error for name, r in agent_results.items()
+        if r.error
+    }
+    empty = [
+        name for name, r in agent_results.items()
+        if not r.content and not r.error
+    ]
+
+    if errored:
+        log.warning("Some agents returned errors", errored_agents=errored)
+    if empty:
+        log.debug("Some agents returned empty results", empty_agents=empty)
 
     if not valid_results:
+        log.warning("All agent results were empty or errored")
         return {
             "final_response": "The agents could not find relevant information. Please try a different query.",
             "source_metadata": {"title": "No Results", "content": [], "docLink": None},
@@ -183,7 +218,10 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 
     # Single agent — pass through directly (no synthesis overhead)
     if len(valid_results) == 1:
-        result = next(iter(valid_results.values()))
+        name, result = next(iter(valid_results.items()))
+        log.info("Single agent pass-through",
+                 agent=name, content_len=len(result.content),
+                 tokens=result.tokens_consumed)
         source_meta = _build_source_metadata(result)
         return {
             "final_response": result.content,
@@ -192,7 +230,9 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         }
 
     # Multiple agents — synthesize with LLM
-    print(f"[Orchestrator Synthesize] Merging {len(valid_results)} agent results")
+    log.info("Multi-agent synthesis starting",
+             agents=list(valid_results.keys()),
+             content_lengths={n: len(r.content) for n, r in valid_results.items()})
 
     agent_results_text = ""
     total_tokens = 0
@@ -204,14 +244,15 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         all_sources.extend(result.sources)
 
     try:
-        llm = get_gemini_flash(temperature=0.2)
-        prompt = ChatPromptTemplate.from_template(SYNTHESIS_PROMPT)
-        chain = prompt | llm
+        with log_time(log, "LLM synthesis"):
+            llm = get_gemini_flash(temperature=0.2)
+            prompt = ChatPromptTemplate.from_template(SYNTHESIS_PROMPT)
+            chain = prompt | llm
 
-        response = chain.invoke({
-            "query": query,
-            "agent_results": agent_results_text,
-        })
+            response = chain.invoke({
+                "query": query,
+                "agent_results": agent_results_text,
+            })
 
         synthesized = response.content
         synth_tokens = 0
@@ -219,9 +260,12 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             synth_tokens = response.usage_metadata.get("total_tokens", 0)
 
         total_tokens += synth_tokens
+        log.info("Synthesis completed",
+                 synthesized_len=len(synthesized),
+                 synthesis_tokens=synth_tokens, total_tokens=total_tokens)
 
     except Exception as e:
-        print(f"[Orchestrator Synthesize] LLM synthesis failed, concatenating: {e}")
+        log.error("LLM synthesis failed, concatenating results", error=str(e))
         parts = []
         for name, result in valid_results.items():
             parts.append(result.content)

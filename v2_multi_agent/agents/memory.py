@@ -20,7 +20,10 @@ from langchain_core.prompts import ChatPromptTemplate
 from core.state import LegalAgentState
 from core.clients import get_gemini_flash
 from core.settings import LAWTTORNEY_API_BASE
+from core.logger import get_logger, log_time
 from tools.inline.abbreviation import expand_abbreviations
+
+log = get_logger("Memory")
 
 
 # --- Chat History Loading ---
@@ -35,14 +38,23 @@ def _load_chat_history_from_api(thread_id: str) -> tuple[list, str]:
 
     try:
         url = f"{LAWTTORNEY_API_BASE}/users/getChatSummary/{thread_id}"
-        response = requests.get(url, timeout=10)
+        with log_time(log, "Chat history API call", thread_id=thread_id):
+            response = requests.get(url, timeout=10)
 
         if response.status_code == 200:
             res_json = response.json()
             if res_json.get("status") and res_json.get("data"):
                 summary_text = res_json["data"].get("chatSummary", "").strip()
+                log.debug("Chat summary received",
+                          thread_id=thread_id,
+                          summary_len=len(summary_text))
+        else:
+            log.warning("Chat history API returned non-200",
+                        status_code=response.status_code,
+                        thread_id=thread_id)
     except Exception as e:
-        print(f"[Memory] Error fetching chat history for thread {thread_id}: {e}")
+        log.error("Error fetching chat history",
+                  thread_id=thread_id, error=str(e))
 
     if summary_text:
         try:
@@ -51,12 +63,15 @@ def _load_chat_history_from_api(thread_id: str) -> tuple[list, str]:
                 for turn in parsed[-5:]:
                     chat_history.append(HumanMessage(content=turn.get("user", "")))
                     chat_history.append(AIMessage(content=turn.get("ai", "")))
+                log.debug("Chat history parsed as list",
+                          turns=len(parsed), used=min(5, len(parsed)))
             else:
                 chat_history.append(HumanMessage(content="Previous summary:"))
                 chat_history.append(AIMessage(content=summary_text))
         except json.JSONDecodeError:
             chat_history.append(HumanMessage(content="Previous summary:"))
             chat_history.append(AIMessage(content=summary_text))
+            log.debug("Chat history is raw text, not JSON")
     else:
         chat_history.append(HumanMessage(content="Previous summary:"))
         chat_history.append(AIMessage(content="Fresh chat started."))
@@ -93,6 +108,8 @@ def _rewrite_query(
     try:
         # Skip if no meaningful history
         if not chat_history or len(chat_history) <= 2:
+            log.debug("Skipping rewrite — no meaningful history",
+                      history_len=len(chat_history))
             return query
 
         # Skip placeholder history
@@ -101,6 +118,7 @@ def _rewrite_query(
             and isinstance(chat_history[1], AIMessage)
             and "Fresh chat started" in chat_history[1].content
         ):
+            log.debug("Skipping rewrite — fresh chat placeholder")
             return query
 
         # Format history as text
@@ -114,21 +132,26 @@ def _rewrite_query(
 
         chat_history_text = "\n".join(history_lines)
 
-        llm = get_gemini_flash(temperature=0.1)
-        prompt = ChatPromptTemplate.from_template(REWRITE_PROMPT)
-        chain = prompt | llm
+        with log_time(log, "Query rewrite (LLM)"):
+            llm = get_gemini_flash(temperature=0.1)
+            prompt = ChatPromptTemplate.from_template(REWRITE_PROMPT)
+            chain = prompt | llm
 
-        response = chain.invoke({"query": query, "chat_history_text": chat_history_text})
+            response = chain.invoke({"query": query, "chat_history_text": chat_history_text})
         rewritten = response.content.strip()
 
         if not rewritten or len(rewritten) > 1000:
+            log.debug("Rewrite result discarded",
+                      reason="empty" if not rewritten else "too_long",
+                      result_len=len(rewritten) if rewritten else 0)
             return query
 
-        print(f"[Memory] Query rewritten: '{query[:50]}' -> '{rewritten[:50]}'")
+        log.info("Query rewritten",
+                 original=query[:60], rewritten=rewritten[:60])
         return rewritten
 
     except Exception as e:
-        print(f"[Memory] Rewrite failed, using original: {e}")
+        log.error("Rewrite failed, using original query", error=str(e))
         return query
 
 
@@ -146,22 +169,33 @@ async def memory_node(state: LegalAgentState) -> dict:
     original_query = state["original_query"]
     thread_id = state.get("thread_id")
 
+    log.info("Agent started",
+             query=original_query[:100], thread_id=thread_id or "none")
+
     # Step 1: Expand abbreviations
     query = expand_abbreviations(original_query)
     if query != original_query:
-        print(f"[Memory] Abbreviations expanded: '{original_query[:50]}' -> '{query[:50]}'")
+        log.info("Abbreviations expanded",
+                 original=original_query[:60], expanded=query[:60])
 
     # Step 2: Load chat history if thread exists
     chat_history = []
     summary_text = ""
 
     if thread_id:
-        print(f"[Memory] Loading history for thread: {thread_id}")
+        log.debug("Loading chat history", thread_id=thread_id)
         chat_history, summary_text = _load_chat_history_from_api(thread_id)
-        print(f"[Memory] Loaded {len(chat_history)} messages")
+        log.info("Chat history loaded",
+                 messages=len(chat_history),
+                 has_summary=bool(summary_text))
 
         # Step 3: Rewrite query with context
         query = _rewrite_query(query, chat_history)
+
+    log.info("Agent completed",
+             final_query=query[:100],
+             query_changed=query != original_query,
+             history_messages=len(chat_history))
 
     return {
         "query": query,

@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import uuid
 from typing import Optional, List
 
@@ -33,6 +34,9 @@ from werkzeug.utils import secure_filename
 
 from .settings import HOST, PORT, RATE_LIMIT_PER_MINUTE, CHROMA_STORE_ROOT
 from .graph import compile_graph
+from .logger import get_logger, set_request_id, log_time
+
+log = get_logger("Gateway")
 
 # --- Rate Limiter ---
 limiter = Limiter(key_func=get_remote_address)
@@ -51,7 +55,9 @@ app.add_middleware(
 )
 
 # Compile the agent graph (done once at startup)
+log.info("Compiling agent graph at startup")
 agent_graph = compile_graph()
+log.info("Agent graph compiled successfully")
 
 
 # --- Request / Response Schemas ---
@@ -121,17 +127,25 @@ async def search(data: SearchRequest, request: Request):
     guardrail → memory → orchestrator → [domain agents] → synthesize → guardrail
     """
     thread_id = data.globalThreadId or str(uuid.uuid4())
+    req_id = set_request_id(thread_id[:8])
     initial_state = _build_initial_state(data.Promptquery, thread_id)
     config = {"configurable": {"thread_id": thread_id}}
 
+    log.info("Search request received",
+             query=data.Promptquery[:100], thread_id=thread_id,
+             query_len=len(data.Promptquery))
+
     try:
-        final_state = await agent_graph.ainvoke(initial_state, config=config)
+        with log_time(log, "Full graph execution"):
+            final_state = await agent_graph.ainvoke(initial_state, config=config)
     except Exception as e:
-        print(f"Agent graph error: {e}")
+        log.error("Agent graph execution failed", exc_info=True, error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 
     # Handle blocked queries
     if final_state.get("is_blocked"):
+        log.warning("Query blocked by safety filter",
+                    reason=final_state.get("block_reason", "unknown"))
         return SearchResponse(
             globalThreadId=thread_id,
             result=final_state.get("block_reason", "Query blocked by safety filter."),
@@ -143,14 +157,40 @@ async def search(data: SearchRequest, request: Request):
     # Build response
     agent_results = final_state.get("agent_results", {})
     agents_used = list(agent_results.keys())
+    total_tokens = final_state.get("tokens_consumed", 0)
+    response_len = len(final_state.get("final_response", ""))
+
+    log.info("Search request completed",
+             agents_used=agents_used, total_tokens=total_tokens,
+             response_len=response_len, thread_id=thread_id)
 
     return SearchResponse(
         globalThreadId=thread_id,
         result=final_state.get("final_response", ""),
-        total_tokens_consumed=final_state.get("tokens_consumed", 0),
+        total_tokens_consumed=total_tokens,
         source=final_state.get("source_metadata", {}),
         agents_used=agents_used,
     )
+
+
+# --- Node → User-Friendly Status Messages ---
+
+_NODE_STATUS = {
+    "guardrail_input": "Validating query...",
+    "memory": "Loading context...",
+    "orchestrator_plan": "Planning search strategy...",
+    "legislation": "Searching legislation...",
+    "judgment": "Searching court judgments...",
+    "newacts": "Searching legal provisions...",
+    "drafting": "Generating legal draft...",
+    "scenario": "Analyzing legal scenario...",
+    "constitution_maxim": "Searching constitutional provisions...",
+    "document": "Searching uploaded documents...",
+    "sci_judgment": "Searching Supreme Court judgments...",
+    "orchestrator_synthesize": "Preparing response...",
+    "guardrail_output": "Finalizing...",
+    "blocked_response": "Query blocked.",
+}
 
 
 @app.post("/pyapi/search/stream")
@@ -158,55 +198,91 @@ async def search(data: SearchRequest, request: Request):
 async def search_stream(data: SearchRequest, request: Request):
     """Streaming legal Q&A endpoint (SSE).
 
-    Streams real-time progress updates as Server-Sent Events:
-    - Agent step completions (stream_mode="updates")
-    - LLM token chunks (stream_mode="messages")
+    Streams real-time progress as Server-Sent Events:
+    - status: Human-readable progress messages for each agent step
+    - response: The final clean answer (after all agents complete)
+    - done: Completion signal with metadata
 
-    Frontend can consume with EventSource or useStream hook.
-    Ref: https://docs.langchain.com/oss/python/langchain/streaming/frontend
+    Uses stream_mode="updates" only (not "messages") to avoid
+    leaking intermediate LLM outputs (metadata extraction JSON,
+    task classification JSON, etc.) into the response stream.
     """
     thread_id = data.globalThreadId or str(uuid.uuid4())
+    req_id = set_request_id(thread_id[:8])
     initial_state = _build_initial_state(data.Promptquery, thread_id)
     config = {"configurable": {"thread_id": thread_id}}
+
+    log.info("Stream request received",
+             query=data.Promptquery[:100], thread_id=thread_id)
 
     async def event_generator():
         """Generate SSE events from the agent graph stream."""
         # Send thread_id as first event
         yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
+        start = time.perf_counter()
+        step_count = 0
+        final_response = ""
+        agents_used = []
+        total_tokens = 0
 
         try:
-            # Stream both updates (agent steps) and messages (LLM tokens)
-            async for stream_mode, chunk in agent_graph.astream(
+            async for chunk in agent_graph.astream(
                 initial_state,
                 config=config,
-                stream_mode=["updates", "messages"],
+                stream_mode="updates",
             ):
-                if stream_mode == "updates":
-                    # Agent step completed — send step name + partial state
-                    for node_name, update in chunk.items():
-                        event = {
-                            "type": "agent_step",
-                            "agent": node_name,
-                            "data": _serialize_update(update),
-                        }
-                        yield f"data: {json.dumps(event, default=str)}\n\n"
+                for node_name, update in chunk.items():
+                    step_count += 1
+                    log.debug("SSE agent step",
+                              node=node_name, step=step_count)
 
-                elif stream_mode == "messages":
-                    # LLM token chunk — stream to frontend
-                    token, metadata = chunk
-                    if hasattr(token, "content") and token.content:
-                        event = {
-                            "type": "token",
-                            "node": metadata.get("langgraph_node", ""),
-                            "content": token.content if isinstance(token.content, str) else "",
-                        }
-                        yield f"data: {json.dumps(event)}\n\n"
+                    # Send human-readable progress status
+                    status_msg = _NODE_STATUS.get(node_name, f"Processing {node_name}...")
+                    status_event = {
+                        "type": "status",
+                        "agent": node_name,
+                        "message": status_msg,
+                    }
+                    yield f"data: {json.dumps(status_event)}\n\n"
+
+                    # Track final response from guardrail_output
+                    if "final_response" in update and update["final_response"]:
+                        final_response = update["final_response"]
+
+                    # Track task info from orchestrator
+                    if "tasks_planned" in update and update["tasks_planned"]:
+                        agents_used = update["tasks_planned"]
+
+                    # Track tokens from agent results
+                    if "agent_results" in update:
+                        for name, r in update["agent_results"].items():
+                            if hasattr(r, "tokens_consumed"):
+                                total_tokens += r.tokens_consumed or 0
 
         except Exception as e:
+            log.error("Stream error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
 
-        # Send completion event
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        # Send the clean final response
+        if final_response:
+            response_event = {
+                "type": "response",
+                "content": final_response,
+            }
+            yield f"data: {json.dumps(response_event)}\n\n"
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        log.info("Stream completed",
+                 steps=step_count, duration_ms=f"{elapsed_ms:.0f}")
+
+        # Send completion event with metadata
+        done_event = {
+            "type": "done",
+            "agents_used": agents_used,
+            "total_tokens": total_tokens,
+            "thread_id": thread_id,
+        }
+        yield f"data: {json.dumps(done_event)}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -217,20 +293,6 @@ async def search_stream(data: SearchRequest, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
-
-
-def _serialize_update(update: dict) -> dict:
-    """Serialize a graph state update for SSE transmission."""
-    serializable = {}
-    for key, value in update.items():
-        if key in ("final_response", "task", "tasks_planned", "is_blocked", "block_reason"):
-            serializable[key] = value
-        elif key == "agent_results":
-            serializable["agent_results"] = {
-                name: {"content_preview": r.content[:200] if hasattr(r, "content") else ""}
-                for name, r in value.items()
-            }
-    return serializable
 
 
 # ============================================================
@@ -252,7 +314,6 @@ async def mainqa(
     usecase='qa': Query the user's uploaded documents.
     """
     import fitz
-    import time
     from langchain_core.documents import Document
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -262,10 +323,15 @@ async def mainqa(
     from tools.shared.memory_tools import rewrite_query
     from core.clients import get_qa_embeddings, get_gemini_pro
 
+    req_id = set_request_id()
+
     if usecase == "upload":
         start_time = time.time()
+        log.info("PDF upload started", unique_string=uniqueString,
+                 file_count=len(file) if file else 0)
 
         if not file or all(f.filename == "" for f in file):
+            log.warning("No files selected for upload")
             return {"status": False, "error": "No selected files"}
 
         documents = []
@@ -292,9 +358,17 @@ async def mainqa(
                     extracted_text += page.get_text("text") + "\n"
                 pdf_doc.close()
 
+                log.debug("PDF text extracted",
+                          filename=filename, pages=num_pages,
+                          text_len=len(extracted_text.strip()),
+                          threshold=text_threshold)
+
                 # Fallback to vision OCR if text is sparse
                 if len(extracted_text.strip()) < text_threshold:
-                    print(f"[Upload] Low text in {filename}, using Vision OCR fallback")
+                    log.info("Low text density, using Vision OCR fallback",
+                             filename=filename,
+                             extracted=len(extracted_text.strip()),
+                             threshold=text_threshold)
                     vision_result = extract_text_vision.invoke(
                         {"file_path": tmp_path, "start_page": 0, "end_page": -1}
                     )
@@ -309,12 +383,14 @@ async def mainqa(
                     processed_filenames.append(filename)
 
             except Exception as e:
-                print(f"[Upload] Error processing {filename}: {e}")
+                log.error("Error processing PDF file",
+                          filename=filename, error=str(e))
             finally:
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
 
         if not documents:
+            log.warning("No text extracted from any PDF")
             return {"status": False, "error": "No text extracted from PDFs"}
 
         # Chunk documents
@@ -322,6 +398,7 @@ async def mainqa(
             separators=[""], chunk_size=15000, chunk_overlap=200
         )
         texts = text_splitter.split_documents(documents)
+        log.info("Documents chunked", chunks=len(texts), files=len(processed_filenames))
 
         # Store in ChromaDB
         collection_name = f"collection_{uniqueString}"
@@ -366,6 +443,9 @@ async def mainqa(
         )
 
         total_time = round(time.time() - start_time, 2)
+        log.info("PDF upload completed",
+                 chunks=len(texts), filenames=all_filenames,
+                 upload_time_sec=total_time, collection=collection_name)
         return {
             "status": True,
             "chunks": len(texts),
@@ -377,9 +457,14 @@ async def mainqa(
         if not question:
             return {"error": "question is required"}
 
+        log.info("PDF QA request", unique_string=uniqueString,
+                 question=question[:100])
+
         # Input guardrails
         guardrail_result = validate_input.invoke({"text": question})
         if not guardrail_result.get("valid", True):
+            log.warning("PDF QA query blocked by guardrail",
+                        reason=guardrail_result.get("reason"))
             return {"answer": guardrail_result.get("reason", "Query blocked."), "filenames": [], "upload_date": "N/A"}
 
         # Load chat history
@@ -392,6 +477,9 @@ async def mainqa(
             {"query": question, "chat_history_text": str(chat_history[-5:])}
         )
         search_query = rewrite_result.get("rewritten_query", question)
+        if search_query != question:
+            log.debug("PDF QA query rewritten",
+                      original=question[:60], rewritten=search_query[:60])
 
         # Load collection
         collection_name = f"collection_{uniqueString}"
@@ -418,26 +506,28 @@ async def mainqa(
             pass
 
         # Retrieve and generate answer
-        retriever = vectordb.as_retriever(search_kwargs={"k": 10})
-        docs = retriever.invoke(search_query)
-        context = "\n\n".join(doc.page_content for doc in docs)
+        with log_time(log, "PDF QA retrieval + generation"):
+            retriever = vectordb.as_retriever(search_kwargs={"k": 10})
+            docs = retriever.invoke(search_query)
+            log.debug("PDF QA retrieval done", docs_found=len(docs))
+            context = "\n\n".join(doc.page_content for doc in docs)
 
-        llm = get_gemini_pro(temperature=0.3)
-        qa_prompt = ChatPromptTemplate.from_messages([
-            ("system", (
-                "You are a legal AI Assistant. Use the following context to answer the question.\n\n"
-                "IMPORTANT: If the question or context refers to old provisions such as IPC, CrPC, or IEA, "
-                "mention both old and new provisions side by side:\n"
-                "- IPC → Bharatiya Nyaya Sanhita (BNS)\n"
-                "- CrPC → Bharatiya Nagrik Suraksha Sanhita (BNSS)\n"
-                "- IEA → Bharatiya Sakshya Adhiniyam (BSA)\n\n"
-                "Format: Use valid GitHub-flavored Markdown with proper line breaks and bullet points."
-            )),
-            ("user", "Document Context:\n{context}"),
-            ("user", "{question}"),
-        ])
-        chain = qa_prompt | llm
-        response = chain.invoke({"context": context, "question": question})
+            llm = get_gemini_pro(temperature=0.3)
+            qa_prompt = ChatPromptTemplate.from_messages([
+                ("system", (
+                    "You are a legal AI Assistant. Use the following context to answer the question.\n\n"
+                    "IMPORTANT: If the question or context refers to old provisions such as IPC, CrPC, or IEA, "
+                    "mention both old and new provisions side by side:\n"
+                    "- IPC → Bharatiya Nyaya Sanhita (BNS)\n"
+                    "- CrPC → Bharatiya Nagrik Suraksha Sanhita (BNSS)\n"
+                    "- IEA → Bharatiya Sakshya Adhiniyam (BSA)\n\n"
+                    "Format: Use valid GitHub-flavored Markdown with proper line breaks and bullet points."
+                )),
+                ("user", "Document Context:\n{context}"),
+                ("user", "{question}"),
+            ])
+            chain = qa_prompt | llm
+            response = chain.invoke({"context": context, "question": question})
 
         # Save chat history
         save_pdf_chat_history.invoke({
@@ -446,9 +536,12 @@ async def mainqa(
             "answer": response.content,
         })
 
+        log.info("PDF QA completed",
+                 response_len=len(response.content), filenames=filenames)
         return {"answer": response.content, "filenames": filenames, "upload_date": upload_date}
 
     else:
+        log.warning("Invalid usecase", usecase=usecase)
         raise HTTPException(status_code=400, detail=f"Invalid usecase: {usecase}")
 
 
@@ -473,9 +566,11 @@ async def delete_vectordb(unique_string: str, request: Request):
         if os.path.exists(chat_file):
             os.remove(chat_file)
 
+        log.info("VectorDB deleted", unique_string=unique_string)
         return {"message": f'VectorDB for "{unique_string}" successfully deleted.'}
     except Exception as e:
-        print(f"[Gateway] Failed to delete vectordb {unique_string}: {e}")
+        log.error("Failed to delete vectordb",
+                  unique_string=unique_string, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
 
 
@@ -508,6 +603,8 @@ async def upload_async(
         tmp_path = tmp.name
 
     job_id = submit_pdf_job(tmp_path, uniqueString, filename)
+    log.info("Async PDF upload submitted",
+             job_id=job_id, filename=filename, unique_string=uniqueString)
     return {"job_id": job_id, "status": "pending", "filename": filename}
 
 

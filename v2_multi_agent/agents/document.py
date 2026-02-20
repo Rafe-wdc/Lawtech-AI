@@ -27,8 +27,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gemini_pro, get_qa_embeddings
 from core.settings import CHROMA_STORE_ROOT
+from core.logger import get_logger, log_time
 
 import chromadb
+
+log = get_logger("Document")
 
 
 # --- Text Chunking ---
@@ -56,9 +59,13 @@ def _load_pdf_chat_history(unique_string: str) -> tuple[list[dict], list[dict]]:
         with open(chat_file, "r", encoding="utf-8") as f:
             all_chats = json.load(f)
         recent = all_chats[-5:] if len(all_chats) > 5 else all_chats
+        log.debug("PDF chat history loaded",
+                  collection=unique_string, total=len(all_chats),
+                  recent=len(recent))
         return recent, all_chats
     except Exception as e:
-        print(f"[Document] Failed to load chat history: {e}")
+        log.error("Failed to load chat history",
+                  collection=unique_string, error=str(e))
         return [], []
 
 
@@ -75,8 +82,11 @@ def _save_pdf_chat_history(
     try:
         with open(chat_file, "w", encoding="utf-8") as f:
             json.dump(all_chats, f, ensure_ascii=False, indent=2)
+        log.debug("Chat history saved",
+                  collection=unique_string, total_entries=len(all_chats))
     except Exception as e:
-        print(f"[Document] Failed to save chat history: {e}")
+        log.error("Failed to save chat history",
+                  collection=unique_string, error=str(e))
 
 
 # --- ChromaDB Collection Management ---
@@ -114,7 +124,9 @@ def process_and_store_text(
 
     vectordb = _get_or_create_collection(unique_string)
     vectordb.add_documents(documents)
-    print(f"[Document] Stored {len(documents)} chunks for {file_name}")
+    log.info("Chunks stored",
+             collection=unique_string, chunks=len(documents),
+             file=file_name)
     return len(documents)
 
 
@@ -127,14 +139,19 @@ def _retrieve_and_answer(
     vectordb = _get_or_create_collection(unique_string)
 
     # MMR retrieval for diversity
-    retriever = vectordb.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 30, "fetch_k": 50},
-    )
-    docs = retriever.invoke(query)
+    with log_time(log, "MMR retrieval", collection=unique_string):
+        retriever = vectordb.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": 30, "fetch_k": 50},
+        )
+        docs = retriever.invoke(query)
 
     if not docs:
+        log.warning("No relevant docs found", collection=unique_string)
         return "No relevant content found in the uploaded document(s) for this query.", 0
+
+    log.debug("Documents retrieved",
+              collection=unique_string, docs_found=len(docs))
 
     docs_text = "\n\n".join(d.page_content for d in docs)
 
@@ -143,22 +160,23 @@ def _retrieve_and_answer(
     for msg in chat_history_messages[-5:]:
         history_text += f"Q: {msg.get('question', '')}\nA: {msg.get('answer', '')[:500]}\n\n"
 
-    llm = get_gemini_pro(temperature=0.3)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are Lawttorney, a legal AI assistant. Answer questions about the uploaded document(s) using only the provided context. Be thorough and cite specific sections when possible."),
-        ("user", "Previous conversation:\n{history}"),
-        ("user", "Document content:\n{docs}"),
-        ("user", "Current Date: {date}"),
-        ("user", "Question: {query}"),
-    ])
-    chain = prompt | llm
+    with log_time(log, "LLM generation"):
+        llm = get_gemini_pro(temperature=0.3)
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are Lawttorney, a legal AI assistant. Answer questions about the uploaded document(s) using only the provided context. Be thorough and cite specific sections when possible."),
+            ("user", "Previous conversation:\n{history}"),
+            ("user", "Document content:\n{docs}"),
+            ("user", "Current Date: {date}"),
+            ("user", "Question: {query}"),
+        ])
+        chain = prompt | llm
 
-    response = chain.invoke({
-        "query": query,
-        "docs": docs_text,
-        "history": history_text,
-        "date": str(date.today()),
-    })
+        response = chain.invoke({
+            "query": query,
+            "docs": docs_text,
+            "history": history_text,
+            "date": str(date.today()),
+        })
 
     tokens = 0
     if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -183,9 +201,11 @@ async def document_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     unique_string = state.get("unique_string")
-    print(f"[Document] Processing for collection: {unique_string}")
+    log.info("Agent started",
+             collection=unique_string, query=query[:100])
 
     if not unique_string:
+        log.warning("No unique_string provided")
         return {
             "agent_results": {"Document": AgentResult(
                 agent_name="Document",
@@ -201,10 +221,15 @@ async def document_node(state: LegalAgentState) -> dict:
         recent_history, all_chats = _load_pdf_chat_history(unique_string)
 
         # Retrieve and answer
-        answer, tokens = _retrieve_and_answer(unique_string, query, recent_history)
+        with log_time(log, "Full document QA pipeline"):
+            answer, tokens = _retrieve_and_answer(unique_string, query, recent_history)
 
         # Save chat history
         _save_pdf_chat_history(unique_string, query, answer, all_chats)
+
+        log.info("Agent completed",
+                 collection=unique_string,
+                 response_len=len(answer), tokens=tokens)
 
         result = AgentResult(
             agent_name="Document",
@@ -217,7 +242,8 @@ async def document_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        print(f"[Document] Error: {e}")
+        log.error("Agent failed",
+                  collection=unique_string, error=str(e), exc_info=True)
         result = AgentResult(
             agent_name="Document",
             content="",

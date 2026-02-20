@@ -13,12 +13,12 @@ load_dotenv()
 # If retrieval returns empty results, verify these paths against actual ES data with:
 #   es.search(index="newacts_v1", body={"size":1, "query":{"match_all":{}}})["hits"]["hits"][0]["_source"]["source"]
 acts_paths = {
-    "The Bharatiya Nyaya Sanhita, 2023" : "Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
-    "The Bharatiya Nagarik Suraksha Sanhita, 2023" : "Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv",
-    "The Bharatiya Sakshya Adhiniyam, 2023" : "Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
-    "The Code of Criminal Procedure 1973" : "Bharitya New Acts/Code of Criminal Procedure 1974.csv",
-    "The Indian Penal Code, 1860" : "Bharitya New Acts/Indian Penal Code 1860.csv",
-    "Indian Evidence Act 1872" : "Bharitya New Acts/Indian Evidence Act 1872.csv"
+    "The Bharatiya Nyaya Sanhita, 2023" : "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+    "The Bharatiya Nagarik Suraksha Sanhita, 2023" : "/content/Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv",
+    "The Bharatiya Sakshya Adhiniyam, 2023" : "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
+    "The Code of Criminal Procedure 1973" : "/content/Bharitya New Acts/Code of Criminal Procedure 1974.csv",
+    "The Indian Penal Code, 1860" : "/content/Bharitya New Acts/Indian Penal Code 1860.csv",
+    "Indian Evidence Act 1872" : "/content/Bharitya New Acts/Indian Evidence Act 1872.csv"
 }
 class QueryMetadata(BaseModel):
     section_number: Optional[List[str]] = Field(None, description="List of section numbers, normalized per rules.")

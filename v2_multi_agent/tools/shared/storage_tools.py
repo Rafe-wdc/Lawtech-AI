@@ -123,14 +123,11 @@ def save_pdf_chat_history(
         return {"saved": False, "total_messages": len(all_chats)}
 
 
-# --- External Chat History API ---
+# --- Chat History (SQLite-first with legacy API fallback) ---
 
 @tool
 def load_chat_history_from_api(thread_id: str) -> dict:
-    """Fetch chat history from the external lawttorney.ai API.
-
-    Retrieves conversation summary for a given thread, parses it,
-    and returns structured message pairs.
+    """Load chat history, preferring local SQLite store with API fallback.
 
     Args:
         thread_id: The conversation thread ID to fetch history for
@@ -138,6 +135,21 @@ def load_chat_history_from_api(thread_id: str) -> dict:
     Returns:
         Dict with keys: messages (list of {role, content} dicts), summary_text (raw)
     """
+    from core.chat_store import chat_store
+
+    # Try SQLite first
+    try:
+        result = chat_store._load_history_sync(thread_id)
+        if result.total_turns > 0:
+            messages = []
+            for turn in result.raw_turns:
+                messages.append({"role": "user", "content": turn["user_query"]})
+                messages.append({"role": "assistant", "content": turn["ai_response"]})
+            return {"messages": messages[-10:], "summary_text": result.summary_text}
+    except Exception:
+        pass
+
+    # Fallback to legacy API
     messages = []
     summary_text = ""
 

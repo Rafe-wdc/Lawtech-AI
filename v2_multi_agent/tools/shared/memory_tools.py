@@ -190,33 +190,22 @@ def save_chat_history(
     response: str,
     recent_chats: list[dict],
 ) -> dict:
-    """Save a conversation turn to the external lawttorney.ai API.
-
-    Appends the new Q&A pair to recent chats and posts
-    the updated summary to the chat storage API.
+    """Save a conversation turn to the local SQLite chat history store.
 
     Args:
         thread_id: The conversation thread ID
         query: The user's question
         response: The AI's response
-        recent_chats: List of recent chat dicts [{user: ..., ai: ...}]
+        recent_chats: List of recent chat dicts (kept for API compatibility)
 
     Returns:
         Dict with keys: saved (bool), total_turns (int)
     """
-    recent_chats.append({"user": query, "ai": response})
-
-    # Keep last 5 turns
-    recent = recent_chats[-5:]
+    from core.chat_store import chat_store
 
     try:
-        url = f"{LAWTTORNEY_API_BASE}/users/storechatSummary"
-        payload = {
-            "ThreadId": thread_id,
-            "chatSummary": json.dumps(recent, ensure_ascii=False),
-        }
-        resp = requests.post(url, json=payload, timeout=10)
-        return {"saved": resp.status_code == 200, "total_turns": len(recent)}
+        turn_number = chat_store._save_turn_sync(thread_id, query, response)
+        return {"saved": True, "total_turns": turn_number}
     except Exception as e:
         print(f"[Memory] Failed to save chat history: {e}")
-        return {"saved": False, "total_turns": len(recent)}
+        return {"saved": False, "total_turns": 0}

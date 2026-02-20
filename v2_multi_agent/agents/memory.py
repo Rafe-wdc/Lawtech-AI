@@ -2,7 +2,7 @@
 
 Manages conversation state across turns:
 - Expands legal abbreviations
-- Loads chat history from external API
+- Loads chat history from local SQLite store (with legacy API fallback)
 - Rewrites follow-up queries into standalone queries
 
 Uses: Gemini 2.5 Flash Lite for query rewriting.
@@ -19,17 +19,60 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from core.state import LegalAgentState
 from core.clients import get_gemini_flash
-from core.settings import LAWTTORNEY_API_BASE
+from core.chat_store import chat_store
+from core.settings import LAWTTORNEY_API_BASE, CHAT_HISTORY_USE_LEGACY_API
 from core.logger import get_logger, log_time
 from tools.inline.abbreviation import expand_abbreviations
 
 log = get_logger("Memory")
 
 
-# --- Chat History Loading ---
+# --- Chat History Loading (SQLite-first with legacy fallback) ---
 
-def _load_chat_history_from_api(thread_id: str) -> tuple[list, str]:
-    """Fetch chat history from external lawttorney.ai API.
+async def _load_chat_history(thread_id: str) -> tuple[list, str]:
+    """Load chat history from SQLite, with optional legacy API fallback.
+
+    Returns: (chat_history as HumanMessage/AIMessage list, summary_text str)
+    """
+    # Step 1: Try SQLite (fast, local)
+    with log_time(log, "SQLite history load", thread_id=thread_id):
+        result = await chat_store.load_history(thread_id, max_recent_turns=5)
+
+    if result.total_turns > 0:
+        log.info("Chat history loaded from SQLite",
+                 thread_id=thread_id[:12],
+                 turns=result.total_turns,
+                 messages=len(result.chat_history),
+                 has_summary=bool(result.summary_text))
+        return result.chat_history, result.summary_text
+
+    # Step 2: If SQLite empty and legacy API enabled, try external API
+    if CHAT_HISTORY_USE_LEGACY_API:
+        log.debug("SQLite empty, trying legacy API", thread_id=thread_id[:12])
+        chat_history, summary_text = _load_from_legacy_api(thread_id)
+
+        # If API had real data, import into SQLite for future use
+        if summary_text and "Fresh chat started" not in summary_text:
+            try:
+                await chat_store.import_from_api_response(thread_id, summary_text)
+                log.info("Legacy history imported to SQLite",
+                         thread_id=thread_id[:12])
+            except Exception as e:
+                log.error("Failed to import legacy history",
+                          thread_id=thread_id[:12], error=str(e))
+
+        return chat_history, summary_text
+
+    # Step 3: No history found — return fresh-chat placeholder
+    log.debug("No history found", thread_id=thread_id[:12])
+    return [
+        HumanMessage(content="Previous summary:"),
+        AIMessage(content="Fresh chat started."),
+    ], ""
+
+
+def _load_from_legacy_api(thread_id: str) -> tuple[list, str]:
+    """Fetch chat history from external lawttorney.ai API (legacy fallback).
 
     Returns: (chat_history as HumanMessage/AIMessage list, raw summary_text)
     """
@@ -38,23 +81,23 @@ def _load_chat_history_from_api(thread_id: str) -> tuple[list, str]:
 
     try:
         url = f"{LAWTTORNEY_API_BASE}/users/getChatSummary/{thread_id}"
-        with log_time(log, "Chat history API call", thread_id=thread_id):
+        with log_time(log, "Legacy API call", thread_id=thread_id):
             response = requests.get(url, timeout=10)
 
         if response.status_code == 200:
             res_json = response.json()
             if res_json.get("status") and res_json.get("data"):
                 summary_text = res_json["data"].get("chatSummary", "").strip()
-                log.debug("Chat summary received",
-                          thread_id=thread_id,
+                log.debug("Legacy API summary received",
+                          thread_id=thread_id[:12],
                           summary_len=len(summary_text))
         else:
-            log.warning("Chat history API returned non-200",
+            log.warning("Legacy API returned non-200",
                         status_code=response.status_code,
-                        thread_id=thread_id)
+                        thread_id=thread_id[:12])
     except Exception as e:
-        log.error("Error fetching chat history",
-                  thread_id=thread_id, error=str(e))
+        log.error("Legacy API fetch failed",
+                  thread_id=thread_id[:12], error=str(e))
 
     if summary_text:
         try:
@@ -81,16 +124,22 @@ def _load_chat_history_from_api(thread_id: str) -> tuple[list, str]:
 
 # --- Query Rewriting ---
 
-REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query.
+REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query that incorporates relevant context from the conversation history.
 
 Rules:
-1. Must be understandable WITHOUT the conversation history.
+1. The rewritten query must be understandable WITHOUT the conversation history.
 2. Preserve all legal specificity: section numbers, act names, party names, dates.
-3. If the user refers to something from the conversation (e.g., "that section", "the same act"), resolve using history.
-4. If already standalone, return as-is.
-5. Do NOT answer the query. Only rewrite it.
-6. Keep concise — a search query, not a paragraph.
-7. Return ONLY the rewritten query text.
+3. If the user refers to something from the conversation (e.g., "that section", "the same act", "find cases on this", "related cases"), resolve the reference using the conversation history.
+4. IMPORTANT: If the latest query is broad or generic (e.g., "find related cases", "what about supreme court cases", "more details"), it is almost certainly a follow-up. You MUST incorporate the specific topic/section/act from the conversation history into the rewritten query.
+5. Only return the query as-is if it is BOTH grammatically standalone AND contains specific legal terms that need no context.
+6. Do NOT answer the query. Only rewrite it.
+7. Keep concise — a search query, not a paragraph.
+8. Return ONLY the rewritten query text.
+
+Examples:
+- History: "User asked about Section 35 of BNS" + Query: "find relevant cases from supreme court" → "Supreme Court cases on right of private defence under Section 35 of Bharatiya Nyaya Sanhita 2023"
+- History: "User asked about anticipatory bail" + Query: "what does the law say" → "Legal provisions on anticipatory bail"
+- History: "User asked about Section 498A IPC" + Query: "related judgments" → "Supreme Court judgments on Section 498A IPC cruelty and dowry"
 
 Conversation History:
 {chat_history_text}
@@ -106,13 +155,12 @@ def _rewrite_query(
 ) -> str:
     """Rewrite a follow-up query into a standalone query using conversation context."""
     try:
-        # Skip if no meaningful history
-        if not chat_history or len(chat_history) <= 2:
-            log.debug("Skipping rewrite — no meaningful history",
-                      history_len=len(chat_history))
+        # Skip if no history at all
+        if not chat_history:
+            log.debug("Skipping rewrite — no chat history")
             return query
 
-        # Skip placeholder history
+        # Skip placeholder history (fresh chat with no real context)
         if (
             len(chat_history) == 2
             and isinstance(chat_history[1], AIMessage)
@@ -120,6 +168,20 @@ def _rewrite_query(
         ):
             log.debug("Skipping rewrite — fresh chat placeholder")
             return query
+
+        # Skip if only 2 messages and the summary is trivially short
+        if len(chat_history) <= 2:
+            summary_content = ""
+            for msg in chat_history:
+                if isinstance(msg, AIMessage):
+                    summary_content = msg.content
+            if len(summary_content) < 20:
+                log.debug("Skipping rewrite — summary too short",
+                          history_len=len(chat_history),
+                          summary_len=len(summary_content))
+                return query
+            log.debug("Summary has context, proceeding with rewrite",
+                      summary_len=len(summary_content))
 
         # Format history as text
         history_lines = []
@@ -162,7 +224,7 @@ async def memory_node(state: LegalAgentState) -> dict:
 
     Flow:
     1. Expand legal abbreviations (BNS → Bharatiya Nyaya Sanhita, etc.)
-    2. If thread_id provided → load chat history from lawttorney.ai API
+    2. If thread_id provided → load chat history from SQLite (or legacy API)
     3. Rewrite query with conversation context if follow-up
     4. Return processed query + chat history
     """
@@ -183,8 +245,8 @@ async def memory_node(state: LegalAgentState) -> dict:
     summary_text = ""
 
     if thread_id:
-        log.debug("Loading chat history", thread_id=thread_id)
-        chat_history, summary_text = _load_chat_history_from_api(thread_id)
+        log.debug("Loading chat history", thread_id=thread_id[:12])
+        chat_history, summary_text = await _load_chat_history(thread_id)
         log.info("Chat history loaded",
                  messages=len(chat_history),
                  has_summary=bool(summary_text))

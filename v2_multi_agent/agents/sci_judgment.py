@@ -23,7 +23,7 @@ from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gpt4o
 from core.logger import get_logger, log_time
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
-from tools.shared import AGENT_TOOLS
+from tools.shared import AGENT_TOOLS, search_by_semantic
 
 log = get_logger("SCI_Judgment")
 
@@ -63,6 +63,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         answer = ""
         tools_used = []
         pdf_links = []
+        sources = []
 
         for msg in messages:
             # Track tool calls
@@ -86,6 +87,65 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                  response_len=len(answer),
                  total_messages=len(messages))
 
+        # Fallback: if ReAct agent didn't call any tools, force a semantic search
+        if not tools_used:
+            log.warning("ReAct agent returned 0 tool calls, forcing semantic search fallback",
+                        query=query[:100])
+            try:
+                fallback_result = search_by_semantic.invoke({"query": query})
+                if fallback_result and "No matching" not in fallback_result:
+                    # Parse sources from the direct fallback result
+                    fallback_text = fallback_result
+                    case_blocks = re.split(r'\n\n(?=\*\*)', fallback_text)
+                    for block in case_blocks:
+                        if not block.strip() or "No matching" in block:
+                            continue
+                        parties_m = re.search(r'\*\*(.+?)\*\*\s*\(DB ID:\s*(\S+)\)', block)
+                        case_no_m = re.search(r'Case No:\s*(.+)', block)
+                        date_m = re.search(r'Date:\s*(.+)', block)
+                        bench_m = re.search(r'Bench:\s*(.+)', block)
+                        judge_m = re.search(r'Judgment By:\s*(.+)', block)
+                        pdf_m = re.search(r'PDF:\s*(https?://\S+)', block)
+                        if parties_m:
+                            p_title = parties_m.group(1).strip()
+                            p_dbid = parties_m.group(2).strip()
+                            pdf_url = pdf_m.group(1).strip() if pdf_m else None
+                            sources.append(SourceMetadata(
+                                source_type="sci_judgment",
+                                title=p_title,
+                                db_id=p_dbid,
+                                parties=p_title,
+                                case_no=case_no_m.group(1).strip() if case_no_m else None,
+                                judgment_date=date_m.group(1).strip() if date_m else None,
+                                bench=bench_m.group(1).strip() if bench_m else None,
+                                judgment_by=judge_m.group(1).strip() if judge_m else None,
+                                doc_link=pdf_url,
+                                pdf_links=[{"label": "Judgment PDF", "url": pdf_url}] if pdf_url and pdf_url != "N/A" else [],
+                                agent_name="SCI_Judgment",
+                            ))
+                    log.info("Fallback sources parsed", source_count=len(sources))
+
+                    # Re-invoke ReAct with the search results as context
+                    with log_time(log, "ReAct retry with fallback results"):
+                        retry_result = await agent.ainvoke(
+                            {"messages": [
+                                ("user", query),
+                                ("assistant", f"I searched for cases and found these results:\n\n{fallback_result}\n\nLet me present these findings to the user."),
+                            ]}
+                        )
+                    retry_messages = retry_result.get("messages", [])
+                    answer = ""
+                    tools_used = ["search_by_semantic (fallback)"]
+                    for msg in retry_messages:
+                        if hasattr(msg, "type") and msg.type == "ai" and msg.content:
+                            answer = msg.content
+                    if not answer:
+                        answer = f"Here are relevant Supreme Court cases found:\n\n{fallback_result}"
+                    log.info("Fallback search completed",
+                             response_len=len(answer))
+            except Exception as fb_err:
+                log.error("Fallback search failed", error=str(fb_err))
+
         # Estimate token usage from messages
         tokens = 0
         for msg in messages:
@@ -93,7 +153,6 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                 tokens += msg.usage_metadata.get("total_tokens", 0)
 
         # Parse tool response messages to extract structured case data
-        sources = []
         for msg in messages:
             if hasattr(msg, "type") and msg.type == "tool" and msg.content:
                 text = msg.content

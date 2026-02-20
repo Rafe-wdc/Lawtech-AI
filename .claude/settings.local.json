@@ -19,7 +19,8 @@
       "Bash(TF_USE_LEGACY_KERAS=1 python:*)",
       "Bash(start:*)",
       "Bash(find:*)",
-      "Bash(PORT=5005 python:*)"
+      "Bash(PORT=5005 python:*)",
+      "Bash(tasklist:*)"
     ]
   }
 }

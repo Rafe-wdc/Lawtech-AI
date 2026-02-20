@@ -35,6 +35,7 @@ from werkzeug.utils import secure_filename
 from .settings import HOST, PORT, RATE_LIMIT_PER_MINUTE, CHROMA_STORE_ROOT
 from .graph import compile_graph
 from .logger import get_logger, set_request_id, log_time
+from .chat_store import chat_store
 
 log = get_logger("Gateway")
 
@@ -73,6 +74,10 @@ class SearchResponse(BaseModel):
     total_tokens_consumed: int
     source: list[dict]
     agents_used: list[str]
+    # Memory context metadata
+    effective_query: Optional[str] = None
+    query_rewritten: bool = False
+    conversation_turn: int = 0
 
 
 class PdfChatRequest(BaseModel):
@@ -164,12 +169,33 @@ async def search(data: SearchRequest, request: Request):
              agents_used=agents_used, total_tokens=total_tokens,
              response_len=response_len, thread_id=thread_id)
 
+    # Memory context metadata
+    effective_query = final_state.get("query", data.Promptquery)
+    query_rewritten = effective_query != data.Promptquery
+    conversation_turn = 0
+
+    # Save chat history to SQLite (non-blocking, don't fail the response)
+    final_response = final_state.get("final_response", "")
+    if not final_state.get("is_blocked") and final_response:
+        try:
+            conversation_turn = await chat_store.save_turn(
+                thread_id, data.Promptquery, final_response
+            )
+            log.debug("Chat history saved",
+                      thread_id=thread_id[:12], turn=conversation_turn)
+        except Exception as e:
+            log.error("Failed to save chat history",
+                      thread_id=thread_id[:12], error=str(e))
+
     return SearchResponse(
         globalThreadId=thread_id,
-        result=final_state.get("final_response", ""),
+        result=final_response,
         total_tokens_consumed=total_tokens,
         source=final_state.get("source_metadata", []),
         agents_used=agents_used,
+        effective_query=effective_query if query_rewritten else None,
+        query_rewritten=query_rewritten,
+        conversation_turn=conversation_turn,
     )
 
 
@@ -225,6 +251,8 @@ async def search_stream(data: SearchRequest, request: Request):
         agents_used = []
         total_tokens = 0
         all_source_metadata = []
+        effective_query = data.Promptquery
+        query_rewritten = False
 
         try:
             async for chunk in agent_graph.astream(
@@ -245,6 +273,20 @@ async def search_stream(data: SearchRequest, request: Request):
                         "message": status_msg,
                     }
                     yield f"data: {json.dumps(status_event)}\n\n"
+
+                    # After memory agent: send context event with rewrite info
+                    if node_name == "memory" and "query" in update:
+                        effective_query = update["query"]
+                        query_rewritten = effective_query != data.Promptquery
+                        history_msgs = update.get("chat_history", [])
+                        context_event = {
+                            "type": "context",
+                            "query_rewritten": query_rewritten,
+                            "effective_query": effective_query if query_rewritten else None,
+                            "history_turns": len(history_msgs) // 2,
+                            "has_summary": bool(update.get("summary_text")),
+                        }
+                        yield f"data: {json.dumps(context_event)}\n\n"
 
                     # Track final response from guardrail_output
                     if "final_response" in update and update["final_response"]:
@@ -288,12 +330,28 @@ async def search_stream(data: SearchRequest, request: Request):
         log.info("Stream completed",
                  steps=step_count, duration_ms=f"{elapsed_ms:.0f}")
 
+        # Save chat history to SQLite after stream completes
+        conversation_turn = 0
+        if final_response:
+            try:
+                conversation_turn = await chat_store.save_turn(
+                    thread_id, data.Promptquery, final_response
+                )
+                log.debug("Chat history saved (stream)",
+                          thread_id=thread_id[:12], turn=conversation_turn)
+            except Exception as e:
+                log.error("Failed to save chat history (stream)",
+                          thread_id=thread_id[:12], error=str(e))
+
         # Send completion event with metadata
         done_event = {
             "type": "done",
             "agents_used": agents_used,
             "total_tokens": total_tokens,
             "thread_id": thread_id,
+            "conversation_turn": conversation_turn,
+            "query_rewritten": query_rewritten,
+            "effective_query": effective_query if query_rewritten else None,
         }
         yield f"data: {json.dumps(done_event)}\n\n"
 

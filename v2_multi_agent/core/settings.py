@@ -60,6 +60,15 @@ CHROMA_PERSIST_DIRS = {
 }
 CHROMA_STORE_ROOT = str(_PROJECT_ROOT.parent / "chroma_store")
 
+# --- Chat History (SQLite) ---
+CHAT_HISTORY_DB_PATH = os.getenv(
+    "CHAT_HISTORY_DB_PATH",
+    str(_PROJECT_ROOT / "data" / "chat_history.db"),
+)
+CHAT_HISTORY_USE_LEGACY_API = os.getenv(
+    "CHAT_HISTORY_USE_LEGACY_API", "true"
+).lower() == "true"
+
 # --- AWS S3 ---
 S3_BUCKET = os.getenv("S3_BUCKET", "lawttorney")
 S3_REGION = os.getenv("S3_REGION", "ap-south-1")

@@ -10,7 +10,15 @@
       "Bash(netstat:*)",
       "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -Property OwningProcess\")",
       "Bash(powershell.exe -Command \"Get-Process -Id 51540 | Select-Object -Property ProcessName,Id\")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "WebFetch(domain:docs.langchain.com)",
+      "Bash(pip show:*)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(pip:*)",
+      "Bash(TF_USE_LEGACY_KERAS=1 python:*)",
+      "Bash(start:*)",
+      "Bash(find:*)"
     ]
   }
 }

@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lawttorney AI v2 — Test Console</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232733;
+    --border: #2e3345;
+    --text: #e4e6f0;
+    --text2: #9ba1b7;
+    --accent: #6c63ff;
+    --accent2: #8b83ff;
+    --green: #34d399;
+    --red: #f87171;
+    --orange: #fbbf24;
+    --blue: #60a5fa;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* --- Layout --- */
+  .app { display: flex; height: 100vh; }
+  .sidebar {
+    width: 260px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-header h1 {
+    font-size: 18px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .sidebar-header .version {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 4px;
+  }
+  .health-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    margin-right: 6px;
+    transition: background 0.3s;
+  }
+  .health-dot.ok { background: var(--green); }
+
+  .nav { flex: 1; padding: 12px; overflow-y: auto; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    color: var(--text2);
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+    margin-bottom: 2px;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: var(--accent); color: #fff; }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* --- Tabs Content --- */
+  .tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  .tab-content.active { display: flex; }
+
+  /* --- Chat Panel --- */
+  .chat-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+  }
+  .chat-header h2 { font-size: 15px; font-weight: 600; }
+  .chat-header .meta { font-size: 12px; color: var(--text2); }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 14px 18px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.65;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.ai {
+    align-self: flex-start;
+    background: var(--surface2);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.ai .agents-badge {
+    display: inline-flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .agent-tag {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(108,99,255,0.2);
+    color: var(--accent2);
+    font-weight: 600;
+  }
+  .msg.ai .tokens {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 8px;
+    text-align: right;
+  }
+  .msg.system {
+    align-self: center;
+    background: transparent;
+    color: var(--text2);
+    font-size: 12px;
+    font-style: italic;
+    padding: 6px;
+  }
+  .msg.error {
+    align-self: center;
+    background: rgba(248,113,113,0.1);
+    color: var(--red);
+    border: 1px solid rgba(248,113,113,0.2);
+  }
+  .msg pre {
+    background: var(--bg);
+    padding: 10px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .msg ul, .msg ol { padding-left: 20px; margin: 6px 0; }
+  .msg h2, .msg h3, .msg h4 { margin: 10px 0 4px; }
+  .msg h2 { font-size: 16px; }
+  .msg h3 { font-size: 14px; }
+  .msg p { margin: 4px 0; }
+
+  .chat-input-area {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .input-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .input-row textarea {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 12px 16px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    min-height: 44px;
+    max-height: 120px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .input-row textarea:focus { border-color: var(--accent); }
+  .input-row textarea::placeholder { color: var(--text2); }
+
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { background: var(--border); }
+  .btn-danger {
+    background: rgba(248,113,113,0.15);
+    color: var(--red);
+    border: 1px solid rgba(248,113,113,0.2);
+  }
+  .btn-danger:hover { background: rgba(248,113,113,0.25); }
+  .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+  .toggle-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-top: 10px;
+  }
+  .toggle-row label {
+    font-size: 12px;
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+  .toggle-row input[type="checkbox"] {
+    accent-color: var(--accent);
+  }
+  .toggle-row select, .toggle-row input[type="text"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+
+  /* --- PDF Panel --- */
+  .pdf-panel {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .section-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .section-card h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .file-drop {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 30px;
+    text-align: center;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 14px;
+  }
+  .file-drop:hover, .file-drop.dragover {
+    border-color: var(--accent);
+    background: rgba(108,99,255,0.05);
+  }
+  .file-drop input { display: none; }
+  .file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .file-item .size { color: var(--text2); font-size: 11px; }
+  .file-item .remove {
+    color: var(--red);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 10px 0;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--blue));
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  .result-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-top: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .field-group {
+    margin-bottom: 14px;
+  }
+  .field-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--text2);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .field-group input, .field-group textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 10px 14px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .field-group input:focus, .field-group textarea:focus {
+    border-color: var(--accent);
+  }
+
+  .status-pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .status-pill.ok { background: rgba(52,211,153,0.15); color: var(--green); }
+  .status-pill.error { background: rgba(248,113,113,0.15); color: var(--red); }
+  .status-pill.pending { background: rgba(251,191,36,0.15); color: var(--orange); }
+  .status-pill.processing { background: rgba(96,165,250,0.15); color: var(--blue); }
+
+  /* --- Streaming indicator --- */
+  .streaming-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 1s infinite;
+    margin-right: 4px;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* --- Log Panel --- */
+  .log-panel {
+    padding: 16px 24px;
+    overflow-y: auto;
+    flex: 1;
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+    background: var(--bg);
+  }
+  .log-entry { color: var(--text2); }
+  .log-entry .time { color: var(--text2); opacity: 0.6; margin-right: 8px; }
+  .log-entry.info { color: var(--blue); }
+  .log-entry.success { color: var(--green); }
+  .log-entry.error { color: var(--red); }
+  .log-entry.warn { color: var(--orange); }
+
+  /* --- Scrollbar --- */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+  /* --- Markdown in messages --- */
+  .msg.ai strong { color: var(--accent2); }
+  .msg.ai a { color: var(--blue); text-decoration: underline; }
+  .msg.ai code {
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .msg.ai table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+  .msg.ai th, .msg.ai td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+  }
+  .msg.ai th { background: var(--bg); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h1>Lawttorney AI</h1>
+      <div class="version">
+        <span class="health-dot" id="healthDot"></span>
+        <span id="healthText">Connecting...</span>
+      </div>
+    </div>
+    <div class="nav">
+      <div class="nav-item active" data-tab="chat" onclick="switchTab('chat')">
+        <span class="icon">&#9998;</span> Legal Q&A
+      </div>
+      <div class="nav-item" data-tab="pdf" onclick="switchTab('pdf')">
+        <span class="icon">&#128196;</span> PDF Upload & Chat
+      </div>
+      <div class="nav-item" data-tab="manage" onclick="switchTab('manage')">
+        <span class="icon">&#128451;</span> Collection Manager
+      </div>
+      <div class="nav-item" data-tab="logs" onclick="switchTab('logs')">
+        <span class="icon">&#128203;</span> Request Logs
+      </div>
+    </div>
+    <div style="padding: 12px; border-top: 1px solid var(--border);">
+      <div class="field-group" style="margin-bottom: 8px;">
+        <label>API Base URL</label>
+        <input type="text" id="apiBase" value="http://localhost:5001" />
+      </div>
+      <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="checkHealth()">
+        Test Connection
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- Tab 1: Legal Q&A Chat -->
+    <div class="tab-content active" id="tab-chat">
+      <div class="chat-header">
+        <div>
+          <h2>Legal Q&A</h2>
+          <div class="meta" id="chatMeta">New conversation</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" onclick="newChat()">New Chat</button>
+        </div>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg system">Ask any legal question — the multi-agent system will classify, route, and respond.</div>
+      </div>
+      <div class="chat-input-area">
+        <div class="input-row">
+          <textarea id="chatInput" placeholder="Ask a legal question... (Shift+Enter for newline)" rows="1"
+                    onkeydown="handleChatKey(event)"></textarea>
+          <button class="btn btn-primary" id="chatSendBtn" onclick="sendChat()">Send</button>
+        </div>
+        <div class="toggle-row">
+          <label><input type="checkbox" id="streamToggle" /> Streaming (SSE)</label>
+          <label>Thread:
+            <input type="text" id="threadId" placeholder="auto" style="width: 180px;" />
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: PDF Upload & Chat -->
+    <div class="tab-content" id="tab-pdf">
+      <div class="chat-header">
+        <h2>PDF Upload & Chat</h2>
+      </div>
+      <div class="pdf-panel">
+        <!-- Upload Section -->
+        <div class="section-card">
+          <h3>&#128228; Upload PDF</h3>
+          <div class="field-group">
+            <label>Unique String (Collection ID)</label>
+            <input type="text" id="pdfUniqueStr" placeholder="e.g. user123_session456" />
+          </div>
+          <div class="file-drop" id="fileDrop" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" accept=".pdf" multiple onchange="handleFiles(this.files)" />
+            <div style="font-size: 28px; margin-bottom: 8px;">&#128196;</div>
+            <div>Drop PDF files here or click to browse</div>
+            <div style="font-size: 11px; margin-top: 4px;">(Max 50 MB per file)</div>
+          </div>
+          <div class="file-list" id="fileList"></div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary" onclick="uploadPdf(false)">Upload (Sync)</button>
+            <button class="btn btn-secondary" onclick="uploadPdf(true)">Upload (Async)</button>
+          </div>
+          <div class="progress-bar" id="uploadProgress" style="display:none;">
+            <div class="fill" style="width: 0%"></div>
+          </div>
+          <div class="result-box" id="uploadResult" style="display:none;"></div>
+        </div>
+
+        <!-- Async Job Status -->
+        <div class="section-card" id="jobSection" style="display:none;">
+          <h3>&#9203; Async Job Status</h3>
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+            <span>Job: <code id="jobIdDisplay"></code></span>
+            <span class="status-pill pending" id="jobStatusPill">pending</span>
+            <button class="btn btn-secondary btn-sm" onclick="pollJobStatus()">Refresh</button>
+          </div>
+          <div class="result-box" id="jobResult"></div>
+        </div>
+
+        <!-- PDF Q&A Section -->
+        <div class="section-card">
+          <h3>&#128172; Chat with PDF</h3>
+          <div class="field-group">
+            <label>Unique String (same as upload)</label>
+            <input type="text" id="pdfQaUniqueStr" placeholder="e.g. user123_session456" />
+          </div>
+          <div class="field-group">
+            <label>Question</label>
+            <textarea id="pdfQuestion" rows="3" placeholder="Ask a question about the uploaded document..."></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="queryPdf()">Ask</button>
+          <div class="result-box" id="pdfQaResult" style="display:none;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Collection Manager -->
+    <div class="tab-content" id="tab-manage">
+      <div class="chat-header">
+        <h2>Collection Manager</h2>
+      </div>
+      <div class="pdf-panel">
+        <div class="section-card">
+          <h3>&#128465; Delete Collection</h3>
+          <div class="field-group">
+            <label>Unique String (Collection ID)</label>
+            <input type="text" id="deleteUniqueStr" placeholder="e.g. user123_session456" />
+          </div>
+          <button class="btn btn-danger" onclick="deleteCollection()">Delete Collection</button>
+          <div class="result-box" id="deleteResult" style="display:none;"></div>
+        </div>
+
+        <div class="section-card">
+          <h3>&#128295; API Endpoints Reference</h3>
+          <div style="font-size: 13px; line-height: 2;">
+            <div><code style="color:var(--green)">GET</code>&nbsp; <code>/pyapi/health</code> — Health check</div>
+            <div><code style="color:var(--blue)">POST</code> <code>/pyapi/search</code> — Legal Q&A (batch)</div>
+            <div><code style="color:var(--blue)">POST</code> <code>/pyapi/search/stream</code> — Legal Q&A (SSE stream)</div>
+            <div><code style="color:var(--blue)">POST</code> <code>/pyapi/mainqa</code> — PDF upload / Q&A</div>
+            <div><code style="color:var(--blue)">POST</code> <code>/pyapi/upload_async</code> — Async PDF upload</div>
+            <div><code style="color:var(--green)">GET</code>&nbsp; <code>/pyapi/job_status/{id}</code> — Job status</div>
+            <div><code style="color:var(--red)">DEL</code>&nbsp; <code>/pyapi/delete_vectordb/{id}</code> — Delete collection</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Request Logs -->
+    <div class="tab-content" id="tab-logs">
+      <div class="chat-header">
+        <div><h2>Request Logs</h2></div>
+        <button class="btn btn-secondary btn-sm" onclick="clearLogs()">Clear</button>
+      </div>
+      <div class="log-panel" id="logPanel"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+let currentThreadId = null;
+let selectedFiles = [];
+let currentJobId = null;
+let jobPollTimer = null;
+
+function getBase() { return document.getElementById('apiBase').value.replace(/\/+$/, ''); }
+
+// ============================================================
+// Tab Switching
+// ============================================================
+function switchTab(tab) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
+}
+
+// ============================================================
+// Health Check
+// ============================================================
+async function checkHealth() {
+  const dot = document.getElementById('healthDot');
+  const txt = document.getElementById('healthText');
+  try {
+    const r = await fetch(getBase() + '/pyapi/health');
+    const d = await r.json();
+    dot.classList.add('ok');
+    txt.textContent = `v${d.version} — Connected`;
+    addLog('success', `Health OK: ${JSON.stringify(d)}`);
+  } catch (e) {
+    dot.classList.remove('ok');
+    txt.textContent = 'Disconnected';
+    addLog('error', `Health check failed: ${e.message}`);
+  }
+}
+
+// ============================================================
+// Legal Q&A Chat
+// ============================================================
+function newChat() {
+  currentThreadId = null;
+  document.getElementById('threadId').value = '';
+  document.getElementById('chatMessages').innerHTML =
+    '<div class="msg system">New conversation started.</div>';
+  document.getElementById('chatMeta').textContent = 'New conversation';
+}
+
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const query = input.value.trim();
+  if (!query) return;
+
+  const streaming = document.getElementById('streamToggle').checked;
+  const threadInput = document.getElementById('threadId').value.trim();
+  const threadId = threadInput || currentThreadId || null;
+
+  // Add user message
+  addChatMsg('user', query);
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Disable send
+  const btn = document.getElementById('chatSendBtn');
+  btn.disabled = true;
+  btn.textContent = streaming ? 'Streaming...' : 'Thinking...';
+
+  try {
+    if (streaming) {
+      await sendChatStream(query, threadId);
+    } else {
+      await sendChatBatch(query, threadId);
+    }
+  } catch (e) {
+    addChatMsg('error', `Request failed: ${e.message}`);
+    addLog('error', `Chat error: ${e.message}`);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Send';
+}
+
+async function sendChatBatch(query, threadId) {
+  const payload = { Promptquery: query };
+  if (threadId) payload.globalThreadId = threadId;
+
+  addLog('info', `POST /pyapi/search — "${query.substring(0, 60)}..."`);
+  const start = Date.now();
+
+  const r = await fetch(getBase() + '/pyapi/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await r.json();
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+
+  if (!r.ok) {
+    addChatMsg('error', `Error ${r.status}: ${data.detail || JSON.stringify(data)}`);
+    addLog('error', `Search failed: ${r.status}`);
+    return;
+  }
+
+  currentThreadId = data.globalThreadId;
+  document.getElementById('threadId').value = currentThreadId;
+  document.getElementById('chatMeta').textContent =
+    `Thread: ${currentThreadId.substring(0, 8)}... | Agents: ${data.agents_used.join(', ') || 'none'}`;
+
+  addChatMsg('ai', data.result, data.agents_used, data.total_tokens_consumed, elapsed);
+  addLog('success', `Response: ${data.agents_used.join(',')} | ${data.total_tokens_consumed} tokens | ${elapsed}s`);
+}
+
+async function sendChatStream(query, threadId) {
+  const payload = { Promptquery: query };
+  if (threadId) payload.globalThreadId = threadId;
+
+  addLog('info', `POST /pyapi/search/stream (SSE) — "${query.substring(0, 60)}..."`);
+
+  const r = await fetch(getBase() + '/pyapi/search/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!r.ok) {
+    const err = await r.text();
+    addChatMsg('error', `Stream error ${r.status}: ${err}`);
+    return;
+  }
+
+  // Create streaming message element
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'msg ai';
+  msgDiv.innerHTML = '<div class="agents-badge" id="streamAgents"></div><div id="streamContent"><span class="streaming-dot"></span> Thinking...</div>';
+  document.getElementById('chatMessages').appendChild(msgDiv);
+  scrollChat();
+
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  let agents = new Set();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event = JSON.parse(line.slice(6));
+
+        if (event.type === 'thread_id') {
+          currentThreadId = event.data;
+          document.getElementById('threadId').value = currentThreadId;
+        } else if (event.type === 'agent_step') {
+          agents.add(event.agent);
+          const agentsEl = document.getElementById('streamAgents');
+          if (agentsEl) {
+            agentsEl.innerHTML = [...agents].map(a =>
+              `<span class="agent-tag">${a}</span>`
+            ).join('');
+          }
+          addLog('info', `Agent step: ${event.agent}`);
+        } else if (event.type === 'token') {
+          content += event.content;
+          const contentEl = document.getElementById('streamContent');
+          if (contentEl) contentEl.innerHTML = renderMarkdown(content);
+          scrollChat();
+        } else if (event.type === 'done') {
+          addLog('success', `Stream complete: ${agents.size} agents`);
+          // If no tokens streamed, get final response from last agent_step
+          if (!content) {
+            const finalData = event.data;
+            if (finalData && finalData.final_response) {
+              content = finalData.final_response;
+            }
+          }
+        } else if (event.type === 'error') {
+          content += `\n\n**Error:** ${event.data}`;
+          addLog('error', `Stream error: ${event.data}`);
+        }
+      } catch (e) { /* ignore parse errors for partial lines */ }
+    }
+  }
+
+  // Finalize streaming message
+  if (!content && msgDiv) {
+    const contentEl = document.getElementById('streamContent');
+    if (contentEl) contentEl.innerHTML = '<em>Stream completed (response may have been sent as agent_step update)</em>';
+  }
+
+  // Remove temp IDs
+  const sa = document.getElementById('streamAgents');
+  if (sa) sa.removeAttribute('id');
+  const sc = document.getElementById('streamContent');
+  if (sc) sc.removeAttribute('id');
+
+  document.getElementById('chatMeta').textContent =
+    `Thread: ${(currentThreadId || '').substring(0, 8)}... | Agents: ${[...agents].join(', ') || 'none'} | Streamed`;
+}
+
+function addChatMsg(type, text, agents, tokens, elapsed) {
+  const div = document.createElement('div');
+  div.className = `msg ${type}`;
+
+  if (type === 'ai') {
+    let html = '';
+    if (agents && agents.length) {
+      html += '<div class="agents-badge">' +
+        agents.map(a => `<span class="agent-tag">${a}</span>`).join('') +
+        '</div>';
+    }
+    html += renderMarkdown(text);
+    if (tokens || elapsed) {
+      html += `<div class="tokens">${tokens ? tokens + ' tokens' : ''}${elapsed ? ' | ' + elapsed + 's' : ''}</div>`;
+    }
+    div.innerHTML = html;
+  } else {
+    div.textContent = text;
+  }
+
+  document.getElementById('chatMessages').appendChild(div);
+  scrollChat();
+}
+
+function scrollChat() {
+  const el = document.getElementById('chatMessages');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ============================================================
+// Simple Markdown Renderer
+// ============================================================
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = text
+    // Code blocks
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Headers
+    .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    // Bullet lists
+    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+    // Numbered lists
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // Line breaks
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/(<li>.*?<\/li>(\s*<br>)?)+/g, (match) => {
+    return '<ul>' + match.replace(/<br>/g, '') + '</ul>';
+  });
+
+  return '<p>' + html + '</p>';
+}
+
+// ============================================================
+// PDF Upload
+// ============================================================
+function handleFiles(files) {
+  for (const f of files) {
+    if (f.type === 'application/pdf') {
+      selectedFiles.push(f);
+    }
+  }
+  renderFileList();
+}
+
+function renderFileList() {
+  const el = document.getElementById('fileList');
+  el.innerHTML = selectedFiles.map((f, i) =>
+    `<div class="file-item">
+      <span>&#128196; ${f.name}</span>
+      <span class="size">${(f.size / 1024 / 1024).toFixed(2)} MB</span>
+      <span class="remove" onclick="removeFile(${i})">&#10005;</span>
+    </div>`
+  ).join('');
+}
+
+function removeFile(i) {
+  selectedFiles.splice(i, 1);
+  renderFileList();
+}
+
+// Drag and drop
+const fileDrop = document.getElementById('fileDrop');
+fileDrop.addEventListener('dragover', e => { e.preventDefault(); fileDrop.classList.add('dragover'); });
+fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('dragover'));
+fileDrop.addEventListener('drop', e => {
+  e.preventDefault();
+  fileDrop.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+
+async function uploadPdf(async_mode) {
+  const uniqueStr = document.getElementById('pdfUniqueStr').value.trim();
+  if (!uniqueStr) return alert('Please enter a Unique String');
+  if (!selectedFiles.length) return alert('Please select at least one PDF');
+
+  const resultEl = document.getElementById('uploadResult');
+  const progressEl = document.getElementById('uploadProgress');
+  resultEl.style.display = 'block';
+  progressEl.style.display = 'block';
+  resultEl.textContent = async_mode ? 'Submitting async job...' : 'Uploading and processing...';
+  progressEl.querySelector('.fill').style.width = '30%';
+
+  if (async_mode) {
+    // Async mode: single file via /pyapi/upload_async
+    const fd = new FormData();
+    fd.append('uniqueString', uniqueStr);
+    fd.append('file', selectedFiles[0]);
+
+    try {
+      addLog('info', `POST /pyapi/upload_async — ${selectedFiles[0].name}`);
+      const r = await fetch(getBase() + '/pyapi/upload_async', { method: 'POST', body: fd });
+      const data = await r.json();
+      progressEl.querySelector('.fill').style.width = '100%';
+
+      if (data.job_id) {
+        currentJobId = data.job_id;
+        resultEl.textContent = `Job submitted: ${data.job_id}\nStatus: ${data.status}`;
+        document.getElementById('jobSection').style.display = 'block';
+        document.getElementById('jobIdDisplay').textContent = data.job_id;
+        addLog('success', `Async job submitted: ${data.job_id}`);
+        startJobPolling();
+      } else {
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      }
+    } catch (e) {
+      resultEl.textContent = `Error: ${e.message}`;
+      addLog('error', `Upload async failed: ${e.message}`);
+    }
+  } else {
+    // Sync mode: via /pyapi/mainqa usecase=upload
+    const fd = new FormData();
+    fd.append('usecase', 'upload');
+    fd.append('uniqueString', uniqueStr);
+    selectedFiles.forEach(f => fd.append('file', f));
+
+    try {
+      addLog('info', `POST /pyapi/mainqa (upload) — ${selectedFiles.length} file(s)`);
+      const start = Date.now();
+      const r = await fetch(getBase() + '/pyapi/mainqa', { method: 'POST', body: fd });
+      const data = await r.json();
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+      progressEl.querySelector('.fill').style.width = '100%';
+
+      resultEl.textContent = JSON.stringify(data, null, 2);
+      if (data.status) {
+        addLog('success', `Upload OK: ${data.chunks} chunks, ${data.filenames?.join(', ')} | ${elapsed}s`);
+        document.getElementById('pdfQaUniqueStr').value = uniqueStr;
+      } else {
+        addLog('error', `Upload failed: ${data.error}`);
+      }
+    } catch (e) {
+      resultEl.textContent = `Error: ${e.message}`;
+      addLog('error', `Upload failed: ${e.message}`);
+    }
+  }
+
+  setTimeout(() => { progressEl.style.display = 'none'; }, 2000);
+}
+
+// ============================================================
+// Async Job Polling
+// ============================================================
+function startJobPolling() {
+  if (jobPollTimer) clearInterval(jobPollTimer);
+  jobPollTimer = setInterval(pollJobStatus, 3000);
+}
+
+async function pollJobStatus() {
+  if (!currentJobId) return;
+
+  try {
+    const r = await fetch(getBase() + `/pyapi/job_status/${currentJobId}`);
+    const data = await r.json();
+
+    const pill = document.getElementById('jobStatusPill');
+    pill.textContent = data.status;
+    pill.className = `status-pill ${data.status}`;
+
+    document.getElementById('jobResult').textContent = JSON.stringify(data, null, 2);
+
+    if (data.status === 'completed' || data.status === 'failed') {
+      clearInterval(jobPollTimer);
+      jobPollTimer = null;
+      addLog(data.status === 'completed' ? 'success' : 'error',
+        `Job ${currentJobId.substring(0, 8)}: ${data.status} — ${data.chunks_stored || 0} chunks`);
+    }
+  } catch (e) {
+    document.getElementById('jobResult').textContent = `Poll error: ${e.message}`;
+  }
+}
+
+// ============================================================
+// PDF Q&A
+// ============================================================
+async function queryPdf() {
+  const uniqueStr = document.getElementById('pdfQaUniqueStr').value.trim();
+  const question = document.getElementById('pdfQuestion').value.trim();
+  if (!uniqueStr) return alert('Please enter a Unique String');
+  if (!question) return alert('Please enter a question');
+
+  const resultEl = document.getElementById('pdfQaResult');
+  resultEl.style.display = 'block';
+  resultEl.textContent = 'Querying...';
+
+  const fd = new FormData();
+  fd.append('usecase', 'qa');
+  fd.append('uniqueString', uniqueStr);
+  fd.append('question', question);
+
+  try {
+    addLog('info', `POST /pyapi/mainqa (qa) — "${question.substring(0, 50)}..."`);
+    const start = Date.now();
+    const r = await fetch(getBase() + '/pyapi/mainqa', { method: 'POST', body: fd });
+    const data = await r.json();
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+
+    if (data.answer) {
+      resultEl.innerHTML = renderMarkdown(data.answer);
+      if (data.filenames?.length) {
+        resultEl.innerHTML += `<br><br><small style="color:var(--text2)">Files: ${data.filenames.join(', ')} | Uploaded: ${data.upload_date}</small>`;
+      }
+      addLog('success', `PDF Q&A: ${data.answer.length} chars | ${elapsed}s`);
+    } else {
+      resultEl.textContent = JSON.stringify(data, null, 2);
+      addLog('warn', `PDF Q&A response: ${JSON.stringify(data)}`);
+    }
+  } catch (e) {
+    resultEl.textContent = `Error: ${e.message}`;
+    addLog('error', `PDF Q&A failed: ${e.message}`);
+  }
+}
+
+// ============================================================
+// Collection Manager
+// ============================================================
+async function deleteCollection() {
+  const uniqueStr = document.getElementById('deleteUniqueStr').value.trim();
+  if (!uniqueStr) return alert('Please enter a Unique String');
+  if (!confirm(`Delete collection "${uniqueStr}"? This cannot be undone.`)) return;
+
+  const resultEl = document.getElementById('deleteResult');
+  resultEl.style.display = 'block';
+  resultEl.textContent = 'Deleting...';
+
+  try {
+    addLog('info', `DELETE /pyapi/delete_vectordb/${uniqueStr}`);
+    const r = await fetch(getBase() + `/pyapi/delete_vectordb/${uniqueStr}`, { method: 'DELETE' });
+    const data = await r.json();
+    resultEl.textContent = JSON.stringify(data, null, 2);
+    addLog(r.ok ? 'success' : 'error', `Delete: ${JSON.stringify(data)}`);
+  } catch (e) {
+    resultEl.textContent = `Error: ${e.message}`;
+    addLog('error', `Delete failed: ${e.message}`);
+  }
+}
+
+// ============================================================
+// Request Logs
+// ============================================================
+function addLog(level, msg) {
+  const el = document.getElementById('logPanel');
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.className = `log-entry ${level}`;
+  div.innerHTML = `<span class="time">${time}</span>${escapeHtml(msg)}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLogs() {
+  document.getElementById('logPanel').innerHTML = '';
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ============================================================
+// Auto-resize textarea
+// ============================================================
+document.getElementById('chatInput').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// ============================================================
+// Init
+// ============================================================
+checkHealth();
+</script>
+</body>
+</html>

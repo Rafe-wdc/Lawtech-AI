@@ -1,0 +1,44 @@
+# LangChain ecosystem (latest v1.0+)
+langchain>=1.0.8
+langchain-core>=1.2.13
+langchain-openai>=1.1.0
+langchain-google-genai>=4.2.1
+langchain-community>=0.4.1
+langchain-classic>=1.0.1
+langchain-text-splitters>=1.1.0
+
+# LangGraph (multi-agent orchestration)
+langgraph>=1.0.3
+langgraph-checkpoint>=3.0.1
+
+# Google GenAI (Gemini with Search grounding)
+google-genai>=1.64.0
+
+# Data validation
+pydantic>=2.12.0
+
+# Data stores
+elasticsearch>=8.0.0
+chromadb>=1.0.0
+
+# Embeddings
+sentence-transformers>=2.2.0
+
+# API framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+
+# PDF processing
+PyMuPDF>=1.24.0
+pikepdf>=9.0.0
+
+# File uploads (FastAPI)
+python-multipart>=0.0.6
+werkzeug>=3.0.0
+
+# Rate limiting
+slowapi>=0.1.9
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.28.0

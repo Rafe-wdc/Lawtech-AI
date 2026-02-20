@@ -36,8 +36,14 @@ chroma_store/
 .DS_Store
 Thumbs.db
 
+# Chat history database
+v2_multi_agent/data/chat_history.db
+v2_multi_agent/data/chat_history.db-wal
+v2_multi_agent/data/chat_history.db-shm
+
 # Logs
 *.log
+v2_multi_agent/logs/
 
 # Temporary files
 tmp/

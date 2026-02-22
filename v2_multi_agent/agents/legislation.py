@@ -316,12 +316,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
             }
 
             from core.streaming import stream_chain_response
-            try:
-                response = await stream_chain_response(chain, invoke_kwargs)
-            except Exception as llm_err:
-                log.warning("LLM generation failed, retrying once",
-                            error=str(llm_err)[:200])
-                response = await stream_chain_response(chain, invoke_kwargs)
+            response = await stream_chain_response(chain, invoke_kwargs)
 
         tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:

@@ -9,6 +9,7 @@ Uses: GPT-4o for task classification, planning, and synthesis.
 
 from __future__ import annotations
 
+import asyncio
 from pydantic import BaseModel, Field
 from typing import Literal
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
@@ -147,7 +148,9 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         task = "Scenario"
         log.info("Long query bypass", word_count=word_count, task=task)
     else:
-        task = _classify_task(query, chat_summary=summary if summary else None)
+        task = await asyncio.to_thread(
+            _classify_task, query, chat_summary=summary if summary else None
+        )
 
     # Step 2: Handle non-legal
     if task == "Non_legal":
@@ -160,7 +163,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         }
 
     # Step 3: Plan agents
-    tasks_planned = _plan_agents(query, task)
+    tasks_planned = await asyncio.to_thread(_plan_agents, query, task)
     log.info("Plan phase completed",
              task=task, agents_planned=tasks_planned,
              agent_count=len(tasks_planned))

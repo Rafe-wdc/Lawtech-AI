@@ -13,6 +13,7 @@ Data Source: ChromaDB vectorstores (constitution db, legal maxim db)
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import date
 from typing import List
@@ -182,10 +183,126 @@ def _retrieve_from_chromadb(task: str, query: str) -> list[Document]:
     return results
 
 
+# --- Task Handlers ---
+
+async def _handle_legal_concepts(query: str, chat_history: list) -> AgentResult:
+    """Handle Legal_Concepts task — direct LLM response, no retrieval."""
+    with log_time(log, "Legal concepts LLM generation"):
+        llm = get_gemini_flash(temperature=0.3).bind(max_tokens=8192)
+        prompt = ChatPromptTemplate.from_messages([
+            ("user", LEGAL_CONCEPTS_PROMPT),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("user", "Current Date: {date}"),
+            ("user", "{query}"),
+        ])
+        chain = prompt | llm
+        from core.streaming import stream_chain_response
+        response = await stream_chain_response(chain, {
+            "query": query,
+            "chat_history": chat_history,
+            "date": str(date.today()),
+        })
+
+    tokens = 0
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        tokens = response.usage_metadata.get("total_tokens", 0)
+
+    log.info("Legal concepts completed",
+             response_len=len(response.content), tokens=tokens)
+
+    return AgentResult(
+        agent_name="Legal_Concepts",
+        content=response.content,
+        sources=[SourceMetadata(
+            source_type="legal_concepts",
+            title="AI-Generated Legal Explanation",
+            content=["Response generated from AI legal knowledge"],
+            agent_name="Legal_Concepts",
+        )],
+        tokens_consumed=tokens,
+    )
+
+
+async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list) -> AgentResult:
+    """Handle Constitution or Maxim task — ChromaDB retrieval + LLM generation."""
+    system_prompt = (
+        CONSTITUTION_SYSTEM_PROMPT if task == "Constitution"
+        else MAXIM_SYSTEM_PROMPT
+    )
+
+    with log_time(log, "ChromaDB retrieval", task=task):
+        docs = await asyncio.to_thread(_retrieve_from_chromadb, task, query)
+
+    if not docs:
+        log.warning("No documents found", task=task)
+        return AgentResult(
+            agent_name=task,
+            content="",
+            sources=[],
+            tokens_consumed=0,
+        )
+
+    docs_text = "\n\n".join(d.page_content for d in docs)
+    source_name = docs[0].metadata.get("source", "unknown")
+
+    log.debug("Generating response",
+              task=task, docs_count=len(docs),
+              source=source_name, context_len=len(docs_text))
+
+    with log_time(log, "LLM generation", task=task):
+        llm = get_gemini_flash(temperature=0.1)
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("user", "Retrieved provisions:\n{docs}"),
+            ("user", "Current Date: {date}"),
+            ("user", "User Query: {query}"),
+        ])
+        chain = prompt | llm
+
+        from core.streaming import stream_chain_response
+        response = await stream_chain_response(chain, {
+            "query": query,
+            "docs": docs_text,
+            "chat_history": chat_history,
+            "date": str(date.today()),
+        })
+
+    tokens = 0
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        tokens = response.usage_metadata.get("total_tokens", 0)
+
+    log.info("Task completed",
+             task=task, source=source_name,
+             response_len=len(response.content), tokens=tokens)
+
+    sources = []
+    for d in docs[:5]:
+        src_name = d.metadata.get("source", "unknown")
+        sources.append(SourceMetadata(
+            source_type=task.lower(),
+            title=os.path.splitext(os.path.basename(src_name))[0] if src_name != "unknown" else task,
+            content=[d.page_content[:300]],
+            file_name=src_name,
+            agent_name=task,
+        ))
+
+    return AgentResult(
+        agent_name=task,
+        content=response.content,
+        sources=sources,
+        tokens_consumed=tokens,
+    )
+
+
 # --- Agent Node ---
 
 async def constitution_maxim_node(state: LegalAgentState) -> dict:
     """Retrieve constitutional provisions, legal maxims, or explain legal concepts.
+
+    Handles ALL matching tasks from tasks_planned — not just the first.
+    For example, if tasks_planned=["Constitution", "Maxim"], both are processed
+    and returned as separate entries in agent_results for synthesis.
 
     Routes based on task type:
     - Constitution: ChromaDB retrieval + LLM generation
@@ -193,137 +310,42 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
     - Legal_Concepts: Direct LLM response (no retrieval)
     """
     query = state.get("query", state["original_query"])
-    task = state.get("task", "Legal_Concepts")
+    primary_task = state.get("task", "Legal_Concepts")
     chat_history = state.get("chat_history", [])
 
-    # When invoked as part of a multi-agent plan, the primary task in state
-    # may not be ours. Determine our effective task from the planned tasks list.
+    # Determine ALL tasks this node should handle from the plan.
+    # Previously used next() which picked only the first match — Bug #1.
     our_tasks = {"Constitution", "Maxim", "Legal_Concepts"}
-    if task not in our_tasks:
-        planned = state.get("tasks_planned", [])
-        task = next((t for t in planned if t in our_tasks), "Legal_Concepts")
+    planned = state.get("tasks_planned", [])
+    active_tasks = [t for t in planned if t in our_tasks]
 
-    log.info("Agent started", task=task, query=query[:100])
+    # Fallback: if no planned tasks matched, use the primary task or default
+    if not active_tasks:
+        active_tasks = [primary_task if primary_task in our_tasks else "Legal_Concepts"]
 
-    try:
-        # Legal_Concepts → direct LLM response (no retrieval needed)
-        if task == "Legal_Concepts":
-            with log_time(log, "Legal concepts LLM generation"):
-                llm = get_gemini_flash(temperature=0.3).bind(max_tokens=8192)
-                prompt = ChatPromptTemplate.from_messages([
-                    ("user", LEGAL_CONCEPTS_PROMPT),
-                    MessagesPlaceholder(variable_name="chat_history", optional=True),
-                    ("user", "Current Date: {date}"),
-                    ("user", "{query}"),
-                ])
-                chain = prompt | llm
-                from core.streaming import stream_chain_response
-                response = await stream_chain_response(chain, {
-                    "query": query,
-                    "chat_history": chat_history,
-                    "date": str(date.today()),
-                })
+    log.info("Agent started", tasks=active_tasks, query=query[:100])
 
-            tokens = 0
-            if hasattr(response, "usage_metadata") and response.usage_metadata:
-                tokens = response.usage_metadata.get("total_tokens", 0)
+    all_results: dict[str, AgentResult] = {}
 
-            log.info("Legal concepts completed",
-                     response_len=len(response.content), tokens=tokens)
-
-            result = AgentResult(
-                agent_name="Legal_Concepts",
-                content=response.content,
-                sources=[SourceMetadata(
-                    source_type="legal_concepts",
-                    title="AI-Generated Legal Explanation",
-                    content=["Response generated from AI legal knowledge"],
-                    agent_name="Legal_Concepts",
-                )],
-                tokens_consumed=tokens,
-            )
-            return {"agent_results": {"Legal_Concepts": result}}
-
-        # Constitution or Maxim → ChromaDB retrieval + generation
-        system_prompt = (
-            CONSTITUTION_SYSTEM_PROMPT if task == "Constitution"
-            else MAXIM_SYSTEM_PROMPT
-        )
-
-        with log_time(log, "ChromaDB retrieval", task=task):
-            docs = _retrieve_from_chromadb(task, query)
-
-        if not docs:
-            log.warning("No documents found", task=task)
-            return {
-                "agent_results": {task: AgentResult(
-                    agent_name=task,
-                    content="",
-                    sources=[],
-                    tokens_consumed=0,
-                )},
-            }
-
-        docs_text = "\n\n".join(d.page_content for d in docs)
-        source_name = docs[0].metadata.get("source", "unknown")
-
-        log.debug("Generating response",
-                  task=task, docs_count=len(docs),
-                  source=source_name, context_len=len(docs_text))
-
-        with log_time(log, "LLM generation", task=task):
-            llm = get_gemini_flash(temperature=0.1)
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                MessagesPlaceholder(variable_name="chat_history", optional=True),
-                ("user", "Retrieved provisions:\n{docs}"),
-                ("user", "Current Date: {date}"),
-                ("user", "User Query: {query}"),
-            ])
-            chain = prompt | llm
-
-            from core.streaming import stream_chain_response
-            response = await stream_chain_response(chain, {
-                "query": query,
-                "docs": docs_text,
-                "chat_history": chat_history,
-                "date": str(date.today()),
-            })
-
-        tokens = 0
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            tokens = response.usage_metadata.get("total_tokens", 0)
-
-        log.info("Agent completed",
-                 task=task, source=source_name,
-                 response_len=len(response.content), tokens=tokens)
-
-        sources = []
-        for d in docs[:5]:
-            src_name = d.metadata.get("source", "unknown")
-            sources.append(SourceMetadata(
-                source_type=task.lower(),
-                title=os.path.splitext(os.path.basename(src_name))[0] if src_name != "unknown" else task,
-                content=[d.page_content[:300]],
-                file_name=src_name,
+    for task in active_tasks:
+        try:
+            if task == "Legal_Concepts":
+                result = await _handle_legal_concepts(query, chat_history)
+            else:
+                result = await _handle_constitution_or_maxim(task, query, chat_history)
+            all_results[task] = result
+        except Exception as e:
+            log.error("Task failed", task=task, error=str(e), exc_info=True)
+            all_results[task] = AgentResult(
                 agent_name=task,
-            ))
-        result = AgentResult(
-            agent_name=task,
-            content=response.content,
-            sources=sources,
-            tokens_consumed=tokens,
-        )
+                content="",
+                sources=[],
+                tokens_consumed=0,
+                error=str(e),
+            )
 
-    except Exception as e:
-        log.error("Agent failed", task=task, error=str(e), exc_info=True)
-        result = AgentResult(
-            agent_name=task or "Constitution",
-            content="",
-            sources=[],
-            tokens_consumed=0,
-            error=str(e),
-        )
-        task = task or "Constitution"
+    log.info("Agent completed all tasks",
+             tasks=list(all_results.keys()),
+             success_count=sum(1 for r in all_results.values() if not r.error))
 
-    return {"agent_results": {task: result}}
+    return {"agent_results": all_results}

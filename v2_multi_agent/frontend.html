@@ -1104,6 +1104,14 @@ async function sendChatStream(query, threadId) {
           scrollChat();
           addLog('info', `${event.agent}: ${event.message}`);
 
+        } else if (event.type === 'token_reset') {
+          // Server is retrying LLM call — clear partial tokens from failed attempt
+          tokenBuffer = '';
+          if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+          const resetContentEl = document.getElementById('streamContent');
+          if (resetContentEl) resetContentEl.innerHTML = '';
+          addLog('info', 'LLM retry — clearing partial output');
+
         } else if (event.type === 'token') {
           // Progressive token streaming
           if (!isTokenStreaming) {
@@ -1296,9 +1304,19 @@ function scrollChat() {
 // ============================================================
 // Simple Markdown Renderer
 // ============================================================
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
-  let html = text
+  // Escape HTML entities FIRST to prevent XSS
+  let html = escapeHtml(text)
     // Code blocks
     .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
     // Inline code

@@ -241,15 +241,24 @@ class ChatHistoryStore:
                 log.debug("Turn saved",
                           thread_id=thread_id[:12], turn=new_turn)
 
-                # Check if summary needs regeneration (every 3 turns)
-                self._maybe_regenerate_summary_sync(thread_id, conn)
-
                 return new_turn
             except Exception:
                 conn.rollback()
                 raise
             finally:
                 conn.close()
+
+        # Summary regeneration runs OUTSIDE the write lock so it doesn't
+        # block other writes during the LLM call (~1-3 seconds).
+        try:
+            conn = self._get_connection()
+            try:
+                self._maybe_regenerate_summary_sync(thread_id, conn)
+            finally:
+                conn.close()
+        except Exception as e:
+            log.error("Post-save summary regeneration failed",
+                      thread_id=thread_id[:12], error=str(e))
 
     async def save_turn(
         self,

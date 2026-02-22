@@ -6,6 +6,7 @@ Agents return partial dicts — LangGraph merges them into the full state.
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, field
 from typing import Any, Literal, Annotated
 from langchain_core.messages import BaseMessage
@@ -115,6 +116,6 @@ class LegalAgentState(MessagesState):
 
     # Final output
     final_response: str
-    source_metadata: list[dict[str, Any]]
-    related_sections: list[dict[str, Any]]
+    source_metadata: Annotated[list[dict[str, Any]], operator.add]
+    related_sections: Annotated[list[dict[str, Any]], operator.add]
     tokens_consumed: Annotated[int, _sum_tokens]

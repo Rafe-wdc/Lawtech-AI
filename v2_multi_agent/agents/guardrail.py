@@ -9,6 +9,7 @@ Uses: Gemini 2.5 Flash Lite for LLM-based injection detection.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pydantic import BaseModel, Field
 
@@ -142,7 +143,7 @@ async def guardrail_input_node(state: LegalAgentState) -> dict:
         return {"is_blocked": True, "block_reason": reason}
 
     # Layer 3: LLM injection detection (only if suspicious)
-    is_safe, reason = _detect_injection_llm(query)
+    is_safe, reason = await asyncio.to_thread(_detect_injection_llm, query)
     if not is_safe:
         log.warning("BLOCKED by LLM injection detection")
         return {"is_blocked": True, "block_reason": reason}

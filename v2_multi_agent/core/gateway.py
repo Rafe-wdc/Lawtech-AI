@@ -114,13 +114,26 @@ async def _generate_followup_suggestions(
         "agents_used": ", ".join(agents_used) if agents_used else "general",
     })
 
-    # Parse JSON array from response
+    # Parse JSON array from response — handle various LLM output formats
     text = result.content.strip()
-    # Strip markdown code fences if present
+    # Strip markdown code fences if present (``` or single `)
     if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    elif text.startswith("`") and text.endswith("`"):
+        text = text.strip("`").strip()
+    # Extract JSON array from surrounding text if needed
+    import re
+    match = re.search(r'\[.*\]', text, re.DOTALL)
+    if match:
+        text = match.group(0)
     suggestions = json.loads(text)
-    if isinstance(suggestions, list) and len(suggestions) >= 3:
+    # Handle dict wrapper like {"suggestions": [...]}
+    if isinstance(suggestions, dict):
+        for v in suggestions.values():
+            if isinstance(v, list):
+                suggestions = v
+                break
+    if isinstance(suggestions, list) and len(suggestions) >= 1:
         return [str(s)[:60] for s in suggestions[:3]]
     return []
 
@@ -218,7 +231,7 @@ async def search(data: SearchRequest, request: Request):
     if not final_state.get("is_blocked") and final_response:
         try:
             conversation_turn = await chat_store.save_turn(
-                thread_id, data.Promptquery, final_response
+                thread_id, effective_query, final_response
             )
             log.debug("Chat history saved",
                       thread_id=thread_id[:12], turn=conversation_turn)
@@ -316,8 +329,11 @@ async def search_stream(data: SearchRequest, request: Request):
 
                 # --- Custom events: token-by-token streaming ---
                 if mode == "custom":
-                    if isinstance(chunk, dict) and chunk.get("type") == "token":
-                        yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
+                    if isinstance(chunk, dict):
+                        if chunk.get("type") == "token":
+                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
+                        elif chunk.get("type") == "token_reset":
+                            yield f"data: {json.dumps({'type': 'token_reset'})}\n\n"
                     continue
 
                 # --- Update events: node-level progress ---
@@ -415,7 +431,7 @@ async def search_stream(data: SearchRequest, request: Request):
         if final_response:
             try:
                 conversation_turn = await chat_store.save_turn(
-                    thread_id, data.Promptquery, final_response
+                    thread_id, effective_query, final_response
                 )
                 log.debug("Chat history saved (stream)",
                           thread_id=thread_id[:12], turn=conversation_turn)

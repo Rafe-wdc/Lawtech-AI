@@ -14,6 +14,7 @@ Data Source: Elasticsearch "supreme_court_judgement" index
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from langchain_core.messages import SystemMessage
@@ -92,7 +93,9 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             log.warning("ReAct agent returned 0 tool calls, forcing semantic search fallback",
                         query=query[:100])
             try:
-                fallback_result = search_by_semantic.invoke({"query": query})
+                fallback_result = await asyncio.to_thread(
+                    search_by_semantic.invoke, {"query": query}
+                )
                 if fallback_result and "No matching" not in fallback_result:
                     # Parse sources from the direct fallback result
                     fallback_text = fallback_result

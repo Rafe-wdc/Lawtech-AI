@@ -78,6 +78,16 @@ class SearchResponse(BaseModel):
     effective_query: Optional[str] = None
     query_rewritten: bool = False
     conversation_turn: int = 0
+    # UX features
+    related_sections: list[dict] = []
+    followup_suggestions: list[str] = []
+
+
+class FeedbackRequest(BaseModel):
+    thread_id: str = Field(..., min_length=1)
+    turn_number: int = Field(..., ge=1)
+    rating: str = Field(..., pattern=r"^(up|down)$")
+    comment: Optional[str] = None
 
 
 class PdfChatRequest(BaseModel):
@@ -86,6 +96,34 @@ class PdfChatRequest(BaseModel):
 
 
 # --- Helpers ---
+
+async def _generate_followup_suggestions(
+    query: str, response: str, agents_used: list[str],
+) -> list[str]:
+    """Generate 3 follow-up question suggestions using Gemini Flash Lite."""
+    from core.clients import get_gemini_flash as get_gemini_flash_lite
+    from langchain_core.prompts import ChatPromptTemplate
+    from config.prompts import FOLLOWUP_SUGGESTIONS_PROMPT
+
+    llm = get_gemini_flash_lite(temperature=0.7)
+    prompt = ChatPromptTemplate.from_template(FOLLOWUP_SUGGESTIONS_PROMPT)
+    chain = prompt | llm
+    result = await chain.ainvoke({
+        "query": query,
+        "response_preview": response[:500],
+        "agents_used": ", ".join(agents_used) if agents_used else "general",
+    })
+
+    # Parse JSON array from response
+    text = result.content.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    suggestions = json.loads(text)
+    if isinstance(suggestions, list) and len(suggestions) >= 3:
+        return [str(s)[:60] for s in suggestions[:3]]
+    return []
+
 
 def _build_initial_state(query: str, thread_id: str, unique_string: str | None = None) -> dict:
     """Build the initial LangGraph state with all required fields."""
@@ -104,6 +142,7 @@ def _build_initial_state(query: str, thread_id: str, unique_string: str | None =
         "block_reason": None,
         "final_response": "",
         "source_metadata": [],
+        "related_sections": [],
         "tokens_consumed": 0,
     }
 
@@ -187,6 +226,16 @@ async def search(data: SearchRequest, request: Request):
             log.error("Failed to save chat history",
                       thread_id=thread_id[:12], error=str(e))
 
+    # Generate follow-up suggestions (non-blocking)
+    followup_suggestions = []
+    if final_response and not final_state.get("is_blocked"):
+        try:
+            followup_suggestions = await _generate_followup_suggestions(
+                data.Promptquery, final_response, agents_used
+            )
+        except Exception as e:
+            log.warning("Followup suggestions failed", error=str(e))
+
     return SearchResponse(
         globalThreadId=thread_id,
         result=final_response,
@@ -196,6 +245,8 @@ async def search(data: SearchRequest, request: Request):
         effective_query=effective_query if query_rewritten else None,
         query_rewritten=query_rewritten,
         conversation_turn=conversation_turn,
+        related_sections=final_state.get("related_sections", []),
+        followup_suggestions=followup_suggestions,
     )
 
 
@@ -251,6 +302,7 @@ async def search_stream(data: SearchRequest, request: Request):
         agents_used = []
         total_tokens = 0
         all_source_metadata = []
+        all_related_sections = []
         effective_query = data.Promptquery
         query_rewritten = False
 
@@ -306,6 +358,10 @@ async def search_stream(data: SearchRequest, request: Request):
                     if "source_metadata" in update and update["source_metadata"]:
                         all_source_metadata = update["source_metadata"]
 
+                    # Capture related_sections when it appears
+                    if "related_sections" in update and update["related_sections"]:
+                        all_related_sections = update["related_sections"]
+
         except Exception as e:
             log.error("Stream error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
@@ -325,6 +381,21 @@ async def search_stream(data: SearchRequest, request: Request):
                 "data": all_source_metadata,
             }
             yield f"data: {json.dumps(sources_event)}\n\n"
+
+        # Send related sections
+        if all_related_sections:
+            yield f"data: {json.dumps({'type': 'related_sections', 'data': all_related_sections})}\n\n"
+
+        # Generate and send follow-up suggestions
+        if final_response:
+            try:
+                suggestions = await _generate_followup_suggestions(
+                    data.Promptquery, final_response, agents_used
+                )
+                if suggestions:
+                    yield f"data: {json.dumps({'type': 'followup_suggestions', 'data': suggestions})}\n\n"
+            except Exception as e:
+                log.warning("Followup suggestions failed (stream)", error=str(e))
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         log.info("Stream completed",
@@ -698,6 +769,22 @@ async def job_status(job_id: str):
 async def health():
     """Simple health check endpoint."""
     return {"status": "ok", "version": "2.0.0"}
+
+
+@app.post("/pyapi/feedback")
+async def submit_feedback(data: FeedbackRequest, request: Request):
+    """Submit thumbs-up/down feedback for a specific response."""
+    try:
+        await chat_store.save_feedback(
+            data.thread_id,
+            data.turn_number,
+            data.rating,
+            data.comment or "",
+        )
+        return {"status": "ok", "message": "Feedback recorded"}
+    except Exception as e:
+        log.error("Failed to save feedback", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to save feedback")
 
 
 # --- Entrypoint ---

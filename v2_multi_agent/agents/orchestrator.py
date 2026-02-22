@@ -216,17 +216,23 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             "source_metadata": [],
         }
 
+    # Pass through related_sections from state (populated by newacts agent)
+    related_sections = state.get("related_sections", [])
+
     # Single agent — pass through directly (no synthesis overhead)
     if len(valid_results) == 1:
         name, result = next(iter(valid_results.items()))
         log.info("Single agent pass-through",
                  agent=name, content_len=len(result.content),
                  tokens=result.tokens_consumed)
-        return {
+        return_dict = {
             "final_response": result.content,
             "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
         }
+        if related_sections:
+            return_dict["related_sections"] = related_sections
+        return return_dict
 
     # Multiple agents — synthesize with LLM
     log.info("Multi-agent synthesis starting",
@@ -270,11 +276,14 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             parts.append(result.content)
         synthesized = "\n\n---\n\n".join(parts)
 
-    return {
+    return_dict = {
         "final_response": synthesized,
         "source_metadata": all_serialized_sources,
         "tokens_consumed": total_tokens,
     }
+    if related_sections:
+        return_dict["related_sections"] = related_sections
+    return return_dict
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:

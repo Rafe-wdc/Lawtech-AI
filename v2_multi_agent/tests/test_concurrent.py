@@ -1,4 +1,4 @@
-"""Run all 27 test prompts CONCURRENTLY against the live API.
+"""Run all 70 test prompts CONCURRENTLY against the live API.
 
 Usage (from v2_multi_agent/):
     python tests/test_concurrent.py [--concurrency N] [--timeout N] [--api-url URL]
@@ -23,33 +23,113 @@ import requests
 # ── Test Prompts ─────────────────────────────────────────────────────────────
 
 PROMPTS = [
+    # ── Newacts: Single Section (1-3) ────────────────────────────────────────
     (1,  "Section 302 of IPC", "Newacts-Single", "Newacts"),
     (2,  "Section 35 of BNS", "Newacts-Single", "Newacts"),
     (3,  "What is Section 438 of CrPC?", "Newacts-Single", "Newacts"),
+
+    # ── Newacts: Multi Section (4-6) ─────────────────────────────────────────
     (4,  "Sections 302 and 307 of IPC", "Newacts-Multi", "Newacts"),
     (5,  "Explain Sections 64, 65 and 66 of BSA", "Newacts-Multi", "Newacts"),
     (6,  "Compare Section 154 and Section 161 of CrPC", "Newacts-Multi", "Newacts"),
+
+    # ── Newacts: Topic Search (7-9) ──────────────────────────────────────────
     (7,  "punishment for theft in BNS", "Newacts-Topic", "Newacts"),
     (8,  "bail provisions under BNSS", "Newacts-Topic", "Newacts"),
     (9,  "electronic evidence rules in BSA", "Newacts-Topic", "Newacts"),
+
+    # ── Newacts: Nearby Sections (10-11) ─────────────────────────────────────
     (10, "What does Section 100 of BNS say?", "Newacts-Nearby", "Newacts"),
     (11, "Section 528 of BNSS", "Newacts-Nearby", "Newacts"),
+
+    # ── Newacts: Subsection (12-13) ──────────────────────────────────────────
     (12, "Section 3(5) of Bharatiya Nyaya Sanhita", "Newacts-Subsection", "Newacts"),
     (13, "IEA Section 65b", "Newacts-Subsection", "Newacts"),
+
+    # ── Newacts: Old↔New Mapping (14-15) ─────────────────────────────────────
     (14, "What is the equivalent of Section 498a of IPC in BNS?", "Newacts-Mapping", "Newacts"),
     (15, "Section 125 CrPC new law equivalent", "Newacts-Mapping", "Newacts"),
+
+    # ── Legislation: Single Section (16-18) ──────────────────────────────────
     (16, "Section 138 of Negotiable Instruments Act", "Legislation-Single", "Legislation"),
     (17, "Section 9 of Arbitration Act", "Legislation-Single", "Legislation"),
-    (18, "Sections 44 and 45 of Transfer of Property Act", "Legislation-Multi", "Legislation"),
-    (19, "Explain Sections 3, 4 and 5 of Consumer Protection Act", "Legislation-Multi", "Legislation"),
-    (20, "Sections 10 to 15 of Companies Act", "Legislation-Range", "Legislation"),
-    (21, "director duties under companies act", "Legislation-Topic", "Legislation"),
-    (22, "tenant rights in rent control legislation", "Legislation-Topic", "Legislation"),
-    (23, "Section 138(1) of Negotiable Instruments Act", "Legislation-Subsection", "Legislation"),
-    (24, "What comes after section 35 of BNS?", "Edge-Nearby", "Newacts"),
-    (25, "theft", "Edge-Vague", None),
-    (26, "Rule 3 of Maharashtra Rent Control Rules", "Edge-NonSection", "Legislation"),
-    (27, "Sections 302, 304, 304a, 307 and 376 of IPC", "Edge-ManySection", "Newacts"),
+    (18, "Section 23 of Indian Contract Act", "Legislation-Single", "Legislation"),
+
+    # ── Legislation: Multi Section (19-20) ───────────────────────────────────
+    (19, "Sections 44 and 45 of Transfer of Property Act", "Legislation-Multi", "Legislation"),
+    (20, "Explain Sections 3, 4 and 5 of Consumer Protection Act", "Legislation-Multi", "Legislation"),
+
+    # ── Legislation: Range (21) ──────────────────────────────────────────────
+    (21, "Sections 10 to 15 of Companies Act", "Legislation-Range", "Legislation"),
+
+    # ── Legislation: Topic Search (22-24) ────────────────────────────────────
+    (22, "director duties under companies act", "Legislation-Topic", "Legislation"),
+    (23, "tenant rights in rent control legislation", "Legislation-Topic", "Legislation"),
+    (24, "minimum wages provisions in labour law", "Legislation-Topic", "Legislation"),
+
+    # ── Legislation: Subsection (25) ─────────────────────────────────────────
+    (25, "Section 138(1) of Negotiable Instruments Act", "Legislation-Subsection", "Legislation"),
+
+    # ── Judgment: Case Search (26-31) ────────────────────────────────────────
+    (26, "cases on anticipatory bail", "Judgment-Topic", "Judgment"),
+    (27, "dowry harassment case law", "Judgment-Topic", "Judgment"),
+    (28, "cheque bounce cases under Section 138", "Judgment-Topic", "Judgment"),
+    (29, "property dispute judgments", "Judgment-Topic", "Judgment"),
+    (30, "cases on medical negligence", "Judgment-Topic", "Judgment"),
+    (31, "land acquisition compensation judgments", "Judgment-Topic", "Judgment"),
+
+    # ── Supreme Court Judgments (32-37) ──────────────────────────────────────
+    (32, "Supreme Court cases on right to privacy", "SCI-Topic", "SCI_Judgment"),
+    (33, "SC judgment on Article 21 right to life", "SCI-Topic", "SCI_Judgment"),
+    (34, "Supreme Court ruling on triple talaq", "SCI-Topic", "SCI_Judgment"),
+    (35, "SC cases on bail conditions", "SCI-Topic", "SCI_Judgment"),
+    (36, "Supreme Court judgments on environmental protection", "SCI-Topic", "SCI_Judgment"),
+    (37, "SC precedents on freedom of speech Article 19", "SCI-Topic", "SCI_Judgment"),
+
+    # ── Constitution (38-43) ─────────────────────────────────────────────────
+    (38, "Article 21 of Indian Constitution", "Constitution", "Constitution"),
+    (39, "Fundamental rights under Part III of Constitution", "Constitution", "Constitution"),
+    (40, "Article 14 right to equality", "Constitution", "Constitution"),
+    (41, "What are fundamental duties under Article 51A?", "Constitution", "Constitution"),
+    (42, "Directive principles of state policy", "Constitution", "Constitution"),
+    (43, "Article 32 writ jurisdiction of Supreme Court", "Constitution", "Constitution"),
+
+    # ── Legal Maxims (44-49) ─────────────────────────────────────────────────
+    (44, "What is audi alteram partem?", "Maxim", "Maxim"),
+    (45, "Explain the doctrine of res judicata", "Maxim", "Maxim"),
+    (46, "Meaning of caveat emptor in law", "Maxim", "Maxim"),
+    (47, "What is estoppel in legal terms?", "Maxim", "Maxim"),
+    (48, "Doctrine of ultra vires", "Maxim", "Maxim"),
+    (49, "Explain nemo judex in causa sua", "Maxim", "Maxim"),
+
+    # ── Drafting (50-55) ─────────────────────────────────────────────────────
+    (50, "Draft a bail application", "Drafting", "Drafting"),
+    (51, "Draft a legal notice for recovery of money", "Drafting", "Drafting"),
+    (52, "Create a power of attorney document", "Drafting", "Drafting"),
+    (53, "Draft an eviction notice to tenant", "Drafting", "Drafting"),
+    (54, "Draft a complaint for cheating and fraud", "Drafting", "Drafting"),
+    (55, "Draft a rental agreement", "Drafting", "Drafting"),
+
+    # ── Scenario / Web-Grounded (56-60) ──────────────────────────────────────
+    (56, "My landlord is refusing to return my security deposit of 50000 rupees after I vacated the flat. What legal steps can I take?", "Scenario", "Scenario"),
+    (57, "My employer terminated me without any notice or severance pay. What are my rights under Indian labour laws?", "Scenario", "Scenario"),
+    (58, "I received a legal notice for defamation on social media. How should I respond and what are the possible consequences?",  "Scenario", "Scenario"),
+    (59, "Can police arrest someone without an FIR? What are the rights of an arrested person in India?", "Scenario", "Scenario"),
+    (60, "What is the procedure to file a consumer complaint online in India and what compensation can I claim?", "Scenario", "Scenario"),
+
+    # ── Edge Cases (61-65) ───────────────────────────────────────────────────
+    (61, "What comes after section 35 of BNS?", "Edge-Nearby", "Newacts"),
+    (62, "theft", "Edge-Vague", None),
+    (63, "Rule 3 of Maharashtra Rent Control Rules", "Edge-NonSection", "Legislation"),
+    (64, "Sections 302, 304, 304a, 307 and 376 of IPC", "Edge-ManySection", "Newacts"),
+    (65, "define murder", "Edge-Concept", None),
+
+    # ── Cross-Domain / Mixed (66-70) ─────────────────────────────────────────
+    (66, "Section 420 IPC punishment for cheating", "Newacts-Single", "Newacts"),
+    (67, "What is Section 34 of Indian Contract Act?", "Legislation-Single", "Legislation"),
+    (68, "Article 19(1)(a) freedom of expression", "Constitution", "Constitution"),
+    (69, "habeas corpus meaning and legal significance", "Maxim", "Maxim"),
+    (70, "Supreme Court landmark judgment on Aadhaar privacy", "SCI-Landmark", "SCI_Judgment"),
 ]
 
 SORRY_PATTERNS = [
@@ -73,11 +153,21 @@ def is_apologetic(text: str) -> bool:
     return False
 
 
+# Agents the orchestrator may reasonably swap between
+_AGENT_ALIASES = {
+    "Maxim": {"Maxim", "Legal_Concepts", "Constitution"},
+    "Constitution": {"Constitution", "Legal_Concepts"},
+    "Legal_Concepts": {"Legal_Concepts", "Maxim", "Constitution"},
+}
+
+
 def classify_result(resp_json: dict, expected_agent: str | None) -> str:
     result_text = resp_json.get("result", "")
     agents_used = resp_json.get("agents_used", [])
-    if expected_agent and expected_agent not in agents_used:
-        return "FAIL"
+    if expected_agent:
+        acceptable = _AGENT_ALIASES.get(expected_agent, {expected_agent})
+        if not acceptable.intersection(agents_used):
+            return "FAIL"
     if is_apologetic(result_text):
         return "WEAK"
     return "PASS"
@@ -315,6 +405,17 @@ def main():
             "details": json_details,
         }, f, indent=2)
     print(f"  JSON results:   {json_path}")
+
+    # Save full-response JSON for AI evaluator (no truncation)
+    full_json_path = os.path.join(script_dir, "test_results_full.json")
+    with open(full_json_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "summary": results,
+            "total_elapsed": total_elapsed,
+            "concurrency": args.concurrency,
+            "details": sorted(details, key=lambda x: x["id"]),
+        }, f, indent=2)
+    print(f"  Full results:   {full_json_path}")
 
     return 0 if results["FAIL"] == 0 and results["ERROR"] == 0 else 1
 

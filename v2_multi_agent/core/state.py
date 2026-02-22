@@ -116,4 +116,5 @@ class LegalAgentState(MessagesState):
     # Final output
     final_response: str
     source_metadata: list[dict[str, Any]]
+    related_sections: list[dict[str, Any]]
     tokens_consumed: Annotated[int, _sum_tokens]

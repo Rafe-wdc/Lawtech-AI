@@ -113,6 +113,19 @@ class ChatHistoryStore:
 
                 CREATE INDEX IF NOT EXISTS idx_messages_thread_turn
                     ON messages(thread_id, turn_number);
+
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    thread_id   TEXT NOT NULL,
+                    turn_number INTEGER NOT NULL,
+                    rating      TEXT NOT NULL CHECK(rating IN ('up', 'down')),
+                    comment     TEXT DEFAULT '',
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(thread_id, turn_number)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_feedback_thread
+                    ON feedback(thread_id, turn_number);
             """)
             conn.commit()
             self._initialized = True
@@ -409,6 +422,53 @@ class ChatHistoryStore:
         """Async wrapper for legacy import."""
         return await asyncio.to_thread(
             self._import_from_api_response_sync, thread_id, summary_text
+        )
+
+    # ------------------------------------------------------------------
+    # Feedback
+    # ------------------------------------------------------------------
+
+    def _save_feedback_sync(
+        self,
+        thread_id: str,
+        turn_number: int,
+        rating: str,
+        comment: str = "",
+    ) -> bool:
+        """Save or update feedback for a specific message (upsert)."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO feedback (thread_id, turn_number, rating, comment)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(thread_id, turn_number) DO UPDATE SET
+                        rating = excluded.rating,
+                        comment = excluded.comment,
+                        created_at = datetime('now')
+                """, (thread_id, turn_number, rating, comment))
+                conn.commit()
+                log.info("Feedback saved",
+                         thread_id=thread_id[:12], turn=turn_number,
+                         rating=rating)
+                return True
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def save_feedback(
+        self,
+        thread_id: str,
+        turn_number: int,
+        rating: str,
+        comment: str = "",
+    ) -> bool:
+        """Async wrapper for feedback save."""
+        return await asyncio.to_thread(
+            self._save_feedback_sync, thread_id, turn_number, rating, comment
         )
 
 

@@ -30,7 +30,8 @@
       "Bash(wmic process where \"ProcessId=31456\" delete:*)",
       "Bash(wmic process:*)",
       "Bash(PYTHONPATH=/d/agentic_proj/Lawtech-AI/v2_multi_agent python:*)",
-      "Bash(PYTHONPATH=/d/agentic_proj/Lawtech-AI/v2_multi_agent EMBEDDING_SERVICE_URL=http://localhost:5200 python:*)"
+      "Bash(PYTHONPATH=/d/agentic_proj/Lawtech-AI/v2_multi_agent EMBEDDING_SERVICE_URL=http://localhost:5200 python:*)",
+      "Bash(EMBEDDING_SERVICE_URL=http://localhost:5210 PYTHONPATH=. python -m uvicorn:*)"
     ]
   }
 }

@@ -12,6 +12,9 @@ __pycache__/
 dist/
 build/
 *.egg
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 
 # Virtual environments
 venv/
@@ -25,25 +28,35 @@ env/
 *.swo
 *~
 
+# Claude Code
+.claude/
+
 # Local models (large files)
 models/
+v2_multi_agent/models/
 
 # Vector databases
 Routing db/
 chroma_store/
+v2_multi_agent/chroma_store/
 
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Chat history database
-v2_multi_agent/data/chat_history.db
-v2_multi_agent/data/chat_history.db-wal
-v2_multi_agent/data/chat_history.db-shm
+# SQLite databases (chat history, etc.)
+*.db
+*.db-wal
+*.db-shm
 
 # Logs
 *.log
 v2_multi_agent/logs/
+
+# Test result artifacts (large JSON dumps)
+v2_multi_agent/tests/test_results_*.json
+v2_multi_agent/tests/test_eval_results.json
 
 # Temporary files
 tmp/

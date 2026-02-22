@@ -209,7 +209,7 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
         # Legal_Concepts → direct LLM response (no retrieval needed)
         if task == "Legal_Concepts":
             with log_time(log, "Legal concepts LLM generation"):
-                llm = get_gemini_flash(temperature=0.3)
+                llm = get_gemini_flash(temperature=0.3).bind(max_tokens=8192)
                 prompt = ChatPromptTemplate.from_messages([
                     ("user", LEGAL_CONCEPTS_PROMPT),
                     MessagesPlaceholder(variable_name="chat_history", optional=True),

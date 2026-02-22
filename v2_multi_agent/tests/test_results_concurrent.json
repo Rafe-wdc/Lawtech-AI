@@ -1,12 +1,12 @@
 {
   "summary": {
-    "PASS": 27,
+    "PASS": 70,
     "WEAK": 0,
     "FAIL": 0,
     "ERROR": 0
   },
-  "total_elapsed": 86.1629250049591,
-  "concurrency": 6,
+  "total_elapsed": 1662.737594127655,
+  "concurrency": 3,
   "details": [
     {
       "id": 1,
@@ -17,11 +17,11 @@
       "agents_used": [
         "Newacts"
       ],
-      "response_len": 745,
-      "elapsed": 16.7,
-      "tokens": 839,
+      "response_len": 758,
+      "elapsed": 18.4,
+      "tokens": 843,
       "error_detail": "",
-      "response_preview": "**Section 302 of The Indian Penal Code 1860 (IPC)**\n\n**Section Name:** Punishment for murder\n\n**Old Provisions:** Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.\n\n**New Provision (Bharatiya Nyaya Sanhita, 2023):**\n\n-   **Section 103:**\n    -   (1) Whoever commits murder shall be punished with death or imprisonment for life, and shall also be liable to fine.\n    -   (2) When a group of five or more persons acting in concert commits ..."
+      "response_preview": "**Section 302 of The Indian Penal Code 1860 (IPC)**\n\n**Section Name:** Punishment for murder\n\n**Old Provisions:** Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.\n\n**New Provision (Bharatiya Nyaya Sanhita, 2023):**\n\n**Section 103 of Bharatiya Nyaya Sanhita, 2023:**\n(1) Whoever commits murder shall be punished with death or imprisonment for life, and shall also be liable to fine.\n(2) When a group of five or more persons acting in con..."
     },
     {
       "id": 2,
@@ -33,7 +33,7 @@
         "Newacts"
       ],
       "response_len": 580,
-      "elapsed": 17.1,
+      "elapsed": 18.4,
       "tokens": 706,
       "error_detail": "",
       "response_preview": "Section 35 of The Bharatiya Nyaya Sanhita, 2023, titled \"Right of private defence of the body and of property,\" states that every person has a right, subject to the restrictions in section 37, to defend:\n(a) his own body, and the body of any other person, against any offence affecting the human body;\n(b) the property, whether movable or immovable, of himself or of any other person, against any act which is an offence falling under the definition of theft, robbery, mischief or criminal trespass, ..."
@@ -48,7 +48,7 @@
         "Newacts"
       ],
       "response_len": 2043,
-      "elapsed": 17.7,
+      "elapsed": 18.4,
       "tokens": 7003,
       "error_detail": "",
       "response_preview": "Section 438 of The Code of Criminal Procedure, 1973, titled \"Direction for grant of bail to person apprehending arrest,\" states:\n\n(1) When any person has reason to believe that he may be arrested on an accusation of having committed a non-bailable offence, he may apply to the High Court or the Court of Session for a direction under this section; and that Court may, if it thinks fit, direct that in the event of such arrest, he shall be released on bail.\n\n(2) When the High Court or the Court of Se..."
@@ -63,7 +63,7 @@
         "Newacts"
       ],
       "response_len": 4303,
-      "elapsed": 18.1,
+      "elapsed": 11.0,
       "tokens": 2525,
       "error_detail": "",
       "response_preview": "**Section 302 of The Indian Penal Code 1860 (Punishment for murder)**\n\n-   **Old Provision:** Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.\n\n**Section 307 of The Indian Penal Code 1860 (Attempt to murder)**\n\n-   **Old Provision:** Whoever does any act with such intention or knowledge, and under such circumstances that, if he by that act caused death, he would be guilty of murder, shall be punished with imprisonment of either desc..."
@@ -77,9 +77,9 @@
       "agents_used": [
         "Newacts"
       ],
-      "response_len": 2072,
-      "elapsed": 10.0,
-      "tokens": 1076,
+      "response_len": 2059,
+      "elapsed": 24.9,
+      "tokens": 1072,
       "error_detail": "",
       "response_preview": "Here are the explanations for Sections 64, 65, and 66 of The Bharatiya Sakshya Adhiniyam, 2023:\n\n**Section 64: Rules as to notice to produce**\n\nThis section deals with the requirement of giving notice before admitting secondary evidence of a document. Secondary evidence of the contents of a document (as referred to in clause (a) of section 60) cannot be presented unless the party intending to use this secondary evidence has first given notice to the opposing party (or their advocate/representati..."
     },
@@ -93,7 +93,7 @@
         "Newacts"
       ],
       "response_len": 4240,
-      "elapsed": 19.8,
+      "elapsed": 24.9,
       "tokens": 6876,
       "error_detail": "",
       "response_preview": "**Section 154 of The Code of Criminal Procedure 1973: Information in cognizable cases**\n\n(1) Every information relating to the commission of a cognizable offence, if given orally to an officer in charge of a police station, shall be reduced to writing by him or under his direction, and be read over to the informant; and every such information, whether given in writing or reduced to writing as aforesaid, shall be signed by the person giving it, and the substance thereof shall be entered in a book..."
@@ -108,7 +108,7 @@
         "Newacts"
       ],
       "response_len": 5011,
-      "elapsed": 12.6,
+      "elapsed": 45.9,
       "tokens": 5461,
       "error_detail": "",
       "response_preview": "Here are the provisions related to punishment for theft in The Bharatiya Nyaya Sanhita, 2023:\n\n-   **Section 313: Punishment for belonging to gang of robbers, dacoits, etc.**\n    Whoever belongs to any gang of persons associated in habitually committing theft or robbery, and not being a gang of dacoits, shall be punished with rigorous imprisonment for a term which may extend to seven years, and shall also be liable to fine.\n\n-   **Section 305: Theft in a dwelling house, or means of transportatio..."
@@ -120,14 +120,13 @@
       "expected_agent": "Newacts",
       "status": "PASS",
       "agents_used": [
-        "Newacts",
-        "Judgment"
+        "Newacts"
       ],
-      "response_len": 17336,
-      "elapsed": 42.0,
-      "tokens": 33312,
+      "response_len": 18820,
+      "elapsed": 87.6,
+      "tokens": 11044,
       "error_detail": "",
-      "response_preview": "The Bharatiya Nagarik Suraksha Sanhita, 2023 (BNSS) significantly overhauls and consolidates provisions related to bail, building upon existing frameworks while introducing new aspects. This response synthesizes the key bail provisions under the BNSS, drawing from its statutory text and relevant judicial interpretations.\n\n## Statutory Basis for Bail under the Bharatiya Nagarik Suraksha Sanhita, 2023\n\nThe BNSS defines and regulates various aspects of bail, including its definition, types of offen..."
+      "response_preview": "Here are the bail provisions under The Bharatiya Nagarik Suraksha Sanhita, 2023:\n\n**Definition of Bail:**\n-   **Section 2(b):** \"bail\" means release of a person accused of or suspected of commission of an offence from the custody of law upon certain conditions imposed by an officer or Court on execution by such person of a bond or a bail bond.\n\n**Bailable and Non-Bailable Offences:**\n-   **Section 2(c):** \"bailable offence\" means an offence which is shown as bailable in the First Schedule, or wh..."
     },
     {
       "id": 9,
@@ -136,13 +135,14 @@
       "expected_agent": "Newacts",
       "status": "PASS",
       "agents_used": [
-        "Newacts"
+        "Newacts",
+        "Judgment"
       ],
-      "response_len": 11960,
-      "elapsed": 16.5,
-      "tokens": 7143,
+      "response_len": 7207,
+      "elapsed": 87.6,
+      "tokens": 18407,
       "error_detail": "",
-      "response_preview": "Here are the provisions related to electronic evidence in The Bharatiya Sakshya Adhiniyam, 2023:\n\n**Section 61: Electronic or digital record (new)**\n\"Nothing in this Adhiniyam shall apply to deny the admissibility of an electronic or digital record in the evidence on the ground that it is an electronic or digital record and such record shall, subject to section 63, have the same legal effect, validity and enforceability as other document.\"\n\n**Section 62: Special provisions as to evidence relatin..."
+      "response_preview": "The Bharatiya Sakshya Adhiniyam, 2023 (BSA 2023) significantly modernizes the admissibility and treatment of electronic evidence in India. It explicitly includes electronic and digital records within the definitions of \"document\" and \"evidence,\" thereby ensuring their seamless integration into legal proceedings.\n\n## Statutory Basis for Electronic Evidence under BSA 2023\n\nThe BSA 2023 introduces several key provisions governing electronic evidence:\n\n### Admissibility and Legal Effect\n\n-   **Secti..."
     },
     {
       "id": 10,
@@ -153,11 +153,11 @@
       "agents_used": [
         "Newacts"
       ],
-      "response_len": 1160,
-      "elapsed": 8.3,
-      "tokens": 2650,
+      "response_len": 2054,
+      "elapsed": 55.7,
+      "tokens": 2869,
       "error_detail": "",
-      "response_preview": "Section 100 of The Bharatiya Nyaya Sanhita, 2023 defines Culpable homicide. It states that whoever causes death by doing an act with the intention of causing death, or with the intention of causing such bodily injury as is likely to cause death, or with the knowledge that he is likely by such act to cause death, commits the offence of culpable homicide.\n\nThe section also provides three explanations:\n-   **Explanation 1:** A person who causes bodily injury to another who is labouring under a diso..."
+      "response_preview": "Section 100 of The Bharatiya Nyaya Sanhita, 2023, defines \"Culpable homicide\" as follows:\n\n\"Whoever causes death by doing an act with the intention of causing death, or with the intention of causing such bodily injury as is likely to cause death, or with the knowledge that he is likely by such act to cause death, commits the offence of culpable homicide.\"\n\nThe section also provides three illustrations and three explanations:\n\n**Illustrations:**\n(a) A lays sticks and turf over a pit, with the int..."
     },
     {
       "id": 11,
@@ -169,7 +169,7 @@
         "Newacts"
       ],
       "response_len": 413,
-      "elapsed": 7.3,
+      "elapsed": 25.8,
       "tokens": 481,
       "error_detail": "",
       "response_preview": "Section 528 of The Bharatiya Nagarik Suraksha Sanhita 2023 is titled \"Saving of inherent powers of High Court\". The provision states: \"Nothing in this Sanhita shall be deemed to limit or affect the inherent powers of the High Court to make such orders as may be necessary to give effect to any order under this Sanhita, or to prevent abuse of the process of any Court or otherwise to secure the ends of justice.\"\n"
@@ -184,7 +184,7 @@
         "Newacts"
       ],
       "response_len": 250,
-      "elapsed": 7.7,
+      "elapsed": 25.8,
       "tokens": 4712,
       "error_detail": "",
       "response_preview": "Section 3(5) of The Bharatiya Nyaya Sanhita, 2023 states: \"When a criminal act is done by several persons in furtherance of the common intention of all, each of such persons is liable for that act in the same manner as if it were done by him alone.\"\n"
@@ -199,11 +199,11 @@
         "Newacts",
         "Judgment"
       ],
-      "response_len": 6456,
-      "elapsed": 14.5,
-      "tokens": 5887,
+      "response_len": 8249,
+      "elapsed": 25.8,
+      "tokens": 6289,
       "error_detail": "",
-      "response_preview": "The provided text discusses Section 65B of the Indian Evidence Act, 1872, primarily in the context of admitting electronic records, such as CDs containing voice recordings, as evidence in legal proceedings. The section requires a certificate to be produced for the admissibility of such electronic records.\n\nHere's a breakdown of how Section 65B of the Indian Evidence Act, 1872, is addressed in the provided judgments:\n\n### Himani Malhotra vs. I.P. College for Women (Delhi High Court)\n\n-   **Case N..."
+      "response_preview": "The provided context discusses Section 65B of the Indian Evidence Act, 1872, primarily in relation to the admissibility of electronic evidence, specifically CDs containing voice recordings. The section requires a certificate to be produced for such evidence to be admissible.\n\nHere are the key points from the judgments regarding Section 65B of the Indian Evidence Act, 1872:\n\n-   **Requirement of Certificate:** Section 65B(4) of the Indian Evidence Act, 1872, mandates the production of a certifica..."
     },
     {
       "id": 14,
@@ -215,11 +215,11 @@
         "Newacts",
         "Legislation"
       ],
-      "response_len": 1517,
-      "elapsed": 17.0,
-      "tokens": 2543,
+      "response_len": 1676,
+      "elapsed": 49.7,
+      "tokens": 2566,
       "error_detail": "",
-      "response_preview": "## Statutory Basis\n\nThe equivalent of Section 498A of the Indian Penal Code, 1860, in the Bharatiya Nyaya Sanhita, 2023, is **Section 85**.\n\n**Section 85 of The Bharatiya Nyaya Sanhita, 2023** states:\n\n\"Husband or relative of husband of a woman subjecting her to cruelty\n85. Whoever, being the husband or the relative of the husband of a woman, subjects such woman to cruelty shall be punished with imprisonment for a term which may extend to three years and shall also be liable to fine.\"\n\nFor compa..."
+      "response_preview": "## Equivalent of Section 498A of the Indian Penal Code, 1860 in the Bharatiya Nyaya Sanhita, 2023\n\n### Statutory Basis\n\nThe equivalent of Section 498A of the Indian Penal Code, 1860, in the Bharatiya Nyaya Sanhita, 2023, is **Section 85**.\n\n**Section 85 of The Bharatiya Nyaya Sanhita, 2023** states:\n\n> **Husband or relative of husband of a woman subjecting her to cruelty**\n>\n> Whoever, being the husband or the relative of the husband of a woman, subjects such woman to cruelty shall be punished w..."
     },
     {
       "id": 15,
@@ -231,11 +231,11 @@
         "Newacts",
         "Legislation"
       ],
-      "response_len": 4235,
-      "elapsed": 19.7,
-      "tokens": 16777,
+      "response_len": 8012,
+      "elapsed": 49.7,
+      "tokens": 17567,
       "error_detail": "",
-      "response_preview": "## Equivalent Provision for Section 125 of the Code of Criminal Procedure, 1973\n\nThe equivalent provision for Section 125 of the Code of Criminal Procedure, 1973 (CrPC), in the new legislation is **Section 144 of The Bharatiya Nagarik Suraksha Sanhita, 2023**.\n\n### Statutory Basis\n\nBoth Section 125 of the CrPC, 1973, and Section 144 of The Bharatiya Nagarik Suraksha Sanhita, 2023, deal with the maintenance of wives, children, and parents. The core provisions remain largely the same, outlining th..."
+      "response_preview": "## Statutory Basis for Maintenance Claims\n\nThe equivalent provision to Section 125 of the Code of Criminal Procedure, 1973, under the new legal framework is **Section 144 of The Bharatiya Nagarik Suraksha Sanhita, 2023**.\n\nBoth sections empower a Magistrate of the first class to order a person with sufficient means to provide a monthly allowance for the maintenance of specific dependents if they neglect or refuse to do so. The dependents covered under both provisions include:\n\n-   **Wife:** Unab..."
     },
     {
       "id": 16,
@@ -246,11 +246,11 @@
       "agents_used": [
         "Legislation"
       ],
-      "response_len": 1088,
-      "elapsed": 7.1,
-      "tokens": 1795,
+      "response_len": 1127,
+      "elapsed": 49.7,
+      "tokens": 1801,
       "error_detail": "",
-      "response_preview": "Section 138 of The Negotiable Instruments Act, 1881, titled \"Dishonour of cheque for insufficiency, etc., of funds in the account,\" states that if a cheque drawn on an account maintained by a person with a banker for payment of money to another person, for the discharge of a debt or liability, is returned unpaid due to insufficient funds or exceeding the arranged payment limit, that person shall be deemed to have committed an offense. The punishment for this offense can be imprisonment for up to..."
+      "response_preview": "Section 138 of The Negotiable Instruments Act, 1881, titled \"Dishonour of cheque for insufficiency, etc., of funds in the account,\" states that if a cheque drawn on an account maintained by a person with a banker for payment of money to another person, for the discharge of a debt or liability, is returned unpaid due to insufficient funds or exceeding the arranged payment limit, that person shall be deemed to have committed an offense. This offense is punishable with imprisonment up to two years,..."
     },
     {
       "id": 17,
@@ -261,14 +261,29 @@
       "agents_used": [
         "Legislation"
       ],
-      "response_len": 2124,
-      "elapsed": 8.5,
-      "tokens": 1892,
+      "response_len": 1934,
+      "elapsed": 10.0,
+      "tokens": 1840,
       "error_detail": "",
-      "response_preview": "Section 9 of The Arbitration and Conciliation Act, 1996, titled \"Interim measures, etc., by Court,\" outlines the provisions for a party to apply to a Court for certain measures.\n\n**Key provisions of Section 9 include:**\n\n-   **Application to Court:** A party can apply to a Court before or during arbitral proceedings, or at any time after an arbitral award is made but before it is enforced under section 36.\n-   **Types of Applications:**\n    -   Appointment of a guardian for a minor or a person o..."
+      "response_preview": "Section 9 of The Arbitration and Conciliation Act, 1996, titled \"Interim measures, etc., by Court,\" outlines the provisions for a party to apply to a Court for specific measures. This application can be made before or during arbitral proceedings, or at any time after an arbitral award is made but before it is enforced under section 36.\n\nThe applications that can be made to the Court under this section are:\n\n1.  **Appointment of a guardian:** For a minor or a person of unsound mind, for the purpo..."
     },
     {
       "id": 18,
+      "prompt": "Section 23 of Indian Contract Act",
+      "category": "Legislation-Single",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 682,
+      "elapsed": 19.4,
+      "tokens": 1665,
+      "error_detail": "",
+      "response_preview": "Section 23 of The Indian Contract Act, 1872, titled \"What considerations and objects are lawful, and what not,\" states that the consideration or object of an agreement is lawful unless it is:\n\n-   Forbidden by law.\n-   Of such a nature that, if permitted, it would defeat the provisions of any law.\n-   Fraudulent.\n-   Involves or implies injury to the person or property of another.\n-   Regarded by the Court as immoral, or opposed to public policy.\n\nIn any of these cases, the consideration or obje..."
+    },
+    {
+      "id": 19,
       "prompt": "Sections 44 and 45 of Transfer of Property Act",
       "category": "Legislation-Multi",
       "expected_agent": "Legislation",
@@ -276,14 +291,14 @@
       "agents_used": [
         "Legislation"
       ],
-      "response_len": 1452,
-      "elapsed": 8.1,
-      "tokens": 1373,
+      "response_len": 1297,
+      "elapsed": 19.4,
+      "tokens": 1330,
       "error_detail": "",
-      "response_preview": "**Section 44 of the Transfer of Property Act, 1977** deals with transfers by co-owners. It states that if one co-owner of immovable property transfers their share or interest, the transferee acquires the transferor's right to joint possession and enjoyment of the property, as well as the right to enforce partition. However, this is subject to any conditions or liabilities affecting the transferred share at the time of the transfer. A specific proviso clarifies that if the transferee of a share i..."
+      "response_preview": "Section 44 of the Transfer of Property Act, 1977, titled \"Transfer by one co-owner,\" states that if a co-owner of immovable property legally transfers their share or interest, the transferee acquires the transferor's right to joint possession or common enjoyment of the property, and the right to enforce partition. This is subject to any conditions and liabilities affecting the transferred share at the time of transfer. However, if the transferee of a share in a dwelling house belonging to an und..."
     },
     {
-      "id": 19,
+      "id": 20,
       "prompt": "Explain Sections 3, 4 and 5 of Consumer Protection Act",
       "category": "Legislation-Multi",
       "expected_agent": "Legislation",
@@ -292,13 +307,13 @@
         "Legislation"
       ],
       "response_len": 1123,
-      "elapsed": 7.7,
+      "elapsed": 13.4,
       "tokens": 1648,
       "error_detail": "",
       "response_preview": "**Section 3: Central Consumer Protection Council**\n\n-   **Establishment:** The Central Government is mandated to establish the Central Consumer Protection Council, to be known as the Central Council, through a notification.\n-   **Nature:** The Central Council functions as an advisory council.\n-   **Composition:**\n    -   The Chairperson is the Minister-in-charge of the Department of Consumer Affairs in the Central Government.\n    -   It also includes other official or non-official members repres..."
     },
     {
-      "id": 20,
+      "id": 21,
       "prompt": "Sections 10 to 15 of Companies Act",
       "category": "Legislation-Range",
       "expected_agent": "Legislation",
@@ -307,13 +322,13 @@
         "Legislation"
       ],
       "response_len": 12948,
-      "elapsed": 14.2,
+      "elapsed": 29.6,
       "tokens": 7521,
       "error_detail": "",
       "response_preview": "Here are the provisions for Sections 10 to 15 of The Companies Act, 2013:\n\n**Section 10: Effect of memorandum and articles**\n(1) Subject to the provisions of this Act, the memorandum and articles shall, when registered, bind the company and the members thereof to the same extent as if they respectively had been signed by the company and by each member, and contained covenants on its and his part to observe all the provisions of the memorandum and of the articles.\n(2) All monies payable by any me..."
     },
     {
-      "id": 21,
+      "id": 22,
       "prompt": "director duties under companies act",
       "category": "Legislation-Topic",
       "expected_agent": "Legislation",
@@ -322,14 +337,14 @@
         "Legislation",
         "Judgment"
       ],
-      "response_len": 2437,
-      "elapsed": 16.3,
-      "tokens": 11294,
+      "response_len": 2601,
+      "elapsed": 29.6,
+      "tokens": 11286,
       "error_detail": "",
-      "response_preview": "## Director Duties Under the Companies Act, 2013\n\nThe Companies Act, 2013 outlines specific requirements and prohibitions related to Director Identification Numbers (DINs) which are foundational to a director's role and compliance.\n\n### Statutory Basis\n\n**Director Identification Number (DIN) Requirements:**\n\n-   **Intimation of DIN:** Section 156 of the Companies Act, 2013 mandates that \"every existing director shall, within one month of receiving their Director Identification Number (DIN) from ..."
+      "response_preview": "## Director Duties Under the Companies Act, 2013\n\nThis response synthesizes the relevant provisions of the Companies Act, 2013, pertaining to director identification and related obligations.\n\n### Statutory Basis\n\nThe Companies Act, 2013, introduces specific provisions concerning the Director Identification Number (DIN) to ensure proper identification and accountability of directors.\n\n-   **Section 156: Intimation of Director Identification Number:** This section mandates that \"every existing dir..."
     },
     {
-      "id": 22,
+      "id": 23,
       "prompt": "tenant rights in rent control legislation",
       "category": "Legislation-Topic",
       "expected_agent": "Legislation",
@@ -338,14 +353,29 @@
         "Legislation",
         "Judgment"
       ],
-      "response_len": 11269,
-      "elapsed": 32.8,
-      "tokens": 62373,
+      "response_len": 8305,
+      "elapsed": 52.3,
+      "tokens": 58563,
       "error_detail": "",
-      "response_preview": "Tenant rights under rent control legislation are multifaceted, encompassing protections against arbitrary eviction, rights related to rent and amenities, and provisions for maintenance and repairs. These rights are established through statutory provisions and have been interpreted and reinforced by various court decisions.\n\n## Statutory Basis for Tenant Rights\n\nThe primary statutory framework for tenant rights in rent control legislation provides for:\n\n### Eviction Protection\n\n-   **General Prot..."
+      "response_preview": "## Tenant Rights Under Rent Control Legislation\n\nTenant rights under rent control legislation are designed to provide security of tenure, protection against arbitrary eviction, and fair treatment regarding rent and property conditions. These rights are established through statutory provisions and reinforced by judicial interpretations.\n\n### Statutory Basis for Tenant Rights\n\nThe core tenant rights are derived from specific provisions within rent control acts, which generally override other laws ..."
     },
     {
-      "id": 23,
+      "id": 24,
+      "prompt": "minimum wages provisions in labour law",
+      "category": "Legislation-Topic",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 1935,
+      "elapsed": 40.6,
+      "tokens": 2964,
+      "error_detail": "",
+      "response_preview": "Rule 3 of The Code on Wages Jharkhand Rules, 2021, titled \"Manner of calculating the minimum rate of wages,\" outlines the criteria for fixing minimum wages on a daily basis. These criteria include:\n\n-   **Family Unit:** A standard working-class family comprising a spouse and two children, equivalent to three adult consumption units.\n-   **Caloric Intake:** A net intake of 2700 calories per day per consumption unit.\n-   **Clothing:** 66 meters of cloth per year per standard working-class family.\n..."
+    },
+    {
+      "id": 25,
       "prompt": "Section 138(1) of Negotiable Instruments Act",
       "category": "Legislation-Subsection",
       "expected_agent": "Legislation",
@@ -353,14 +383,557 @@
       "agents_used": [
         "Legislation"
       ],
-      "response_len": 1018,
-      "elapsed": 8.2,
-      "tokens": 1781,
+      "response_len": 979,
+      "elapsed": 40.6,
+      "tokens": 1772,
       "error_detail": "",
-      "response_preview": "Section 138 of The Negotiable Instruments Act, 1881, states that if a cheque drawn on an account maintained by a person with a bank for payment of money to another person, for the discharge of a debt or liability, is returned unpaid due to insufficient funds or exceeding the arranged payment limit, that person shall be deemed to have committed an offense. This offense is punishable with imprisonment up to two years, a fine up to twice the amount of the cheque, or both.\n\nHowever, this section doe..."
+      "response_preview": "Section 138 of The Negotiable Instruments Act, 1881, states that if a cheque drawn on an account maintained by a person with a bank for payment of money to another person, for the discharge of a debt or liability, is returned unpaid due to insufficient funds or exceeding the arranged limit, that person shall be deemed to have committed an offense. This offense is punishable with imprisonment up to two years, a fine up to twice the amount of the cheque, or both.\n\nHowever, this section does not ap..."
     },
     {
-      "id": 24,
+      "id": 26,
+      "prompt": "cases on anticipatory bail",
+      "category": "Judgment-Topic",
+      "expected_agent": "Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "Judgment"
+      ],
+      "response_len": 11147,
+      "elapsed": 33.5,
+      "tokens": 17176,
+      "error_detail": "",
+      "response_preview": "Here are the cases from the provided text that deal with anticipatory bail:\n\n### Bail Appl.No.8396 OF 2020\n\n-   **Court:** High Court of Kerala at Ernakulam\n-   **Bench/Judge(s):** Mr. Justice Ashok Menon\n-   **Facts:** The applicant is the sole accused in Crime No.815/2020 of Vellarikundu Police Station for offences under Sections 448, 323, 324, and 326 of the IPC. The prosecution alleges that on 23.11.2020, the applicant trespassed into the de facto complainant's house and attacked him with a ..."
+    },
+    {
+      "id": 27,
+      "prompt": "dowry harassment case law",
+      "category": "Judgment-Topic",
+      "expected_agent": "Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "Judgment"
+      ],
+      "response_len": 10251,
+      "elapsed": 59.0,
+      "tokens": 28040,
+      "error_detail": "",
+      "response_preview": "Here are some case laws related to dowry harassment from the provided text:\n\n### Soran Singh vs. State\n\n-   **Court:** High Court of Delhi\n-   **Citation:** CRL APPEAL NO.713/2007 & CRL APPEAL NO.706/2007\n-   **Bench/Judge(s):** Hon'ble Mr. Justice Pradeep Nandrajog, Hon'ble Mr. Justice Suresh Kait\n-   **Facts:** Rakesh (husband) and Soran Singh (father-in-law) were convicted under Section 498A and 304B IPC. The deceased, Mamta, committed suicide within seven months of her marriage. The prosecut..."
+    },
+    {
+      "id": 28,
+      "prompt": "cheque bounce cases under Section 138",
+      "category": "Judgment-Topic",
+      "expected_agent": "Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "Judgment",
+        "Newacts"
+      ],
+      "response_len": 6291,
+      "elapsed": 59.0,
+      "tokens": 11854,
+      "error_detail": "",
+      "response_preview": "## Cheque Bounce Cases Under Section 138 of the Negotiable Instruments Act\n\nThis response synthesizes information regarding cheque bounce cases filed under Section 138 of the Negotiable Instruments Act, 1881 (NI Act). The provided judgments illustrate how such cases are resolved, particularly when disputes are settled amicably between the parties.\n\n### Statutory Basis\n\nSection 138 of the Negotiable Instruments Act, 1881, deals with the offense of dishonor of a cheque for insufficiency, etc., of ..."
+    },
+    {
+      "id": 29,
+      "prompt": "property dispute judgments",
+      "category": "Judgment-Topic",
+      "expected_agent": "Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "Judgment"
+      ],
+      "response_len": 12369,
+      "elapsed": 56.4,
+      "tokens": 12915,
+      "error_detail": "",
+      "response_preview": "The provided court judgments primarily deal with situations where civil disputes over property are brought before the High Courts, which then direct the parties to pursue their claims in civil courts. The courts generally refrain from intervening in such matters under Article 226 of the Constitution, as they are considered civil in nature and require adjudication by a civil court.\n\nHere's a summary of the relevant judgments:\n\n### Sandesh Balkrishna Sawant and ors. vs. Maharashtra Housing and Are..."
+    },
+    {
+      "id": 30,
+      "prompt": "cases on medical negligence",
+      "category": "Judgment-Topic",
+      "expected_agent": "Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "Judgment"
+      ],
+      "response_len": 10082,
+      "elapsed": 39.2,
+      "tokens": 18284,
+      "error_detail": "",
+      "response_preview": "Here are some cases related to medical negligence from the provided context:\n\n### Sahenara Bibi v. The State of West Bengal and others\n\n-   **Citation:** WPA No. 11799 of 2024\n-   **Court:** High Court at Calcutta\n-   **Bench/Judge(s):** Sabyasachi Bhattacharyya, J.\n-   **Facts:** The petitioner alleged that her younger son's right leg was amputated due to the alleged negligence of treating doctors and a hospital. An inquiry was held, which the petitioner deemed an \"eyewash,\" and she sought a fu..."
+    },
+    {
+      "id": 31,
+      "prompt": "land acquisition compensation judgments",
+      "category": "Judgment-Topic",
+      "expected_agent": "Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "Judgment"
+      ],
+      "response_len": 11411,
+      "elapsed": 39.2,
+      "tokens": 11834,
+      "error_detail": "",
+      "response_preview": "Here are the summaries of the provided court judgments concerning land acquisition compensation:\n\n### Bhiku s/o Chandu Jadhao vs. The Collector, Yavatmal & Ors.\n\n-   **Citation:** First Appeal No.1404 of 2019\n-   **Court:** High Court of Judicature at Bombay, Nagpur Bench, Nagpur\n-   **Bench/Judge(s):** Smt. Anuja Prabhudessai, J.\n-   **Date:** February 16, 2021\n-   **Issues:** The appellant sought enhanced compensation for his acquired land.\n-   **Facts:** The appellant's land (2.02 hectares) w..."
+    },
+    {
+      "id": 32,
+      "prompt": "Supreme Court cases on right to privacy",
+      "category": "SCI-Topic",
+      "expected_agent": "SCI_Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "response_len": 2926,
+      "elapsed": 124.1,
+      "tokens": 10051,
+      "error_detail": "",
+      "response_preview": "The right to privacy, while not explicitly enumerated in the Indian Constitution, has been recognized and developed by the Supreme Court of India through its interpretations of fundamental rights.\n\n### Statutory Basis\n\nThe right to privacy is primarily derived from the fundamental right to life and personal liberty guaranteed under **Article 21** of the Constitution of India.\n\n### Case Laws\n\nSeveral landmark Supreme Court judgments have shaped the understanding and scope of the right to privacy:..."
+    },
+    {
+      "id": 33,
+      "prompt": "SC judgment on Article 21 right to life",
+      "category": "SCI-Topic",
+      "expected_agent": "SCI_Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "response_len": 3246,
+      "elapsed": 104.7,
+      "tokens": 10324,
+      "error_detail": "",
+      "response_preview": "## Supreme Court's Interpretation of Article 21: The Right to Life\n\nArticle 21 of the Constitution of India guarantees that \"No person shall be deprived of his life or personal liberty except according to procedure established by law.\" The Supreme Court of India has, over time, significantly expanded the scope of this fundamental right, interpreting it to encompass a wide array of protections essential for a dignified human existence.\n\n### Statutory Basis\n\n-   **Article 21 of the Constitution of..."
+    },
+    {
+      "id": 34,
+      "prompt": "Supreme Court ruling on triple talaq",
+      "category": "SCI-Topic",
+      "expected_agent": "SCI_Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "SCI_Judgment",
+        "Judgment"
+      ],
+      "response_len": 5874,
+      "elapsed": 98.3,
+      "tokens": 309764,
+      "error_detail": "",
+      "response_preview": "The Supreme Court of India, in a landmark judgment, has declared the practice of instant triple talaq, also known as 'talaq-e-biddat', unconstitutional. This decision significantly impacted Muslim personal law and aimed to protect the rights of Muslim women.\n\n## **Shayara Bano vs Union of India and Ors.**\n\nThe pivotal case concerning triple talaq is **Shayara Bano vs Union of India and Ors.**, Case No. W.P.(C) No.-000118-000118 of 2016, decided on **August 22, 2017**. The judgment is reported in..."
+    },
+    {
+      "id": 35,
+      "prompt": "SC cases on bail conditions",
+      "category": "SCI-Topic",
+      "expected_agent": "SCI_Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "SCI_Judgment"
+      ],
+      "response_len": 2735,
+      "elapsed": 51.9,
+      "tokens": 7545,
+      "error_detail": "",
+      "response_preview": "Here are some Supreme Court cases discussing bail conditions:\n\n1. **Sheikh Javed Iqbal @ Ashfaq Ansari @ Javed Ansari vs The State of Uttar Pradesh** (Crl.A. No.-002790-002790 - 2024)\n   - Date: 18-07-2024\n   - Bench: HON'BLE THE CHIEF JUSTICE, HON'BLE MR. JUSTICE UJJAL BHUYAN\n   - Key Holding: The court emphasized that bail conditions must be consistent with the object of granting bail and should not curtail the liberty of the accused unnecessarily. Imposing drastic conditions that amount to co..."
+    },
+    {
+      "id": 36,
+      "prompt": "Supreme Court judgments on environmental protection",
+      "category": "SCI-Topic",
+      "expected_agent": "SCI_Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "SCI_Judgment"
+      ],
+      "response_len": 2524,
+      "elapsed": 48.3,
+      "tokens": 6993,
+      "error_detail": "",
+      "response_preview": "Here are some Supreme Court judgments related to environmental protection:\n\n1. **Environmental & Consumer Protection Foundation vs Delhi Administration**\n   - Case No: W.P.(C) No.-000631-000631 - 2004\n   - Date: 03-10-2012\n   - Bench: K.S. Radhakrishnan, Dipak Misra\n   - Summary: This case involves the monitoring of child rights to education and touches upon environmental protection as part of broader public interest litigation.\n   - [Read Judgment](https://api.sci.gov.in/jonew/judis/39616.pdf)\n..."
+    },
+    {
+      "id": 37,
+      "prompt": "SC precedents on freedom of speech Article 19",
+      "category": "SCI-Topic",
+      "expected_agent": "SCI_Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "response_len": 3811,
+      "elapsed": 45.5,
+      "tokens": 11847,
+      "error_detail": "",
+      "response_preview": "## Freedom of Speech under Article 19 of the Indian Constitution: Supreme Court Precedents\n\nThe freedom of speech and expression is a fundamental right guaranteed under **Article 19(1)(a)** of the Constitution of India. This right, however, is not absolute and is subject to reasonable restrictions imposed by the State under **Article 19(2)**. The Supreme Court of India has, through various judgments, elucidated the scope and nuances of this fundamental freedom.\n\n### Statutory Basis\n\n**Article 19..."
+    },
+    {
+      "id": 38,
+      "prompt": "Article 21 of Indian Constitution",
+      "category": "Constitution",
+      "expected_agent": "Constitution",
+      "status": "PASS",
+      "agents_used": [
+        "Constitution"
+      ],
+      "response_len": 162,
+      "elapsed": 85.0,
+      "tokens": 2151,
+      "error_detail": "",
+      "response_preview": "Article 21 of the Constitution of India states that no person shall be deprived of his life or personal liberty except according to procedure established by law.\n"
+    },
+    {
+      "id": 39,
+      "prompt": "Fundamental rights under Part III of Constitution",
+      "category": "Constitution",
+      "expected_agent": "Constitution",
+      "status": "PASS",
+      "agents_used": [
+        "Constitution"
+      ],
+      "response_len": 2650,
+      "elapsed": 84.9,
+      "tokens": 2471,
+      "error_detail": "",
+      "response_preview": "Part III of the Constitution of India, 1950, deals with Fundamental Rights. These rights are guaranteed to all citizens and include:\n\n-   **Right to Equality** (Article 16): This article ensures equality of opportunity in matters of public employment. It prohibits discrimination on grounds of religion, race, caste, sex, descent, place of birth, or residence. It also allows for provisions for reservation in appointments or posts for backward classes, Scheduled Castes and Tribes, and economically ..."
+    },
+    {
+      "id": 40,
+      "prompt": "Article 14 right to equality",
+      "category": "Constitution",
+      "expected_agent": "Constitution",
+      "status": "PASS",
+      "agents_used": [
+        "Constitution",
+        "Judgment"
+      ],
+      "response_len": 6039,
+      "elapsed": 94.6,
+      "tokens": 44605,
+      "error_detail": "",
+      "response_preview": "## Article 14: The Right to Equality\n\nArticle 14 of the Constitution of India guarantees the fundamental right to equality. It states:\n\n**\"The State shall not deny to any person equality before the law or the equal protection of the laws within the territory of India.\"**\n\nThis article embodies the principle of equality and non-discrimination, ensuring that all individuals are treated equally under the law and receive equal protection from it.\n\n### Application of Article 14 in Case Law\n\nThe princ..."
+    },
+    {
+      "id": 41,
+      "prompt": "What are fundamental duties under Article 51A?",
+      "category": "Constitution",
+      "expected_agent": "Constitution",
+      "status": "PASS",
+      "agents_used": [
+        "Constitution"
+      ],
+      "response_len": 1305,
+      "elapsed": 52.9,
+      "tokens": 2582,
+      "error_detail": "",
+      "response_preview": "Fundamental duties under Article 51A include:\n-   Abiding by the Constitution and respecting its ideals, institutions, the National Flag, and the National Anthem.\n-   Cherishing and following the noble ideals that inspired the national struggle for freedom.\n-   Upholding and protecting the sovereignty, unity, and integrity of India.\n-   Defending the country and rendering national service when called upon to do so.\n-   Promoting harmony and the spirit of common brotherhood among all people of In..."
+    },
+    {
+      "id": 42,
+      "prompt": "Directive principles of state policy",
+      "category": "Constitution",
+      "expected_agent": "Constitution",
+      "status": "PASS",
+      "agents_used": [
+        "Constitution"
+      ],
+      "response_len": 2384,
+      "elapsed": 52.9,
+      "tokens": 1503,
+      "error_detail": "",
+      "response_preview": "Part IV of The Constitution of India, 1950, titled \"Directive Principles of State Policy,\" outlines fundamental principles for the governance of the country. Article 37 states that while these principles are not enforceable by any court, they are fundamental in the governance of the nation, and the State has a duty to apply them in making laws.\n\nKey principles within this Part include:\n\n-   **Article 39:** This article directs the State's policy towards securing several objectives for citizens, ..."
+    },
+    {
+      "id": 43,
+      "prompt": "Article 32 writ jurisdiction of Supreme Court",
+      "category": "Constitution",
+      "expected_agent": "Constitution",
+      "status": "PASS",
+      "agents_used": [
+        "Constitution",
+        "SCI_Judgment"
+      ],
+      "response_len": 3567,
+      "elapsed": 259.4,
+      "tokens": 11680,
+      "error_detail": "",
+      "response_preview": "## Article 32: Supreme Court's Writ Jurisdiction for Enforcement of Fundamental Rights\n\nArticle 32 of the Constitution of India, 1950, titled \"Remedies for enforcement of rights conferred by this Part,\" is a cornerstone of India's constitutional framework, empowering the Supreme Court to act as the ultimate guardian of Fundamental Rights.\n\n### Statutory Basis\n\nThe Constitution explicitly states:\n\n\"**32. Remedies for enforcement of rights conferred by this Part**\n(1) The right to move the Supreme..."
+    },
+    {
+      "id": 44,
+      "prompt": "What is audi alteram partem?",
+      "category": "Maxim",
+      "expected_agent": "Maxim",
+      "status": "PASS",
+      "agents_used": [
+        "Maxim",
+        "Judgment"
+      ],
+      "response_len": 2131,
+      "elapsed": 99.9,
+      "tokens": 16786,
+      "error_detail": "",
+      "response_preview": "## Audi Alteram Partem: The Principle of a Fair Hearing\n\nThe legal principle of **audi alteram partem**, a Latin maxim meaning \"hear the other side,\" is a cornerstone of natural justice. It fundamentally dictates that **no man shall be condemned unheard**. This principle ensures fairness by requiring that any individual affected by a decision, particularly one that may adversely impact their rights or interests, must be given a genuine opportunity to present their case and be heard before any ju..."
+    },
+    {
+      "id": 45,
+      "prompt": "Explain the doctrine of res judicata",
+      "category": "Maxim",
+      "expected_agent": "Maxim",
+      "status": "PASS",
+      "agents_used": [
+        "Maxim",
+        "Judgment"
+      ],
+      "response_len": 6787,
+      "elapsed": 100.0,
+      "tokens": 34855,
+      "error_detail": "",
+      "response_preview": "## The Doctrine of Res Judicata: Preventing Relitigation\n\nThe doctrine of **res judicata**, a Latin term meaning \"a matter already judged,\" is a fundamental legal principle that prevents the same issue from being litigated multiple times between the same parties. This doctrine is crucial for ensuring the finality of judicial decisions and promoting efficiency in the legal system by preventing endless litigation.\n\n### Statutory Basis\n\nIn India, the doctrine of res judicata is statutorily embodied..."
+    },
+    {
+      "id": 46,
+      "prompt": "Meaning of caveat emptor in law",
+      "category": "Maxim",
+      "expected_agent": "Maxim",
+      "status": "PASS",
+      "agents_used": [
+        "Maxim"
+      ],
+      "response_len": 375,
+      "elapsed": 40.9,
+      "tokens": 387,
+      "error_detail": "",
+      "response_preview": "**Caveat emptor**\n\n-   **Meaning:** Let the buyer beware.\n-   **Legal Interpretation:** This maxim places the responsibility on the buyer to perform due diligence and examine goods or property before purchasing. The seller is not obligated to disclose every defect, and the buyer assumes the risk of any defects that could have been discovered through reasonable inspection.\n"
+    },
+    {
+      "id": 47,
+      "prompt": "What is estoppel in legal terms?",
+      "category": "Maxim",
+      "expected_agent": "Maxim",
+      "status": "PASS",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "response_len": 2348,
+      "elapsed": 40.9,
+      "tokens": 600,
+      "error_detail": "",
+      "response_preview": "This query is about a legal explanation.\n\n### Estoppel: A Legal Principle\n\nEstoppel is a legal principle that prevents a party from asserting a claim or right that contradicts what they have previously stated or agreed to by law, or that has been previously determined by a court or other legal process.\n\n#### Key Concepts:\n\n-   **Preventing Contradiction:** It stops someone from going back on their word or actions when another party has reasonably relied on them.\n-   **Fairness and Equity:** The ..."
+    },
+    {
+      "id": 48,
+      "prompt": "Doctrine of ultra vires",
+      "category": "Maxim",
+      "expected_agent": "Maxim",
+      "status": "PASS",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "response_len": 2831,
+      "elapsed": 55.3,
+      "tokens": 684,
+      "error_detail": "",
+      "response_preview": "This query is about a legal explanation.\n\n### Doctrine of Ultra Vires\n\nThe doctrine of ultra vires, Latin for \"beyond the powers,\" is a fundamental principle in company law. It dictates that a company's actions are only valid if they fall within the scope of its powers as defined by its constitutional documents, primarily its Memorandum of Association (MOA).\n\n**Key Aspects:**\n\n-   **Source of Powers:** A company's powers are derived from its MOA, which outlines its objects and the extent of its ..."
+    },
+    {
+      "id": 49,
+      "prompt": "Explain nemo judex in causa sua",
+      "category": "Maxim",
+      "expected_agent": "Maxim",
+      "status": "PASS",
+      "agents_used": [
+        "Maxim",
+        "Judgment"
+      ],
+      "response_len": 5096,
+      "elapsed": 75.4,
+      "tokens": 42287,
+      "error_detail": "",
+      "response_preview": "## Nemo Judex in Causa Sua: The Principle of Impartiality\n\nThe legal maxim **\"Nemo judex in causa sua\"** (also known as \"Nemo debet esse judex in propria causa\" or \"Nemo judex in sua causa\") is a fundamental principle of natural justice that translates to **\"nobody can be the judge in his own case.\"** This principle dictates that a person cannot preside over or adjudicate a matter in which they have a personal interest, whether direct or indirect. Its core purpose is to ensure fairness and preve..."
+    },
+    {
+      "id": 50,
+      "prompt": "Draft a bail application",
+      "category": "Drafting",
+      "expected_agent": "Drafting",
+      "status": "PASS",
+      "agents_used": [
+        "Drafting"
+      ],
+      "response_len": 4277,
+      "elapsed": 44.1,
+      "tokens": 2075,
+      "error_detail": "",
+      "response_preview": "```markdown\n# Draft of Bail Application under Section 439 of CrPC\n\n## IN THE COURT OF HON'BLE SESSIONS COURT [PLACEHOLDER], AT [PLACEHOLDER]\n\n### Cri. Bail. Application No. [PLACEHOLDER] /2026\n### In C.R. No [PLACEHOLDER] /2026 registered with [PLACEHOLDER] Police Station\n### under section [PLACEHOLDER], [PLACEHOLDER], [PLACEHOLDER] of I.P.C or BNS.\n\nMr. [PLACEHOLDER]\nAge: [PLACEHOLDER] Years,\nOccupation: [PLACEHOLDER],\n[PLACEHOLDER] Accused/Applicant.\nR/At: [PLACEHOLDER],\n\nVs\n\n1. State Of [PLAC..."
+    },
+    {
+      "id": 51,
+      "prompt": "Draft a legal notice for recovery of money",
+      "category": "Drafting",
+      "expected_agent": "Drafting",
+      "status": "PASS",
+      "agents_used": [
+        "Drafting"
+      ],
+      "response_len": 17302,
+      "elapsed": 73.4,
+      "tokens": 7260,
+      "error_detail": "",
+      "response_preview": "```markdown\n# NOTICE\n(By R.P.A.D.)\n\n**From:**\n[Your Name]\n[Your Address]\n[City, State, Pincode]\n\n**Date:** 2026-02-22\n\n**To,**\nM/S ABC Pvt. Ltd.\n[Company Address]\n[City, State, Pincode]\n\n**Sir,**\n\nUnder the instructions of my client, M/s [Client's Company Name] having office at [Client's Office Address], represented by its proprietor Mr. [Proprietor's Name] and being authorised by him in this behalf, I am addressing you this notice, the contents whereof you may please note.\n\n1. My client is a pr..."
+    },
+    {
+      "id": 52,
+      "prompt": "Create a power of attorney document",
+      "category": "Drafting",
+      "expected_agent": "Drafting",
+      "status": "PASS",
+      "agents_used": [
+        "Drafting"
+      ],
+      "response_len": 3911,
+      "elapsed": 73.4,
+      "tokens": 1731,
+      "error_detail": "",
+      "response_preview": "```markdown\n# GENERAL POWER OF ATTORNEY\n\nKNOW ALL MEN BY THESE PRESENTS that I, [Name of Executant], residing at [Address of Executant], hereby nominate, constitute, and appoint [Name of Attorney], residing at [Address of Attorney], to be my true and lawful attorney (hereinafter called \"the Attorney\") to act in my name and on my behalf to do all or any of the acts, deeds, and things hereinafter mentioned:\n\n1. To operate all my current, savings bank accounts, fixed deposits, or other accounts and..."
+    },
+    {
+      "id": 53,
+      "prompt": "Draft an eviction notice to tenant",
+      "category": "Drafting",
+      "expected_agent": "Drafting",
+      "status": "PASS",
+      "agents_used": [
+        "Drafting"
+      ],
+      "response_len": 3287,
+      "elapsed": 67.3,
+      "tokens": 1644,
+      "error_detail": "",
+      "response_preview": "```markdown\n(Name of Advocate)\n(Address)\nTele _____\nDated: 22nd February, 2026\n\nNOTICE\nREGISTERED A.D.\n\nTo\nShri/Smt. ______\n(Address)\n\nSir/Madam,\n\nUnder instructions from and on behalf of my clients, (1) Smt. ________, (2) Dr. ________, and (3) Shri ________, all\nresidents of (Address), I am serving you with the present legal notice as follows:\n\n1. That the property bearing House No. ______, located at ______ Peth, ________, was originally owned by Late Shri\n________, and upon his demise, my cli..."
+    },
+    {
+      "id": 54,
+      "prompt": "Draft a complaint for cheating and fraud",
+      "category": "Drafting",
+      "expected_agent": "Drafting",
+      "status": "PASS",
+      "agents_used": [
+        "Drafting",
+        "Newacts"
+      ],
+      "response_len": 8111,
+      "elapsed": 80.9,
+      "tokens": 16529,
+      "error_detail": "",
+      "response_preview": "# Complaint for the Offence of Cheating and Fraud under Section 318(4) of Bharatiya Nyaya Sanhita, 2023 (BNS)\n\n## IN THE COURT OF JUDICIAL MAGISTRATE FIRST CLASS, _____\nCriminal Case No. ___ of 2026\n\n**Shri- [Complainant's Name]**\nAge- [Complainant's Age]\nOccupation- [Complainant's Occupation]\nResiding at- [Complainant's Address].\n...Complainant\n\n**Versus**\n\n**Shri- [Accused's Name]**\nAge- [Accused's Age]\nOccupation- [Accused's Occupation]\nResiding at- [Accused's Address].\n...Accused\n\n### Compla..."
+    },
+    {
+      "id": 55,
+      "prompt": "Draft a rental agreement",
+      "category": "Drafting",
+      "expected_agent": "Drafting",
+      "status": "PASS",
+      "agents_used": [
+        "Drafting"
+      ],
+      "response_len": 6636,
+      "elapsed": 80.9,
+      "tokens": 3563,
+      "error_detail": "",
+      "response_preview": "```markdown\n# Draft or Specimen or Format of Lease-Deed-Residential House\n\n## THIS DEED OF LEASE made and executed at [City Name] this 22nd day of February 2026.\n\n### BETWEEN\n\nShri [Lessor's Name], age [Lessor's Age] years, occupation- [Lessor's Occupation], resident of [Lessor's Address], [City] 411[PIN], hereinafter called the LESSOR, (which expression shall, unless repugnant to the context, mean and include his heirs, executors, administrators and assigns) of the One Part\n\n### AND\n\nShri [Less..."
+    },
+    {
+      "id": 56,
+      "prompt": "My landlord is refusing to return my security deposit of 50000 rupees after I vacated the flat. What legal steps can I take?",
+      "category": "Scenario",
+      "expected_agent": "Scenario",
+      "status": "PASS",
+      "agents_used": [
+        "Scenario",
+        "Judgment"
+      ],
+      "response_len": 6315,
+      "elapsed": 110.6,
+      "tokens": 20563,
+      "error_detail": "",
+      "response_preview": "## Legal Recourse for Non-Refund of Security Deposit\n\nWhen a landlord refuses to return a security deposit, it is considered a civil wrong. The security deposit is the tenant's property, held by the landlord as security against unpaid rent or damages beyond normal wear and tear. Arbitrarily forfeiting this amount is not legally permissible.\n\n### Statutory Basis and Foundational Principles\n\nThe landlord-tenant relationship is primarily governed by the rental agreement. In the absence of a written..."
+    },
+    {
+      "id": 57,
+      "prompt": "My employer terminated me without any notice or severance pay. What are my rights under Indian labour laws?",
+      "category": "Scenario",
+      "expected_agent": "Scenario",
+      "status": "PASS",
+      "agents_used": [
+        "Scenario",
+        "Legislation"
+      ],
+      "response_len": 4314,
+      "elapsed": 167.4,
+      "tokens": 6942,
+      "error_detail": "",
+      "response_preview": "If your employer terminated your employment without notice or severance pay in India, your rights are primarily governed by the **Industrial Disputes Act, 1947 (IDA)**, applicable **State-Specific Shops and Establishments Acts**, and your **employment contract** as per the **Indian Contract Act, 1872**.\n\n## Statutory Framework for Termination\n\n### **The Industrial Disputes Act, 1947 (IDA)**\n\nThis central legislation protects 'workmen' against unfair dismissal and retrenchment.\n\n-   **Notice Peri..."
+    },
+    {
+      "id": 58,
+      "prompt": "I received a legal notice for defamation on social media. How should I respond and what are the possible consequences?",
+      "category": "Scenario",
+      "expected_agent": "Scenario",
+      "status": "PASS",
+      "agents_used": [
+        "Scenario",
+        "Judgment",
+        "Legal_Concepts"
+      ],
+      "response_len": 6528,
+      "elapsed": 167.4,
+      "tokens": 24904,
+      "error_detail": "",
+      "response_preview": "Receiving a legal notice for defamation on social media is a serious matter that requires a prompt, strategic, and legally informed response. In India, defamation is addressed under both civil and criminal law, with potential consequences under the Indian Penal Code, 1860 (IPC) and the Information Technology Act, 2000.\n\n## Immediate Steps Upon Receiving a Legal Notice\n\nUpon receipt of a legal notice, it is crucial to take the following immediate steps:\n\n1.  **Thorough Review of the Notice:** Car..."
+    },
+    {
+      "id": 59,
+      "prompt": "Can police arrest someone without an FIR? What are the rights of an arrested person in India?",
+      "category": "Scenario",
+      "expected_agent": "Scenario",
+      "status": "PASS",
+      "agents_used": [
+        "Scenario",
+        "Legislation",
+        "Judgment"
+      ],
+      "response_len": 11534,
+      "elapsed": 192.4,
+      "tokens": 86304,
+      "error_detail": "",
+      "response_preview": "Yes, the police can arrest someone without a First Information Report (FIR) in India under specific circumstances. The Code of Criminal Procedure, 1973 (CrPC), and subsequent judicial pronouncements outline these situations and the rights afforded to an arrested person.\n\n## Arrest Without a First Information Report (FIR)\n\nA police officer is empowered to arrest a person without a warrant and, consequently, without a prior FIR, primarily under **Section 41 of the CrPC**. This section pertains to ..."
+    },
+    {
+      "id": 60,
+      "prompt": "What is the procedure to file a consumer complaint online in India and what compensation can I claim?",
+      "category": "Scenario",
+      "expected_agent": "Scenario",
+      "status": "PASS",
+      "agents_used": [
+        "Scenario",
+        "Legislation"
+      ],
+      "response_len": 5280,
+      "elapsed": 143.5,
+      "tokens": 7839,
+      "error_detail": "",
+      "response_preview": "## Procedure for Filing a Consumer Complaint Online in India and Claimable Compensation\n\nConsumers in India have a streamlined process for filing complaints online, primarily through the E-Daakhil portal, established under the Consumer Protection Act, 2019. This portal aims to provide an accessible, transparent, and efficient mechanism for seeking redressal.\n\n### Procedure for Filing an Online Consumer Complaint\n\nThe E-Daakhil portal (https://edaakhil.nic.in) facilitates the electronic filing of..."
+    },
+    {
+      "id": 61,
       "prompt": "What comes after section 35 of BNS?",
       "category": "Edge-Nearby",
       "expected_agent": "Newacts",
@@ -369,13 +942,13 @@
         "Newacts"
       ],
       "response_len": 162,
-      "elapsed": 9.4,
+      "elapsed": 143.5,
       "tokens": 620,
       "error_detail": "",
       "response_preview": "Section 36 of The Bharatiya Nyaya Sanhita, 2023, titled \"Right of private defence against the act of a person with mental illness, etc.\", comes after Section 35.\n"
     },
     {
-      "id": 25,
+      "id": 62,
       "prompt": "theft",
       "category": "Edge-Vague",
       "expected_agent": null,
@@ -384,14 +957,14 @@
         "Newacts",
         "Judgment"
       ],
-      "response_len": 9196,
-      "elapsed": 33.0,
-      "tokens": 28014,
+      "response_len": 7890,
+      "elapsed": 128.7,
+      "tokens": 28024,
       "error_detail": "",
-      "response_preview": "Theft is defined as the dishonest moving of any movable property out of the possession of any person without that person's consent, with the intention to take it. This definition is consistent under both the Bharatiya Nyaya Sanhita, 2023 (BNS) and the Indian Penal Code, 1860 (IPC).\n\n## Statutory Basis\n\n### Definition and General Punishment for Theft\n\n-   **Bharatiya Nyaya Sanhita, 2023 (BNS):**\n    -   **Section 303(1): Theft** defines theft as \"dishonestly moving any movable property out of the..."
+      "response_preview": "Theft is defined as the dishonest moving of any movable property out of the possession of any person without that person's consent, with the intention to take it. This definition is consistent under both the Bharatiya Nyaya Sanhita, 2023 (BNS) and the Indian Penal Code, 1860 (IPC).\n\n## Statutory Basis\n\n### Definition and Punishment for Theft\n\n-   **Bharatiya Nyaya Sanhita, 2023 (BNS):**\n    -   **Section 303(1): Theft** defines theft. It includes explanations regarding things attached to the ear..."
     },
     {
-      "id": 26,
+      "id": 63,
       "prompt": "Rule 3 of Maharashtra Rent Control Rules",
       "category": "Edge-NonSection",
       "expected_agent": "Legislation",
@@ -399,14 +972,14 @@
       "agents_used": [
         "Legislation"
       ],
-      "response_len": 203,
-      "elapsed": 6.7,
-      "tokens": 733,
+      "response_len": 176,
+      "elapsed": 94.2,
+      "tokens": 727,
       "error_detail": "",
-      "response_preview": "Rule 3 of the Maharashtra Rent Control Rules, 2017, titled \"Receipt for rent,\" states that a receipt given under section 31 for the amount of rent received in respect of any premises shall be in Form I.\n"
+      "response_preview": "Rule 3 of the Maharashtra Rent Control Rules, 2017, states that a receipt given under section 31 for the amount of rent received in respect of any premises shall be in Form I.\n"
     },
     {
-      "id": 27,
+      "id": 64,
       "prompt": "Sections 302, 304, 304a, 307 and 376 of IPC",
       "category": "Edge-ManySection",
       "expected_agent": "Newacts",
@@ -414,11 +987,103 @@
       "agents_used": [
         "Newacts"
       ],
-      "response_len": 9796,
-      "elapsed": 10.3,
-      "tokens": 5562,
+      "response_len": 9622,
+      "elapsed": 94.2,
+      "tokens": 5503,
       "error_detail": "",
       "response_preview": "**Section 302 of The Indian Penal Code 1860 (Punishment for murder)**\n\n-   **Old Provision:** Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.\n-   **New Provision (Section 103 of Bharatiya Nyaya Sanhita, 2023):**\n    -   (1) Whoever commits murder shall be punished with death or imprisonment for life, and shall also be liable to fine.\n    -   (2) When a group of five or more persons acting in concert commits murder on the ground of ..."
+    },
+    {
+      "id": 65,
+      "prompt": "define murder",
+      "category": "Edge-Concept",
+      "expected_agent": null,
+      "status": "PASS",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "response_len": 270769,
+      "elapsed": 128.0,
+      "tokens": 65664,
+      "error_detail": "",
+      "response_preview": "This request is for a legal explanation.\n\n**Definition of Murder in Indian Law**\n\nMurder is defined under **Section 300 of the Indian Penal Code, 1860 (IPC)**. It is the most serious form of homicide and is distinguished from culpable homicide not amounting to murder by the presence of specific intentions or knowledge.\n\n**Key Elements of Murder:**\n\nFor an act to constitute murder, the following elements must be present:\n\n1.  **Actus Reus (The Guilty Act):** The accused must have caused the death..."
+    },
+    {
+      "id": 66,
+      "prompt": "Section 420 IPC punishment for cheating",
+      "category": "Newacts-Single",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 1050,
+      "elapsed": 130.1,
+      "tokens": 1137,
+      "error_detail": "",
+      "response_preview": "**Old Provision:**\n\n-   **Section 420 of The Indian Penal Code 1860 (Cheating and dishonestly inducing delivery of property):** Whoever cheats and thereby dishonestly induces the person deceived to deliver any property to any person, or to make, alter or destroy the whole or any part of a valuable security, or anything which is signed or sealed, and which is capable of being converted into a valuable security, shall be punished with imprisonment of either description for a term which may extend ..."
+    },
+    {
+      "id": 67,
+      "prompt": "What is Section 34 of Indian Contract Act?",
+      "category": "Legislation-Single",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 718,
+      "elapsed": 130.1,
+      "tokens": 1004,
+      "error_detail": "",
+      "response_preview": "Section 34 of The Indian Contract Act, 1872, titled \"When event on which contract is contingent to be deemed impossible, if it is the future conduct of a living person,\" states that if the future event on which a contract is contingent is the way a person will act at an unspecified time, the event will be considered impossible when that person does anything that makes it impossible for them to act in that way within any definite time or otherwise than under further contingencies.\n\nAn illustratio..."
+    },
+    {
+      "id": 68,
+      "prompt": "Article 19(1)(a) freedom of expression",
+      "category": "Constitution",
+      "expected_agent": "Constitution",
+      "status": "PASS",
+      "agents_used": [
+        "Constitution",
+        "Judgment"
+      ],
+      "response_len": 4636,
+      "elapsed": 76.8,
+      "tokens": 20150,
+      "error_detail": "",
+      "response_preview": "## Article 19(1)(a) Freedom of Speech and Expression\n\n### Statutory Basis\n\nArticle 19(1)(a) of The Constitution of India, 1950, guarantees that \"all citizens shall have the right to freedom of speech and expression.\"\n\n### Judicial Interpretation and Application\n\nThe right to freedom of speech and expression under Article 19(1)(a) is a fundamental right that has been extensively interpreted and applied by the Indian judiciary across various contexts. While this freedom is broad, it is not absolut..."
+    },
+    {
+      "id": 69,
+      "prompt": "habeas corpus meaning and legal significance",
+      "category": "Maxim",
+      "expected_agent": "Maxim",
+      "status": "PASS",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "response_len": 1802,
+      "elapsed": 64.4,
+      "tokens": 503,
+      "error_detail": "",
+      "response_preview": "### Habeas Corpus: Meaning and Legal Significance\n\n**Meaning:**\n\n-   \"Habeas corpus\" is a Latin term meaning \"you shall have the body.\"\n-   It is a writ (a formal written order) issued by a court.\n-   It commands a person or authority holding another person in custody to produce that person before the court.\n-   The purpose is to determine if the detention is lawful.\n\n**Legal Significance:**\n\n-   **Safeguard Against Unlawful Detention:** It is a fundamental right and a crucial remedy against arb..."
+    },
+    {
+      "id": 70,
+      "prompt": "Supreme Court landmark judgment on Aadhaar privacy",
+      "category": "SCI-Landmark",
+      "expected_agent": "SCI_Judgment",
+      "status": "PASS",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "response_len": 1384,
+      "elapsed": 74.8,
+      "tokens": 14720,
+      "error_detail": "",
+      "response_preview": "## Supreme Court Landmark Judgment on Aadhaar Privacy\n\nThe landmark Supreme Court judgment concerning Aadhaar and privacy is **Justice K.S. Puttaswamy (Retd.) vs Union of India**. This pivotal case established the constitutional right to privacy in India and examined the implications of the Aadhaar scheme on individual privacy rights.\n\n### Case Law: Justice K.S. Puttaswamy (Retd.) vs Union of India\n\n-   **Case No**: W.P.(C) No.-000494-000494 - 2012\n-   **Date**: 11-08-2015\n-   **Bench**: J. Chel..."
     }
   ]
 }

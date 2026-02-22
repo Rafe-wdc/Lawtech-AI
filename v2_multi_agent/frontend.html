@@ -525,6 +525,70 @@
     font-size: 9px; padding: 1px 6px; border-radius: 8px;
     background: rgba(108,99,255,0.15); color: var(--accent2); font-weight: 600;
   }
+  .citation-expand-btn {
+    color: var(--blue); font-size: 11px; cursor: pointer; margin-top: 4px;
+    background: none; border: none; padding: 0; font-family: inherit;
+  }
+  .citation-expand-btn:hover { text-decoration: underline; }
+  .citation-full-content {
+    display: none; margin-top: 8px; padding: 10px; background: var(--surface2);
+    border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--text);
+    max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  .citation-full-content.visible { display: block; }
+
+  /* --- Response Actions (Copy, Export, Feedback) --- */
+  .response-actions {
+    display: flex; gap: 8px; align-items: center; margin-top: 10px;
+    padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .response-action-btn {
+    background: transparent; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text2); font-size: 11px; padding: 4px 10px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px; transition: all 0.15s; font-family: inherit;
+  }
+  .response-action-btn:hover { background: var(--surface); color: var(--text); border-color: var(--accent); }
+  .response-action-btn.copied { color: var(--green); border-color: var(--green); }
+  .feedback-btn {
+    background: transparent; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 14px; padding: 4px 8px; cursor: pointer; transition: all 0.15s; line-height: 1;
+  }
+  .feedback-btn:hover { background: var(--surface); }
+  .feedback-btn.active-up { background: rgba(52,211,153,0.15); border-color: var(--green); }
+  .feedback-btn.active-down { background: rgba(248,113,113,0.15); border-color: var(--red); }
+  .feedback-comment {
+    display: none; margin-top: 6px; gap: 6px; align-items: center;
+  }
+  .feedback-comment.visible { display: flex; }
+  .feedback-comment input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); padding: 6px 10px; font-size: 12px;
+    font-family: inherit; outline: none;
+  }
+
+  /* --- Related Sections --- */
+  .related-sections { margin-top: 12px; }
+  .related-sections-title {
+    font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 8px;
+  }
+  .related-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px;
+    border-radius: 16px; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25);
+    color: var(--green); font-size: 12px; cursor: pointer; transition: all 0.15s;
+    margin: 3px 4px 3px 0;
+  }
+  .related-chip:hover { background: rgba(52,211,153,0.2); border-color: var(--green); }
+
+  /* --- Follow-up Suggestions --- */
+  .followup-section { margin-top: 12px; }
+  .followup-title { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 8px; }
+  .followup-chip {
+    display: inline-block; padding: 6px 14px; border-radius: 16px;
+    background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.25);
+    color: var(--accent2); font-size: 12px; cursor: pointer; transition: all 0.15s;
+    margin: 3px 4px 3px 0;
+  }
+  .followup-chip:hover { background: rgba(108,99,255,0.2); border-color: var(--accent); }
 
   /* --- Context Bar (below chat header) --- */
   .context-bar {
@@ -604,7 +668,7 @@
     <div style="padding: 12px; border-top: 1px solid var(--border);">
       <div class="field-group" style="margin-bottom: 8px;">
         <label>API Base URL</label>
-        <input type="text" id="apiBase" value="http://localhost:5000" />
+        <input type="text" id="apiBase" value="http://localhost:5055" />
       </div>
       <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="checkHealth()">
         Test Connection
@@ -915,7 +979,8 @@ async function sendChatBatch(query, threadId) {
     threadId: currentThreadId,
   });
 
-  addChatMsg('ai', data.result, data.agents_used, data.total_tokens_consumed, elapsed, data.source);
+  addChatMsg('ai', data.result, data.agents_used, data.total_tokens_consumed, elapsed, data.source,
+    data.conversation_turn || currentTurnCount, data.related_sections, data.followup_suggestions);
   addLog('success', `Response: ${data.agents_used.join(',')} | ${data.total_tokens_consumed} tokens | ${elapsed}s | ${(data.source || []).length} sources`);
   if (data.query_rewritten) {
     addLog('info', `Query rewritten: "${data.effective_query}"`);
@@ -1030,6 +1095,7 @@ async function sendChatStream(query, threadId) {
         } else if (event.type === 'response') {
           // Show final response, hide status
           content = event.content;
+          msgDiv.dataset.markdown = content || '';
           const statusEl = document.getElementById('streamStatus');
           if (statusEl) statusEl.style.display = 'none';
           const stepsEl = document.getElementById('streamSteps');
@@ -1044,6 +1110,25 @@ async function sendChatStream(query, threadId) {
         } else if (event.type === 'sources') {
           sourcesData = event.data || [];
           addLog('info', `Received ${sourcesData.length} citation sources`);
+
+        } else if (event.type === 'related_sections') {
+          var relData = event.data || [];
+          if (relData.length > 0) {
+            var relDiv = document.createElement('div');
+            relDiv.innerHTML = renderRelatedSections(relData);
+            msgDiv.appendChild(relDiv);
+          }
+          addLog('info', `Received ${relData.length} related sections`);
+
+        } else if (event.type === 'followup_suggestions') {
+          var sugData = event.data || [];
+          if (sugData.length > 0) {
+            var sugDiv = document.createElement('div');
+            sugDiv.innerHTML = renderFollowupSuggestions(sugData);
+            msgDiv.appendChild(sugDiv);
+            scrollChat();
+          }
+          addLog('info', `Received ${sugData.length} follow-up suggestions`);
 
         } else if (event.type === 'done') {
           agents = event.agents_used || [];
@@ -1091,12 +1176,18 @@ async function sendChatStream(query, threadId) {
     msgDiv.appendChild(citDiv);
   }
 
-  // Add tokens footer
+  // Add tokens footer + response actions
   if (totalTokens > 0) {
     const tokensDiv = document.createElement('div');
     tokensDiv.className = 'tokens';
     tokensDiv.textContent = `${totalTokens} tokens | ${sourcesData.length} sources`;
     msgDiv.appendChild(tokensDiv);
+  }
+  if (content) {
+    msgDiv.dataset.turn = currentTurnCount || '0';
+    const actionsDiv = document.createElement('div');
+    actionsDiv.innerHTML = renderResponseActions(currentTurnCount);
+    msgDiv.appendChild(actionsDiv);
   }
 
   // Handle no response
@@ -1122,11 +1213,13 @@ async function sendChatStream(query, threadId) {
     `Thread: ${(currentThreadId || '').substring(0, 8)}... | Turn ${currentTurnCount} | Agents: ${agents.join(', ') || 'none'} | Streamed`;
 }
 
-function addChatMsg(type, text, agents, tokens, elapsed, sources) {
+function addChatMsg(type, text, agents, tokens, elapsed, sources, turnNumber, relatedSections, followupSuggestions) {
   const div = document.createElement('div');
   div.className = `msg ${type}`;
 
   if (type === 'ai') {
+    div.dataset.markdown = text || '';
+    if (turnNumber) div.dataset.turn = turnNumber;
     let html = '';
     if (agents && agents.length) {
       html += '<div class="agents-badge">' +
@@ -1137,9 +1230,16 @@ function addChatMsg(type, text, agents, tokens, elapsed, sources) {
     if (sources && sources.length) {
       html += renderCitations(sources);
     }
+    if (relatedSections && relatedSections.length) {
+      html += renderRelatedSections(relatedSections);
+    }
+    if (followupSuggestions && followupSuggestions.length) {
+      html += renderFollowupSuggestions(followupSuggestions);
+    }
     if (tokens || elapsed) {
       html += `<div class="tokens">${tokens ? tokens + ' tokens' : ''}${elapsed ? ' | ' + elapsed + 's' : ''}</div>`;
     }
+    html += renderResponseActions(turnNumber);
     div.innerHTML = html;
   } else {
     div.textContent = text;
@@ -1462,8 +1562,15 @@ function renderCitations(sources) {
 
     var excerptHtml = '';
     if (s.content && s.content.length && s.content[0]) {
-      var excerpt = s.content[0].substring(0, 150);
+      var fullText = Array.isArray(s.content) ? s.content.join('\n\n') : String(s.content);
+      var excerpt = fullText.substring(0, 150);
+      var cardUid = 'card_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
       excerptHtml = '<div class="citation-excerpt">' + escapeHtml(excerpt) + '...</div>';
+      if (fullText.length > 160) {
+        excerptHtml += '<button class="citation-expand-btn" onclick="toggleCardContent(\'' + cardUid + '\')">' +
+          '<span id="' + cardUid + '_label">Show more</span></button>' +
+          '<div class="citation-full-content" id="' + cardUid + '_full">' + escapeHtml(fullText) + '</div>';
+      }
     }
 
     var titleHtml = escapeHtml(s.title || 'Source');
@@ -1503,6 +1610,150 @@ function toggleCitations(id) {
     list.classList.add('expanded');
     chevron.classList.add('open');
   }
+}
+
+function toggleCardContent(cardUid) {
+  var fullEl = document.getElementById(cardUid + '_full');
+  var labelEl = document.getElementById(cardUid + '_label');
+  if (fullEl.classList.contains('visible')) {
+    fullEl.classList.remove('visible');
+    labelEl.textContent = 'Show more';
+  } else {
+    fullEl.classList.add('visible');
+    labelEl.textContent = 'Show less';
+  }
+}
+
+// ============================================================
+// Response Actions (Copy, Export, Feedback)
+// ============================================================
+function renderResponseActions(turnNumber) {
+  var tn = turnNumber || 0;
+  return '<div class="response-actions">' +
+    '<button class="response-action-btn" onclick="copyResponse(this)">\uD83D\uDCCB Copy</button>' +
+    '<button class="response-action-btn" onclick="exportResponse(this)">\uD83D\uDCE5 Export .md</button>' +
+    '<div style="margin-left:auto;display:flex;gap:6px">' +
+      '<button class="feedback-btn" data-turn="' + tn + '" onclick="sendFeedback(this,\'up\')">\uD83D\uDC4D</button>' +
+      '<button class="feedback-btn" data-turn="' + tn + '" onclick="sendFeedback(this,\'down\')">\uD83D\uDC4E</button>' +
+    '</div>' +
+  '</div>' +
+  '<div class="feedback-comment" id="fb_comment_' + tn + '">' +
+    '<input type="text" placeholder="What went wrong? (optional)" onkeydown="if(event.key===\'Enter\')submitFeedbackComment(this)" />' +
+    '<button class="btn btn-secondary btn-sm" onclick="submitFeedbackComment(this.previousElementSibling)">Send</button>' +
+  '</div>';
+}
+
+function copyResponse(btn) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  navigator.clipboard.writeText(markdown).then(function() {
+    btn.classList.add('copied');
+    var orig = btn.innerHTML;
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.classList.remove('copied'); btn.innerHTML = orig; }, 2000);
+  });
+}
+
+function exportResponse(btn) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  var blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'lawttorney_response_' + new Date().toISOString().slice(0, 10) + '.md';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function sendFeedback(btn, rating) {
+  if (!currentThreadId) return;
+  var turn = parseInt(btn.dataset.turn) || 0;
+  if (!turn) return;
+
+  var row = btn.parentElement;
+  row.querySelectorAll('.feedback-btn').forEach(function(b) {
+    b.classList.remove('active-up', 'active-down');
+  });
+  btn.classList.add('active-' + rating);
+
+  var commentEl = document.getElementById('fb_comment_' + turn);
+  if (rating === 'down' && commentEl) {
+    commentEl.classList.add('visible');
+  } else if (commentEl) {
+    commentEl.classList.remove('visible');
+  }
+
+  try {
+    await fetch(getBase() + '/pyapi/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thread_id: currentThreadId, turn_number: turn, rating: rating }),
+    });
+    addLog('info', 'Feedback sent: ' + rating + ' for turn ' + turn);
+  } catch (e) {
+    addLog('error', 'Feedback failed: ' + e.message);
+  }
+}
+
+async function submitFeedbackComment(input) {
+  var comment = input.value.trim();
+  if (!comment || !currentThreadId) return;
+  var msgEl = input.closest('.msg');
+  var downBtn = msgEl.querySelector('.feedback-btn[data-turn]');
+  var turn = parseInt(downBtn.dataset.turn) || 0;
+
+  try {
+    await fetch(getBase() + '/pyapi/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thread_id: currentThreadId, turn_number: turn, rating: 'down', comment: comment }),
+    });
+    input.closest('.feedback-comment').classList.remove('visible');
+    input.value = '';
+    addLog('info', 'Feedback comment sent for turn ' + turn);
+  } catch (e) {
+    addLog('error', 'Feedback comment failed: ' + e.message);
+  }
+}
+
+// ============================================================
+// Related Sections & Follow-up Suggestions
+// ============================================================
+function renderRelatedSections(sections) {
+  if (!sections || !sections.length) return '';
+  var chips = sections.map(function(s) {
+    var label = '\u00A7 Section ' + escapeHtml(String(s.section_number));
+    if (s.title) label += ' \u2014 ' + escapeHtml(s.title.substring(0, 60));
+    var query = 'Section ' + s.section_number + ' of ' + (s.act_name || 'the Act');
+    return '<span class="related-chip" onclick="sendRelatedQuery(\'' +
+      escapeHtml(query).replace(/'/g, "\\'") + '\')">' + label + '</span>';
+  }).join('');
+  return '<div class="related-sections">' +
+    '<div class="related-sections-title">\uD83D\uDCCC Related Sections</div>' +
+    chips + '</div>';
+}
+
+function sendRelatedQuery(query) {
+  document.getElementById('chatInput').value = query;
+  sendChat();
+}
+
+function renderFollowupSuggestions(suggestions) {
+  if (!suggestions || !suggestions.length) return '';
+  var chips = suggestions.map(function(s) {
+    return '<span class="followup-chip" onclick="sendFollowup(this)">' + escapeHtml(s) + '</span>';
+  }).join('');
+  return '<div class="followup-section">' +
+    '<div class="followup-title">Suggested follow-ups</div>' +
+    chips + '</div>';
+}
+
+function sendFollowup(chip) {
+  document.getElementById('chatInput').value = chip.textContent;
+  sendChat();
 }
 
 // ============================================================

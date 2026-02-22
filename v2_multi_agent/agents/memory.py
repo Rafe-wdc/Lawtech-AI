@@ -189,7 +189,7 @@ def _rewrite_query(
             if isinstance(msg, HumanMessage):
                 history_lines.append(f"User: {msg.content}")
             elif isinstance(msg, AIMessage):
-                content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
+                content = msg.content[:1500] + "..." if len(msg.content) > 1500 else msg.content
                 history_lines.append(f"Assistant: {content}")
 
         chat_history_text = "\n".join(history_lines)

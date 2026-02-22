@@ -254,7 +254,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             prompt = ChatPromptTemplate.from_template(SYNTHESIS_PROMPT)
             chain = prompt | llm
 
-            response = chain.invoke({
+            from core.streaming import stream_chain_response
+            response = await stream_chain_response(chain, {
                 "query": query,
                 "agent_results": agent_results_text,
             })

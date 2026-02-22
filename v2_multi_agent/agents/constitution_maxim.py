@@ -217,7 +217,8 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
                     ("user", "{query}"),
                 ])
                 chain = prompt | llm
-                response = chain.invoke({
+                from core.streaming import stream_chain_response
+                response = await stream_chain_response(chain, {
                     "query": query,
                     "chat_history": chat_history,
                     "date": str(date.today()),
@@ -281,7 +282,8 @@ async def constitution_maxim_node(state: LegalAgentState) -> dict:
             ])
             chain = prompt | llm
 
-            response = chain.invoke({
+            from core.streaming import stream_chain_response
+            response = await stream_chain_response(chain, {
                 "query": query,
                 "docs": docs_text,
                 "chat_history": chat_history,

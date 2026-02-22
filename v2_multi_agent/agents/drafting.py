@@ -138,7 +138,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
             ])
             chain = prompt | llm
 
-            llm_response = chain.invoke({
+            from core.streaming import stream_chain_response
+            llm_response = await stream_chain_response(chain, {
                 "query": query,
                 "docs": template_text,
                 "chat_history": chat_history,

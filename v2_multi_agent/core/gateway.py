@@ -280,9 +280,9 @@ async def search_stream(data: SearchRequest, request: Request):
     - response: The final clean answer (after all agents complete)
     - done: Completion signal with metadata
 
-    Uses stream_mode="updates" only (not "messages") to avoid
-    leaking intermediate LLM outputs (metadata extraction JSON,
-    task classification JSON, etc.) into the response stream.
+    Uses stream_mode=["updates", "custom"] to get both:
+    - Node-level updates (status messages, state captures)
+    - Token-by-token streaming from domain agents via get_stream_writer()
     """
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
@@ -307,11 +307,20 @@ async def search_stream(data: SearchRequest, request: Request):
         query_rewritten = False
 
         try:
-            async for chunk in agent_graph.astream(
+            async for event in agent_graph.astream(
                 initial_state,
                 config=config,
-                stream_mode="updates",
+                stream_mode=["updates", "custom"],
             ):
+                mode, chunk = event
+
+                # --- Custom events: token-by-token streaming ---
+                if mode == "custom":
+                    if isinstance(chunk, dict) and chunk.get("type") == "token":
+                        yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
+                    continue
+
+                # --- Update events: node-level progress ---
                 for node_name, update in chunk.items():
                     step_count += 1
                     log.debug("SSE agent step",

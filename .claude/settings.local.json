@@ -20,7 +20,17 @@
       "Bash(start:*)",
       "Bash(find:*)",
       "Bash(PORT=5005 python:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(pkill:*)",
+      "Bash(PYTHONPATH=v2_multi_agent python:*)",
+      "Bash(taskkill:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell -Command \"Stop-Process -Id 31456 -Force -ErrorAction SilentlyContinue; Stop-Process -Id 14564 -Force -ErrorAction SilentlyContinue; Stop-Process -Id 13024 -Force -ErrorAction SilentlyContinue; Write-Host ''Done''\")",
+      "Bash(powershell -Command:*)",
+      "Bash(wmic process where \"ProcessId=31456\" delete:*)",
+      "Bash(wmic process:*)",
+      "Bash(PYTHONPATH=/d/agentic_proj/Lawtech-AI/v2_multi_agent python:*)",
+      "Bash(PYTHONPATH=/d/agentic_proj/Lawtech-AI/v2_multi_agent EMBEDDING_SERVICE_URL=http://localhost:5200 python:*)"
     ]
   }
 }

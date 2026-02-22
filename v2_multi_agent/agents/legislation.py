@@ -6,6 +6,12 @@ Handles: "Section 15 of Companies Act", "Consumer Protection Act refunds", etc.
 
 Uses: Gemini Flash Lite (generation) + GPT-4o-mini (match phrase extraction)
 Data Source: Elasticsearch "legislation" index
+
+Search strategy:
+1. Parse query for section type/number(s)/act name
+2. Multi-section path: if multiple sections detected, search each in parallel
+3. Single-section path: multi-query ES search with source aggregation
+4. Topic fallback: if no section parsed and no hits, use BM25 topic search
 """
 
 from __future__ import annotations
@@ -13,7 +19,6 @@ from __future__ import annotations
 import os
 import re
 from datetime import date
-from collections import Counter
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -25,99 +30,14 @@ from core.settings import ES_INDICES
 from core.logger import get_logger, log_time
 from config.prompts import LEGISLATION_SYSTEM_PROMPT
 
+from tools.inline.section_parser import parse_section_info, parse_multi_section_info
+from tools.shared.elasticsearch_tools import (
+    _create_search_variations,
+    _search_legislation_by_topic,
+    _search_legislation_multi_section,
+)
+
 log = get_logger("Legislation")
-
-
-# --- Section Parsing (migrated from v1 legislation_retriever.py) ---
-
-SECTION_TYPES = [
-    'section', 'rule', 'rules', 'order', 'regulation', 'scheme', 'procedure',
-    'policy', 'article', 'condition', 'statute', 'ordinance', 'standing',
-    'rule and regulation', 'bye-law', 'bye-laws', 'bye law', 'bye laws',
-    'by-law', 'plan', 'niyam', 'adhiniyam', 'code', 'notification',
-    'instruction', 'manual', 'licence', 'roster', 'process', 'tariff',
-    'regulatory', 'schedule', 'function', 'byelaw', 'byelaws', 'direction',
-    'guideline', 'criteria', 'law', 'clause', 'board standing order',
-]
-
-
-def _extract_section_info(query: str) -> dict | None:
-    """Extract section type, number, and act name from natural language query."""
-    query_lower = query.lower().strip()
-
-    # Create regex pattern (longest first to avoid partial matches)
-    section_pattern = '|'.join(
-        re.escape(st) for st in sorted(SECTION_TYPES, key=len, reverse=True)
-    )
-    number_pattern = r'(\d+[a-z]*|\b[ivx]+\b|[a-z]\d*|\d+[a-z]\d*)'
-
-    section_matches = re.findall(
-        rf'({section_pattern})\s+{number_pattern}', query_lower
-    )
-
-    if not section_matches:
-        return None
-
-    section_type, section_number = section_matches[0]
-
-    # Extract act/law name
-    act_indicators = r'(?:act|rule|law|code|regulation|ordinance|statute|scheme|policy|manual|notification)'
-    act_patterns = [
-        rf'of\s+(?:the\s+)?(.+?{act_indicators}[^,]*)',
-        rf'(.+?{act_indicators}[^,]*?).*?{section_type}',
-        rf'([\w\s]+{act_indicators}[\w\s]*)',
-    ]
-
-    act_name = None
-    for pattern in act_patterns:
-        match = re.search(pattern, query_lower)
-        if match:
-            act_name = match.group(1).strip()
-            act_name = re.sub(r'^\s*(of\s+(?:the\s+)?|the\s+)', '', act_name)
-            act_name = re.sub(r'\s*,\s*\d{4}.*', '', act_name)
-            break
-
-    parsed = {
-        'section_type': section_type,
-        'section_number': section_number,
-        'act_name': act_name or '',
-    }
-    log.debug("Section info extracted", **parsed)
-    return parsed
-
-
-def _create_search_variations(original_query: str, parsed_info: dict | None) -> list[str]:
-    """Create multiple search query variations."""
-    queries = [original_query]
-
-    if parsed_info:
-        st = parsed_info['section_type']
-        sn = parsed_info['section_number']
-        act = parsed_info['act_name']
-
-        queries.extend([
-            f"{st} {sn} of {act}",
-            f"{st} {sn} of the {act}",
-            f"{st.title()} {sn} of {act.title()}",
-            f"{st.title()} {sn} of the {act.title()}",
-        ])
-
-        if st == 'rule':
-            queries.append(f"rules {sn} of {act}")
-        elif st == 'rules':
-            queries.append(f"rule {sn} of {act}")
-
-    # Deduplicate preserving order
-    seen = set()
-    unique = []
-    for q in queries:
-        q_clean = re.sub(r'\s+', ' ', q.strip().lower())
-        if q_clean not in seen:
-            seen.add(q_clean)
-            unique.append(q)
-
-    log.debug("Search variations created", count=len(unique))
-    return unique
 
 
 # --- Match Phrase Extraction ---
@@ -156,14 +76,16 @@ def _extract_match_phrase(query: str, text: str, title: str) -> QueryMetadata:
     return chain.invoke({'query': query, 'text': text, 'title': title})
 
 
-# --- Elasticsearch Search ---
+# --- Elasticsearch Search (single-section path) ---
 
 def _search_legislation(query: str) -> tuple[list[dict], str | None]:
     """Multi-query ES search for legislation. Returns (hits, most_common_source)."""
+    from collections import Counter
+
     es = get_es_client()
     index = ES_INDICES["legislation"]
 
-    parsed_info = _extract_section_info(query)
+    parsed_info = parse_section_info(query)
     search_queries = _create_search_variations(query, parsed_info)
 
     all_hits = []
@@ -239,6 +161,16 @@ def _search_legislation(query: str) -> tuple[list[dict], str | None]:
                 {"match_phrase": {"page_content": {"query": variation, "boost": 4.0}}}
             )
 
+        # Boost section header pattern to prioritize the actual section
+        # over cross-referencing sections (e.g., "section number: Section 138")
+        for header_var in [
+            f"section number: {st.title()} {sn}",
+            f"section number: {st} {sn}",
+        ]:
+            should_clauses.append(
+                {"match_phrase": {"page_content": {"query": header_var, "boost": 8.0}}}
+            )
+
         source_query = {
             "query": {
                 "bool": {
@@ -274,10 +206,10 @@ async def legislation_node(state: LegalAgentState) -> dict:
     """Retrieve legislation and generate response.
 
     Flow:
-    1. Parse section type/number/act name from query
-    2. Multi-query search in ES "legislation" index
-    3. Find most relevant source document
-    4. Targeted sub-search within that source
+    1. Parse query with multi-section parser
+    2. If multiple sections: use multi-section search path
+    3. If single section: use standard multi-query search
+    4. If no section and no hits: fall back to topic-based search
     5. Generate response using retrieved statute text
     """
     query = state.get("query", state["original_query"])
@@ -285,11 +217,68 @@ async def legislation_node(state: LegalAgentState) -> dict:
     log.info("Agent started", query=query[:100])
 
     try:
-        with log_time(log, "ES retrieval"):
-            hits, source_name = _search_legislation(query)
+        # Strip subsection parentheticals for cleaner ES matching
+        # e.g. "Section 138(1) of NI Act" → "Section 138 of NI Act"
+        # Keep original query for LLM generation and user display
+        clean_query = re.sub(r'\(\w+\)', '', query).strip()
+        clean_query = re.sub(r'\s+', ' ', clean_query)
+        if clean_query != query:
+            log.info("Stripped subsections for ES search",
+                     original=query[:80], clean=clean_query[:80])
+
+        # Step 1: Parse query for section info (use original for full parsing)
+        multi_parsed = parse_multi_section_info(query)
+        search_mode = "standard"
+
+        # Step 2: Choose search strategy
+        if multi_parsed and len(multi_parsed["section_numbers"]) > 1:
+            # --- Multi-section path ---
+            search_mode = "multi_section"
+            log.info("Multi-section query detected",
+                     sections=multi_parsed["section_numbers"],
+                     act=multi_parsed["act_name"])
+
+            with log_time(log, "Multi-section ES retrieval"):
+                result = _search_legislation_multi_section(
+                    clean_query,
+                    multi_parsed["section_numbers"],
+                    multi_parsed["act_name"],
+                )
+
+            # Convert tool result format to raw ES hits format for downstream
+            hits = []
+            source_name = None
+            for h in result["hits"]:
+                hits.append({
+                    "_source": {"page_content": h["content"], "source": h["source"]},
+                    "_score": h["score"],
+                })
+                if not source_name:
+                    source_name = h["source"]
+
+        else:
+            # --- Standard single-section path (use clean_query) ---
+            with log_time(log, "ES retrieval"):
+                hits, source_name = _search_legislation(clean_query)
+
+        # Step 3: Topic fallback if no hits and no section was identified
+        if not hits and not multi_parsed:
+            search_mode = "topic"
+            log.info("No section hits, trying topic-based search")
+            with log_time(log, "Topic ES retrieval"):
+                topic_result = _search_legislation_by_topic(clean_query)
+
+            if topic_result["hits"]:
+                source_name = topic_result["source"]
+                hits = []
+                for h in topic_result["hits"]:
+                    hits.append({
+                        "_source": {"page_content": h["content"], "source": h["source"]},
+                        "_score": h["score"],
+                    })
 
         if not hits:
-            log.warning("No results found")
+            log.warning("No results found", search_mode=search_mode)
             return {
                 "agent_results": {"Legislation": AgentResult(
                     agent_name="Legislation",
@@ -299,16 +288,16 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 )},
             }
 
-        # Convert hits to documents
+        # Step 4: Convert hits to documents
         docs_text = "\n\n".join(h["_source"]["page_content"] for h in hits)
         source_file = hits[0]["_source"].get("source", "unknown")
         source_display = os.path.splitext(os.path.basename(source_file))[0]
 
         log.debug("Generating response",
                   source=source_display, docs_count=len(hits),
-                  docs_text_len=len(docs_text))
+                  docs_text_len=len(docs_text), search_mode=search_mode)
 
-        # Generate response
+        # Step 5: Generate response (with 1 retry on disconnect)
         with log_time(log, "LLM generation"):
             llm = get_gemini_flash(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([
@@ -319,13 +308,19 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 ("user", "User Query: {query}"),
             ])
             chain = prompt | llm
-
-            response = chain.invoke({
+            invoke_kwargs = {
                 "query": query,
                 "docs": docs_text,
                 "chat_history": chat_history,
                 "date": str(date.today()),
-            })
+            }
+
+            try:
+                response = chain.invoke(invoke_kwargs)
+            except Exception as llm_err:
+                log.warning("LLM generation failed, retrying once",
+                            error=str(llm_err)[:200])
+                response = chain.invoke(invoke_kwargs)
 
         tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -333,9 +328,10 @@ async def legislation_node(state: LegalAgentState) -> dict:
 
         log.info("Agent completed",
                  source=source_display, response_len=len(response.content),
-                 tokens=tokens)
+                 tokens=tokens, search_mode=search_mode)
 
-        parsed_info = _extract_section_info(query)
+        # Step 6: Build source metadata
+        parsed_info = parse_section_info(query)
         sources = []
         for h in hits:
             hit_source = h["_source"].get("source", "unknown")

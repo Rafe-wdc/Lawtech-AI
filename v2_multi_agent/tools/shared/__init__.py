@@ -11,8 +11,12 @@ Agent-specific tool lists are available via AGENT_TOOLS dict.
 # --- Elasticsearch & Domain Tools ---
 from .elasticsearch_tools import (
     search_legislation,
+    search_legislation_by_topic,
+    search_legislation_multi_section,
     search_judgments,
     search_newacts,
+    search_newacts_by_topic,
+    get_nearby_sections,
     search_drafts,
     get_docs_by_source,
     create_search_variations,
@@ -116,10 +120,14 @@ from .sci_judgment_tools import (
 # ============================================================
 
 ALL_TOOLS = [
-    # Elasticsearch (5)
+    # Elasticsearch (5 + 4 new)
     search_legislation,
+    search_legislation_by_topic,
+    search_legislation_multi_section,
     search_judgments,
     search_newacts,
+    search_newacts_by_topic,
+    get_nearby_sections,
     search_drafts,
     get_docs_by_source,
     # Domain-specific ES helpers (6)
@@ -218,6 +226,8 @@ AGENT_TOOLS = {
     ],
     "legislation": [
         search_legislation,
+        search_legislation_by_topic,
+        search_legislation_multi_section,
         create_search_variations,
         get_docs_by_source,
         extract_match_phrase,
@@ -233,6 +243,8 @@ AGENT_TOOLS = {
     "newacts": [
         extract_act_metadata,
         search_newacts,
+        search_newacts_by_topic,
+        get_nearby_sections,
         map_act_to_source,
         map_old_to_new_law,
         generate_legal_response,

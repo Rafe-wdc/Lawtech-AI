@@ -53,6 +53,9 @@ EMBEDDING_MODELS = {
     "pdf_qa": str(_PROJECT_ROOT.parent / "models" / "all-MiniLM-L6-v2"),
 }
 
+# --- Embedding Service (set to enable remote embeddings, e.g. http://localhost:5100) ---
+EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "")
+
 # --- ChromaDB (absolute paths from project root) ---
 CHROMA_PERSIST_DIRS = {
     "constitution": str(_PROJECT_ROOT.parent / "Routing db" / "constitution db"),

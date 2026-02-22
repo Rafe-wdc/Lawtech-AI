@@ -21,6 +21,7 @@ from google import genai
 from .settings import (
     ELASTICSEARCH_URL,
     EMBEDDING_MODELS,
+    EMBEDDING_SERVICE_URL,
 )
 
 
@@ -85,29 +86,52 @@ def get_genai_client() -> genai.Client:
 
 
 # --- Embedding Models ---
+# When EMBEDDING_SERVICE_URL is set, embeddings are computed by a remote
+# microservice (services/embedding_service.py) instead of loading models
+# locally. This allows multi-worker deployments without OOM crashes.
 
-_retriever_embeddings: HuggingFaceEmbeddings | None = None
-_qa_embeddings: HuggingFaceEmbeddings | None = None
+_retriever_embeddings = None
+_qa_embeddings = None
 
 
-def get_retriever_embeddings() -> HuggingFaceEmbeddings:
-    """BGE-large-en-v1.5 for legal document retrieval (ES hybrid search, ChromaDB)."""
+def get_retriever_embeddings():
+    """BGE-large-en-v1.5 for legal document retrieval (ES hybrid search, ChromaDB).
+
+    Returns a LangChain-compatible Embeddings object — either a remote HTTP
+    client (production) or a local HuggingFaceEmbeddings (development).
+    """
     global _retriever_embeddings
     if _retriever_embeddings is None:
-        _retriever_embeddings = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_MODELS["retriever"],
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
-        )
+        if EMBEDDING_SERVICE_URL:
+            from .embedding_client import RemoteEmbeddings
+            _retriever_embeddings = RemoteEmbeddings(
+                EMBEDDING_SERVICE_URL, model_name="retriever",
+            )
+        else:
+            _retriever_embeddings = HuggingFaceEmbeddings(
+                model_name=EMBEDDING_MODELS["retriever"],
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True},
+            )
     return _retriever_embeddings
 
 
-def get_qa_embeddings() -> HuggingFaceEmbeddings:
-    """all-MiniLM-L6-v2 for PDF document Q&A."""
+def get_qa_embeddings():
+    """all-MiniLM-L6-v2 for PDF document Q&A.
+
+    Returns a LangChain-compatible Embeddings object — either a remote HTTP
+    client (production) or a local HuggingFaceEmbeddings (development).
+    """
     global _qa_embeddings
     if _qa_embeddings is None:
-        _qa_embeddings = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_MODELS["pdf_qa"],
-            model_kwargs={"device": "cpu"},
-        )
+        if EMBEDDING_SERVICE_URL:
+            from .embedding_client import RemoteEmbeddings
+            _qa_embeddings = RemoteEmbeddings(
+                EMBEDDING_SERVICE_URL, model_name="qa",
+            )
+        else:
+            _qa_embeddings = HuggingFaceEmbeddings(
+                model_name=EMBEDDING_MODELS["pdf_qa"],
+                model_kwargs={"device": "cpu"},
+            )
     return _qa_embeddings

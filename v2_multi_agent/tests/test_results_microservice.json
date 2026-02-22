@@ -1,0 +1,428 @@
+{
+  "summary": {
+    "PASS": 27,
+    "WEAK": 0,
+    "FAIL": 0,
+    "ERROR": 0
+  },
+  "total_elapsed": 427.95414662361145,
+  "architecture": {
+    "embedding_port": 5200,
+    "api_port": 5050,
+    "api_workers": 4
+  },
+  "details": [
+    {
+      "id": 1,
+      "prompt": "Section 302 of IPC",
+      "category": "Newacts-Single",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 745,
+      "elapsed": 39.0,
+      "tokens": 839,
+      "error_detail": "",
+      "response_preview": "**Section 302 of The Indian Penal Code 1860 (IPC)**\n\n**Section Name:** Punishment for murder\n\n**Old Provisions:** Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.\n\n**New Provision (Bharatiya Nyaya Sanhita, 2023):**\n\n-   **Section 103:**\n    -   (1) Whoever commits murder shall be punished with death or imprisonment for life, and shall also be liable to fine.\n    -   (2) When a group of five or more persons acting in concert commits ..."
+    },
+    {
+      "id": 2,
+      "prompt": "Section 35 of BNS",
+      "category": "Newacts-Single",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 580,
+      "elapsed": 16.4,
+      "tokens": 706,
+      "error_detail": "",
+      "response_preview": "Section 35 of The Bharatiya Nyaya Sanhita, 2023, titled \"Right of private defence of the body and of property,\" states that every person has a right, subject to the restrictions in section 37, to defend:\n(a) his own body, and the body of any other person, against any offence affecting the human body;\n(b) the property, whether movable or immovable, of himself or of any other person, against any act which is an offence falling under the definition of theft, robbery, mischief or criminal trespass, ..."
+    },
+    {
+      "id": 3,
+      "prompt": "What is Section 438 of CrPC?",
+      "category": "Newacts-Single",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 2043,
+      "elapsed": 16.9,
+      "tokens": 7003,
+      "error_detail": "",
+      "response_preview": "Section 438 of The Code of Criminal Procedure, 1973, titled \"Direction for grant of bail to person apprehending arrest,\" states:\n\n(1) When any person has reason to believe that he may be arrested on an accusation of having committed a non-bailable offence, he may apply to the High Court or the Court of Session for a direction under this section; and that Court may, if it thinks fit, direct that in the event of such arrest, he shall be released on bail.\n\n(2) When the High Court or the Court of Se..."
+    },
+    {
+      "id": 4,
+      "prompt": "Sections 302 and 307 of IPC",
+      "category": "Newacts-Multi",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 4303,
+      "elapsed": 14.6,
+      "tokens": 2525,
+      "error_detail": "",
+      "response_preview": "**Section 302 of The Indian Penal Code 1860 (Punishment for murder)**\n\n-   **Old Provision:** Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.\n\n**Section 307 of The Indian Penal Code 1860 (Attempt to murder)**\n\n-   **Old Provision:** Whoever does any act with such intention or knowledge, and under such circumstances that, if he by that act caused death, he would be guilty of murder, shall be punished with imprisonment of either desc..."
+    },
+    {
+      "id": 5,
+      "prompt": "Explain Sections 64, 65 and 66 of BSA",
+      "category": "Newacts-Multi",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 2119,
+      "elapsed": 10.3,
+      "tokens": 1080,
+      "error_detail": "",
+      "response_preview": "Here are the explanations for Sections 64, 65, and 66 of The Bharatiya Sakshya Adhiniyam, 2023:\n\n**Section 64: Rules as to notice to produce**\n\nThis section deals with the requirement of giving notice before admitting secondary evidence of a document. Secondary evidence of the contents of a document (as referred to in clause (a) of section 60) cannot be presented unless the party intending to use this secondary evidence has first given notice to the party who possesses the original document, or ..."
+    },
+    {
+      "id": 6,
+      "prompt": "Compare Section 154 and Section 161 of CrPC",
+      "category": "Newacts-Multi",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts",
+        "Judgment"
+      ],
+      "response_len": 5894,
+      "elapsed": 20.8,
+      "tokens": 16930,
+      "error_detail": "",
+      "response_preview": "This response synthesizes information regarding Section 154 and Section 161 of the Code of Criminal Procedure, 1973 (CrPC).\n\n## Statutory Basis\n\n### Section 154 of the CrPC: Information in Cognizable Cases\n\nSection 154 of the CrPC deals with the recording of information related to the commission of a **cognizable offence**.\n\n-   **Sub-section (1)** mandates that any information given orally to an officer in charge of a police station about a cognizable offence must be reduced to writing by the o..."
+    },
+    {
+      "id": 7,
+      "prompt": "punishment for theft in BNS",
+      "category": "Newacts-Topic",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 5011,
+      "elapsed": 13.5,
+      "tokens": 5461,
+      "error_detail": "",
+      "response_preview": "Here are the provisions related to punishment for theft in The Bharatiya Nyaya Sanhita, 2023:\n\n-   **Section 313: Punishment for belonging to gang of robbers, dacoits, etc.**\n    Whoever belongs to any gang of persons associated in habitually committing theft or robbery, and not being a gang of dacoits, shall be punished with rigorous imprisonment for a term which may extend to seven years, and shall also be liable to fine.\n\n-   **Section 305: Theft in a dwelling house, or means of transportatio..."
+    },
+    {
+      "id": 8,
+      "prompt": "bail provisions under BNSS",
+      "category": "Newacts-Topic",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 20307,
+      "elapsed": 25.6,
+      "tokens": 11495,
+      "error_detail": "",
+      "response_preview": "Here are the bail provisions under The Bharatiya Nagarik Suraksha Sanhita, 2023:\n\n**Definition of Bail:**\n-   **Section 2(b):** \"bail\" means release of a person accused of or suspected of commission of an offence from the custody of law upon certain conditions imposed by an officer or Court on execution by such person of a bond or a bail bond.\n\n**Types of Offences related to Bail:**\n-   **Section 2(c):** \"bailable offence\" means an offence which is shown as bailable in the First Schedule, or whi..."
+    },
+    {
+      "id": 9,
+      "prompt": "electronic evidence rules in BSA",
+      "category": "Newacts-Topic",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts",
+        "Judgment"
+      ],
+      "response_len": 7780,
+      "elapsed": 29.2,
+      "tokens": 18490,
+      "error_detail": "",
+      "response_preview": "The Bharatiya Sakshya Adhiniyam, 2023 (BSA 2023) significantly modernizes the admissibility and treatment of electronic evidence in India. It explicitly includes electronic and digital records within the definitions of \"document\" and \"evidence,\" ensuring their seamless integration into legal proceedings.\n\n## Statutory Basis for Electronic Evidence under BSA 2023\n\nThe BSA 2023 introduces several key provisions governing electronic evidence:\n\n-   **Section 61: Electronic or Digital Record:** This ..."
+    },
+    {
+      "id": 10,
+      "prompt": "What does Section 100 of BNS say?",
+      "category": "Newacts-Nearby",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 2054,
+      "elapsed": 10.3,
+      "tokens": 2869,
+      "error_detail": "",
+      "response_preview": "Section 100 of The Bharatiya Nyaya Sanhita, 2023, defines \"Culpable homicide\" as follows:\n\n\"Whoever causes death by doing an act with the intention of causing death, or with the intention of causing such bodily injury as is likely to cause death, or with the knowledge that he is likely by such act to cause death, commits the offence of culpable homicide.\"\n\nThe section also provides three illustrations and three explanations:\n\n**Illustrations:**\n(a) A lays sticks and turf over a pit, with the int..."
+    },
+    {
+      "id": 11,
+      "prompt": "Section 528 of BNSS",
+      "category": "Newacts-Nearby",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 413,
+      "elapsed": 8.3,
+      "tokens": 481,
+      "error_detail": "",
+      "response_preview": "Section 528 of The Bharatiya Nagarik Suraksha Sanhita 2023 is titled \"Saving of inherent powers of High Court\". The provision states: \"Nothing in this Sanhita shall be deemed to limit or affect the inherent powers of the High Court to make such orders as may be necessary to give effect to any order under this Sanhita, or to prevent abuse of the process of any Court or otherwise to secure the ends of justice.\"\n"
+    },
+    {
+      "id": 12,
+      "prompt": "Section 3(5) of Bharatiya Nyaya Sanhita",
+      "category": "Newacts-Subsection",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 250,
+      "elapsed": 7.4,
+      "tokens": 4712,
+      "error_detail": "",
+      "response_preview": "Section 3(5) of The Bharatiya Nyaya Sanhita, 2023 states: \"When a criminal act is done by several persons in furtherance of the common intention of all, each of such persons is liable for that act in the same manner as if it were done by him alone.\"\n"
+    },
+    {
+      "id": 13,
+      "prompt": "IEA Section 65b",
+      "category": "Newacts-Subsection",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts",
+        "Judgment"
+      ],
+      "response_len": 11088,
+      "elapsed": 18.8,
+      "tokens": 6821,
+      "error_detail": "",
+      "response_preview": "The provided text discusses Section 65B of the Indian Evidence Act, 1872, primarily in the context of admitting electronic records, such as CDs containing voice recordings, as evidence in legal proceedings. The section requires a certificate to be produced for the admissibility of such electronic records.\n\nSeveral court cases highlight the importance and application of Section 65B:\n\n-   **Himani Malhotra vs. I.P. College for Women (Delhi High Court):** In this case, the petitioner sought to intr..."
+    },
+    {
+      "id": 14,
+      "prompt": "What is the equivalent of Section 498a of IPC in BNS?",
+      "category": "Newacts-Mapping",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts",
+        "Legislation"
+      ],
+      "response_len": 1392,
+      "elapsed": 18.0,
+      "tokens": 2502,
+      "error_detail": "",
+      "response_preview": "## Equivalent of Section 498A IPC in Bharatiya Nyaya Sanhita 2023\n\nThe Bharatiya Nyaya Sanhita, 2023, has introduced **Section 85** as the equivalent of Section 498A of the Indian Penal Code, 1860. Both provisions address the offense of cruelty by a husband or his relatives towards a woman.\n\n### Statutory Basis\n\n**Section 498A of the Indian Penal Code, 1860:**\n\"Whoever, being the husband or the relative of the husband of a woman, subjects such woman to cruelty shall be punished with imprisonment..."
+    },
+    {
+      "id": 15,
+      "prompt": "Section 125 CrPC new law equivalent",
+      "category": "Newacts-Mapping",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts",
+        "Legislation"
+      ],
+      "response_len": 4151,
+      "elapsed": 22.4,
+      "tokens": 16722,
+      "error_detail": "",
+      "response_preview": "## Equivalent Provision for Section 125 of the Code of Criminal Procedure, 1973\n\nThe equivalent provision to Section 125 of the Code of Criminal Procedure, 1973 (CrPC) in the new legislation is **Section 144 of The Bharatiya Nagarik Suraksha Sanhita, 2023**.\n\n### Statutory Basis\n\nBoth Section 125 of the CrPC, 1973, and Section 144 of The Bharatiya Nagarik Suraksha Sanhita, 2023, deal with the maintenance of wives, children, and parents. The core provisions and their intent remain largely the sam..."
+    },
+    {
+      "id": 16,
+      "prompt": "Section 138 of Negotiable Instruments Act",
+      "category": "Legislation-Single",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 1111,
+      "elapsed": 8.9,
+      "tokens": 1798,
+      "error_detail": "",
+      "response_preview": "Section 138 of The Negotiable Instruments Act, 1881, titled \"Dishonour of cheque for insufficiency, etc., of funds in the account,\" states that if a cheque drawn on an account maintained by a person with a banker for payment of money to another person, for the discharge of a debt or liability, is returned unpaid due to insufficient funds or exceeding the arranged payment limit, that person shall be deemed to have committed an offense. This offense is punishable with imprisonment up to two years,..."
+    },
+    {
+      "id": 17,
+      "prompt": "Section 9 of Arbitration Act",
+      "category": "Legislation-Single",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 2004,
+      "elapsed": 11.3,
+      "tokens": 1846,
+      "error_detail": "",
+      "response_preview": "Section 9 of The Arbitration and Conciliation Act, 1996, titled \"Interim measures, etc., by Court,\" outlines the provisions for a party to apply to a Court for specific measures. This application can be made before or during arbitral proceedings, or at any time after the making of an arbitral award but before its enforcement under section 36.\n\nThe applications that can be made to the Court under this section are:\n1.  For the appointment of a guardian for a minor or a person of unsound mind for t..."
+    },
+    {
+      "id": 18,
+      "prompt": "Sections 44 and 45 of Transfer of Property Act",
+      "category": "Legislation-Multi",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 1297,
+      "elapsed": 7.6,
+      "tokens": 1330,
+      "error_detail": "",
+      "response_preview": "Section 44 of the Transfer of Property Act, 1977, titled \"Transfer by one co-owner,\" states that if a co-owner of immovable property legally transfers their share or interest, the transferee acquires the transferor's right to joint possession or common enjoyment of the property, and the right to enforce partition. This is subject to any conditions and liabilities affecting the transferred share at the time of transfer. However, if the transferee of a share in a dwelling house belonging to an und..."
+    },
+    {
+      "id": 19,
+      "prompt": "Explain Sections 3, 4 and 5 of Consumer Protection Act",
+      "category": "Legislation-Multi",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 1128,
+      "elapsed": 7.5,
+      "tokens": 1650,
+      "error_detail": "",
+      "response_preview": "**Section 3: Central Consumer Protection Council**\n\n-   **Establishment:** The Central Government is mandated to establish the Central Consumer Protection Council, to be known as the Central Council, through a notification.\n-   **Nature:** The Central Council functions as an advisory council.\n-   **Composition:**\n    -   The Chairperson is the Minister-in-charge of the Department of Consumer Affairs in the Central Government.\n    -   It also includes other official or non-official members repres..."
+    },
+    {
+      "id": 20,
+      "prompt": "Sections 10 to 15 of Companies Act",
+      "category": "Legislation-Range",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 12951,
+      "elapsed": 17.9,
+      "tokens": 7521,
+      "error_detail": "",
+      "response_preview": "Here are the provisions for Sections 10 to 15 of The Companies Act, 2013:\n\n**Section 10: Effect of memorandum and articles**\n(1) Subject to the provisions of this Act, the memorandum and articles shall, when registered, bind the company and the members thereof to the same extent as if they respectively had been signed by the company and by each member, and contained covenants on its and his part to observe all the provisions of the memorandum and of the articles.\n(2) All monies payable by any me..."
+    },
+    {
+      "id": 21,
+      "prompt": "director duties under companies act",
+      "category": "Legislation-Topic",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "response_len": 2606,
+      "elapsed": 16.6,
+      "tokens": 11296,
+      "error_detail": "",
+      "response_preview": "## Director Duties Under the Companies Act, 2013\n\nThis response synthesizes the available information regarding director duties under the Companies Act, 2013, focusing on the statutory requirements related to Director Identification Numbers (DIN).\n\n### Statutory Basis\n\nThe Companies Act, 2013, outlines specific provisions concerning the Director Identification Number (DIN), which is a prerequisite for individuals acting as directors.\n\n-   **Section 156 of The Companies Act, 2013** mandates that:..."
+    },
+    {
+      "id": 22,
+      "prompt": "tenant rights in rent control legislation",
+      "category": "Legislation-Topic",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "response_len": 10003,
+      "elapsed": 31.9,
+      "tokens": 61428,
+      "error_detail": "",
+      "response_preview": "Tenant rights under rent control legislation are multifaceted, encompassing protection against arbitrary eviction, specific conditions for rent payment and deposit, rights concerning building amenities and repairs, and provisions for restoration to possession and compensation. These rights are established through statutory provisions and further interpreted and reinforced by judicial pronouncements.\n\n## Statutory Basis for Tenant Rights\n\nThe **Tripura Buildings (Lease and Rent Control) Act, 1975..."
+    },
+    {
+      "id": 23,
+      "prompt": "Section 138(1) of Negotiable Instruments Act",
+      "category": "Legislation-Subsection",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 971,
+      "elapsed": 11.5,
+      "tokens": 1771,
+      "error_detail": "",
+      "response_preview": "Section 138 of The Negotiable Instruments Act, 1881, states that if a cheque drawn on an account maintained by a person with a banker for payment of money to another person, for the discharge of a debt or liability, is returned unpaid due to insufficient funds or exceeding the arranged limit, that person shall be deemed to have committed an offense. This offense is punishable with imprisonment up to two years, a fine up to twice the amount of the cheque, or both.\n\nHowever, this section does not ..."
+    },
+    {
+      "id": 24,
+      "prompt": "What comes after section 35 of BNS?",
+      "category": "Edge-Nearby",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 162,
+      "elapsed": 7.6,
+      "tokens": 620,
+      "error_detail": "",
+      "response_preview": "Section 36 of The Bharatiya Nyaya Sanhita, 2023, titled \"Right of private defence against the act of a person with mental illness, etc.\", comes after Section 35.\n"
+    },
+    {
+      "id": 25,
+      "prompt": "theft",
+      "category": "Edge-Vague",
+      "expected_agent": null,
+      "status": "PASS",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "response_len": 1940,
+      "elapsed": 8.9,
+      "tokens": 551,
+      "error_detail": "",
+      "response_preview": "This query is about a legal explanation.\n\n### Theft in India\n\nTheft, as defined under Indian law, is a criminal offense.\n\n**Definition:**\nSection 378 of the Indian Penal Code, 1860 (IPC) defines theft as:\n\"Whoever, intending to take dishonestly any moveable property out of the possession of any person without that person's consent, moves that property in order to such taking, is said to commit theft.\"\n\n**Key Elements:**\n1.  **Dishonest Intention:** The act must be done with the intention of caus..."
+    },
+    {
+      "id": 26,
+      "prompt": "Rule 3 of Maharashtra Rent Control Rules",
+      "category": "Edge-NonSection",
+      "expected_agent": "Legislation",
+      "status": "PASS",
+      "agents_used": [
+        "Legislation"
+      ],
+      "response_len": 176,
+      "elapsed": 10.2,
+      "tokens": 727,
+      "error_detail": "",
+      "response_preview": "Rule 3 of the Maharashtra Rent Control Rules, 2017, states that a receipt given under section 31 for the amount of rent received in respect of any premises shall be in Form I.\n"
+    },
+    {
+      "id": 27,
+      "prompt": "Sections 302, 304, 304a, 307 and 376 of IPC",
+      "category": "Edge-ManySection",
+      "expected_agent": "Newacts",
+      "status": "PASS",
+      "agents_used": [
+        "Newacts"
+      ],
+      "response_len": 9742,
+      "elapsed": 16.7,
+      "tokens": 5548,
+      "error_detail": "",
+      "response_preview": "**Section 302 of The Indian Penal Code 1860 (Punishment for murder)**\n\n-   **Old Provision:** Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.\n-   **New Provision (Section 103 of Bharatiya Nyaya Sanhita, 2023):**\n    -   (1) Whoever commits murder shall be punished with death or imprisonment for life, and shall also be liable to fine.\n    -   (2) When a group of five or more persons acting in concert commits murder on the ground of ..."
+    }
+  ]
+}

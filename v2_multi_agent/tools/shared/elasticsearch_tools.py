@@ -145,6 +145,16 @@ def search_legislation(query: str) -> dict:
                 {"match_phrase": {"page_content": {"query": variation, "boost": 4.0}}}
             )
 
+        # Boost section header pattern to prioritize the actual section
+        # over cross-referencing sections
+        for header_var in [
+            f"section number: {st.title()} {sn}",
+            f"section number: {st} {sn}",
+        ]:
+            should_clauses.append(
+                {"match_phrase": {"page_content": {"query": header_var, "boost": 8.0}}}
+            )
+
         source_query = {
             "query": {
                 "bool": {
@@ -181,6 +191,263 @@ def search_legislation(query: str) -> dict:
         ],
         "source": most_common_source,
     }
+
+
+# --- Legislation Topic Search ---
+
+def _search_legislation_by_topic(
+    query: str, act_name: Optional[str] = None, size: int = 10,
+) -> dict:
+    """Internal: topic-based legislation search without section numbers."""
+    es = get_es_client()
+    index = ES_INDICES["legislation"]
+
+    # BM25 match on page_content
+    must_clause = {
+        "match": {
+            "page_content": {
+                "query": query,
+                "minimum_should_match": "75%",
+            }
+        }
+    }
+
+    filters = []
+    if act_name:
+        # Fuzzy match against source field — use match instead of term
+        # since the caller may pass a human-readable act name
+        filters.append({"match": {"source": {"query": act_name, "minimum_should_match": "80%"}}})
+
+    # Phase 1: discover most common source
+    discover_query = {
+        "size": 30,
+        "query": {
+            "bool": {
+                "must": [must_clause],
+                "filter": filters,
+            }
+        },
+    }
+
+    response = es.search(index=index, body=discover_query)
+    discover_hits = response["hits"]["hits"]
+
+    if not discover_hits:
+        return {"hits": [], "source": None, "topic_matched": False}
+
+    # Aggregate by source
+    sources_counter: Counter = Counter()
+    for h in discover_hits:
+        sources_counter[h["_source"]["source"]] += h["_score"]
+
+    most_common_source = sources_counter.most_common(1)[0][0]
+
+    # Phase 2: targeted retrieval within best source
+    targeted_query = {
+        "size": size,
+        "query": {
+            "bool": {
+                "must": [must_clause],
+                "filter": [{"term": {"source.keyword": most_common_source}}],
+            }
+        },
+        "sort": [{"_score": {"order": "desc"}}],
+    }
+
+    targeted_response = es.search(index=index, body=targeted_query)
+    final_hits = targeted_response["hits"]["hits"]
+
+    return {
+        "hits": [
+            {
+                "content": h["_source"]["page_content"],
+                "source": h["_source"].get("source", "unknown"),
+                "score": h["_score"],
+            }
+            for h in final_hits
+        ],
+        "source": most_common_source,
+        "topic_matched": True,
+    }
+
+
+@tool
+def search_legislation_by_topic(
+    query: str, act_name: Optional[str] = None, size: int = 10,
+) -> dict:
+    """Search legislation by topic/concept without requiring section numbers.
+
+    For vague or conceptual queries like "director duties in companies act"
+    or "consumer refund rights". Uses BM25 full-text matching.
+
+    Args:
+        query: Conceptual/topic legal query (no section number needed)
+        act_name: Optional act name to filter results to a specific statute
+        size: Number of results to return
+
+    Returns:
+        Dict with keys: hits (list of doc dicts), source (most common source), topic_matched (bool)
+    """
+    return _search_legislation_by_topic(query, act_name, size)
+
+
+# --- Legislation Multi-Section Search ---
+
+def _search_legislation_multi_section(
+    query: str, section_numbers: list[str], act_name: str = "",
+) -> dict:
+    """Internal: search for multiple specific sections of an act.
+
+    Phase 1 — Source discovery: broad search with first section + act name
+    to identify the most relevant source document.
+    Phase 2 — Per-section retrieval: search within that source for each section.
+    """
+    import re as _re
+
+    es = get_es_client()
+    index = ES_INDICES["legislation"]
+
+    # Clean act_name: strip trailing punctuation, filler words
+    clean_act = act_name.strip()
+    clean_act = _re.sub(r'[?!.,;]+$', '', clean_act)
+    clean_act = _re.sub(r'\b(say|explain|what|does|do|the)\b', '', clean_act, flags=_re.IGNORECASE)
+    clean_act = _re.sub(r'\s+', ' ', clean_act).strip()
+
+    # --- Phase 1: Source discovery ---
+    # Strategy: match act name against source field (file path), ordered by
+    # doc_count so the actual act (with many sections) outranks peripheral
+    # acts that merely contain the same words (e.g. "Companies Act" vs
+    # "Gas Companies Act").
+    best_source = None
+
+    if clean_act:
+        try:
+            source_discovery = es.search(index=index, body={
+                "size": 0,
+                "query": {"match_phrase": {"source": clean_act}},
+                "aggs": {
+                    "by_source": {
+                        "terms": {
+                            "field": "source.keyword",
+                            "size": 5,
+                            "order": {"_count": "desc"},
+                        },
+                    }
+                },
+            })
+            buckets = (
+                source_discovery
+                .get("aggregations", {})
+                .get("by_source", {})
+                .get("buckets", [])
+            )
+            if buckets:
+                best_source = buckets[0]["key"]
+        except Exception:
+            pass
+
+    # Fallback: content-based discovery if source matching failed
+    if not best_source:
+        discovery_text = (
+            f"section {section_numbers[0]} of the {clean_act}" if clean_act
+            else f"section {section_numbers[0]}"
+        )
+        try:
+            fallback_resp = es.search(index=index, body={
+                "size": 30,
+                "query": {"match": {"page_content": discovery_text}},
+            })
+            sources_counter: Counter = Counter()
+            for h in fallback_resp["hits"]["hits"]:
+                sources_counter[h["_source"]["source"]] += h["_score"]
+            if sources_counter:
+                best_source = sources_counter.most_common(1)[0][0]
+        except Exception:
+            pass
+
+    # --- Phase 2: Per-section retrieval within best source ---
+    all_hits = []
+    seen_ids: set[str] = set()
+    hits_by_section: dict[str, list] = {}
+
+    for sec_num in section_numbers:
+        should_clauses = []
+        for variation in [
+            f"section {sec_num} of {act_name}",
+            f"section {sec_num} of the {act_name}",
+            f"Section {sec_num} of {act_name.title()}" if act_name else f"Section {sec_num}",
+            f"Section {sec_num}",
+        ]:
+            should_clauses.append(
+                {"match_phrase": {"page_content": {"query": variation, "boost": 3.0}}}
+            )
+        should_clauses.append(
+            {"match": {"page_content": {"query": f"section {sec_num} {act_name}", "boost": 1.5}}}
+        )
+
+        # Apply source filter if discovery found a best source
+        filter_clauses = []
+        if best_source:
+            filter_clauses.append({"term": {"source.keyword": best_source}})
+
+        es_query = {
+            "size": 5,
+            "query": {
+                "bool": {
+                    "should": should_clauses,
+                    "minimum_should_match": 1,
+                    "filter": filter_clauses,
+                }
+            },
+            "sort": [{"_score": {"order": "desc"}}],
+        }
+
+        try:
+            response = es.search(index=index, body=es_query)
+            section_hits = []
+            for h in response["hits"]["hits"]:
+                doc_id = h["_id"]
+                if doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    hit_dict = {
+                        "content": h["_source"]["page_content"],
+                        "source": h["_source"].get("source", "unknown"),
+                        "score": h["_score"],
+                        "section_queried": sec_num,
+                    }
+                    all_hits.append(hit_dict)
+                    section_hits.append(hit_dict)
+            hits_by_section[sec_num] = section_hits
+        except Exception:
+            hits_by_section[sec_num] = []
+            continue
+
+    return {
+        "hits": all_hits,
+        "hits_by_section": hits_by_section,
+        "total": len(all_hits),
+        "source": best_source,
+    }
+
+
+@tool
+def search_legislation_multi_section(
+    query: str, section_numbers: list[str], act_name: str = "",
+) -> dict:
+    """Search legislation for multiple specific sections of an act.
+
+    For queries like "Sections 44 and 45 of Transfer of Property Act"
+    or "Sections 302, 307 and 420 of IPC".
+
+    Args:
+        query: The original user query
+        section_numbers: List of section numbers to look up (e.g. ["44", "45"])
+        act_name: The act name (e.g. "transfer of property act")
+
+    Returns:
+        Dict with keys: hits (all results), hits_by_section (dict mapping section→hits), total
+    """
+    return _search_legislation_multi_section(query, section_numbers, act_name)
 
 
 # --- Judgment Search ---
@@ -409,6 +676,156 @@ def search_newacts(
         ],
         "total": len(hits),
     }
+
+
+# --- Newacts Topic Search (BM25-only, safe fallback) ---
+
+def _search_newacts_by_topic(
+    query: str, act_name: Optional[str] = None, size: int = 15,
+) -> dict:
+    """Internal: BM25-only topic search in newacts. Avoids embedding/script errors."""
+    es = get_es_client()
+
+    filters = []
+    if act_name and act_name in ACTS_PATHS:
+        filters.append({"term": {"source": ACTS_PATHS[act_name]}})
+
+    es_query = {
+        "size": size,
+        "query": {
+            "bool": {
+                "must": [
+                    {"match": {
+                        "page_content": {
+                            "query": query,
+                            "minimum_should_match": "60%",
+                        }
+                    }}
+                ],
+                "filter": filters,
+            }
+        },
+        "sort": [
+            {"_score": {"order": "desc"}},
+            {"section_number": {"order": "asc"}},
+        ],
+    }
+
+    response = es.search(index=ES_INDICES["newacts"], body=es_query)
+    hits = response["hits"]["hits"]
+
+    return {
+        "hits": [
+            {
+                "content": h["_source"]["page_content"],
+                "source": h["_source"].get("source", "unknown"),
+                "section_number": h["_source"].get("section_number"),
+                "score": h.get("_score"),
+            }
+            for h in hits
+        ],
+        "total": len(hits),
+    }
+
+
+@tool
+def search_newacts_by_topic(
+    query: str, act_name: Optional[str] = None, size: int = 15,
+) -> dict:
+    """Search newacts by topic using BM25 only (no vector/embedding search).
+
+    Safe fallback for conceptual queries like "punishment for theft in BNS"
+    or "bail provisions in BNSS". Avoids the cosineSimilarity script that
+    can fail if embedding fields are missing.
+
+    Args:
+        query: Conceptual/topic query text
+        act_name: Optional exact act name from ACTS_PATHS mapping
+        size: Number of results to return
+
+    Returns:
+        Dict with keys: hits (list of doc dicts), total
+    """
+    return _search_newacts_by_topic(query, act_name, size)
+
+
+# --- Nearby Sections in Newacts ---
+
+def _get_nearby_sections(
+    section_number: str, act_name: str, window: int = 2,
+    timeout: int = 5,
+) -> dict:
+    """Internal: retrieve adjacent sections from an act in newacts index.
+
+    Args:
+        timeout: Per-request ES timeout in seconds (default 5).
+                 Keeps enrichment fast; callers should handle failure gracefully.
+    """
+    es = get_es_client()
+
+    if act_name not in ACTS_PATHS:
+        return {"hits": [], "center_section": section_number, "range": []}
+
+    try:
+        center = int(section_number)
+    except ValueError:
+        return {"hits": [], "center_section": section_number, "range": []}
+
+    start = max(1, center - window)
+    end = center + window
+    range_values = [str(n) for n in range(start, end + 1)]
+
+    es_query = {
+        "size": len(range_values) + 5,  # a little headroom
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"source": ACTS_PATHS[act_name]}},
+                    {"terms": {"section_number": range_values}},
+                ]
+            }
+        },
+        "sort": [{"section_number": {"order": "asc"}}],
+    }
+
+    response = es.search(
+        index=ES_INDICES["newacts"], body=es_query, request_timeout=timeout,
+    )
+    hits = response["hits"]["hits"]
+
+    return {
+        "hits": [
+            {
+                "content": h["_source"]["page_content"],
+                "source": h["_source"].get("source", "unknown"),
+                "section_number": h["_source"].get("section_number"),
+                "score": h.get("_score"),
+            }
+            for h in hits
+        ],
+        "center_section": section_number,
+        "range": [str(start), str(end)],
+    }
+
+
+@tool
+def get_nearby_sections(
+    section_number: str, act_name: str, window: int = 2,
+) -> dict:
+    """Get sections adjacent to a given section in a newacts act.
+
+    Useful for providing context around a specific section, or answering
+    queries like "what comes after section 35 of BNS".
+
+    Args:
+        section_number: The center section number (e.g. "35")
+        act_name: Exact act name from ACTS_PATHS (e.g. "The Bharatiya Nyaya Sanhita, 2023")
+        window: How many sections on each side to retrieve (default 2)
+
+    Returns:
+        Dict with keys: hits (list of doc dicts sorted by section), center_section, range
+    """
+    return _get_nearby_sections(section_number, act_name, window)
 
 
 # --- Drafting Search ---

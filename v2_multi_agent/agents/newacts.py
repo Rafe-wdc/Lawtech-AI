@@ -273,11 +273,14 @@ async def newacts_node(state: LegalAgentState) -> dict:
     log.info("Agent started", query=query[:100])
 
     try:
-        # Step 1: Extract metadata (GPT-4o with regex fallback)
+        # Step 1: Extract metadata (GPT-4o in a thread, with timeout + regex fallback)
         try:
-            metadata = _extract_act_metadata(query)
-        except Exception as meta_err:
-            log.warning("GPT-4o metadata extraction failed, using regex fallback",
+            metadata = await asyncio.wait_for(
+                asyncio.to_thread(_extract_act_metadata, query),
+                timeout=20,
+            )
+        except (asyncio.TimeoutError, Exception) as meta_err:
+            log.warning("GPT-4o metadata extraction failed/timed out, using regex fallback",
                         error=str(meta_err))
             metadata = _regex_fallback_metadata(query)
 
@@ -389,8 +392,43 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
         # Step 2: Decide search path
 
+        # Large-range path: > 20 sections requested → switch to chapter overview
+        # strategy instead of per-section ES retrieval.
+        # Rationale:
+        #   - A terms-filter with 100 values is slow and ES caps results at
+        #     query size (10-20), so most sections would be silently missing.
+        #   - The user asking for "Section 1 to 100" wants a chapter overview,
+        #     not individual section text.
+        #   - Avoids DoS via unbounded range expansion (C4).
+        _SECTION_RANGE_CAP = 20
+        if has_section and metadata.section_number and len(metadata.section_number) > _SECTION_RANGE_CAP:
+            log.info(
+                "Large section range detected — switching to topic/overview search",
+                requested=len(metadata.section_number),
+                cap=_SECTION_RANGE_CAP,
+                act=metadata.act_name,
+            )
+            # Truncate the section list so the LLM prompt stays reasonable
+            metadata.section_number = metadata.section_number[:_SECTION_RANGE_CAP]
+            # Use BM25 topic search across the act — returns representative sections
+            with log_time(log, "Topic BM25 search (large range)"):
+                topic_result = _search_newacts_by_topic(
+                    query, metadata.act_name if has_act else None, size=20,
+                )
+            hits = [
+                {
+                    "_source": {
+                        "page_content": h["content"],
+                        "source": h["source"],
+                        "section_number": h.get("section_number"),
+                    },
+                    "_score": h.get("score"),
+                }
+                for h in topic_result["hits"]
+            ]
+
         # Topic-only path: no section and no act identified → BM25 topic search
-        if not has_section and not has_act and metadata.hybrid_search:
+        elif not has_section and not has_act and metadata.hybrid_search:
             log.info("No section/act identified, using topic search")
             with log_time(log, "Topic BM25 search"):
                 topic_result = _search_newacts_by_topic(query)
@@ -584,7 +622,11 @@ async def newacts_node(state: LegalAgentState) -> dict:
             "cannot provide information", "no direct information",
             "no specific information", "no information available",
             "unable to find", "could not find", "not available in",
-            "there is no", "does not have information", "based on the provided",
+            "there is no", "does not have information",
+            # "based on the provided agent results, there is no…" — specific
+            # orchestrator deflection phrase. NOT "based on the provided
+            # sections, here are…" (legitimate response).
+            "based on the provided agent",
         ]
         content_lower = llm_response.content.lower()[:300]
         if any(p in content_lower for p in _sorry_patterns) or len(llm_response.content) < 50:

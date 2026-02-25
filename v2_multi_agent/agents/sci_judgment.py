@@ -24,7 +24,7 @@ from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gpt4o
 from core.logger import get_logger, log_time
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
-from tools.shared import AGENT_TOOLS, search_by_semantic
+from tools.shared import AGENT_TOOLS, search_by_topic
 
 log = get_logger("SCI_Judgment")
 
@@ -94,7 +94,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                         query=query[:100])
             try:
                 fallback_result = await asyncio.to_thread(
-                    search_by_semantic.invoke, {"query": query}
+                    search_by_topic.invoke, {"query": query}
                 )
                 if fallback_result and "No matching" not in fallback_result:
                     # Parse sources from the direct fallback result
@@ -138,7 +138,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                         )
                     retry_messages = retry_result.get("messages", [])
                     answer = ""
-                    tools_used = ["search_by_semantic (fallback)"]
+                    tools_used = ["search_by_topic (fallback)"]
                     for msg in retry_messages:
                         if hasattr(msg, "type") and msg.type == "ai" and msg.content:
                             answer = msg.content

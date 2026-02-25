@@ -11,6 +11,7 @@ Uses: Gemini Flash Lite for LLM-based detection, regex for fast checks
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -51,6 +52,22 @@ SUSPICIOUS_INDICATORS = [
 ]
 
 # PII patterns for Indian legal context
+def _normalize_for_injection_check(text: str) -> str:
+    """Normalize text before injection pattern matching.
+
+    Applies NFKC Unicode normalization to collapse look-alike characters
+    (e.g., Unicode script 'ⅈ' → 'i', fullwidth letters → ASCII).
+    Also strips zero-width and invisible Unicode control characters that
+    can be inserted between letters to bypass regex detection.
+    """
+    # NFKC: compatibility decomposition + canonical composition
+    # e.g. ﬁ → fi,  ⅈ → i,  Ａ → A
+    normalized = unicodedata.normalize("NFKC", text)
+    # Strip zero-width and other invisible glyphs (U+200B..U+200F, U+2060..U+2064, U+FEFF)
+    normalized = re.sub(r"[\u200b-\u200f\u2060-\u2064\ufeff]", "", normalized)
+    return normalized
+
+
 PII_PATTERNS = {
     "aadhaar": re.compile(r"\b\d{4}\s?\d{4}\s?\d{4}\b"),
     "pan": re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"),
@@ -124,8 +141,10 @@ def detect_injection_regex(query: str) -> dict:
     Returns:
         Dict with keys: blocked (bool), pattern_matched (str or None)
     """
+    # Normalize before matching — prevents homoglyph and zero-width bypasses
+    normalized = _normalize_for_injection_check(query)
     for i, pattern in enumerate(COMPILED_PATTERNS):
-        if pattern.search(query):
+        if pattern.search(normalized):
             return {
                 "blocked": True,
                 "pattern_matched": INJECTION_PATTERNS[i],
@@ -147,8 +166,10 @@ def detect_injection_llm(query: str) -> dict:
     Returns:
         Dict with keys: is_injection (bool), confidence (str: low/medium/high)
     """
-    # Quick check — skip LLM if no suspicious keywords
-    has_suspicious = any(ind in query.lower() for ind in SUSPICIOUS_INDICATORS)
+    # Quick check — skip LLM if no suspicious keywords.
+    # Normalize first to catch homoglyph attempts like ⅈgnore → ignore.
+    normalized_lower = _normalize_for_injection_check(query).lower()
+    has_suspicious = any(ind in normalized_lower for ind in SUSPICIOUS_INDICATORS)
     if not has_suspicious:
         return {"is_injection": False, "confidence": "low"}
 

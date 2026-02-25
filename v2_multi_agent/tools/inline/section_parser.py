@@ -104,8 +104,13 @@ def parse_multi_section_info(query: str) -> dict | None:
     range_match = re.search(r'(\d+)\s+to\s+(\d+)', after_type)
     if range_match:
         start, end = int(range_match.group(1)), int(range_match.group(2))
-        if end > start and (end - start) <= 50:  # safety limit
-            section_numbers = [str(n) for n in range(start, end + 1)]
+        # Hard cap at 20 — prevents DoS via "Sections 1 to 10000" expanding
+        # into thousands of ES terms-filter values.  Callers that receive
+        # exactly 20 numbers should treat it as a capped range and switch to
+        # a topic/overview search strategy.
+        _RANGE_CAP = 20
+        if end > start:
+            section_numbers = [str(n) for n in range(start, min(end, start + _RANGE_CAP - 1) + 1)]
     else:
         # Check for comma/and list: "302, 307 and 420" or "302, 307, 420"
         # First capture all number+optional-subsection patterns

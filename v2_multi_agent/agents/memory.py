@@ -10,6 +10,7 @@ Uses: Gemini 2.5 Flash Lite for query rewriting.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import requests
 from typing import Union
@@ -49,7 +50,9 @@ async def _load_chat_history(thread_id: str) -> tuple[list, str]:
     # Step 2: If SQLite empty and legacy API enabled, try external API
     if CHAT_HISTORY_USE_LEGACY_API:
         log.debug("SQLite empty, trying legacy API", thread_id=thread_id[:12])
-        chat_history, summary_text = _load_from_legacy_api(thread_id)
+        chat_history, summary_text = await asyncio.to_thread(
+            _load_from_legacy_api, thread_id
+        )
 
         # If API had real data, import into SQLite for future use
         if summary_text and "Fresh chat started" not in summary_text:
@@ -251,8 +254,8 @@ async def memory_node(state: LegalAgentState) -> dict:
                  messages=len(chat_history),
                  has_summary=bool(summary_text))
 
-        # Step 3: Rewrite query with context
-        query = _rewrite_query(query, chat_history)
+        # Step 3: Rewrite query with context (run sync LLM call in thread)
+        query = await asyncio.to_thread(_rewrite_query, query, chat_history)
 
     log.info("Agent completed",
              final_query=query[:100],

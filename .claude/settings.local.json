@@ -34,7 +34,10 @@
       "Bash(EMBEDDING_SERVICE_URL=http://localhost:5210 PYTHONPATH=. python -m uvicorn:*)",
       "Bash(C:/Python312/python.exe:*)",
       "Bash(RATE_LIMIT_PER_MINUTE=200 python:*)",
-      "Bash(bash start.sh:*)"
+      "Bash(bash start.sh:*)",
+      "Bash(ssh:*)",
+      "Bash(tar czf:*)",
+      "Bash(scp:*)"
     ]
   }
 }

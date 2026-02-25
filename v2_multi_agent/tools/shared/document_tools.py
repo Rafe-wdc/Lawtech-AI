@@ -16,6 +16,7 @@ import os
 import base64
 import shutil
 import subprocess
+import tempfile
 
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
@@ -31,6 +32,31 @@ import chromadb
 MAX_PDF_SIZE_MB = 50
 MAX_PDF_PAGES = 500
 GEMINI_VISION_BATCH_SIZE = 5
+
+# Allowed base directories for PDF file operations.
+# Files must resolve to one of these paths to prevent path traversal.
+_ALLOWED_PDF_DIRS: tuple[str, ...] = (
+    tempfile.gettempdir(),
+    CHROMA_STORE_ROOT,
+    os.path.abspath(os.getcwd()),
+)
+
+
+def _is_safe_pdf_path(file_path: str) -> bool:
+    """Return True if file_path resolves to within an allowed directory.
+
+    Prevents path traversal attacks where a crafted filename like
+    '../../etc/passwd' could escape the expected upload directory.
+    Also enforces a .pdf extension requirement.
+    """
+    if not file_path.lower().endswith(".pdf"):
+        return False
+    resolved = os.path.realpath(file_path)
+    return any(
+        resolved.startswith(os.path.realpath(allowed) + os.sep)
+        or resolved == os.path.realpath(allowed)
+        for allowed in _ALLOWED_PDF_DIRS
+    )
 
 
 # --- Tool Functions ---
@@ -51,6 +77,9 @@ def validate_pdf(file_path: str, max_size_mb: int = 50, max_pages: int = 500) ->
         Dict with keys: valid (bool), reason (str or None), pages (int), size_mb (float)
     """
     import fitz
+
+    if not _is_safe_pdf_path(file_path):
+        return {"valid": False, "reason": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'", "pages": 0, "size_mb": 0}
 
     if not os.path.exists(file_path):
         return {"valid": False, "reason": "File not found", "pages": 0, "size_mb": 0}
@@ -107,6 +136,9 @@ def extract_text_pymupdf(file_path: str) -> dict:
     """
     import fitz
 
+    if not _is_safe_pdf_path(file_path):
+        return {"text": "", "pages_extracted": 0, "has_text": False, "error": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'"}
+
     try:
         doc = fitz.open(file_path)
         all_text = []
@@ -148,6 +180,9 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
         Dict with keys: text (str), pages_processed (int)
     """
     import fitz
+
+    if not _is_safe_pdf_path(file_path):
+        return {"text": "", "pages_processed": 0, "error": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'"}
 
     try:
         doc = fitz.open(file_path)
@@ -228,6 +263,15 @@ def compress_pdf(file_path: str) -> dict:
     Returns:
         Dict with keys: compressed_path (str), original_size (int), compressed_size (int), reduction_pct (float)
     """
+    if not _is_safe_pdf_path(file_path):
+        return {
+            "compressed_path": file_path,
+            "original_size": 0,
+            "compressed_size": 0,
+            "reduction_pct": 0.0,
+            "error": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'",
+        }
+
     original_size = os.path.getsize(file_path)
 
     # Step 1: Try PikePDF (lossless)

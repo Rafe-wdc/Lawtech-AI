@@ -37,16 +37,55 @@ class IdentifyTaskSchema(BaseModel):
     ] = Field(..., description="The primary legal task type")
 
 
-def _classify_task(query: str, chat_summary: str | None = None) -> str:
-    """Classify query into a task type using GPT-4o structured output."""
-    with log_time(log, "Task classification"):
-        prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-        llm = get_gpt4o().with_structured_output(IdentifyTaskSchema)
+def _classify_task_regex_fallback(query: str) -> str:
+    """Keyword-based task classification fallback when LLM is unavailable."""
+    q = query.lower()
+    if any(k in q for k in ("draft", "agreement", "notice", "plaint", "petition", "template", "format")):
+        return "Drafting"
+    if any(k in q for k in ("bns", "bnss", "bsa", "ipc", "crpc", "iea",
+                              "bharatiya nyaya", "bharatiya nagarik", "bharatiya sakshya",
+                              "penal code", "criminal procedure", "evidence act")):
+        return "Newacts"
+    if any(k in q for k in ("judgment", "judgement", "case law", "citation", "held that",
+                              "vs.", " v. ", "high court", "hc", "bench")):
+        return "Judgment"
+    if any(k in q for k in ("supreme court", "sc judgment", "puttaswamy", "maneka gandhi",
+                              "kesavananda", "navtej", "vishaka")):
+        return "SCI_Judgment"
+    if any(k in q for k in ("article ", "fundamental right", "directive principle",
+                              "constitution", "constitutional")):
+        return "Constitution"
+    if any(k in q for k in ("maxim", "audi alteram", "res judicata", "estoppel",
+                              "nemo judex", "caveat emptor", "actus reus", "mens rea")):
+        return "Maxim"
+    if any(k in q for k in ("scenario", "situation", "what happens if", "can i",
+                              "what should", "legal opinion", "advise", "rights")):
+        return "Scenario"
+    if any(k in q for k in ("section ", "act ", "rule ", "regulation", "provision",
+                              "statute", "law ", " act,", " act.")):
+        return "Legislation"
+    return "Legal_Concepts"
 
-        formatted = prompt.format(query=query, chat_summary=chat_summary or "")
-        result = llm.invoke(formatted)
-    log.info("Task classified", task=result.task, query=query[:80])
-    return result.task
+
+def _classify_task(query: str, chat_summary: str | None = None) -> str:
+    """Classify query into a task type using GPT-4o structured output.
+
+    Falls back to keyword-based classification if the LLM call fails
+    (rate-limit, timeout, structured-output parse error, etc.).
+    """
+    try:
+        with log_time(log, "Task classification"):
+            prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
+            llm = get_gpt4o().with_structured_output(IdentifyTaskSchema)
+            formatted = prompt.format(query=query, chat_summary=chat_summary or "")
+            result = llm.invoke(formatted)
+        log.info("Task classified", task=result.task, query=query[:80])
+        return result.task
+    except Exception as e:
+        fallback = _classify_task_regex_fallback(query)
+        log.warning("Task classification LLM failed, using regex fallback",
+                    error=str(e), fallback=fallback, query=query[:80])
+        return fallback
 
 
 # --- Multi-Agent Planning ---
@@ -201,9 +240,17 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         task = "Scenario"
         log.info("Long query bypass", word_count=word_count, task=task)
     else:
-        task = await asyncio.to_thread(
-            _classify_task, query, chat_summary=summary if summary else None
-        )
+        try:
+            task = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _classify_task, query, chat_summary=summary if summary else None
+                ),
+                timeout=30,
+            )
+        except asyncio.TimeoutError:
+            task = _classify_task_regex_fallback(query)
+            log.warning("Task classification timed out, using regex fallback",
+                        task=task, query=query[:80])
 
     # Step 2: Handle non-legal
     if task == "Non_legal":
@@ -226,7 +273,14 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         }
 
     # Step 3: Plan agents
-    tasks_planned = await asyncio.to_thread(_plan_agents, query, task)
+    try:
+        tasks_planned = await asyncio.wait_for(
+            asyncio.to_thread(_plan_agents, query, task),
+            timeout=25,
+        )
+    except asyncio.TimeoutError:
+        log.warning("Agent planning timed out, falling back to single agent", task=task)
+        tasks_planned = [task] if task not in ("Non_legal",) else []
     log.info("Plan phase completed",
              task=task, agents_planned=tasks_planned,
              agent_count=len(tasks_planned))

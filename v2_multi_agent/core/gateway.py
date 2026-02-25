@@ -26,7 +26,7 @@ from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Request, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -64,7 +64,9 @@ log.info("Agent graph compiled successfully")
 # --- Request / Response Schemas ---
 
 class SearchRequest(BaseModel):
-    Promptquery: str = Field(..., min_length=1, max_length=5000)
+    model_config = ConfigDict(populate_by_name=True)
+    # alias keeps backward-compat with existing clients sending "Promptquery"
+    prompt_query: str = Field(..., alias="Promptquery", min_length=1, max_length=5000)
     globalThreadId: Optional[str] = None
 
 
@@ -185,12 +187,12 @@ async def search(data: SearchRequest, request: Request):
     """
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
-    initial_state = _build_initial_state(data.Promptquery, thread_id)
+    initial_state = _build_initial_state(data.prompt_query, thread_id)
     config = {"configurable": {"thread_id": thread_id}}
 
     log.info("Search request received",
-             query=data.Promptquery[:100], thread_id=thread_id,
-             query_len=len(data.Promptquery))
+             query=data.prompt_query[:100], thread_id=thread_id,
+             query_len=len(data.prompt_query))
 
     try:
         with log_time(log, "Full graph execution"):
@@ -222,8 +224,8 @@ async def search(data: SearchRequest, request: Request):
              response_len=response_len, thread_id=thread_id)
 
     # Memory context metadata
-    effective_query = final_state.get("query", data.Promptquery)
-    query_rewritten = effective_query != data.Promptquery
+    effective_query = final_state.get("query", data.prompt_query)
+    query_rewritten = effective_query != data.prompt_query
     conversation_turn = 0
 
     # Save chat history to SQLite (non-blocking, don't fail the response)
@@ -244,7 +246,7 @@ async def search(data: SearchRequest, request: Request):
     if final_response and not final_state.get("is_blocked"):
         try:
             followup_suggestions = await _generate_followup_suggestions(
-                data.Promptquery, final_response, agents_used
+                data.prompt_query, final_response, agents_used
             )
         except Exception as e:
             log.warning("Followup suggestions failed", error=str(e))
@@ -301,11 +303,11 @@ async def search_stream(data: SearchRequest, request: Request):
     """
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
-    initial_state = _build_initial_state(data.Promptquery, thread_id)
+    initial_state = _build_initial_state(data.prompt_query, thread_id)
     config = {"configurable": {"thread_id": thread_id}}
 
     log.info("Stream request received",
-             query=data.Promptquery[:100], thread_id=thread_id)
+             query=data.prompt_query[:100], thread_id=thread_id)
 
     async def event_generator():
         """Generate SSE events from the agent graph stream."""
@@ -318,7 +320,7 @@ async def search_stream(data: SearchRequest, request: Request):
         total_tokens = 0
         all_source_metadata = []
         all_related_sections = []
-        effective_query = data.Promptquery
+        effective_query = data.prompt_query
         query_rewritten = False
 
         try:
@@ -363,7 +365,7 @@ async def search_stream(data: SearchRequest, request: Request):
                     # After memory agent: send context event with rewrite info
                     if node_name == "memory" and "query" in update:
                         effective_query = update["query"]
-                        query_rewritten = effective_query != data.Promptquery
+                        query_rewritten = effective_query != data.prompt_query
                         history_msgs = update.get("chat_history", [])
                         context_event = {
                             "type": "context",
@@ -425,7 +427,7 @@ async def search_stream(data: SearchRequest, request: Request):
         if final_response:
             try:
                 suggestions = await _generate_followup_suggestions(
-                    data.Promptquery, final_response, agents_used
+                    data.prompt_query, final_response, agents_used
                 )
                 if suggestions:
                     yield f"data: {json.dumps({'type': 'followup_suggestions', 'data': suggestions})}\n\n"
@@ -601,7 +603,16 @@ async def mainqa(
                     existing_filenames = [f for f in fnames_str.split(",") if f]
             except Exception:
                 pass
-            vectordb.add_documents(texts)
+            # Skip files already in the collection to prevent duplicate chunks
+            existing_set = set(existing_filenames)
+            new_texts = [doc for doc in texts if doc.metadata.get("source") not in existing_set]
+            if new_texts:
+                vectordb.add_documents(new_texts)
+                log.info("Added new chunks to existing collection",
+                         new_chunks=len(new_texts), skipped=len(texts) - len(new_texts))
+            else:
+                log.info("All files already in collection, skipping re-upload",
+                         unique_string=uniqueString, existing=list(existing_set))
         else:
             vectordb = Chroma.from_documents(
                 documents=texts,

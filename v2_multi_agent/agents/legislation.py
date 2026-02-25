@@ -342,7 +342,8 @@ async def legislation_node(state: LegalAgentState) -> dict:
             "cannot provide information", "no direct information",
             "no specific information", "no information available",
             "unable to find", "could not find", "not available in",
-            "there is no", "does not have information", "based on the provided",
+            "there is no", "does not have information",
+            "based on the provided agent",
         ]
         content_lower = response.content.lower()[:300]
         if any(p in content_lower for p in _sorry_patterns) or len(response.content) < 50:

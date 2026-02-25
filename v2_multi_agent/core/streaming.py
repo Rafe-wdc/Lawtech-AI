@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from types import SimpleNamespace
 
@@ -21,8 +22,20 @@ from langgraph.config import get_stream_writer
 
 log = logging.getLogger("Streaming")
 
+# Default timeout for a complete LLM generation.
+# 90s covers large streaming responses (drafts, scenario analysis).
+# Batch calls (no streaming) use 60s — they're simpler tasks.
+_STREAM_TIMEOUT = 90
+_BATCH_TIMEOUT = 60
 
-async def stream_chain_response(chain, inputs: dict, *, retry: bool = True):
+
+async def stream_chain_response(
+    chain,
+    inputs: dict,
+    *,
+    retry: bool = True,
+    timeout: int | None = None,
+):
     """Invoke a LangChain chain with token-by-token streaming.
 
     In streaming context (graph.astream with custom mode):
@@ -32,17 +45,35 @@ async def stream_chain_response(chain, inputs: dict, *, retry: bool = True):
     In batch context (graph.ainvoke):
         Falls back to chain.ainvoke() — no streaming, no writer needed.
 
+    Args:
+        chain: A runnable LangChain chain (prompt | llm).
+        inputs: Dict of template variables.
+        retry: Retry once on streaming failure (default True).
+        timeout: Override the default generation timeout in seconds.
+                 Defaults to _STREAM_TIMEOUT (streaming) or _BATCH_TIMEOUT (batch).
+
     Returns an object with .content (str) and .usage_metadata (dict),
     matching the AIMessage interface so agent code needs minimal changes.
+
+    Raises:
+        asyncio.TimeoutError: if the LLM does not respond within timeout seconds.
     """
     try:
         writer = get_stream_writer()
     except RuntimeError:
         # Not in streaming context (batch endpoint) — use regular async invoke
-        return await chain.ainvoke(inputs)
+        t = timeout or _BATCH_TIMEOUT
+        return await asyncio.wait_for(chain.ainvoke(inputs), timeout=t)
 
+    t = timeout or _STREAM_TIMEOUT
     try:
-        return await _stream_with_writer(chain, inputs, writer)
+        return await asyncio.wait_for(
+            _stream_with_writer(chain, inputs, writer), timeout=t
+        )
+    except asyncio.TimeoutError:
+        log.error("LLM streaming timed out after %ds", t)
+        writer({"type": "token_reset"})
+        raise
     except Exception as e:
         if not retry:
             raise
@@ -50,7 +81,9 @@ async def stream_chain_response(chain, inputs: dict, *, retry: bool = True):
                     str(e)[:200])
         # Tell the frontend to clear its token buffer before retry
         writer({"type": "token_reset"})
-        return await _stream_with_writer(chain, inputs, writer)
+        return await asyncio.wait_for(
+            _stream_with_writer(chain, inputs, writer), timeout=t
+        )
 
 
 async def _stream_with_writer(chain, inputs: dict, writer):

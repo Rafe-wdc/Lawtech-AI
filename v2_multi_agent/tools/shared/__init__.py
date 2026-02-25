@@ -120,7 +120,7 @@ from .judgment_search import (
 
 # --- SCI Judgment Tools ---
 from .sci_judgment_tools import (
-    search_by_semantic,
+    search_by_topic,
     search_by_keyword,
     search_by_case_number,
     search_by_party_name,
@@ -212,7 +212,7 @@ ALL_TOOLS = [
     detect_citation,
     detect_case_type,
     # SCI Judgment (7)
-    search_by_semantic,
+    search_by_topic,
     search_by_keyword,
     search_by_case_number,
     search_by_party_name,
@@ -325,7 +325,7 @@ AGENT_TOOLS = {
         save_pdf_chat_history,
     ],
     "sci_judgment": [
-        search_by_semantic,
+        search_by_topic,
         search_by_keyword,
         search_by_case_number,
         search_by_party_name,

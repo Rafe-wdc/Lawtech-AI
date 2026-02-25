@@ -16,6 +16,8 @@ Uses: Elasticsearch client from core.clients
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 from collections import Counter
 from typing import Optional
 
@@ -24,6 +26,63 @@ from langchain.tools import tool
 from core.clients import get_es_client, get_retriever_embeddings
 from core.settings import ES_INDICES
 from tools.inline.section_parser import parse_section_info
+
+
+# --- Input Sanitization ---
+
+# Whitelist of indices this module is allowed to search.
+# Used to block index-name injection in get_docs_by_source.
+_ALLOWED_ES_INDICES: frozenset[str] = frozenset(ES_INDICES.values())
+
+# Lucene / ES query_string metacharacters that can alter DSL structure
+# if a query_string clause is ever added. Escaping them here is defence-in-depth.
+_LUCENE_SPECIAL = re.compile(r'([+\-=&|!(){}\[\]^"~*?:\\/])')
+
+
+def _sanitize_es_input(text: str, max_length: int = 500) -> str:
+    """Sanitize a user-supplied string before embedding it in an ES query body.
+
+    Steps applied in order:
+    1. Unicode NFC normalization — prevents homoglyph bypass tricks.
+    2. Strip ASCII control characters (\\x00-\\x1f, \\x7f) except \\t and \\n.
+    3. Truncate to max_length — stops expensive tokenisation of huge inputs.
+    4. Escape Lucene metacharacters — defence-in-depth for any future
+       query_string clause; harmless for match / match_phrase (they analyse
+       the string and ignore escaped chars).
+
+    Args:
+        text:       Raw user-supplied string.
+        max_length: Hard cap on character length (default 500).
+
+    Returns:
+        Sanitized string safe to embed in ES query values.
+    """
+    if not isinstance(text, str):
+        return ""
+    # 1. Unicode normalise
+    text = unicodedata.normalize("NFC", text)
+    # 2. Strip control chars (keep \t and \n for readability)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    # 3. Truncate
+    text = text[:max_length]
+    # 4. Escape Lucene special chars
+    text = _LUCENE_SPECIAL.sub(r"\\\1", text)
+    return text
+
+
+def _sanitize_section_number(section: str) -> str:
+    """Validate that a section number contains only safe characters.
+
+    Allows digits, letters, dots, brackets, and hyphens — the characters
+    that legitimately appear in Indian legal section numbers like
+    "65b", "3(5)", "10-A", "302".  Strips everything else.
+    """
+    return re.sub(r"[^A-Za-z0-9.()\-]", "", section)[:20]
+
+
+def _validate_index_name(index_name: str) -> bool:
+    """Return True only if index_name is one of the known ES indices."""
+    return index_name in _ALLOWED_ES_INDICES
 
 
 # --- Search Variation Helpers ---
@@ -77,6 +136,7 @@ def search_legislation(query: str) -> dict:
     Returns:
         Dict with keys: hits (list of doc dicts), source (most common source name)
     """
+    query = _sanitize_es_input(query)
     es = get_es_client()
     index = ES_INDICES["legislation"]
 
@@ -199,6 +259,9 @@ def _search_legislation_by_topic(
     query: str, act_name: Optional[str] = None, size: int = 10,
 ) -> dict:
     """Internal: topic-based legislation search without section numbers."""
+    query = _sanitize_es_input(query)
+    if act_name:
+        act_name = _sanitize_es_input(act_name, max_length=200)
     es = get_es_client()
     index = ES_INDICES["legislation"]
 
@@ -303,6 +366,12 @@ def _search_legislation_multi_section(
     Phase 2 — Per-section retrieval: search within that source for each section.
     """
     import re as _re
+
+    query = _sanitize_es_input(query)
+    act_name = _sanitize_es_input(act_name, max_length=200) if act_name else ""
+    # Validate each section number — only keep safe chars, cap at 20
+    section_numbers = [_sanitize_section_number(s) for s in section_numbers if s]
+    section_numbers = [s for s in section_numbers if s]  # drop any that became empty
 
     es = get_es_client()
     index = ES_INDICES["legislation"]
@@ -487,15 +556,17 @@ def search_judgments(
     Returns:
         Dict with keys: hits (list of doc dicts with content, metadata, score), total
     """
+    query = _sanitize_es_input(query)
+    petitioner_names = [_sanitize_es_input(n, max_length=200) for n in (petitioner_names or []) if n]
+    respondent_names = [_sanitize_es_input(n, max_length=200) for n in (respondent_names or []) if n]
+    topics = [_sanitize_es_input(t, max_length=200) for t in (topics or []) if t]
+    acts_or_sections = [_sanitize_es_input(a, max_length=200) for a in (acts_or_sections or []) if a]
+    lexical_query = _sanitize_es_input(lexical_query, max_length=300) if lexical_query else query
+    court_name = _sanitize_es_input(court_name, max_length=100) if court_name else None
+
     es = get_es_client()
     should_clauses = []
     filters = []
-
-    petitioner_names = petitioner_names or []
-    respondent_names = respondent_names or []
-    topics = topics or []
-    acts_or_sections = acts_or_sections or []
-    lexical_query = lexical_query or query
 
     # TIER 1: Exact Party Match
     if petitioner_names and respondent_names:
@@ -607,6 +678,12 @@ def search_newacts(
     Returns:
         Dict with keys: hits (list of doc dicts), total
     """
+    query = _sanitize_es_input(query)
+    # section_numbers: validated to safe chars only; act_name gated by ACTS_PATHS whitelist
+    if section_numbers:
+        section_numbers = [_sanitize_section_number(s) for s in section_numbers if s]
+        section_numbers = [s for s in section_numbers if s]
+
     es = get_es_client()
     filters = []
 
@@ -684,6 +761,7 @@ def _search_newacts_by_topic(
     query: str, act_name: Optional[str] = None, size: int = 15,
 ) -> dict:
     """Internal: BM25-only topic search in newacts. Avoids embedding/script errors."""
+    query = _sanitize_es_input(query)
     es = get_es_client()
 
     filters = []
@@ -843,6 +921,7 @@ def search_drafts(query: str, size: int = 100) -> dict:
     Returns:
         Dict with keys: hits (list of doc dicts), file_paths (unique source paths)
     """
+    query = _sanitize_es_input(query)
     es = get_es_client()
     index = ES_INDICES["drafting"]
 
@@ -886,6 +965,11 @@ def get_docs_by_source(index_name: str, source_path: str, size: int = 1) -> dict
     Returns:
         Dict with keys: hits (list of doc dicts), total
     """
+    # Block index-name injection — only allow indices declared in settings.py
+    if not _validate_index_name(index_name):
+        return {"hits": [], "total": 0, "error": f"Unknown index: '{index_name}'"}
+    source_path = _sanitize_es_input(source_path, max_length=500)
+
     es = get_es_client()
 
     es_query = {
@@ -946,6 +1030,8 @@ def search_high_court(
     Returns:
         Dict with keys: hits (list of doc dicts), total
     """
+    query = _sanitize_es_input(query)
+    court_name = _sanitize_es_input(court_name, max_length=100) if court_name else None
     es = get_es_client()
 
     should_clauses = [

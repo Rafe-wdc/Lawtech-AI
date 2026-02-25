@@ -74,8 +74,8 @@ class SemanticSearchInput(BaseModel):
 
 
 @tool(args_schema=SemanticSearchInput)
-def search_by_semantic(query: str, top_k: int = 5, year_from: Optional[int] = None, year_to: Optional[int] = None) -> str:
-    """Search Supreme Court judgments by topic or legal concept using intelligent text matching.
+def search_by_topic(query: str, top_k: int = 5, year_from: Optional[int] = None, year_to: Optional[int] = None) -> str:
+    """Search Supreme Court judgments by topic or legal concept using BM25 keyword matching.
 
     Use this tool when the user asks about a legal concept, topic, or principle
     in natural language. Examples: 'right to privacy', 'dowry death',
@@ -86,6 +86,7 @@ def search_by_semantic(query: str, top_k: int = 5, year_from: Optional[int] = No
 
     This tool searches across the full judgment text, party names, and bench
     to find the most relevant cases using BM25 ranking with phrase boosting.
+    NOTE: This uses keyword/BM25 matching, not embedding-based semantic search.
     """
     try:
         es = get_es_client()

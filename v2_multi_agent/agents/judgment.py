@@ -22,6 +22,7 @@ Search Strategies (tried in order of specificity):
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date
 from typing import Optional, List
 
@@ -121,6 +122,80 @@ def _extract_case_metadata(query: str) -> CaseMetadata:
     return result
 
 
+_LEGAL_TOPICS = [
+    "bail", "anticipatory bail", "murder", "rape", "cheating", "fraud",
+    "negligence", "contract", "property", "divorce", "custody", "contempt",
+    "quashing", "injunction", "defamation", "accident", "compensation",
+    "writ", "habeas corpus", "mandamus", "eviction", "arbitration",
+]
+
+
+def _judgment_regex_fallback(query: str) -> CaseMetadata:
+    """Regex-based fallback when GPT-4o metadata extraction fails or times out.
+
+    Extracts party names, year, court, and legal topics without any LLM call.
+    Deliberately conservative — returns broad search params to avoid missing results.
+    """
+    query_lower = query.lower()
+
+    # Party names: "X vs Y" or "X versus Y"
+    petitioners: list[str] = []
+    respondents: list[str] = []
+    vs_match = re.search(
+        r'(.+?)\s+(?:vs?\.?|versus)\s+(.+?)(?:\s+\d{4}|\s*$)',
+        query, re.IGNORECASE,
+    )
+    if vs_match:
+        petitioners = [vs_match.group(1).strip()[:80]]
+        respondents = [vs_match.group(2).strip()[:80]]
+
+    # Year: 4-digit number 1900-2099
+    year: int | None = None
+    yr_match = re.search(r'\b(19|20)\d{2}\b', query)
+    if yr_match:
+        year = int(yr_match.group(0))
+
+    # Court name
+    court_name: str | None = None
+    if "supreme court" in query_lower or re.search(r'\bsc\b', query_lower):
+        court_name = "supreme court"
+    elif "high court" in query_lower:
+        hc = re.search(r'(\w+)\s+high court', query_lower)
+        court_name = f"{hc.group(1)} high court" if hc else "high court"
+
+    # Legal topics
+    topics = [t for t in _LEGAL_TOPICS if t in query_lower]
+
+    # Lexical query: combine key tokens
+    lexical_parts = []
+    if petitioners:
+        lexical_parts.append(petitioners[0])
+    if respondents:
+        lexical_parts.append("vs")
+        lexical_parts.append(respondents[0])
+    if year:
+        lexical_parts.append(str(year))
+    lexical = " ".join(lexical_parts) if lexical_parts else query[:100]
+
+    # size: narrow if both parties known, else broader
+    size = 1 if (petitioners and respondents) else (5 if topics else 10)
+
+    log.info("Regex fallback metadata",
+             petitioners=petitioners, respondents=respondents,
+             year=year, court=court_name, topics=topics, size=size)
+
+    return CaseMetadata(
+        petitioner_names=petitioners,
+        respondent_names=respondents,
+        year=year,
+        court_name=court_name,
+        topics=topics,
+        acts_or_sections=[],
+        lexical_query=lexical,
+        size=size,
+    )
+
+
 # --- Hit Processing ---
 
 def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
@@ -184,8 +259,16 @@ async def judgment_node(state: LegalAgentState) -> dict:
     log.info("Agent started", query=query[:100])
 
     try:
-        # Step 1: Extract metadata
-        metadata = _extract_case_metadata(query)
+        # Step 1: Extract metadata (GPT-4o in a thread, with timeout + regex fallback)
+        try:
+            metadata = await asyncio.wait_for(
+                asyncio.to_thread(_extract_case_metadata, query),
+                timeout=20,
+            )
+        except (asyncio.TimeoutError, Exception) as meta_err:
+            log.warning("Metadata extraction failed/timed out, using regex fallback",
+                        error=str(meta_err))
+            metadata = _judgment_regex_fallback(query)
 
         # Step 2: Smart multi-strategy search
         with log_time(log, "ES search"):
@@ -282,7 +365,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
             "cannot provide information", "no direct information",
             "no specific information", "no information available",
             "unable to find", "could not find", "not available in",
-            "there is no", "does not have information", "based on the provided",
+            "there is no", "does not have information",
+            "based on the provided agent",
         ]
         content_lower = llm_response.content.lower()[:300]
         if any(p in content_lower for p in _sorry_patterns) or len(llm_response.content) < 50:

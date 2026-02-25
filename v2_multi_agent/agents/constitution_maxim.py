@@ -1,7 +1,14 @@
-"""Agent #9 — Constitution & Maxim Agent
+"""Agents #9a, #9b, #9c — Constitution, Maxim, and Legal Concepts
 
-Handles constitutional provisions, fundamental rights/duties,
-directive principles, legal maxims, and general legal concepts.
+Split into THREE separate node functions so they can run in parallel
+via LangGraph Send API. Previously a single combined node ran them
+sequentially, which meant if Constitution failed, Maxim was unaffected
+but the results were still merged in one pass.
+
+Now:
+- constitution_node: Handles Constitution queries (ChromaDB + LLM fallback)
+- maxim_node: Handles Maxim queries (ChromaDB + LLM fallback)
+- legal_concepts_node: Handles Legal_Concepts queries (direct LLM, no retrieval)
 
 Uses ChromaDB vectorstores with MultiQuery + BM25 ensemble retrieval.
 
@@ -15,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from datetime import date
 from typing import List
 
@@ -66,20 +74,29 @@ _MULTI_QUERY_PROMPT = PromptTemplate(
 # --- ChromaDB Initialization ---
 
 _vectordbs: dict[str, Chroma] = {}
+_vectordb_lock = threading.Lock()
 
 
 def _get_vectordb(task: str) -> Chroma:
-    """Get or initialize a ChromaDB vectorstore for the given task."""
-    if task not in _vectordbs:
+    """Get or initialize a ChromaDB vectorstore for the given task.
+
+    Thread-safe: uses a lock to prevent race conditions when Constitution
+    and Maxim agents initialize their vectorstores in parallel.
+    """
+    if task in _vectordbs:
+        return _vectordbs[task]
+
+    with _vectordb_lock:
+        # Double-check after acquiring lock
+        if task in _vectordbs:
+            return _vectordbs[task]
+
         task_lower = task.lower()
         if task_lower not in CHROMA_PERSIST_DIRS:
             raise ValueError(f"No ChromaDB directory configured for task: {task}")
 
         persist_dir = CHROMA_PERSIST_DIRS[task_lower]
         embeddings = get_retriever_embeddings()
-
-        # Clear cache to avoid stale connections
-        chromadb.api.client.SharedSystemClient.clear_system_cache()
 
         _vectordbs[task] = Chroma(
             persist_directory=persist_dir,
@@ -186,75 +203,57 @@ def _retrieve_from_chromadb(task: str, query: str) -> list[Document]:
 # --- Task Handlers ---
 
 async def _handle_legal_concepts(query: str, chat_history: list) -> AgentResult:
-    """Handle Legal_Concepts task — direct LLM response, no retrieval."""
-    with log_time(log, "Legal concepts LLM generation"):
-        llm = get_gemini_flash(temperature=0.3).bind(max_tokens=8192)
-        prompt = ChatPromptTemplate.from_messages([
-            ("user", LEGAL_CONCEPTS_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "Current Date: {date}"),
-            ("user", "{query}"),
-        ])
-        chain = prompt | llm
-        from core.streaming import stream_chain_response
-        response = await stream_chain_response(chain, {
-            "query": query,
-            "chat_history": chat_history,
-            "date": str(date.today()),
-        })
-
-    tokens = 0
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        tokens = response.usage_metadata.get("total_tokens", 0)
-
-    log.info("Legal concepts completed",
-             response_len=len(response.content), tokens=tokens)
-
-    return AgentResult(
-        agent_name="Legal_Concepts",
-        content=response.content,
-        sources=[SourceMetadata(
-            source_type="legal_concepts",
-            title="AI-Generated Legal Explanation",
-            content=["Response generated from AI legal knowledge"],
-            agent_name="Legal_Concepts",
-        )],
-        tokens_consumed=tokens,
-    )
+    """Handle Legal_Concepts task — web-grounded AI response for comprehensive coverage."""
+    from core.agent_fallback import web_search_fallback
+    log.info("Legal concepts using web search for comprehensive response")
+    result = await web_search_fallback(query, "Legal_Concepts", LEGAL_CONCEPTS_PROMPT)
+    return result
 
 
 async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list) -> AgentResult:
-    """Handle Constitution or Maxim task — ChromaDB retrieval + LLM generation."""
+    """Handle Constitution or Maxim task — ChromaDB retrieval + web enrichment + LLM generation."""
     system_prompt = (
         CONSTITUTION_SYSTEM_PROMPT if task == "Constitution"
         else MAXIM_SYSTEM_PROMPT
     )
 
-    with log_time(log, "ChromaDB retrieval", task=task):
-        docs = await asyncio.to_thread(_retrieve_from_chromadb, task, query)
+    # Run ChromaDB retrieval and web enrichment in parallel
+    from core.agent_fallback import get_web_context
+    with log_time(log, "ChromaDB + web enrichment (parallel)", task=task):
+        docs, web_context = await asyncio.gather(
+            asyncio.to_thread(_retrieve_from_chromadb, task, query),
+            get_web_context(query, task),
+        )
 
     if not docs:
-        log.warning("No documents found", task=task)
-        return AgentResult(
-            agent_name=task,
-            content="",
-            sources=[],
-            tokens_consumed=0,
-        )
+        log.warning("No documents found in ChromaDB, using web search fallback", task=task)
+        from core.agent_fallback import web_search_fallback
+        result = await web_search_fallback(query, task, system_prompt)
+        return result
 
     docs_text = "\n\n".join(d.page_content for d in docs)
     source_name = docs[0].metadata.get("source", "unknown")
 
+    # Combine ChromaDB text with web context for richer input
+    combined_context = docs_text
+    if web_context:
+        combined_context = (
+            f"{docs_text}\n\n"
+            f"--- Additional Context from Web Research ---\n{web_context}"
+        )
+        log.debug("Web enrichment added",
+                  task=task, web_context_len=len(web_context))
+
     log.debug("Generating response",
               task=task, docs_count=len(docs),
-              source=source_name, context_len=len(docs_text))
+              source=source_name, context_len=len(combined_context))
 
     with log_time(log, "LLM generation", task=task):
-        llm = get_gemini_flash(temperature=0.1)
+        llm = get_gemini_flash(temperature=0.3)
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "Retrieved provisions:\n{docs}"),
+            ("user", "Retrieved provisions and context:\n{docs}"),
             ("user", "Current Date: {date}"),
             ("user", "User Query: {query}"),
         ])
@@ -263,7 +262,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
         from core.streaming import stream_chain_response
         response = await stream_chain_response(chain, {
             "query": query,
-            "docs": docs_text,
+            "docs": combined_context,
             "chat_history": chat_history,
             "date": str(date.today()),
         })
@@ -271,6 +270,32 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     tokens = 0
     if hasattr(response, "usage_metadata") and response.usage_metadata:
         tokens = response.usage_metadata.get("total_tokens", 0)
+
+    # Check if LLM apologized (docs were irrelevant) — fall back to web search
+    _sorry_patterns = ["i am sorry", "i'm sorry", "does not contain", "no information",
+                       "not contain information", "cannot find", "no relevant"]
+    content_lower = response.content.lower()[:200]
+    if any(p in content_lower for p in _sorry_patterns) or len(response.content) < 50:
+        log.warning("LLM response is an apology or too short, using web fallback",
+                    task=task, response_preview=response.content[:100])
+        # Emit token_reset so frontend clears the sorry text
+        try:
+            from langgraph.config import get_stream_writer
+            writer = get_stream_writer()
+            writer({"type": "token_reset"})
+        except RuntimeError:
+            pass  # not in streaming context
+        from core.agent_fallback import web_search_fallback
+        result = await web_search_fallback(query, task, system_prompt)
+        result.tokens_consumed += tokens  # include the wasted tokens
+        # Stream the fallback content as tokens so frontend displays it
+        try:
+            writer = get_stream_writer()
+            for i in range(0, len(result.content), 20):
+                writer({"type": "token", "content": result.content[i:i+20]})
+        except (RuntimeError, NameError):
+            pass
+        return result
 
     log.info("Task completed",
              task=task, source=source_name,
@@ -295,57 +320,78 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     )
 
 
-# --- Agent Node ---
+# --- Separate Agent Nodes (parallel via LangGraph Send) ---
 
-async def constitution_maxim_node(state: LegalAgentState) -> dict:
-    """Retrieve constitutional provisions, legal maxims, or explain legal concepts.
+async def constitution_node(state: LegalAgentState) -> dict:
+    """Handle Constitution queries — ChromaDB retrieval + LLM fallback.
 
-    Handles ALL matching tasks from tasks_planned — not just the first.
-    For example, if tasks_planned=["Constitution", "Maxim"], both are processed
-    and returned as separate entries in agent_results for synthesis.
-
-    Routes based on task type:
-    - Constitution: ChromaDB retrieval + LLM generation
-    - Maxim: ChromaDB retrieval + LLM generation
-    - Legal_Concepts: Direct LLM response (no retrieval)
+    Runs as its own graph node so it executes in parallel with maxim_node.
     """
     query = state.get("query", state["original_query"])
-    primary_task = state.get("task", "Legal_Concepts")
     chat_history = state.get("chat_history", [])
+    log.info("Constitution agent started", query=query[:100])
 
-    # Determine ALL tasks this node should handle from the plan.
-    # Previously used next() which picked only the first match — Bug #1.
-    our_tasks = {"Constitution", "Maxim", "Legal_Concepts"}
-    planned = state.get("tasks_planned", [])
-    active_tasks = [t for t in planned if t in our_tasks]
+    try:
+        result = await _handle_constitution_or_maxim("Constitution", query, chat_history)
+    except Exception as e:
+        log.error("Constitution agent failed", error=str(e), exc_info=True)
+        result = AgentResult(
+            agent_name="Constitution",
+            content="",
+            sources=[],
+            tokens_consumed=0,
+            error=str(e),
+        )
 
-    # Fallback: if no planned tasks matched, use the primary task or default
-    if not active_tasks:
-        active_tasks = [primary_task if primary_task in our_tasks else "Legal_Concepts"]
+    log.info("Constitution agent completed",
+             has_content=bool(result.content), error=result.error)
+    return {"agent_results": {"Constitution": result}}
 
-    log.info("Agent started", tasks=active_tasks, query=query[:100])
 
-    all_results: dict[str, AgentResult] = {}
+async def maxim_node(state: LegalAgentState) -> dict:
+    """Handle Maxim queries — ChromaDB retrieval + LLM fallback.
 
-    for task in active_tasks:
-        try:
-            if task == "Legal_Concepts":
-                result = await _handle_legal_concepts(query, chat_history)
-            else:
-                result = await _handle_constitution_or_maxim(task, query, chat_history)
-            all_results[task] = result
-        except Exception as e:
-            log.error("Task failed", task=task, error=str(e), exc_info=True)
-            all_results[task] = AgentResult(
-                agent_name=task,
-                content="",
-                sources=[],
-                tokens_consumed=0,
-                error=str(e),
-            )
+    Runs as its own graph node so it executes in parallel with constitution_node.
+    """
+    query = state.get("query", state["original_query"])
+    chat_history = state.get("chat_history", [])
+    log.info("Maxim agent started", query=query[:100])
 
-    log.info("Agent completed all tasks",
-             tasks=list(all_results.keys()),
-             success_count=sum(1 for r in all_results.values() if not r.error))
+    try:
+        result = await _handle_constitution_or_maxim("Maxim", query, chat_history)
+    except Exception as e:
+        log.error("Maxim agent failed", error=str(e), exc_info=True)
+        result = AgentResult(
+            agent_name="Maxim",
+            content="",
+            sources=[],
+            tokens_consumed=0,
+            error=str(e),
+        )
 
-    return {"agent_results": all_results}
+    log.info("Maxim agent completed",
+             has_content=bool(result.content), error=result.error)
+    return {"agent_results": {"Maxim": result}}
+
+
+async def legal_concepts_node(state: LegalAgentState) -> dict:
+    """Handle Legal_Concepts queries — direct LLM response, no retrieval."""
+    query = state.get("query", state["original_query"])
+    chat_history = state.get("chat_history", [])
+    log.info("Legal Concepts agent started", query=query[:100])
+
+    try:
+        result = await _handle_legal_concepts(query, chat_history)
+    except Exception as e:
+        log.error("Legal Concepts agent failed", error=str(e), exc_info=True)
+        result = AgentResult(
+            agent_name="Legal_Concepts",
+            content="",
+            sources=[],
+            tokens_consumed=0,
+            error=str(e),
+        )
+
+    log.info("Legal Concepts agent completed",
+             has_content=bool(result.content), error=result.error)
+    return {"agent_results": {"Legal_Concepts": result}}

@@ -14,6 +14,8 @@ Data Source: Google Search (real-time web)
 
 from __future__ import annotations
 
+import asyncio
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
@@ -60,18 +62,24 @@ async def scenario_node(state: LegalAgentState) -> dict:
 
         log.debug("Prompt built", prompt_len=len(full_prompt))
 
-        # Invoke Gemini 2.5 Pro with Google Search grounding
-        with log_time(log, "Gemini Pro + Google Search"):
+        # Invoke Gemini 2.5 Flash with Google Search grounding
+        # Uses asyncio.to_thread to avoid blocking the event loop
+        # 120s timeout to prevent indefinite hangs on complex searches
+        with log_time(log, "Gemini Flash + Google Search"):
             client = get_genai_client()
-            response = client.models.generate_content(
-                model="gemini-2.5-pro",
-                contents=[full_prompt],
-                config={
-                    "tools": [{"google_search": {}}],
-                    "max_output_tokens": 8000,
-                    "temperature": 0.5,
-                    "top_p": 0.95,
-                },
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model="gemini-2.5-flash",
+                    contents=[full_prompt],
+                    config={
+                        "tools": [{"google_search": {}}],
+                        "max_output_tokens": 8000,
+                        "temperature": 0.5,
+                        "top_p": 0.95,
+                    },
+                ),
+                timeout=120.0,
             )
 
         # Extract response text

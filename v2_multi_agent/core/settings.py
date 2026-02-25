@@ -24,7 +24,7 @@ if _missing:
 MODELS = {
     "orchestrator": "gpt-4o",
     "task_classifier": "gpt-4o",
-    "drafting": "gpt-4o",
+    "drafting": "gemini-2.5-flash",
     "judgment_metadata": "gpt-4o",
     "newacts_metadata": "gpt-4o",
     "draft_selector": "gpt-4o-mini",

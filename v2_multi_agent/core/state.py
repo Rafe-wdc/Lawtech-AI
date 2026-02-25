@@ -72,6 +72,8 @@ class AgentResult:
     sources: list[SourceMetadata] = field(default_factory=list)
     tokens_consumed: int = 0
     error: str | None = None
+    retry_attempted: bool = False
+    fallback_used: bool = False
 
 
 def _merge_agent_results(existing: dict, new: dict) -> dict:

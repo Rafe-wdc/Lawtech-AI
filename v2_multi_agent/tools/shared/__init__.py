@@ -103,6 +103,21 @@ from .document_tools import (
     get_collection_metadata,
 )
 
+# --- Judgment Specialized Search ---
+from .judgment_search import (
+    smart_judgment_search,
+    search_by_party_names as search_judgment_by_party,
+    search_by_party_fuzzy as search_judgment_fuzzy,
+    search_by_single_party as search_judgment_single_party,
+    search_by_citation as search_judgment_by_citation,
+    search_by_case_type as search_judgment_by_case_type,
+    search_by_judge as search_judgment_by_judge,
+    search_by_date_range as search_judgment_by_date_range,
+    search_by_legal_provision as search_judgment_by_provision,
+    detect_citation,
+    detect_case_type,
+)
+
 # --- SCI Judgment Tools ---
 from .sci_judgment_tools import (
     search_by_semantic,
@@ -184,6 +199,18 @@ ALL_TOOLS = [
     compress_pdf,
     delete_pdf_vectorstore,
     get_collection_metadata,
+    # Judgment Specialized Search (11)
+    smart_judgment_search,
+    search_judgment_by_party,
+    search_judgment_fuzzy,
+    search_judgment_single_party,
+    search_judgment_by_citation,
+    search_judgment_by_case_type,
+    search_judgment_by_judge,
+    search_judgment_by_date_range,
+    search_judgment_by_provision,
+    detect_citation,
+    detect_case_type,
     # SCI Judgment (7)
     search_by_semantic,
     search_by_keyword,
@@ -237,6 +264,15 @@ AGENT_TOOLS = {
         extract_case_metadata,
         search_judgments,
         search_high_court,
+        smart_judgment_search,
+        search_judgment_by_party,
+        search_judgment_fuzzy,
+        search_judgment_single_party,
+        search_judgment_by_citation,
+        search_judgment_by_case_type,
+        search_judgment_by_judge,
+        search_judgment_by_date_range,
+        search_judgment_by_provision,
         generate_s3_link,
         generate_legal_response,
     ],
@@ -265,8 +301,15 @@ AGENT_TOOLS = {
         suggest_remedies,
         get_legal_news,
     ],
-    "constitution_maxim": [
+    "constitution": [
         search_chromadb_ensemble,
+        generate_legal_response,
+    ],
+    "maxim": [
+        search_chromadb_ensemble,
+        generate_legal_response,
+    ],
+    "legal_concepts": [
         generate_legal_response,
     ],
     "document": [

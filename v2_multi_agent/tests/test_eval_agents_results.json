@@ -1,0 +1,1704 @@
+{
+  "verdicts": {
+    "PASS": 94,
+    "PARTIAL": 4,
+    "FAIL": 2,
+    "ERROR": 0
+  },
+  "evaluation_time": 30.869356632232666,
+  "single_turn": [
+    {
+      "id": 1,
+      "prompt": "Section 302 of IPC",
+      "category": "Newacts-Single",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 744,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Section 302 of the IPC by providing the relevant statutory text and its equivalent in the new Bharatiya Nyaya Sanhita, 2023. It covers both the old and new provisions comprehensively, with accurate citations and a clear explanation of the changes."
+    },
+    {
+      "id": 2,
+      "prompt": "Section 35 of BNS",
+      "category": "Newacts-Single",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 587,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing the specific section number and the statutory text of Section 35 of the Bharatiya Nyaya Sanhita, 2023. It covers all aspects of the query comprehensively and accurately, ensuring that the legal information is correct and well-cited."
+    },
+    {
+      "id": 3,
+      "prompt": "What is Section 438 of CrPC?",
+      "category": "Newacts-Single",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 2043,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing the full text of Section 438 of the Code of Criminal Procedure, 1973, which is exactly what was asked. It covers all aspects of the section comprehensively and accurately, including the conditions under which bail may be granted and the exceptions to the section. The legal information is correct and well-cited, fulfilling all the requirements for a high score."
+    },
+    {
+      "id": 4,
+      "prompt": "Section 173 of BNSS",
+      "category": "Newacts-Single",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 2292,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Section 173 of the Bharatiya Nagarik Suraksha Sanhita, 2023, providing a comprehensive overview of its provisions. It accurately summarizes the statutory text and includes relevant details about the procedures for recording information in cognizable cases, ensuring all aspects of the query are covered with precision."
+    },
+    {
+      "id": 5,
+      "prompt": "Sections 302 and 307 of IPC",
+      "category": "Newacts-Multi",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 4418,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Sections 302 and 307 of the IPC, providing detailed statutory text and relevant illustrations. It also accurately compares these sections with their counterparts in the Bharatiya Nyaya Sanhita, 2023, covering all aspects of the query comprehensively. The only minor issue is a slight lack of clarity in the last part of the response, which could have been more polished."
+    },
+    {
+      "id": 6,
+      "prompt": "Compare Section 154 and Section 161 of CrPC",
+      "category": "Newacts-Multi",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "FAIL",
+      "response_len": 4306,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing a detailed comparison of Sections 154 and 161 of the CrPC, covering their purposes, key provisions, and differences. It accurately reflects the statutory text and includes relevant details about state amendments, ensuring a comprehensive and precise overview."
+    },
+    {
+      "id": 7,
+      "prompt": "Explain Sections 64, 65 and 66 of BSA",
+      "category": "Newacts-Multi",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 2134,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by explaining Sections 64, 65, and 66 of the Bharatiya Sakshya Adhiniyam, 2023 in detail. It covers all aspects of the sections comprehensively, providing accurate paraphrases of the statutory text. The only minor issue is the lack of specific citations for the sections, but the content is otherwise accurate and relevant."
+    },
+    {
+      "id": 8,
+      "prompt": "punishment for theft in BNS",
+      "category": "Newacts-Topic",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 4565,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about the punishment for theft under the Bharatiya Nyaya Sanhita (BNS) by providing specific sections related to theft and their corresponding punishments. It is also complete, covering various aspects of theft and related offenses, and accurately cites the relevant sections of the BNS with appropriate descriptions. Overall, the legal information provided is correct and well-cited."
+    },
+    {
+      "id": 9,
+      "prompt": "bail provisions under BNSS",
+      "category": "Newacts-Topic",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 20526,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about bail provisions under the Bharatiya Nagarik Suraksha Sanhita, 2023, providing relevant sections and definitions. It comprehensively covers both bailable and non-bailable offences, along with general provisions for bail, demonstrating a thorough understanding of the topic. The legal information is mostly accurate, but there is a minor issue with the completeness of the last sentence, which appears to be cut off."
+    },
+    {
+      "id": 10,
+      "prompt": "electronic evidence rules in BSA",
+      "category": "Newacts-Topic",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 11141,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about electronic evidence rules in the Bharatiya Sakshya Adhiniyam, 2023, by providing relevant sections and their statutory text. It comprehensively covers the admissibility and effect of electronic records, ensuring all aspects of the query are met with accurate legal information."
+    },
+    {
+      "id": 11,
+      "prompt": "What is the equivalent of Section 498a of IPC in BNS?",
+      "category": "Newacts-Mapping",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 691,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing the equivalent section in the Bharatiya Nyaya Sanhita (BNS) for Section 498A of the IPC. It includes the relevant statutory text for both sections, ensuring clarity and accuracy in the mapping. All aspects of the query are covered comprehensively."
+    },
+    {
+      "id": 12,
+      "prompt": "Section 125 CrPC new law equivalent",
+      "category": "Newacts-Mapping",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts",
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 9734,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about the equivalent of Section 125 CrPC by clearly stating that it has been replaced by Section 144 of the BNSS. It provides a comprehensive overview of the new provision, including its purpose and key provisions, while accurately citing the relevant statutory text. All aspects of the query are thoroughly covered, making the response highly relevant, complete, and accurate."
+    },
+    {
+      "id": 13,
+      "prompt": "Section 3(5) of Bharatiya Nyaya Sanhita",
+      "category": "Newacts-Subsection",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 250,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing the exact text of Section 3(5) of the Bharatiya Nyaya Sanhita, 2023. It is comprehensive and accurately reflects the legal provision without any omissions or inaccuracies."
+    },
+    {
+      "id": 14,
+      "prompt": "IEA Section 65b",
+      "category": "Newacts-Subsection",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 6681,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Section 65B of the Indian Evidence Act, providing a comprehensive overview of its provisions. It accurately cites the section and explains its significance regarding the admissibility of electronic records in court, fulfilling all the requirements for relevance, completeness, and accuracy."
+    },
+    {
+      "id": 15,
+      "prompt": "What does Section 100 of BNS say?",
+      "category": "Newacts-Nearby",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 2058,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing the full text of Section 100 of the Bharatiya Nyaya Sanhita, 2023, along with detailed illustrations and explanations. It accurately reflects the legal definition and context of culpable homicide, ensuring completeness and correctness in the information provided."
+    },
+    {
+      "id": 16,
+      "prompt": "What comes after section 35 of BNS?",
+      "category": "Newacts-Nearby",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 162,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing the next section number and its title, which is relevant and complete. Additionally, it accurately cites the specific act, 'The Bharatiya Nyaya Sanhita, 2023,' and correctly identifies the content of Section 36, ensuring the legal information is precise and well-cited."
+    },
+    {
+      "id": 17,
+      "prompt": "Sections 302, 304, 304a, 307 and 376 of IPC",
+      "category": "Newacts-Range",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 9655,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it addresses the specific sections of the IPC requested by the user, providing both the old and new provisions. It covers most of the sections comprehensively, although it lacks the new provision for Section 304A, which is a notable gap. The legal information provided is accurate and well-cited, with proper references to the Bharatiya Nyaya Sanhita, 2023."
+    },
+    {
+      "id": 18,
+      "prompt": "Section 420 IPC punishment for cheating",
+      "category": "Newacts-Single",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 1050,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Section 420 IPC by providing the statutory text and punishment details. It also accurately maps the old provision to the new provision under Section 318(4) of the Bharatiya Nyaya Sanhita, 2023, maintaining clarity and correctness throughout. All aspects of the query are covered comprehensively."
+    },
+    {
+      "id": 19,
+      "prompt": "Section 138 of Negotiable Instruments Act",
+      "category": "Legislation-Single",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 1125,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user query by providing a detailed explanation of Section 138 of the Negotiable Instruments Act, including the conditions under which the section applies. It accurately summarizes the statutory text and context, covering all necessary aspects without any gaps or inaccuracies."
+    },
+    {
+      "id": 20,
+      "prompt": "Section 9 of Arbitration Act",
+      "category": "Legislation-Single",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 2138,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Section 9 of the Arbitration Act by providing a detailed summary of its key provisions. It covers all aspects of the section comprehensively and accurately, including the specific legal context and implications. The information is correct and well-structured, making it a strong response."
+    },
+    {
+      "id": 21,
+      "prompt": "Section 23 of Indian Contract Act",
+      "category": "Legislation-Single",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 678,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Section 23 of the Indian Contract Act by providing the statutory text and summarizing its key points. It covers the lawful and unlawful considerations and objects of agreements comprehensively, though it could have included specific illustrations mentioned in the section for greater completeness. The legal information presented is accurate and well-cited."
+    },
+    {
+      "id": 22,
+      "prompt": "Section 34 of Indian Contract Act",
+      "category": "Legislation-Single",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 705,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user query by accurately summarizing Section 34 of the Indian Contract Act, 1872, and provides a relevant illustration to clarify the legal provision. It covers all aspects of the query comprehensively and presents the legal information correctly, making it a well-rounded response."
+    },
+    {
+      "id": 23,
+      "prompt": "Sections 44 and 45 of Transfer of Property Act",
+      "category": "Legislation-Multi",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 1376,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing detailed explanations of both Sections 44 and 45 of the Transfer of Property Act, 1977. It accurately summarizes the statutory provisions and their implications, ensuring that all aspects of the query are covered comprehensively and correctly."
+    },
+    {
+      "id": 24,
+      "prompt": "Explain Sections 3, 4 and 5 of Consumer Protection Act",
+      "category": "Legislation-Multi",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 1110,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's request for an explanation of Sections 3, 4, and 5 of the Consumer Protection Act. It covers the main points of each section with sufficient detail, although it could have included more context about the significance of these sections. The legal information provided is accurate and aligns well with the statutory provisions."
+    },
+    {
+      "id": 25,
+      "prompt": "Sections 10 to 15 of Companies Act",
+      "category": "Legislation-Range",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 12913,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's request for Sections 10 to 15 of the Companies Act, 2013, providing detailed summaries of the sections. It covers most aspects comprehensively, although it omits Section 11 entirely, which is a notable gap. The legal information presented is accurate and well-cited, aligning with the statutory text."
+    },
+    {
+      "id": 26,
+      "prompt": "director duties under companies act",
+      "category": "Legislation-Topic",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 701,
+      "eval_relevance": 4,
+      "eval_completeness": 4,
+      "eval_accuracy": 6,
+      "eval_verdict": "FAIL",
+      "eval_reasoning": "The response does not directly address the user's query about director duties under the Companies Act, focusing instead on the Director Identification Number (DIN) provisions. It fails to cover the actual duties of directors as outlined in the Act, such as fiduciary duties, duty of care, and compliance with statutory obligations. Additionally, while the sections mentioned are accurate, they do not pertain to the duties of directors, leading to a lack of relevance and completeness."
+    },
+    {
+      "id": 27,
+      "prompt": "tenant rights in rent control legislation",
+      "category": "Legislation-Topic",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 10076,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, addressing tenant rights under rent control legislation with a focus on eviction protection, rent and deposit rights, and amenities. It covers most aspects of the query comprehensively, although it could provide more detail on the statutory basis for amenities and repairs. The legal information appears accurate, referencing specific sections of the legislation, but could benefit from clearer citations or context regarding the specific Rent Control Act being discussed."
+    },
+    {
+      "id": 28,
+      "prompt": "minimum wages provisions in labour law",
+      "category": "Legislation-Topic",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 1351,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the query about minimum wages provisions in labor law, specifically referencing the Code on Wages Jharkhand Rules, 2021. It covers the criteria for calculating minimum wages and the role of the technical committee in fixing these rates, though it could have included more context about the overarching Code on Wages itself. The legal information provided is accurate and well-cited, meeting the requirements for a comprehensive response."
+    },
+    {
+      "id": 29,
+      "prompt": "Section 138(1) of Negotiable Instruments Act",
+      "category": "Legislation-Subsection",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 1005,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses Section 138 of the Negotiable Instruments Act, providing a clear summary of the section's provisions. It covers the essential elements of the offense and the conditions under which it applies, though it could have included the exact statutory text for completeness. The legal information presented is accurate and well-explained, with minor gaps in citation."
+    },
+    {
+      "id": 30,
+      "prompt": "Section 18 of RERA Act",
+      "category": "Legislation-Single",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 2517,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user query about Section 18 of the RERA Act, providing a detailed summary of its provisions. It covers all aspects of the section, including the rights of allottees and the obligations of promoters, while accurately reflecting the statutory text and context. The legal information is correct and well-articulated, making it a comprehensive and relevant response."
+    },
+    {
+      "id": 31,
+      "prompt": "Section 12 of Domestic Violence Act",
+      "category": "Legislation-Single",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 1227,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Section 12 of the Domestic Violence Act by providing a detailed summary of the section's key provisions. It covers all aspects of the query comprehensively and accurately, including the specific statutory text and context of the legal provisions."
+    },
+    {
+      "id": 32,
+      "prompt": "Rule 3 of Maharashtra Rent Control Rules",
+      "category": "Legislation-NonSection",
+      "expected_agents": "Legislation",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 176,
+      "eval_relevance": 8,
+      "eval_completeness": 7,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is relevant as it directly addresses Rule 3 of the Maharashtra Rent Control Rules. It provides a specific reference to the rule and mentions the requirement for a receipt under section 31, although it could have included more context about the implications or details of the rule. The legal information appears accurate and well-cited, meeting the criteria for a passing score."
+    },
+    {
+      "id": 33,
+      "prompt": "cases on anticipatory bail",
+      "category": "Judgment-Topic",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 5455,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about anticipatory bail cases, providing specific case names, court details, and key legal principles. It covers multiple cases comprehensively, although there is a minor issue with the accuracy of the legal principle regarding anticipatory bail under the S.C./S.T. Act, which could have been more clearly articulated. Overall, it meets the criteria for a PASS."
+    },
+    {
+      "id": 34,
+      "prompt": "dowry harassment case law",
+      "category": "Judgment-Topic",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 14579,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about dowry harassment case law by providing detailed summaries of multiple relevant court judgments. It covers all necessary aspects, including citations, court names, facts, issues, and decisions, demonstrating completeness. The legal information is mostly accurate, with proper citations, though there is a minor lack of detail in the last case summary, which slightly affects the accuracy score."
+    },
+    {
+      "id": 35,
+      "prompt": "cheque bounce cases under Section 138",
+      "category": "Judgment-Topic",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 6972,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses cheque bounce cases under Section 138, covering the statutory basis, conditions, and judicial interpretations. It provides a comprehensive overview of the legal principles involved and cites specific case law, although it could have included more case citations for completeness. The legal information presented is accurate and well-cited, adhering to the requirements for a query about Indian court judgments."
+    },
+    {
+      "id": 36,
+      "prompt": "property dispute judgments",
+      "category": "Judgment-Topic",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 4870,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about property dispute judgments, providing a list of pertinent cases. It covers various aspects of property disputes comprehensively, including land acquisition and compensation issues, and cites specific cases with their legal principles. The legal information presented is accurate and well-cited, referencing the appropriate courts and summarizing key holdings effectively."
+    },
+    {
+      "id": 37,
+      "prompt": "cases on medical negligence",
+      "category": "Judgment-Topic",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 10031,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about cases on medical negligence, providing specific case names, citations, and court details. It covers multiple cases comprehensively, detailing facts, issues, and decisions, which enhances completeness. The legal information is mostly accurate, with proper references to case law, though it could benefit from a few more citations for thoroughness."
+    },
+    {
+      "id": 38,
+      "prompt": "land acquisition compensation judgments",
+      "category": "Judgment-Topic",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment",
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 10200,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, addressing the user's query about land acquisition compensation judgments comprehensively. It covers key legal principles, statutory frameworks, and significant judicial pronouncements, including specific case names and citations. The legal information provided is mostly accurate, with a minor note that the mention of a 'recent judgment' in February 2026 is speculative and not verifiable as of the current date."
+    },
+    {
+      "id": 39,
+      "prompt": "Kirloskar vs Kirloskar property dispute",
+      "category": "Judgment-Party",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment",
+        "Scenario"
+      ],
+      "test_status": "PASS",
+      "response_len": 9277,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, addressing the Kirloskar property dispute comprehensively by detailing the legal arguments, parties involved, and court interventions. It covers the key aspects of the case, including the Deed of Family Settlement and trademark licensing issues, while providing accurate information about the courts involved and the timeline of events. However, it lacks specific case citations and some minor details could be clearer, which slightly affects the accuracy score."
+    },
+    {
+      "id": 40,
+      "prompt": "State of Maharashtra vs Suresh",
+      "category": "Judgment-Party",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 4312,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user query by providing a comprehensive overview of the case 'State of Maharashtra vs Suresh', including the court, citation, and key legal principles. It thoroughly covers the facts, issues, and final decision, ensuring all aspects of the query are met with accurate legal information."
+    },
+    {
+      "id": 41,
+      "prompt": "quashing of FIR in cyber crime cases",
+      "category": "Judgment-CaseType",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Scenario",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 8352,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, directly addressing the quashing of FIRs in cybercrime cases and providing a comprehensive overview of the legal framework and considerations involved. It accurately cites the relevant legal provisions and case law, particularly the landmark case of State of Haryana v. Ch. Bhajan Lal, while also discussing the unique aspects of cybercrime. The only minor gap is that it could have included more recent case law or examples specific to cybercrime, but overall, it is thorough and well-cited."
+    },
+    {
+      "id": 42,
+      "prompt": "writ petition cases on fundamental rights",
+      "category": "Judgment-CaseType",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Constitution",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 6430,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about writ petitions concerning fundamental rights, referencing specific constitutional articles and relevant case law. It provides a comprehensive overview of the legal framework and includes multiple case citations, although it could improve by ensuring all case names are complete and correctly formatted. Overall, the legal information is accurate and well-cited, making it a strong response."
+    },
+    {
+      "id": 43,
+      "prompt": "cases invoking Section 498A IPC",
+      "category": "Judgment-Provision",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment",
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 6020,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about cases invoking Section 498A IPC. It provides a comprehensive overview of the statutory basis, relevant case law, and key legal principles, covering multiple aspects of the provision. The legal information presented is accurate, with proper citations and references to specific cases and courts, fulfilling the requirements for a query about Indian court judgments."
+    },
+    {
+      "id": 44,
+      "prompt": "judgments under Section 138 NI Act",
+      "category": "Judgment-Provision",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment",
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 9549,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, addressing the user's query about judgments under Section 138 of the NI Act by discussing key interpretations and procedural aspects. It covers most important points, although it could have included specific case citations for greater completeness. The legal information provided is accurate and well-explained, with a solid understanding of the statutory provisions."
+    },
+    {
+      "id": 45,
+      "prompt": "Bombay High Court cases on rent dispute",
+      "category": "Judgment-Court",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 12864,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about Bombay High Court cases on rent disputes, providing specific case names, citations, and details about the court and judges involved. It covers multiple cases comprehensively, detailing the issues, facts, and final decisions, although it could improve slightly on accuracy by ensuring all citations are correctly formatted and verified."
+    },
+    {
+      "id": 46,
+      "prompt": "Delhi High Court cybercrime judgments",
+      "category": "Judgment-Court",
+      "expected_agents": "Judgment",
+      "agents_used": [
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 15097,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about Delhi High Court judgments related to cybercrime, providing specific case names, citations, and details about the court and judges involved. It covers all aspects of the query comprehensively, including the issues, facts, and final decisions of the cases. The legal information is mostly accurate, with proper citations, though minor improvements could be made in clarity or additional context."
+    },
+    {
+      "id": 47,
+      "prompt": "Supreme Court cases on right to privacy",
+      "category": "SCI-Topic",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 4448,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the user's query about Supreme Court cases on the right to privacy, referencing specific landmark cases and their significance. It covers the evolution of the right to privacy, its constitutional basis, and key judgments, although it could have included more details on remedies. The legal information provided is accurate and well-cited, making it a comprehensive and relevant response."
+    },
+    {
+      "id": 48,
+      "prompt": "SC judgment on Article 21 right to life",
+      "category": "SCI-Topic",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 6073,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the user's query about the Supreme Court's interpretation of Article 21, providing a comprehensive overview of key judgments and their implications. It accurately cites landmark cases and summarizes their significance, although it could have included more specific citations for some cases. Overall, the response is highly relevant, complete, and mostly accurate."
+    },
+    {
+      "id": 49,
+      "prompt": "Supreme Court ruling on triple talaq",
+      "category": "SCI-Topic",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 4580,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about the Supreme Court ruling on triple talaq, providing a comprehensive overview of the case, including its citation, key issues, and the majority and minority opinions. It accurately reflects the legal principles established in the Shayara Bano case and cites relevant constitutional provisions, demonstrating a thorough understanding of the topic."
+    },
+    {
+      "id": 50,
+      "prompt": "SC cases on bail conditions",
+      "category": "SCI-Topic",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 2158,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Supreme Court cases on bail conditions by providing specific case names, summaries, and relevant legal principles. It covers all aspects of the query comprehensively, although there is a minor issue with the accuracy of the case citation format. Overall, the information is well-cited and relevant to the topic."
+    },
+    {
+      "id": 51,
+      "prompt": "Supreme Court judgments on environmental protection",
+      "category": "SCI-Topic",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 2288,
+      "eval_relevance": 8,
+      "eval_completeness": 7,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is relevant as it addresses the user's query about Supreme Court judgments on environmental protection, providing specific case names and summaries. However, it could improve by including more explicit references to constitutional provisions and the significance of the cases. The legal information appears accurate, with proper citations and relevant details."
+    },
+    {
+      "id": 52,
+      "prompt": "Supreme Court landmark judgment on Aadhaar privacy",
+      "category": "SCI-Landmark",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 4494,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the user's query about landmark Supreme Court judgments on Aadhaar and privacy, providing detailed case names, dates, and key findings. It accurately summarizes the legal principles established in the relevant judgments and cites specific constitutional provisions, demonstrating a comprehensive understanding of the topic."
+    },
+    {
+      "id": 53,
+      "prompt": "Kesavananda Bharati vs State of Kerala",
+      "category": "SCI-Landmark",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 3958,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user query by providing a comprehensive overview of the Kesavananda Bharati case, including its background, the landmark judgment, and the establishment of the basic structure doctrine. It accurately cites the case name, date, and key legal principles, while also discussing the implications of the ruling, thus fulfilling all category-specific criteria."
+    },
+    {
+      "id": 54,
+      "prompt": "Maneka Gandhi vs Union of India case",
+      "category": "SCI-Landmark",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 4060,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the user query about the *Maneka Gandhi vs. Union of India* case, covering its background, statutory basis, key legal principles established, and its impact on Indian constitutional law. It accurately references relevant constitutional articles and the specific Supreme Court case, providing a comprehensive overview that aligns with the category-specific criteria."
+    },
+    {
+      "id": 55,
+      "prompt": "SC precedents on freedom of speech Article 19",
+      "category": "SCI-Topic",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 6794,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, directly addressing the user's query about Supreme Court precedents on freedom of speech under Article 19. It covers key cases and principles comprehensively, although it could have included a few more recent cases for completeness. The legal information provided is accurate and well-cited, referencing specific Supreme Court judgments and their significance."
+    },
+    {
+      "id": 56,
+      "prompt": "Supreme Court on reservation and equality",
+      "category": "SCI-Topic",
+      "expected_agents": "SCI_Judgment",
+      "agents_used": [
+        "SCI_Judgment",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 7027,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response effectively addresses the user's query about the Supreme Court's stance on reservation and equality, referencing relevant constitutional articles and landmark cases. It covers the statutory basis for reservation and provides specific Supreme Court judgments, although it could have included more details on the implications of the cases mentioned."
+    },
+    {
+      "id": 57,
+      "prompt": "Article 21 of Indian Constitution",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 218,
+      "eval_relevance": 8,
+      "eval_completeness": 5,
+      "eval_accuracy": 9,
+      "eval_verdict": "PARTIAL",
+      "eval_reasoning": "The response provides a relevant definition of Article 21, addressing the core aspect of the user's query. However, it lacks depth in explaining the scope and application of the provision, such as mentioning relevant case law or interpretations, and does not distinguish between fundamental rights, DPSPs, and duties. The legal information is accurate, but the response is incomplete."
+    },
+    {
+      "id": 58,
+      "prompt": "Fundamental rights under Part III of Constitution",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 2343,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about Fundamental Rights under Part III of the Constitution. It covers the main articles related to Fundamental Rights, providing a good overview, though it could have included more about the distinction between fundamental rights, directive principles, and duties. The legal information provided is accurate and well-cited, referencing specific articles and their implications."
+    },
+    {
+      "id": 59,
+      "prompt": "Article 14 right to equality",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 220,
+      "eval_relevance": 8,
+      "eval_completeness": 5,
+      "eval_accuracy": 9,
+      "eval_verdict": "PARTIAL",
+      "eval_reasoning": "The response accurately defines Article 14 and its core principle of equality before the law, which is relevant to the user's query. However, it lacks depth in explaining the scope and application of the provision, such as its implications in case law or how it interacts with other constitutional provisions. Additionally, it does not distinguish between fundamental rights, directive principles, and duties, which is essential for a comprehensive understanding."
+    },
+    {
+      "id": 60,
+      "prompt": "What are fundamental duties under Article 51A?",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 1307,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about fundamental duties under Article 51A, listing all the duties comprehensively. It accurately reflects the provisions of the Article and provides a clear understanding of the scope of these duties, although it could have included relevant case law or interpretations for a more in-depth analysis."
+    },
+    {
+      "id": 61,
+      "prompt": "Directive principles of state policy",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 2359,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about the Directive Principles of State Policy, referencing specific Articles and explaining their significance. It covers the main principles and their implications comprehensively, though it could benefit from more detailed case law references. The legal information provided is mostly accurate, with a minor imprecision regarding the mention of Article 243ZI, which, while related, is not a core part of the Directive Principles."
+    },
+    {
+      "id": 62,
+      "prompt": "Article 32 writ jurisdiction of Supreme Court",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution",
+        "SCI_Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 2875,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Article 32, providing a thorough explanation of its provisions and significance in the context of Fundamental Rights. It includes relevant case law, although the cited case could have been more directly related to Article 32 itself. Overall, the response is comprehensive and accurate, making it a strong answer."
+    },
+    {
+      "id": 63,
+      "prompt": "Article 19(1)(a) freedom of expression",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 475,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Article 19(1)(a) by clearly stating the right to freedom of speech and expression. It also mentions Article 19(2), which is relevant to understanding the scope and limitations of this right. However, it could have included relevant case law or interpretations to enhance completeness."
+    },
+    {
+      "id": 64,
+      "prompt": "What is Article 226 and its scope?",
+      "category": "Constitution",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 4722,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the user query regarding Article 226, providing a detailed explanation of its provisions, scope, and relevant interpretations. It accurately references the article and discusses its application, including the enforcement of fundamental rights and the High Court's jurisdiction. The only minor issue is the lack of specific case law citations, which would enhance the accuracy score."
+    },
+    {
+      "id": 65,
+      "prompt": "What is audi alteram partem?",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Maxim"
+      ],
+      "test_status": "PASS",
+      "response_len": 472,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response effectively addresses the user's query by clearly explaining the meaning of the maxim 'audi alteram partem' and its legal interpretation. It covers the essential aspects of the principle of natural justice, although it could have included specific case law or statutory references for greater depth. Overall, the legal information provided is accurate and relevant."
+    },
+    {
+      "id": 66,
+      "prompt": "Explain the doctrine of res judicata",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Maxim"
+      ],
+      "test_status": "PASS",
+      "response_len": 462,
+      "eval_relevance": 8,
+      "eval_completeness": 6,
+      "eval_accuracy": 8,
+      "eval_verdict": "PARTIAL",
+      "eval_reasoning": "The response is relevant and accurately explains the meaning and legal interpretation of the doctrine of res judicata. However, it lacks depth in covering all aspects, such as providing relevant case law or statutory provisions, and practical examples of its application, which are essential for a comprehensive understanding."
+    },
+    {
+      "id": 67,
+      "prompt": "Meaning of caveat emptor in law",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Maxim",
+        "Legal_Concepts"
+      ],
+      "test_status": "PASS",
+      "response_len": 4473,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly explains the meaning of 'Caveat Emptor,' its legal context, and application in Indian law, including relevant statutory provisions and exceptions. It also discusses the evolution of the doctrine and its implications, providing a comprehensive overview. The only minor issue is the lack of specific case law references, which would enhance the accuracy score."
+    },
+    {
+      "id": 68,
+      "prompt": "What is estoppel in legal terms?",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Maxim"
+      ],
+      "test_status": "PASS",
+      "response_len": 412,
+      "eval_relevance": 8,
+      "eval_completeness": 6,
+      "eval_accuracy": 7,
+      "eval_verdict": "PARTIAL",
+      "eval_reasoning": "The response provides a relevant definition of estoppel and explains its meaning, which is good. However, it lacks depth in covering the legal context, application, and relevant case law or statutory provisions, which are essential for a comprehensive understanding of the doctrine. While the information is mostly accurate, the absence of practical examples and citations affects the completeness of the response."
+    },
+    {
+      "id": 69,
+      "prompt": "Doctrine of ultra vires",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Maxim",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 6160,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly explains the doctrine of *ultra vires*, covering its meaning, legal context, and applications across corporate, administrative, and constitutional law. It provides relevant examples and discusses its significance in Indian law, although it could benefit from specific case law citations to enhance accuracy."
+    },
+    {
+      "id": 70,
+      "prompt": "Explain nemo judex in causa sua",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Maxim"
+      ],
+      "test_status": "PASS",
+      "response_len": 535,
+      "eval_relevance": 9,
+      "eval_completeness": 7,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, directly addressing the user's query about the maxim 'nemo judex in causa sua' and explaining its meaning and legal interpretation. However, it lacks depth in providing specific case law or statutory references that would enhance completeness, and while the legal information is mostly accurate, it could benefit from more detailed citations."
+    },
+    {
+      "id": 71,
+      "prompt": "habeas corpus meaning and legal significance",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "test_status": "PASS",
+      "response_len": 4100,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the meaning and legal significance of habeas corpus, providing a clear explanation and relevant context. It covers the historical background, constitutional provisions in India, and significant case law, demonstrating a comprehensive understanding of the topic. The legal information is mostly accurate, with only minor potential improvements in citation details."
+    },
+    {
+      "id": 72,
+      "prompt": "What is the doctrine of proportionality?",
+      "category": "Maxim",
+      "expected_agents": "Maxim",
+      "agents_used": [
+        "Maxim"
+      ],
+      "test_status": "PASS",
+      "response_len": 3912,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly explains the doctrine of proportionality, covering its meaning, legal interpretation, and application across various branches of law. It provides a comprehensive overview, including relevant examples and a multi-part test for its application, although it could have included specific Indian case law for greater accuracy. Overall, it directly addresses the query with depth and clarity."
+    },
+    {
+      "id": 73,
+      "prompt": "define murder",
+      "category": "Legal_Concepts",
+      "expected_agents": "Legal_Concepts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "FAIL",
+      "response_len": 1876,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by providing a clear definition of murder as per both the new and old legal provisions in India. It covers all aspects of the definition comprehensively and accurately, referencing relevant sections of the Bharatiya Nyaya Sanhita, 2023, and the Indian Penal Code, 1860. The only minor issue is that it could have included a brief context on how these definitions apply in practice, but overall, it is highly informative."
+    },
+    {
+      "id": 74,
+      "prompt": "What is the difference between bail and anticipatory bail?",
+      "category": "Legal_Concepts",
+      "expected_agents": "Legal_Concepts",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "test_status": "PASS",
+      "response_len": 4787,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response provides a clear and detailed explanation of the differences between bail and anticipatory bail, addressing all aspects of the user's query. It accurately references relevant sections of the Code of Criminal Procedure and the Bharatiya Nagarik Suraksha Sanhita, 2023, demonstrating a solid understanding of the legal concepts involved. The only minor gap is that the response is cut off at the end, but it still conveys the essential information effectively."
+    },
+    {
+      "id": 75,
+      "prompt": "Explain FIR and its importance",
+      "category": "Legal_Concepts",
+      "expected_agents": "Legal_Concepts",
+      "agents_used": [
+        "Legal_Concepts"
+      ],
+      "test_status": "PASS",
+      "response_len": 4175,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly explains the concept of FIR, its importance, and relevant legal provisions, including the transition to the BNSS, 2023. It covers all aspects of the query comprehensively, although it could have included more specific citations from the Indian Evidence Act for a perfect score in accuracy."
+    },
+    {
+      "id": 76,
+      "prompt": "theft",
+      "category": "Legal_Concepts",
+      "expected_agents": null,
+      "agents_used": [
+        "Newacts",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 6306,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response provides a comprehensive overview of theft as defined under The Bharatiya Nyaya Sanhita, 2023, including its definition, punishment, and related offences. It accurately references relevant sections of the law and includes judicial precedents that illustrate the application of these laws, although it could benefit from a few more citations for complete accuracy."
+    },
+    {
+      "id": 77,
+      "prompt": "My landlord is refusing to return my security deposit of 50000 rupees after I vacated the flat. What legal steps can I take?",
+      "category": "Scenario",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Scenario",
+        "Judgment",
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 8143,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by outlining the legal steps they can take regarding the non-return of their security deposit. It comprehensively covers relevant laws, including the Indian Contract Act and the Model Tenancy Act, and provides practical advice on documentation and permissible deductions. The legal information is mostly accurate, with a minor note that it could have included more specific citations for the case laws mentioned."
+    },
+    {
+      "id": 78,
+      "prompt": "My employer terminated me without any notice or severance pay. What are my rights under Indian labour laws?",
+      "category": "Scenario",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Scenario",
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 6522,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about rights under Indian labor laws regarding termination without notice or severance pay, providing a comprehensive overview of relevant laws such as the Industrial Disputes Act, 1947, and state-specific Shops and Establishments Acts. It accurately outlines the definitions, conditions for retrenchment, and consequences of non-compliance, although it could have included more recent updates or changes in law for completeness."
+    },
+    {
+      "id": 79,
+      "prompt": "I received a legal notice for defamation on social media. How should I respond and what are the possible consequences?",
+      "category": "Scenario",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Scenario",
+        "Judgment",
+        "Legal_Concepts"
+      ],
+      "test_status": "PASS",
+      "response_len": 8411,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about how to respond to a legal notice for defamation and outlines the potential consequences under Indian law. It covers both criminal and civil aspects of defamation, provides actionable steps for responding to the notice, and references relevant laws and sections accurately. The only minor gap is that it could have elaborated slightly more on the consequences of civil defamation."
+    },
+    {
+      "id": 80,
+      "prompt": "Can police arrest someone without an FIR? What are the rights of an arrested person in India?",
+      "category": "Scenario",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Scenario",
+        "Legislation",
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 8505,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about police arrest without an FIR and the rights of an arrested person in India, providing detailed legal provisions and explanations. It covers the relevant laws, including the CrPC and the BNSS, and outlines the rights of arrested individuals comprehensively, with only minor gaps in the completeness of the rights listed."
+    },
+    {
+      "id": 81,
+      "prompt": "What is the procedure to file a consumer complaint online in India and what compensation can I claim?",
+      "category": "Scenario",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Scenario",
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 6434,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about the procedure for filing a consumer complaint online in India and the types of compensation that can be claimed. It provides a comprehensive overview of the relevant laws, the steps involved in filing a complaint, and the compensation framework under the Consumer Protection Act, 2019. The legal information is accurate and well-cited, making it a strong response."
+    },
+    {
+      "id": 82,
+      "prompt": "My neighbour is encroaching on my land and has constructed an illegal wall. I have all the land documents. What remedies are available to me under Indian law? Can I file a civil suit and also approach the municipal corporation? What are the time limits for filing such cases?",
+      "category": "Scenario-Long",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Scenario",
+        "Judgment",
+        "Legislation"
+      ],
+      "test_status": "PASS",
+      "response_len": 7291,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about remedies for land encroachment, providing detailed civil and municipal actions available under Indian law. It covers various legal provisions, including the Specific Relief Act and relevant municipal laws, and discusses the possibility of criminal action, ensuring a comprehensive overview. The legal information is mostly accurate, with a minor note that the reference to the Bharatiya Nyaya Sanhita is a recent change that may not be universally recognized yet."
+    },
+    {
+      "id": 83,
+      "prompt": "What are the latest changes in GST laws in India?",
+      "category": "Scenario-News",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Legislation"
+      ],
+      "test_status": "FAIL",
+      "response_len": 7469,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, addressing the user's query about the latest changes in GST laws in India with specific details about the reforms and amendments. It covers multiple aspects of the changes comprehensively, including GST rate rationalization and amendments to specific sections of the CGST Act. While the legal information is mostly accurate, there are minor inaccuracies regarding the dates mentioned, which slightly affect the accuracy score."
+    },
+    {
+      "id": 84,
+      "prompt": "Is cryptocurrency legal in India? What are the recent court rulings?",
+      "category": "Scenario-News",
+      "expected_agents": "Scenario",
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "test_status": "FAIL",
+      "response_len": 6110,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response effectively addresses the user's query about the legality of cryptocurrency in India and recent court rulings, providing a comprehensive overview of relevant cases. It includes specific court decisions and their implications, although it could benefit from clearer citations for some legal references. Overall, the information is mostly accurate and relevant to the query."
+    },
+    {
+      "id": 85,
+      "prompt": "Explain Article 21 with landmark Supreme Court judgments",
+      "category": "Multi-Constitution+Judgment",
+      "expected_agents": [
+        "Constitution",
+        "Judgment",
+        "SCI_Judgment"
+      ],
+      "agents_used": [
+        "Constitution",
+        "SCI_Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 3906,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the user query by explaining Article 21 and providing detailed summaries of landmark Supreme Court judgments that illustrate its interpretation. It integrates constitutional provisions with relevant case law effectively, although it could have included more citations for accuracy. Overall, it presents a cohesive and comprehensive overview of the topic."
+    },
+    {
+      "id": 86,
+      "prompt": "Article 14 equality with related case laws",
+      "category": "Multi-Constitution+Judgment",
+      "expected_agents": [
+        "Constitution",
+        "Judgment",
+        "SCI_Judgment"
+      ],
+      "agents_used": [
+        "Constitution",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 9352,
+      "eval_relevance": 9,
+      "eval_completeness": 9,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response effectively addresses the user's query about Article 14 by providing a comprehensive overview of its principles, including equality before the law and equal protection of the laws. It integrates relevant case laws that illustrate the application and interpretation of Article 14, although it could benefit from a few more citations or details on the cases mentioned for enhanced accuracy."
+    },
+    {
+      "id": 87,
+      "prompt": "Section 438 BNSS with Supreme Court precedents on anticipatory bail",
+      "category": "Multi-Newacts+SCI",
+      "expected_agents": [
+        "Newacts",
+        "SCI_Judgment"
+      ],
+      "agents_used": [],
+      "test_status": "ERROR",
+      "response_len": 0,
+      "eval_relevance": 0,
+      "eval_completeness": 0,
+      "eval_accuracy": 0,
+      "eval_verdict": "FAIL",
+      "eval_reasoning": "No response to evaluate (status: ERROR)"
+    },
+    {
+      "id": 88,
+      "prompt": "BNS Section 302 murder with relevant SC judgments",
+      "category": "Multi-Newacts+SCI",
+      "expected_agents": [
+        "Newacts",
+        "SCI_Judgment",
+        "Judgment"
+      ],
+      "agents_used": [
+        "Newacts",
+        "SCI_Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 6113,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the user's query about Section 302 of the IPC and its equivalent in the BNS 2023, along with relevant Supreme Court judgments. It covers the statutory basis, principles governing murder charges, and key judgments, though it could have included more specific case citations. The legal information provided is accurate and well-cited, with a clear connection between the old and new laws."
+    },
+    {
+      "id": 89,
+      "prompt": "Section 138 NI Act with important case laws",
+      "category": "Multi-Legislation+Judgment",
+      "expected_agents": [
+        "Legislation",
+        "Judgment"
+      ],
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 5729,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response effectively addresses the user query by providing a detailed explanation of Section 138 of the Negotiable Instruments Act, along with relevant case laws that illustrate its application. While it covers the main points comprehensively, there is a minor gap in fully integrating the discussion of Section 148, which could have been more cohesively tied to the main topic. Overall, the legal information presented is accurate and well-cited."
+    },
+    {
+      "id": 90,
+      "prompt": "RERA Section 18 with recent court judgments on delayed possession",
+      "category": "Multi-Legislation+Judgment",
+      "expected_agents": [
+        "Legislation",
+        "Judgment"
+      ],
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 8396,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response thoroughly addresses the user's query by providing a detailed explanation of Section 18 of RERA and integrating relevant recent court judgments that reinforce the statutory provisions. It covers all aspects of the query comprehensively, although there is a minor lack of citation for the specific dates of the judgments mentioned, which slightly affects the accuracy score."
+    },
+    {
+      "id": 91,
+      "prompt": "Article 14 and res judicata",
+      "category": "Multi-Constitution+Maxim",
+      "expected_agents": [
+        "Constitution",
+        "Maxim"
+      ],
+      "agents_used": [
+        "Constitution",
+        "Maxim"
+      ],
+      "test_status": "PASS",
+      "response_len": 4057,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response effectively addresses the user's query by clearly explaining both Article 14 and the doctrine of res judicata, along with their interplay. It covers the essential aspects of both legal principles and provides accurate legal citations, demonstrating a strong understanding of the subject matter. However, while it is comprehensive, a few minor details could enhance the completeness of the response."
+    },
+    {
+      "id": 92,
+      "prompt": "I was arrested without a warrant and the police did not inform my family. What are my rights under BNSS?",
+      "category": "Multi-Scenario+Newacts",
+      "expected_agents": [
+        "Scenario",
+        "Newacts"
+      ],
+      "agents_used": [
+        "Newacts",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 3847,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about rights under the BNSS regarding arrest without a warrant and failure to inform family, covering all relevant sections and providing a thorough explanation. It integrates statutory rights with relevant case law, although the case law references could be more directly tied to the specific issue of family notification. Overall, the legal information is accurate and well-cited."
+    },
+    {
+      "id": 93,
+      "prompt": "Compare old Section 302 IPC with new BNS equivalent and cite relevant Supreme Court judgments",
+      "category": "Multi-Newacts+SCI",
+      "expected_agents": [
+        "Newacts",
+        "SCI_Judgment",
+        "Judgment"
+      ],
+      "agents_used": [
+        "Newacts",
+        "SCI_Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 4804,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response effectively addresses the user's query by comparing Section 302 IPC with its equivalent in the Bharatiya Nyaya Sanhita 2023, highlighting key differences and similarities. It also cites relevant Supreme Court judgments, although it could have included more direct comparisons or interpretations from the judgments regarding the new provisions. Overall, the legal information is accurate and well-organized."
+    },
+    {
+      "id": 94,
+      "prompt": "What are the legal provisions for cybercrime in India and recent judgments?",
+      "category": "Multi-Mixed",
+      "expected_agents": null,
+      "agents_used": [
+        "Legislation",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 9491,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 8,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant, directly addressing the user's query about legal provisions for cybercrime in India and recent judgments. It provides a comprehensive overview of the IT Act and relevant IPC sections, though it could have included more recent case law to enhance completeness. The legal information presented is accurate and well-cited, with specific sections referenced, demonstrating a solid understanding of the topic."
+    },
+    {
+      "id": 95,
+      "prompt": "sec 302 ipc",
+      "category": "Edge-Abbreviation",
+      "expected_agents": "Newacts",
+      "agents_used": [
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 721,
+      "eval_relevance": 9,
+      "eval_completeness": 8,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the query about Section 302 of the IPC by providing relevant information about its provisions and the recent changes under the Bharatiya Nyaya Sanhita, 2023. It covers the main aspects of the section, including the punishment for murder, though it could have briefly mentioned the context of the IPC itself. The legal information provided is accurate and well-cited, making it a strong response."
+    },
+    {
+      "id": 96,
+      "prompt": "art 21 constitution",
+      "category": "Edge-Abbreviation",
+      "expected_agents": "Constitution",
+      "agents_used": [
+        "Constitution"
+      ],
+      "test_status": "PASS",
+      "response_len": 167,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query about Article 21 of the Constitution of India, providing a clear and accurate definition of the article. It covers all essential aspects without any tangents or omissions, and the legal information presented is correct and well-cited."
+    },
+    {
+      "id": 97,
+      "prompt": "Anticipatory bail",
+      "category": "Edge-Short",
+      "expected_agents": null,
+      "agents_used": [
+        "Scenario",
+        "Newacts",
+        "Judgment"
+      ],
+      "test_status": "PASS",
+      "response_len": 10000,
+      "eval_relevance": 10,
+      "eval_completeness": 9,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is highly relevant as it directly addresses the concept of anticipatory bail in India, providing a clear definition and context. It covers the statutory basis under both the CrPC and the new BNSS 2023, although it could have included a brief mention of the implications or conditions of anticipatory bail for completeness. The legal information provided is accurate and well-cited, making it a strong response overall."
+    },
+    {
+      "id": 98,
+      "prompt": "What happens if someone commits forgery of a government document and also cheating by personation and criminal breach of trust all in a single transaction?",
+      "category": "Edge-Complex",
+      "expected_agents": null,
+      "agents_used": [
+        "Scenario",
+        "Newacts"
+      ],
+      "test_status": "PASS",
+      "response_len": 8003,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response directly addresses the user's query by detailing the legal implications of committing forgery, cheating by personation, and criminal breach of trust in a single transaction. It comprehensively covers the relevant sections of both the Indian Penal Code and the Bharatiya Nyaya Sanhita, providing a thorough explanation of each offense and its potential penalties. The legal information is mostly accurate, with a minor note that the BNS is not yet in effect, but this does not significantly detract from the overall quality of the response."
+    },
+    {
+      "id": 99,
+      "prompt": "hello",
+      "category": "Edge-NonLegal",
+      "expected_agents": null,
+      "agents_used": [],
+      "test_status": "PASS",
+      "response_len": 72,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response is perfectly relevant as it addresses the user's non-legal query by redirecting them to ask a legal question. It is complete in that it clearly states the nature of the query and what is expected. Additionally, the information provided is accurate, as it correctly identifies the query as non-legal."
+    },
+    {
+      "id": 100,
+      "prompt": "Tell me about the weather today",
+      "category": "Edge-NonLegal",
+      "expected_agents": null,
+      "agents_used": [],
+      "test_status": "PASS",
+      "response_len": 72,
+      "eval_relevance": 10,
+      "eval_completeness": 10,
+      "eval_accuracy": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The response correctly identifies that the query is not related to legal matters and appropriately redirects the user to ask a legal question. It does not contain any errors or irrelevant information, fulfilling the criteria for handling non-legal queries effectively."
+    }
+  ],
+  "multi_turn": [
+    {
+      "name": "Newacts Follow-up",
+      "eval_coherence": 9,
+      "eval_follow_up": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The conversation maintains strong coherence across all turns, with each response building logically on the previous questions. The follow-up answers are precise and contextual, directly addressing the inquiries based on the established legal framework."
+    },
+    {
+      "name": "Judgment Follow-up",
+      "eval_coherence": 10,
+      "eval_follow_up": 10,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The system maintains perfect context across both turns, as the follow-up question directly relates to the topic of anticipatory bail discussed in the first turn. The responses are detailed and build on the previous information, demonstrating a strong understanding of the legal context."
+    },
+    {
+      "name": "Legislation Follow-up",
+      "eval_coherence": 9,
+      "eval_follow_up": 9,
+      "eval_verdict": "PASS",
+      "eval_reasoning": "The system effectively maintains context between the two turns, with the second turn directly building on the topic introduced in the first. The follow-up question is specific and relevant, and the response provides detailed information about the defenses available under Section 138, demonstrating a strong understanding of the prior context."
+    }
+  ]
+}

@@ -6,18 +6,18 @@
 <title>Lawttorney AI v2 — Test Console</title>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #232733;
-    --border: #2e3345;
-    --text: #e4e6f0;
-    --text2: #9ba1b7;
-    --accent: #6c63ff;
-    --accent2: #8b83ff;
-    --green: #34d399;
-    --red: #f87171;
-    --orange: #fbbf24;
-    --blue: #60a5fa;
+    --bg: #fdfcf8;
+    --surface: #f7f3e9;
+    --surface2: #ede8d8;
+    --border: #ddd3b5;
+    --text: #2c2720;
+    --text2: #7d7060;
+    --accent: #c8920c;
+    --accent2: #a87608;
+    --green: #16a34a;
+    --red: #dc2626;
+    --orange: #ea580c;
+    --blue: #2563eb;
     --radius: 10px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -45,7 +45,7 @@
   .sidebar-header h1 {
     font-size: 18px;
     font-weight: 700;
-    background: linear-gradient(135deg, var(--accent), var(--blue));
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
@@ -77,7 +77,7 @@
     margin-bottom: 2px;
   }
   .nav-item:hover { background: var(--surface2); color: var(--text); }
-  .nav-item.active { background: var(--accent); color: #fff; }
+  .nav-item.active { background: var(--accent); color: #1c1917; font-weight: 600; }
   .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
 
   .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -117,7 +117,7 @@
   .msg.user {
     align-self: flex-end;
     background: var(--accent);
-    color: #fff;
+    color: #1c1917;
     border-bottom-right-radius: 4px;
   }
   .msg.ai {
@@ -135,7 +135,7 @@
     font-size: 10px;
     padding: 2px 8px;
     border-radius: 10px;
-    background: rgba(108,99,255,0.2);
+    background: rgba(200,146,12,0.2);
     color: var(--accent2);
     font-weight: 600;
   }
@@ -155,12 +155,12 @@
   }
   .msg.error {
     align-self: center;
-    background: rgba(248,113,113,0.1);
+    background: rgba(220,38,38,0.08);
     color: var(--red);
-    border: 1px solid rgba(248,113,113,0.2);
+    border: 1px solid rgba(220,38,38,0.2);
   }
   .msg pre {
-    background: var(--bg);
+    background: #f3f4f6;
     padding: 10px;
     border-radius: 6px;
     overflow-x: auto;
@@ -214,9 +214,9 @@
   }
   .btn-primary {
     background: var(--accent);
-    color: #fff;
+    color: #1c1917;
   }
-  .btn-primary:hover { background: var(--accent2); }
+  .btn-primary:hover { background: var(--accent2); color: #fff; }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-secondary {
     background: var(--surface2);
@@ -225,11 +225,11 @@
   }
   .btn-secondary:hover { background: var(--border); }
   .btn-danger {
-    background: rgba(248,113,113,0.15);
+    background: rgba(220,38,38,0.1);
     color: var(--red);
-    border: 1px solid rgba(248,113,113,0.2);
+    border: 1px solid rgba(220,38,38,0.2);
   }
-  .btn-danger:hover { background: rgba(248,113,113,0.25); }
+  .btn-danger:hover { background: rgba(220,38,38,0.2); }
   .btn-sm { padding: 6px 14px; font-size: 12px; }
 
   .toggle-row {
@@ -293,7 +293,7 @@
   }
   .file-drop:hover, .file-drop.dragover {
     border-color: var(--accent);
-    background: rgba(108,99,255,0.05);
+    background: rgba(200,146,12,0.05);
   }
   .file-drop input { display: none; }
   .file-list {
@@ -328,7 +328,7 @@
   }
   .progress-bar .fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--accent), var(--blue));
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
     border-radius: 2px;
     transition: width 0.3s;
   }
@@ -379,10 +379,10 @@
     font-size: 11px;
     font-weight: 600;
   }
-  .status-pill.ok { background: rgba(52,211,153,0.15); color: var(--green); }
-  .status-pill.error { background: rgba(248,113,113,0.15); color: var(--red); }
-  .status-pill.pending { background: rgba(251,191,36,0.15); color: var(--orange); }
-  .status-pill.processing { background: rgba(96,165,250,0.15); color: var(--blue); }
+  .status-pill.ok { background: rgba(22,163,74,0.12); color: var(--green); }
+  .status-pill.error { background: rgba(220,38,38,0.12); color: var(--red); }
+  .status-pill.pending { background: rgba(200,146,12,0.15); color: var(--accent2); }
+  .status-pill.processing { background: rgba(37,99,235,0.12); color: var(--blue); }
 
   /* --- Streaming indicator --- */
   .streaming-dot {
@@ -429,6 +429,88 @@
   .stream-steps .step.done { color: var(--green); }
   .stream-steps .step .check { font-size: 11px; }
 
+  /* --- Draft Progress Card (multi-step pipeline) --- */
+  .draft-progress-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin: 8px 0;
+    animation: fadeSlideIn 0.3s ease;
+  }
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .draft-progress-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent2);
+    margin-bottom: 12px;
+  }
+  .draft-progress-header .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .draft-progress-counter {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text2);
+    font-weight: 400;
+  }
+  .draft-progress-bar {
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  .draft-progress-bar .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 3px;
+    transition: width 0.5s ease;
+  }
+  .draft-progress-label {
+    font-size: 12px;
+    color: var(--accent2);
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  .draft-section-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+  .draft-section-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text2);
+    transition: color 0.2s;
+  }
+  .draft-section-item.done { color: var(--green); }
+  .draft-section-item.active { color: var(--accent2); font-weight: 500; }
+  .draft-section-item .icon { width: 14px; text-align: center; font-size: 10px; }
+  .draft-progress-card.complete .spinner {
+    animation: none;
+    border-color: var(--green);
+    border-top-color: var(--green);
+  }
+  .draft-progress-card.complete .draft-progress-header { color: var(--green); }
+
   /* --- Log Panel --- */
   .log-panel {
     padding: 16px 24px;
@@ -456,7 +538,7 @@
   .msg.ai strong { color: var(--accent2); }
   .msg.ai a { color: var(--blue); text-decoration: underline; }
   .msg.ai code {
-    background: var(--bg);
+    background: rgba(0,0,0,0.07);
     padding: 1px 5px;
     border-radius: 3px;
     font-size: 12px;
@@ -471,7 +553,7 @@
     padding: 6px 10px;
     text-align: left;
   }
-  .msg.ai th { background: var(--bg); }
+  .msg.ai th { background: var(--surface); }
 
   /* --- Citation Cards --- */
   .citations-section { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -484,7 +566,7 @@
   .citations-header .chevron { transition: transform 0.2s; font-size: 12px; }
   .citations-header .chevron.open { transform: rotate(180deg); }
   .citations-count {
-    background: var(--accent); color: #fff; font-size: 10px;
+    background: var(--accent); color: #1c1917; font-size: 10px;
     padding: 1px 7px; border-radius: 10px; margin-left: 8px;
   }
   .citations-list {
@@ -502,16 +584,16 @@
     width: 32px; height: 32px; border-radius: 6px; display: flex;
     align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
   }
-  .citation-icon.judgment    { background: rgba(248,113,113,0.15); }
-  .citation-icon.sci_judgment { background: rgba(251,191,36,0.15); }
-  .citation-icon.legislation  { background: rgba(96,165,250,0.15); }
-  .citation-icon.newacts      { background: rgba(52,211,153,0.15); }
-  .citation-icon.drafting     { background: rgba(168,85,247,0.15); }
-  .citation-icon.scenario     { background: rgba(236,72,153,0.15); }
-  .citation-icon.constitution { background: rgba(251,191,36,0.15); }
-  .citation-icon.maxim        { background: rgba(96,165,250,0.15); }
-  .citation-icon.document     { background: rgba(52,211,153,0.15); }
-  .citation-icon.legal_concepts { background: rgba(108,99,255,0.15); }
+  .citation-icon.judgment    { background: rgba(220,38,38,0.12); }
+  .citation-icon.sci_judgment { background: rgba(200,146,12,0.15); }
+  .citation-icon.legislation  { background: rgba(37,99,235,0.12); }
+  .citation-icon.newacts      { background: rgba(22,163,74,0.12); }
+  .citation-icon.drafting     { background: rgba(124,58,237,0.12); }
+  .citation-icon.scenario     { background: rgba(219,39,119,0.12); }
+  .citation-icon.constitution { background: rgba(200,146,12,0.15); }
+  .citation-icon.maxim        { background: rgba(37,99,235,0.12); }
+  .citation-icon.document     { background: rgba(22,163,74,0.12); }
+  .citation-icon.legal_concepts { background: rgba(200,146,12,0.15); }
   .citation-body { flex: 1; min-width: 0; }
   .citation-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
   .citation-title a { color: var(--blue); text-decoration: none; }
@@ -532,7 +614,7 @@
   .citation-link:hover { text-decoration: underline; }
   .citation-agent-tag {
     font-size: 9px; padding: 1px 6px; border-radius: 8px;
-    background: rgba(108,99,255,0.15); color: var(--accent2); font-weight: 600;
+    background: rgba(200,146,12,0.15); color: var(--accent2); font-weight: 600;
   }
   .citation-expand-btn {
     color: var(--blue); font-size: 11px; cursor: pointer; margin-top: 4px;
@@ -563,8 +645,8 @@
     font-size: 14px; padding: 4px 8px; cursor: pointer; transition: all 0.15s; line-height: 1;
   }
   .feedback-btn:hover { background: var(--surface); }
-  .feedback-btn.active-up { background: rgba(52,211,153,0.15); border-color: var(--green); }
-  .feedback-btn.active-down { background: rgba(248,113,113,0.15); border-color: var(--red); }
+  .feedback-btn.active-up { background: rgba(22,163,74,0.12); border-color: var(--green); }
+  .feedback-btn.active-down { background: rgba(220,38,38,0.12); border-color: var(--red); }
   .feedback-comment {
     display: none; margin-top: 6px; gap: 6px; align-items: center;
   }
@@ -582,22 +664,22 @@
   }
   .related-chip {
     display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px;
-    border-radius: 16px; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25);
+    border-radius: 16px; background: rgba(22,163,74,0.08); border: 1px solid rgba(22,163,74,0.25);
     color: var(--green); font-size: 12px; cursor: pointer; transition: all 0.15s;
     margin: 3px 4px 3px 0;
   }
-  .related-chip:hover { background: rgba(52,211,153,0.2); border-color: var(--green); }
+  .related-chip:hover { background: rgba(22,163,74,0.15); border-color: var(--green); }
 
   /* --- Follow-up Suggestions --- */
   .followup-section { margin-top: 12px; }
   .followup-title { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 8px; }
   .followup-chip {
     display: inline-block; padding: 6px 14px; border-radius: 16px;
-    background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.25);
+    background: rgba(200,146,12,0.1); border: 1px solid rgba(245,158,11,0.25);
     color: var(--accent2); font-size: 12px; cursor: pointer; transition: all 0.15s;
     margin: 3px 4px 3px 0;
   }
-  .followup-chip:hover { background: rgba(108,99,255,0.2); border-color: var(--accent); }
+  .followup-chip:hover { background: rgba(200,146,12,0.2); border-color: var(--accent); }
 
   /* --- Context Bar (below chat header) --- */
   .context-bar {
@@ -623,19 +705,19 @@
     font-weight: 500;
   }
   .context-pill.turn {
-    background: rgba(96,165,250,0.15);
+    background: rgba(37,99,235,0.1);
     color: var(--blue);
   }
   .context-pill.rewrite {
-    background: rgba(251,191,36,0.15);
-    color: var(--orange);
+    background: rgba(200,146,12,0.15);
+    color: var(--accent2);
   }
   .context-pill.summary {
-    background: rgba(52,211,153,0.15);
+    background: rgba(22,163,74,0.1);
     color: var(--green);
   }
   .context-pill.thread {
-    background: rgba(108,99,255,0.15);
+    background: rgba(200,146,12,0.15);
     color: var(--accent2);
   }
   .rewrite-detail {
@@ -1076,12 +1158,40 @@ async function sendChatStream(query, threadId) {
             addLog('info', `Memory: Context loaded (${streamHistoryTurns} prev turns, has summary)`);
           }
 
+        } else if (event.type === 'agents_planned') {
+          // Show agent badges early (as soon as orchestrator plans)
+          const agentsEl = document.getElementById('streamAgents');
+          if (agentsEl && event.agents && event.agents.length) {
+            agentsEl.innerHTML = event.agents.map(a =>
+              '<span class="agent-tag">' + escapeHtml(a) + '</span>'
+            ).join('');
+          }
+          addLog('info', 'Agents planned: ' + (event.agents || []).join(', '));
+
         } else if (event.type === 'status') {
           // Update current status text
           const statusEl = document.getElementById('streamStatus');
           if (statusEl) {
             statusEl.innerHTML = '<span class="streaming-dot"></span> ' + escapeHtml(event.message);
           }
+
+          // When synthesis starts, mark draft progress card as complete
+          if (event.agent === 'orchestrator_synthesize') {
+            const draftCard = document.getElementById('draftProgressCard');
+            if (draftCard) {
+              draftCard.classList.add('complete');
+              const fillEl = document.getElementById('draftFill');
+              if (fillEl) fillEl.style.width = '100%';
+              const labelEl = document.getElementById('draftLabel');
+              if (labelEl) labelEl.textContent = 'All sections complete — injecting citations...';
+              draftCard.querySelectorAll('.draft-section-item.active').forEach(function(el) {
+                el.classList.remove('active');
+                el.classList.add('done');
+                el.querySelector('.icon').textContent = '\u2713';
+              });
+            }
+          }
+
           // Mark previous step as done, add new step
           const stepsEl = document.getElementById('streamSteps');
           if (stepsEl) {
@@ -1104,6 +1214,61 @@ async function sendChatStream(query, threadId) {
           scrollChat();
           addLog('info', `${event.agent}: ${event.message}`);
 
+        } else if (event.type === 'drafting_progress') {
+          // Dedicated draft section progress card
+          const statusEl = document.getElementById('streamStatus');
+          const stepsEl = document.getElementById('streamSteps');
+          let card = document.getElementById('draftProgressCard');
+          if (!card) {
+            // First section — create the progress card
+            if (statusEl) statusEl.style.display = 'none';
+            card = document.createElement('div');
+            card.id = 'draftProgressCard';
+            card.className = 'draft-progress-card';
+            card.innerHTML =
+              '<div class="draft-progress-header">' +
+                '<div class="spinner"></div>' +
+                'Generating Legal Draft' +
+                '<span class="draft-progress-counter" id="draftCounter"></span>' +
+              '</div>' +
+              '<div class="draft-progress-bar"><div class="fill" id="draftFill" style="width:0%"></div></div>' +
+              '<div class="draft-progress-label" id="draftLabel"></div>' +
+              '<div class="draft-section-list" id="draftSections"></div>';
+            // Insert card before the steps list
+            if (stepsEl && stepsEl.parentNode) {
+              stepsEl.parentNode.insertBefore(card, stepsEl);
+            }
+          }
+          // Update progress bar
+          const pct = Math.round((event.section / event.total) * 100);
+          const fillEl = document.getElementById('draftFill');
+          if (fillEl) fillEl.style.width = pct + '%';
+          // Update counter
+          const counterEl = document.getElementById('draftCounter');
+          if (counterEl) counterEl.textContent = event.section + ' / ' + event.total;
+          // Update label
+          const labelEl = document.getElementById('draftLabel');
+          if (labelEl) labelEl.textContent = 'Writing: ' + event.title;
+          // Update section list
+          const listEl = document.getElementById('draftSections');
+          if (listEl) {
+            // Mark previous active as done
+            const prevActive = listEl.querySelector('.active');
+            if (prevActive) {
+              prevActive.classList.remove('active');
+              prevActive.classList.add('done');
+              prevActive.querySelector('.icon').textContent = '\u2713';
+            }
+            // Add current section
+            const item = document.createElement('div');
+            item.className = 'draft-section-item active';
+            item.innerHTML = '<span class="icon">\u25CF</span> ' + escapeHtml(event.title);
+            listEl.appendChild(item);
+            listEl.scrollTop = listEl.scrollHeight;
+          }
+          scrollChat();
+          addLog('info', 'Drafting section ' + event.section + '/' + event.total + ': ' + event.title);
+
         } else if (event.type === 'token_reset') {
           // Server is retrying LLM call — clear partial tokens from failed attempt
           tokenBuffer = '';
@@ -1120,6 +1285,9 @@ async function sendChatStream(query, threadId) {
             if (statusEl) statusEl.style.display = 'none';
             const stepsEl = document.getElementById('streamSteps');
             if (stepsEl) stepsEl.style.display = 'none';
+            // Hide draft progress card when final response starts streaming
+            const draftCard = document.getElementById('draftProgressCard');
+            if (draftCard) draftCard.style.display = 'none';
             const contentEl = document.getElementById('streamContent');
             if (contentEl) {
               contentEl.style.display = 'block';
@@ -1146,6 +1314,8 @@ async function sendChatStream(query, threadId) {
           if (statusEl) statusEl.style.display = 'none';
           const stepsEl = document.getElementById('streamSteps');
           if (stepsEl) stepsEl.style.display = 'none';
+          const draftCard = document.getElementById('draftProgressCard');
+          if (draftCard) draftCard.style.display = 'none';
           const contentEl = document.getElementById('streamContent');
           if (contentEl) {
             contentEl.classList.remove('streaming-cursor');

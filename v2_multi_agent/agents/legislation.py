@@ -16,6 +16,7 @@ Search strategy:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from datetime import date
@@ -278,15 +279,27 @@ async def legislation_node(state: LegalAgentState) -> dict:
                     })
 
         if not hits:
-            log.warning("No results found", search_mode=search_mode)
-            return {
-                "agent_results": {"Legislation": AgentResult(
-                    agent_name="Legislation",
-                    content="",
-                    sources=[],
-                    tokens_consumed=0,
-                )},
-            }
+            # Phase 1: Query rewrite + retry
+            from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
+            rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Legislation")
+            if rewritten != query:
+                log.info("Retrying with rewritten query", rewritten=rewritten[:100])
+                try:
+                    retry_hits, retry_source = _search_legislation(rewritten)
+                    if retry_hits:
+                        hits, source_name = retry_hits, retry_source
+                        log.info("Retry search succeeded", hit_count=len(hits))
+                except Exception as retry_err:
+                    log.warning("Retry search failed", error=str(retry_err))
+
+            # Phase 2: Web search fallback if still empty
+            if not hits:
+                log.warning("All searches exhausted, using web fallback",
+                            search_mode=search_mode)
+                fallback_result = await web_search_fallback(
+                    query, "Legislation", LEGISLATION_SYSTEM_PROMPT)
+                fallback_result.retry_attempted = True
+                return {"agent_results": {"Legislation": fallback_result}}
 
         # Step 4: Convert hits to documents
         docs_text = "\n\n".join(h["_source"]["page_content"] for h in hits)
@@ -321,6 +334,30 @@ async def legislation_node(state: LegalAgentState) -> dict:
         tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             tokens = response.usage_metadata.get("total_tokens", 0)
+
+        # Check if LLM apologized (ES hits were irrelevant) — fall back to web search
+        _sorry_patterns = [
+            "i am sorry", "i'm sorry", "does not contain", "no information",
+            "not contain information", "cannot find", "no relevant",
+            "cannot provide information", "no direct information",
+            "no specific information", "no information available",
+            "unable to find", "could not find", "not available in",
+            "there is no", "does not have information", "based on the provided",
+        ]
+        content_lower = response.content.lower()[:300]
+        if any(p in content_lower for p in _sorry_patterns) or len(response.content) < 50:
+            log.warning("LLM response is an apology or too short, using web fallback",
+                        response_preview=response.content[:100], search_mode=search_mode)
+            try:
+                from langgraph.config import get_stream_writer
+                writer = get_stream_writer()
+                writer({"type": "token_reset"})
+            except RuntimeError:
+                pass
+            from core.agent_fallback import web_search_fallback
+            fallback_result = await web_search_fallback(query, "Legislation", LEGISLATION_SYSTEM_PROMPT)
+            fallback_result.tokens_consumed += tokens
+            return {"agent_results": {"Legislation": fallback_result}}
 
         log.info("Agent completed",
                  source=source_display, response_len=len(response.content),

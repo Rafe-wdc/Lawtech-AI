@@ -274,10 +274,12 @@ _NODE_STATUS = {
     "newacts": "Searching legal provisions...",
     "drafting": "Generating legal draft...",
     "scenario": "Analyzing legal scenario...",
-    "constitution_maxim": "Searching constitutional provisions...",
+    "constitution": "Searching constitutional provisions...",
+    "maxim": "Searching legal maxims...",
+    "legal_concepts": "Explaining legal concepts...",
     "document": "Searching uploaded documents...",
     "sci_judgment": "Searching Supreme Court judgments...",
-    "orchestrator_synthesize": "Preparing response...",
+    "orchestrator_synthesize": "Injecting citations into draft...",
     "guardrail_output": "Finalizing...",
     "blocked_response": "Query blocked.",
 }
@@ -334,6 +336,13 @@ async def search_stream(data: SearchRequest, request: Request):
                             yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
                         elif chunk.get("type") == "token_reset":
                             yield f"data: {json.dumps({'type': 'token_reset'})}\n\n"
+                        elif chunk.get("type") == "drafting_progress":
+                            yield "data: {}\n\n".format(json.dumps({
+                                "type": "drafting_progress",
+                                "section": chunk["section"],
+                                "total": chunk["total"],
+                                "title": chunk["title"],
+                            }))
                     continue
 
                 # --- Update events: node-level progress ---
@@ -369,9 +378,10 @@ async def search_stream(data: SearchRequest, request: Request):
                     if "final_response" in update and update["final_response"]:
                         final_response = update["final_response"]
 
-                    # Track task info from orchestrator
+                    # Track task info from orchestrator + emit early agent badges
                     if "tasks_planned" in update and update["tasks_planned"]:
                         agents_used = update["tasks_planned"]
+                        yield f"data: {json.dumps({'type': 'agents_planned', 'agents': agents_used})}\n\n"
 
                     # Track tokens from agent results
                     if "agent_results" in update:

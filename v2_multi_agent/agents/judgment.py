@@ -1,17 +1,27 @@
 """Agent #5 — Judgment Agent
 
-Searches court judgments using multi-tier ES queries.
+Searches court judgments using smart multi-strategy ES queries.
 Extracts structured case metadata and generates S3 PDF links.
 
-Handles: "State vs Doe 2020", "SC cases on anticipatory bail", etc.
+Handles: "State vs Doe 2020", "SC cases on anticipatory bail",
+         "bail cases under section 438", "Kirloskar vs Kirloskar", etc.
 
-Uses: GPT-4o (metadata extraction + response generation)
+Uses: GPT-4o (metadata extraction), Gemini Flash (response generation)
 Data Source: Elasticsearch "judgements" index + AWS S3
+
+Search Strategies (tried in order of specificity):
+1. Citation / case number direct lookup
+2. Both party names (exact → no-year → swapped → fuzzy)
+3. Single party name
+4. Case type specialized (bail, quashing, writ, appeal, etc.)
+5. Legal provision (acts/sections invoked)
+6. Multi-tier (topics + acts + lexical BM25)
+7. Relaxed full-text fallback
 """
 
 from __future__ import annotations
 
-import os
+import asyncio
 from datetime import date
 from typing import Optional, List
 
@@ -19,15 +29,20 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
-from core.clients import get_es_client, get_gpt4o, get_gemini_flash
-from core.settings import ES_INDICES, S3_BUCKET, S3_REGION
+from core.clients import get_gpt4o, get_gemini_flash
 from core.logger import get_logger, log_time
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
+from tools.shared.judgment_search import (
+    smart_judgment_search,
+    generate_s3_link,
+    detect_citation,
+    detect_case_type,
+)
 
 log = get_logger("Judgment")
 
 
-# --- Case Metadata Extraction (migrated from v1 judgement_retriever.py) ---
+# --- Case Metadata Extraction ---
 
 class CaseMetadata(BaseModel):
     court_name: Optional[str] = Field(
@@ -106,109 +121,51 @@ def _extract_case_metadata(query: str) -> CaseMetadata:
     return result
 
 
-# --- Multi-Tier ES Query Builder ---
+# --- Hit Processing ---
 
-def _build_judgment_query(metadata: CaseMetadata, query_text: str) -> dict:
-    """Build a multi-tier ES query for judgments.
+def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
+    """Convert smart search hits to doc texts and SourceMetadata list."""
+    docs_text_parts = []
+    sources = []
 
-    Tiers:
-    1. Exact party match (petitioner + respondent, boost 20)
-    2. Topic-based (keywords field, boost 15)
-    3. Statutory reference (acts_or_sections_invoked field, boost 15)
-    4. Lexical fallback (page_content, boost 8)
-    5. Full-text fallback (page_content, boost 3)
-    """
-    should_clauses = []
-    filters = []
+    for hit in hits:
+        content = hit["content"]
+        court = hit.get("court_name", "")
+        source_file = hit.get("source", "unknown")
+        year = hit.get("year")
+        keywords = hit.get("keywords", [])
+        acts_sections = hit.get("acts_or_sections_invoked", [])
+        score = hit.get("score")
 
-    petitioner_names = metadata.petitioner_names or []
-    respondent_names = metadata.respondent_names or []
-    topics = metadata.topics or []
-    acts_or_sections = metadata.acts_or_sections or []
-    lexical_query = metadata.lexical_query or query_text
+        petitioner = hit.get("petitioner_names", ["Unknown"])
+        respondent = hit.get("respondent_names", ["Unknown"])
+        pet_name = petitioner[0] if petitioner else "Unknown"
+        resp_name = respondent[0] if respondent else "Unknown"
+        title = f"{pet_name} vs {resp_name}"
 
-    # TIER 1: Exact Party Match
-    if petitioner_names and respondent_names:
-        for petitioner in petitioner_names:
-            for respondent in respondent_names:
-                should_clauses.append({
-                    "bool": {
-                        "must": [
-                            {"match": {"petitioner_names": {"query": petitioner, "boost": 20, "minimum_should_match": "95%"}}},
-                            {"match": {"respondent_names": {"query": respondent, "boost": 20, "minimum_should_match": "95%"}}},
-                        ]
-                    }
-                })
+        docs_text_parts.append(content)
 
-    # TIER 2: Topics
-    for topic in topics:
-        should_clauses.append(
-            {"match": {"keywords": {"query": topic, "boost": 15, "minimum_should_match": "95%"}}}
-        )
+        # Generate S3 link
+        file_str = str(source_file) if isinstance(source_file, dict) else source_file
+        s3_link = generate_s3_link(court, file_str, title) if court and file_str else None
 
-    # TIER 3: Acts / Sections
-    for section in acts_or_sections:
-        should_clauses.append(
-            {"match": {"acts_or_sections_invoked": {"query": section, "boost": 15, "minimum_should_match": "95%"}}}
-        )
+        sources.append(SourceMetadata(
+            source_type="judgment",
+            title=title,
+            content=[content[:300]],
+            file_name=file_str,
+            doc_link=s3_link,
+            agent_name="Judgment",
+            relevance_score=score,
+            court_name=court,
+            year=year,
+            petitioner_names=petitioner if isinstance(petitioner, list) else [petitioner],
+            respondent_names=respondent if isinstance(respondent, list) else [respondent],
+            keywords=keywords if isinstance(keywords, list) else [],
+            acts_or_sections_invoked=acts_sections if isinstance(acts_sections, list) else [],
+        ))
 
-    # TIER 4: Lexical Query
-    if lexical_query:
-        should_clauses.append(
-            {"match": {"page_content": {"query": lexical_query, "boost": 8, "minimum_should_match": "95%"}}}
-        )
-
-    # TIER 5: Full-text fallback
-    if query_text and not lexical_query:
-        should_clauses.append(
-            {"match": {"page_content": {"query": query_text, "boost": 3}}}
-        )
-
-    # Filters
-    if metadata.year:
-        filters.append({"term": {"year": metadata.year}})
-    if metadata.court_name:
-        filters.append({"term": {"court_name": metadata.court_name.lower()}})
-
-    tiers_used = []
-    if petitioner_names and respondent_names:
-        tiers_used.append("party_match")
-    if topics:
-        tiers_used.append("topics")
-    if acts_or_sections:
-        tiers_used.append("acts_sections")
-    if lexical_query:
-        tiers_used.append("lexical")
-
-    log.debug("ES query built",
-              tiers=tiers_used, clauses=len(should_clauses),
-              filters=len(filters), size=min(metadata.size or 3, 50))
-
-    return {
-        "size": min(metadata.size or 3, 50),
-        "query": {
-            "bool": {
-                "should": should_clauses,
-                "filter": filters if filters else [],
-                "minimum_should_match": 1,
-            }
-        },
-    }
-
-
-# --- S3 Link Generation ---
-
-def _generate_s3_link(court: str, file_name: str, title: str) -> str:
-    """Generate an S3 public URL for a judgment PDF."""
-    s3_root = (court or "").strip().lower()
-    file_base = os.path.basename(file_name.replace("\\", "/"))
-
-    if s3_root == "supreme":
-        s3_key = f"{s3_root}/{title}.pdf"
-    else:
-        s3_key = f"{s3_root}/{file_base}"
-
-    return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
+    return docs_text_parts, sources
 
 
 # --- Agent Node ---
@@ -218,10 +175,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
 
     Flow:
     1. Extract structured metadata from query (GPT-4o)
-    2. Build multi-tier ES query
-    3. Search ES "judgements" index
-    4. Generate S3 PDF links
-    5. Generate response with citations
+    2. Run smart multi-strategy ES search (citation → party → case type → topic → fallback)
+    3. Generate S3 PDF links for each hit
+    4. Generate response with citations (Gemini Flash, streaming)
     """
     query = state.get("query", state["original_query"])
     chat_history = state.get("chat_history", [])
@@ -231,82 +187,69 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # Step 1: Extract metadata
         metadata = _extract_case_metadata(query)
 
-        # Step 2: Build and execute query
-        es_query = _build_judgment_query(metadata, query)
-
+        # Step 2: Smart multi-strategy search
         with log_time(log, "ES search"):
-            es = get_es_client()
-            response = es.options(request_timeout=50).search(
-                index=ES_INDICES["judgments"], body=es_query
+            search_result = smart_judgment_search(
+                query=query,
+                petitioner=(metadata.petitioner_names or [""])[0],
+                respondent=(metadata.respondent_names or [""])[0],
+                year=metadata.year,
+                court=metadata.court_name,
+                topics=metadata.topics,
+                acts_or_sections=metadata.acts_or_sections,
+                lexical_query=metadata.lexical_query or "",
+                size=min(metadata.size or 10, 50),
             )
 
-        hits = response["hits"]["hits"]
+        hits = search_result["hits"]
+        strategy = search_result["strategy_used"]
+        strategies_tried = search_result["strategies_tried"]
+
         if not hits:
-            log.warning("No results found")
-            return {
-                "agent_results": {"Judgment": AgentResult(
-                    agent_name="Judgment",
-                    content="",
-                    sources=[],
-                    tokens_consumed=0,
-                )},
-            }
+            # Phase 1: Query rewrite + retry
+            from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
+            rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Judgment")
+            if rewritten != query:
+                log.info("Retrying with rewritten query", rewritten=rewritten[:100])
+                try:
+                    retry_result = smart_judgment_search(
+                        query=rewritten,
+                        petitioner=(metadata.petitioner_names or [""])[0],
+                        respondent=(metadata.respondent_names or [""])[0],
+                        year=metadata.year,
+                        court=metadata.court_name,
+                        topics=metadata.topics,
+                        acts_or_sections=metadata.acts_or_sections,
+                        lexical_query=rewritten,
+                        size=min(metadata.size or 10, 50),
+                    )
+                    hits = retry_result["hits"]
+                    if hits:
+                        strategy = retry_result["strategy_used"]
+                        log.info("Retry search succeeded", hit_count=len(hits))
+                except Exception as retry_err:
+                    log.warning("Retry search failed", error=str(retry_err))
+
+            # Phase 2: Web search fallback if still empty
+            if not hits:
+                log.warning("All searches exhausted, using web fallback",
+                            strategies_tried=strategies_tried)
+                fallback_result = await web_search_fallback(
+                    query, "Judgment", JUDGMENT_SYSTEM_PROMPT)
+                fallback_result.retry_attempted = True
+                return {"agent_results": {"Judgment": fallback_result}}
 
         log.info("ES results found",
                  hit_count=len(hits),
-                 top_score=hits[0]["_score"] if hits else 0)
+                 top_score=hits[0].get("score", 0),
+                 strategy=strategy,
+                 strategies_tried=len(strategies_tried))
 
-        # Step 3: Convert hits to documents + extract metadata
-        docs_text_parts = []
-        sources = []
-        first_court = ""
-        first_file = ""
-        first_title = ""
+        # Step 3: Process hits into docs + source metadata
+        docs_text_parts, sources = _process_hits(hits)
+        first_title = sources[0].title if sources else ""
 
-        for hit in hits:
-            src = hit["_source"]
-            content = src["page_content"]
-            court = src.get("court_name", "")
-            source_file = src.get("source", "unknown")
-            year = src.get("year")
-            keywords = src.get("keywords", [])
-            acts_sections = src.get("acts_or_sections_invoked", [])
-            score = hit.get("_score")
-
-            petitioner = src.get("petitioner_names", ["Unknown"])
-            respondent = src.get("respondent_names", ["Unknown"])
-            pet_name = petitioner[0] if petitioner else "Unknown"
-            resp_name = respondent[0] if respondent else "Unknown"
-            title = f"{pet_name} vs {resp_name}"
-
-            docs_text_parts.append(content)
-
-            if not first_court:
-                first_court = court
-                first_file = source_file if isinstance(source_file, str) else str(source_file)
-                first_title = title
-
-            # Generate S3 link for each hit
-            file_str = str(source_file) if isinstance(source_file, dict) else source_file
-            s3_link = _generate_s3_link(court, file_str, title) if court and file_str else None
-
-            sources.append(SourceMetadata(
-                source_type="judgment",
-                title=title,
-                content=[content[:300]],
-                file_name=file_str,
-                doc_link=s3_link,
-                agent_name="Judgment",
-                relevance_score=score,
-                court_name=court,
-                year=year,
-                petitioner_names=petitioner if isinstance(petitioner, list) else [petitioner],
-                respondent_names=respondent if isinstance(respondent, list) else [respondent],
-                keywords=keywords if isinstance(keywords, list) else [],
-                acts_or_sections_invoked=acts_sections if isinstance(acts_sections, list) else [],
-            ))
-
-        # Step 5: Generate response
+        # Step 4: Generate response
         docs_text = "\n\n".join(docs_text_parts)
 
         with log_time(log, "LLM generation"):
@@ -332,9 +275,34 @@ async def judgment_node(state: LegalAgentState) -> dict:
         if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
             tokens = llm_response.usage_metadata.get("total_tokens", 0)
 
+        # Check if LLM apologized (ES hits were irrelevant) — fall back to web search
+        _sorry_patterns = [
+            "i am sorry", "i'm sorry", "does not contain", "no information",
+            "not contain information", "cannot find", "no relevant",
+            "cannot provide information", "no direct information",
+            "no specific information", "no information available",
+            "unable to find", "could not find", "not available in",
+            "there is no", "does not have information", "based on the provided",
+        ]
+        content_lower = llm_response.content.lower()[:300]
+        if any(p in content_lower for p in _sorry_patterns) or len(llm_response.content) < 50:
+            log.warning("LLM response is an apology or too short, using web fallback",
+                        response_preview=llm_response.content[:100], strategy=strategy)
+            try:
+                from langgraph.config import get_stream_writer
+                writer = get_stream_writer()
+                writer({"type": "token_reset"})
+            except RuntimeError:
+                pass
+            from core.agent_fallback import web_search_fallback
+            fallback_result = await web_search_fallback(query, "Judgment", JUDGMENT_SYSTEM_PROMPT)
+            fallback_result.tokens_consumed += tokens
+            return {"agent_results": {"Judgment": fallback_result}}
+
         log.info("Agent completed",
                  cases=len(hits), response_len=len(llm_response.content),
-                 tokens=tokens, first_case=first_title[:60])
+                 tokens=tokens, strategy=strategy,
+                 first_case=first_title[:60])
 
         result = AgentResult(
             agent_name="Judgment",

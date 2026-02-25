@@ -31,7 +31,10 @@
       "Bash(wmic process:*)",
       "Bash(PYTHONPATH=/d/agentic_proj/Lawtech-AI/v2_multi_agent python:*)",
       "Bash(PYTHONPATH=/d/agentic_proj/Lawtech-AI/v2_multi_agent EMBEDDING_SERVICE_URL=http://localhost:5200 python:*)",
-      "Bash(EMBEDDING_SERVICE_URL=http://localhost:5210 PYTHONPATH=. python -m uvicorn:*)"
+      "Bash(EMBEDDING_SERVICE_URL=http://localhost:5210 PYTHONPATH=. python -m uvicorn:*)",
+      "Bash(C:/Python312/python.exe:*)",
+      "Bash(RATE_LIMIT_PER_MINUTE=200 python:*)",
+      "Bash(bash start.sh:*)"
     ]
   }
 }

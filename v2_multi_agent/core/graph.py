@@ -27,7 +27,7 @@ from agents.judgment import judgment_node
 from agents.newacts import newacts_node
 from agents.drafting import drafting_node
 from agents.scenario import scenario_node
-from agents.constitution_maxim import constitution_maxim_node
+from agents.constitution_maxim import constitution_node, maxim_node, legal_concepts_node
 from agents.document import document_node
 from agents.sci_judgment import sci_judgment_node
 
@@ -41,9 +41,9 @@ AGENT_NODE_MAP = {
     "Drafting": "drafting",
     "Scenario": "scenario",
     "Other": "scenario",
-    "Constitution": "constitution_maxim",
-    "Maxim": "constitution_maxim",
-    "Legal_Concepts": "constitution_maxim",
+    "Constitution": "constitution",
+    "Maxim": "maxim",
+    "Legal_Concepts": "legal_concepts",
     "SCI_Judgment": "sci_judgment",
 }
 
@@ -150,7 +150,9 @@ def build_graph() -> StateGraph:
     graph.add_node("newacts", newacts_node)
     graph.add_node("drafting", drafting_node)
     graph.add_node("scenario", scenario_node)
-    graph.add_node("constitution_maxim", constitution_maxim_node)
+    graph.add_node("constitution", constitution_node)
+    graph.add_node("maxim", maxim_node)
+    graph.add_node("legal_concepts", legal_concepts_node)
     graph.add_node("document", document_node)
     graph.add_node("sci_judgment", sci_judgment_node)
 
@@ -182,8 +184,8 @@ def build_graph() -> StateGraph:
     # All domain agents converge → orchestrator_synthesize
     domain_agents = [
         "legislation", "judgment", "newacts", "drafting",
-        "scenario", "constitution_maxim", "document",
-        "sci_judgment",
+        "scenario", "constitution", "maxim", "legal_concepts",
+        "document", "sci_judgment",
     ]
     for agent_name in domain_agents:
         graph.add_edge(agent_name, "orchestrator_synthesize")

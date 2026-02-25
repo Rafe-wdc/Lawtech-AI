@@ -73,8 +73,8 @@ def get_gemini_flash(temperature: float = 0.3):
 
 @lru_cache(maxsize=1)
 def get_drafting_llm():
-    """GPT-4o tuned for legal drafting (higher creativity)."""
-    return init_chat_model("openai:gpt-4o", temperature=0.5, max_retries=2)
+    """Gemini 2.5 Flash for legal drafting — fast, high-quality sections."""
+    return init_chat_model("google_genai:gemini-2.5-flash", temperature=0.4)
 
 
 # --- Google GenAI client (for Gemini with Google Search grounding) ---
@@ -82,7 +82,9 @@ def get_drafting_llm():
 @lru_cache(maxsize=1)
 def get_genai_client() -> genai.Client:
     """Google GenAI client for web-grounded search (Scenario agent)."""
-    return genai.Client()
+    return genai.Client(
+        http_options={"timeout": 120_000},  # 120s timeout for web-grounded search
+    )
 
 
 # --- Embedding Models ---

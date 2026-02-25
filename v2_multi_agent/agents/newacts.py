@@ -18,6 +18,7 @@ Search strategy:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import date
 from typing import Optional, List
@@ -519,16 +520,31 @@ async def newacts_node(state: LegalAgentState) -> dict:
                             error=str(rel_err))
 
         if not hits:
-            log.warning("No results found")
-            return {
-                "agent_results": {"Newacts": AgentResult(
-                    agent_name="Newacts",
-                    content="",
-                    sources=[],
-                    tokens_consumed=0,
-                )},
-                "related_sections": related_sections_data,
-            }
+            # Phase 1: Query rewrite + retry
+            from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
+            rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Newacts")
+            if rewritten != query:
+                log.info("Retrying with rewritten query", rewritten=rewritten[:100])
+                try:
+                    retry_meta = _regex_fallback_metadata(rewritten)
+                    retry_es_query = _build_newacts_query(retry_meta, rewritten)
+                    es = get_es_client()
+                    retry_resp = es.search(index=ES_INDICES["newacts"], body=retry_es_query)
+                    hits = retry_resp["hits"]["hits"]
+                    if hits:
+                        log.info("Retry search succeeded", hit_count=len(hits))
+                except Exception as retry_err:
+                    log.warning("Retry search failed", error=str(retry_err))
+
+            # Phase 2: Web search fallback if still empty
+            if not hits:
+                log.warning("All searches exhausted, using web fallback")
+                fallback_result = await web_search_fallback(query, "Newacts", NEWACTS_SYSTEM_PROMPT)
+                fallback_result.retry_attempted = True
+                return {
+                    "agent_results": {"Newacts": fallback_result},
+                    "related_sections": related_sections_data,
+                }
 
         log.info("ES results found", hit_count=len(hits))
 
@@ -560,6 +576,33 @@ async def newacts_node(state: LegalAgentState) -> dict:
         tokens = 0
         if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
             tokens = llm_response.usage_metadata.get("total_tokens", 0)
+
+        # Check if LLM apologized (ES hits were irrelevant) — fall back to web search
+        _sorry_patterns = [
+            "i am sorry", "i'm sorry", "does not contain", "no information",
+            "not contain information", "cannot find", "no relevant",
+            "cannot provide information", "no direct information",
+            "no specific information", "no information available",
+            "unable to find", "could not find", "not available in",
+            "there is no", "does not have information", "based on the provided",
+        ]
+        content_lower = llm_response.content.lower()[:300]
+        if any(p in content_lower for p in _sorry_patterns) or len(llm_response.content) < 50:
+            log.warning("LLM response is an apology or too short, using web fallback",
+                        response_preview=llm_response.content[:100])
+            try:
+                from langgraph.config import get_stream_writer
+                writer = get_stream_writer()
+                writer({"type": "token_reset"})
+            except RuntimeError:
+                pass
+            from core.agent_fallback import web_search_fallback
+            fallback_result = await web_search_fallback(query, "Newacts", NEWACTS_SYSTEM_PROMPT)
+            fallback_result.tokens_consumed += tokens
+            return {
+                "agent_results": {"Newacts": fallback_result},
+                "related_sections": related_sections_data,
+            }
 
         # Determine display name for the act
         act_display = metadata.act_name or source_file

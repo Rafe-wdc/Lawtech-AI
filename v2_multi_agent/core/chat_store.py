@@ -126,6 +126,12 @@ class ChatHistoryStore:
 
                 CREATE INDEX IF NOT EXISTS idx_feedback_thread
                     ON feedback(thread_id, turn_number);
+
+                CREATE TABLE IF NOT EXISTS draft_continuations (
+                    thread_id   TEXT PRIMARY KEY,
+                    data_json   TEXT NOT NULL,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                );
             """)
             conn.commit()
             self._initialized = True
@@ -431,6 +437,77 @@ class ChatHistoryStore:
         """Async wrapper for legacy import."""
         return await asyncio.to_thread(
             self._import_from_api_response_sync, thread_id, summary_text
+        )
+
+    # ------------------------------------------------------------------
+    # Draft continuation (incomplete draft metadata)
+    # ------------------------------------------------------------------
+
+    def _save_draft_continuation_sync(self, thread_id: str, data: dict) -> None:
+        """Save or update draft continuation data for a thread."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO draft_continuations (thread_id, data_json)
+                    VALUES (?, ?)
+                    ON CONFLICT(thread_id) DO UPDATE SET
+                        data_json = excluded.data_json,
+                        created_at = datetime('now')
+                """, (thread_id, json.dumps(data)))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def save_draft_continuation(self, thread_id: str, data: dict) -> None:
+        return await asyncio.to_thread(
+            self._save_draft_continuation_sync, thread_id, data
+        )
+
+    def _load_draft_continuation_sync(self, thread_id: str) -> dict | None:
+        """Load draft continuation data for a thread."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT data_json FROM draft_continuations WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+            if row:
+                return json.loads(row["data_json"])
+            return None
+        finally:
+            conn.close()
+
+    async def load_draft_continuation(self, thread_id: str) -> dict | None:
+        return await asyncio.to_thread(
+            self._load_draft_continuation_sync, thread_id
+        )
+
+    def _clear_draft_continuation_sync(self, thread_id: str) -> None:
+        """Remove draft continuation data after successful completion."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    "DELETE FROM draft_continuations WHERE thread_id = ?",
+                    (thread_id,),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def clear_draft_continuation(self, thread_id: str) -> None:
+        return await asyncio.to_thread(
+            self._clear_draft_continuation_sync, thread_id
         )
 
     # ------------------------------------------------------------------

@@ -77,6 +77,48 @@ def _extract_match_phrase(query: str, text: str, title: str) -> QueryMetadata:
     return chain.invoke({'query': query, 'text': text, 'title': title})
 
 
+# --- Act Name Extraction from Query ---
+
+import re as _re
+
+# Common Indian act names to look for in queries
+_ACT_PATTERNS = [
+    r"(Consumer Protection Act[,\s]*\d*)",
+    r"(Income Tax Act[,\s]*\d*)",
+    r"(Companies Act[,\s]*\d*)",
+    r"(Negotiable Instruments Act[,\s]*\d*)",
+    r"(Motor Vehicles Act[,\s]*\d*)",
+    r"(RERA|Real Estate[^\.\n]*Act[,\s]*\d*)",
+    r"(Arbitration[^\.\n]*Act[,\s]*\d*)",
+    r"(POCSO[^\.\n]*Act[,\s]*\d*)",
+    r"(Information Technology Act[,\s]*\d*)",
+    r"(GST Act[,\s]*\d*|Goods and Services Tax[^\.\n]*Act[,\s]*\d*)",
+    r"(Hindu Marriage Act[,\s]*\d*)",
+    r"(Hindu Succession Act[,\s]*\d*)",
+    r"(Transfer of Property Act[,\s]*\d*)",
+    r"(Indian Contract Act[,\s]*\d*)",
+    r"(Specific Relief Act[,\s]*\d*)",
+    r"(Limitation Act[,\s]*\d*)",
+    r"(Registration Act[,\s]*\d*)",
+    r"(Rent Control Act[,\s]*\d*)",
+    r"(Domestic Violence[^\.\n]*Act[,\s]*\d*)",
+    r"(Insolvency[^\.\n]*Act[,\s]*\d*|IBC[,\s]*\d*)",
+]
+
+
+def _extract_act_name_from_query(query: str) -> str | None:
+    """Extract a specific act name from the query if one is mentioned.
+
+    Returns the first act name found, or None if no specific act is mentioned.
+    """
+    for pattern in _ACT_PATTERNS:
+        match = _re.search(pattern, query, _re.IGNORECASE)
+        if match:
+            act_name = match.group(1).strip().rstrip(",")
+            return act_name
+    return None
+
+
 # --- Elasticsearch Search (single-section path) ---
 
 def _search_legislation(query: str) -> tuple[list[dict], str | None]:
@@ -139,7 +181,23 @@ def _search_legislation(query: str) -> tuple[list[dict], str | None]:
     if not sources_counter:
         return [], None
 
-    most_common_source = sources_counter.most_common(1)[0][0]
+    # When the query explicitly names an act, prefer sources matching that act name
+    # This prevents "Consumer Protection Act 2019" matching "Medical Service Personnel" act
+    act_keywords_in_query = _extract_act_name_from_query(query)
+    if act_keywords_in_query:
+        matching_sources = [
+            (src, score) for src, score in sources_counter.most_common()
+            if act_keywords_in_query.lower() in src.lower()
+        ]
+        if matching_sources:
+            most_common_source = matching_sources[0][0]
+            log.info("Act-name matched source preferred",
+                     act_hint=act_keywords_in_query, source=most_common_source)
+        else:
+            most_common_source = sources_counter.most_common(1)[0][0]
+    else:
+        most_common_source = sources_counter.most_common(1)[0][0]
+
     log.info("Most relevant source identified",
              source=most_common_source,
              total_hits=len(all_hits),
@@ -213,9 +271,11 @@ async def legislation_node(state: LegalAgentState) -> dict:
     4. If no section and no hits: fall back to topic-based search
     5. Generate response using retrieved statute text
     """
-    query = state.get("query", state["original_query"])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("Legislation", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
-    log.info("Agent started", query=query[:100])
+    log.info("Agent started", query=query[:100],
+             using_agent_query="Legislation" in agent_queries)
 
     try:
         # Strip subsection parentheticals for cleaner ES matching

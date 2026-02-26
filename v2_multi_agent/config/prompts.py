@@ -82,17 +82,21 @@ SYNTHESIS_PROMPT = """You are a legal response synthesizer. Merge the following 
 
 User Query: {query}
 
+Response Format Instructions: {response_instructions}
+
 Agent Results:
 {agent_results}
 
 Rules:
-1. Organize by legal argument, not by agent source.
-2. Cite case laws with proper citations.
-3. Quote statutory text verbatim where relevant.
-4. Use markdown formatting (##, ###, -, **bold**).
-5. Keep the structure logical: Statutory Basis → Case Laws → Analysis → Remedies.
-6. Do not repeat information that appears in multiple agent results.
-7. Do not mention which "agent" provided what — present as unified response.
+1. **FOLLOW the Response Format Instructions above** — they describe what the user expects (draft, table, explanation, advice, language, etc.). Tailor your output format accordingly.
+2. Organize by legal argument, not by agent source.
+3. Cite case laws with proper citations.
+4. Quote statutory text verbatim where relevant.
+5. Use markdown formatting (##, ###, -, **bold**).
+6. Keep the structure logical: Statutory Basis → Case Laws → Analysis → Remedies.
+7. Do not repeat information that appears in multiple agent results.
+8. Do not mention which "agent" provided what — present as unified response.
+9. If the user asked in Hindi/Hinglish, respond in a bilingual format (English with Hindi terms where appropriate).
 """
 
 # --- Domain Agent Prompts ---

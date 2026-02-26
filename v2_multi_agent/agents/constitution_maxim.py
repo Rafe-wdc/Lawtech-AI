@@ -327,9 +327,11 @@ async def constitution_node(state: LegalAgentState) -> dict:
 
     Runs as its own graph node so it executes in parallel with maxim_node.
     """
-    query = state.get("query", state["original_query"])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("Constitution", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
-    log.info("Constitution agent started", query=query[:100])
+    log.info("Constitution agent started", query=query[:100],
+             using_agent_query="Constitution" in agent_queries)
 
     try:
         result = await _handle_constitution_or_maxim("Constitution", query, chat_history)
@@ -353,9 +355,11 @@ async def maxim_node(state: LegalAgentState) -> dict:
 
     Runs as its own graph node so it executes in parallel with constitution_node.
     """
-    query = state.get("query", state["original_query"])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("Maxim", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
-    log.info("Maxim agent started", query=query[:100])
+    log.info("Maxim agent started", query=query[:100],
+             using_agent_query="Maxim" in agent_queries)
 
     try:
         result = await _handle_constitution_or_maxim("Maxim", query, chat_history)
@@ -376,9 +380,11 @@ async def maxim_node(state: LegalAgentState) -> dict:
 
 async def legal_concepts_node(state: LegalAgentState) -> dict:
     """Handle Legal_Concepts queries — direct LLM response, no retrieval."""
-    query = state.get("query", state["original_query"])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("Legal_Concepts", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
-    log.info("Legal Concepts agent started", query=query[:100])
+    log.info("Legal Concepts agent started", query=query[:100],
+             using_agent_query="Legal_Concepts" in agent_queries)
 
     try:
         result = await _handle_legal_concepts(query, chat_history)

@@ -47,10 +47,12 @@ async def scenario_node(state: LegalAgentState) -> dict:
     4. Extract response text and token usage
     5. Return with "Disclaimer" source metadata
     """
-    query = state.get("query", state["original_query"])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("Scenario", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
-             has_history=len(chat_history) > 0)
+             has_history=len(chat_history) > 0,
+             using_agent_query="Scenario" in agent_queries)
 
     try:
         # Build prompt using the LangChain template → convert to single string

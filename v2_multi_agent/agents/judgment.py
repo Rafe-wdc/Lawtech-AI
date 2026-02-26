@@ -254,9 +254,11 @@ async def judgment_node(state: LegalAgentState) -> dict:
     3. Generate S3 PDF links for each hit
     4. Generate response with citations (Gemini Flash, streaming)
     """
-    query = state.get("query", state["original_query"])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("Judgment", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
-    log.info("Agent started", query=query[:100])
+    log.info("Agent started", query=query[:100],
+             using_agent_query="Judgment" in agent_queries)
 
     try:
         # Step 1: Extract metadata (GPT-4o in a thread, with timeout + regex fallback)

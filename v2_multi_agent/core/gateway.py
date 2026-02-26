@@ -25,7 +25,7 @@ from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Request, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field, ConfigDict
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -60,6 +60,18 @@ log.info("Compiling agent graph at startup")
 agent_graph = compile_graph()
 log.info("Agent graph compiled successfully")
 
+# --- Frontend UI ---
+_FRONTEND_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend.html")
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_frontend():
+    """Serve the frontend UI at root."""
+    try:
+        with open(_FRONTEND_PATH, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Frontend not found</h1>", status_code=404)
+
 
 # --- Request / Response Schemas ---
 
@@ -81,7 +93,6 @@ class SearchResponse(BaseModel):
     query_rewritten: bool = False
     conversation_turn: int = 0
     # UX features
-    related_sections: list[dict] = []
     followup_suggestions: list[str] = []
 
 
@@ -140,7 +151,11 @@ async def _generate_followup_suggestions(
     return []
 
 
-def _build_initial_state(query: str, thread_id: str, unique_string: str | None = None) -> dict:
+def _build_initial_state(
+    query: str, thread_id: str,
+    unique_string: str | None = None,
+    draft_continuation: dict | None = None,
+) -> dict:
     """Build the initial LangGraph state with all required fields."""
     return {
         "messages": [],
@@ -150,14 +165,16 @@ def _build_initial_state(query: str, thread_id: str, unique_string: str | None =
         "unique_string": unique_string,
         "task": None,
         "tasks_planned": [],
+        "agent_queries": {},
+        "response_instructions": "",
         "chat_history": [],
         "summary_text": "",
         "agent_results": {},
         "is_blocked": False,
         "block_reason": None,
+        "draft_continuation": draft_continuation,
         "final_response": "",
         "source_metadata": [],
-        "related_sections": [],
         "tokens_consumed": 0,
     }
 
@@ -260,7 +277,6 @@ async def search(data: SearchRequest, request: Request):
         effective_query=effective_query if query_rewritten else None,
         query_rewritten=query_rewritten,
         conversation_turn=conversation_turn,
-        related_sections=final_state.get("related_sections", []),
         followup_suggestions=followup_suggestions,
     )
 
@@ -319,9 +335,9 @@ async def search_stream(data: SearchRequest, request: Request):
         agents_used = []
         total_tokens = 0
         all_source_metadata = []
-        all_related_sections = []
         effective_query = data.prompt_query
         query_rewritten = False
+        draft_continuation_data = None
 
         try:
             async for event in agent_graph.astream(
@@ -344,6 +360,13 @@ async def search_stream(data: SearchRequest, request: Request):
                                 "section": chunk["section"],
                                 "total": chunk["total"],
                                 "title": chunk["title"],
+                            }))
+                        elif chunk.get("type") == "draft_incomplete":
+                            yield "data: {}\n\n".format(json.dumps({
+                                "type": "draft_incomplete",
+                                "failed_sections": chunk["failed_sections"],
+                                "total_sections": chunk["total_sections"],
+                                "completed_sections": chunk["completed_sections"],
                             }))
                     continue
 
@@ -395,9 +418,9 @@ async def search_stream(data: SearchRequest, request: Request):
                     if "source_metadata" in update and update["source_metadata"]:
                         all_source_metadata = update["source_metadata"]
 
-                    # Capture related_sections when it appears
-                    if "related_sections" in update and update["related_sections"]:
-                        all_related_sections = update["related_sections"]
+                    # Capture draft_continuation when it appears
+                    if "draft_continuation" in update and update["draft_continuation"]:
+                        draft_continuation_data = update["draft_continuation"]
 
         except Exception as e:
             log.error("Stream error", error=str(e))
@@ -418,10 +441,6 @@ async def search_stream(data: SearchRequest, request: Request):
                 "data": all_source_metadata,
             }
             yield f"data: {json.dumps(sources_event)}\n\n"
-
-        # Send related sections
-        if all_related_sections:
-            yield f"data: {json.dumps({'type': 'related_sections', 'data': all_related_sections})}\n\n"
 
         # Generate and send follow-up suggestions
         if final_response:
@@ -451,6 +470,14 @@ async def search_stream(data: SearchRequest, request: Request):
                 log.error("Failed to save chat history (stream)",
                           thread_id=thread_id[:12], error=str(e))
 
+        # Persist draft continuation metadata for incomplete drafts
+        if draft_continuation_data:
+            try:
+                await chat_store.save_draft_continuation(thread_id, draft_continuation_data)
+                log.debug("Draft continuation saved", thread_id=thread_id[:12])
+            except Exception as e:
+                log.error("Failed to save draft continuation", error=str(e))
+
         # Send completion event with metadata
         done_event = {
             "type": "done",
@@ -460,6 +487,178 @@ async def search_stream(data: SearchRequest, request: Request):
             "conversation_turn": conversation_turn,
             "query_rewritten": query_rewritten,
             "effective_query": effective_query if query_rewritten else None,
+            "has_draft_continuation": draft_continuation_data is not None,
+        }
+        yield f"data: {json.dumps(done_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ============================================================
+# Continue Draft (retry failed sections)
+# ============================================================
+
+class ContinueDraftRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    globalThreadId: str = Field(..., min_length=1)
+
+
+@app.post("/pyapi/continue_draft")
+@limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
+async def continue_draft(data: ContinueDraftRequest, request: Request):
+    """Continue an incomplete draft by regenerating failed sections.
+
+    Loads the draft_continuation metadata from the previous turn in chat history,
+    runs only the drafting agent to regenerate failed sections, then re-synthesizes.
+    Returns an SSE stream.
+    """
+    thread_id = data.globalThreadId
+    req_id = set_request_id(thread_id[:8])
+
+    log.info("Continue draft request", thread_id=thread_id)
+
+    # Load continuation metadata from chat_store
+    continuation = await chat_store.load_draft_continuation(thread_id)
+    if not continuation:
+        raise HTTPException(
+            status_code=404,
+            detail="No incomplete draft found for this thread.",
+        )
+
+    query = continuation.get("query", "")
+    log.info("Continuing draft",
+             failed_sections=len(continuation.get("failed_indices", [])),
+             query=query[:80])
+
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
+        yield f"data: {json.dumps({'type': 'status', 'agent': 'continue_draft', 'message': 'Retrying incomplete sections...'})}\n\n"
+        yield f"data: {json.dumps({'type': 'agents_planned', 'agents': ['Drafting']})}\n\n"
+
+        start = time.perf_counter()
+        final_response = ""
+        total_tokens = 0
+        all_source_metadata = []
+        draft_continuation_data = None
+
+        try:
+            from agents.drafting import continue_draft_node
+            from core.state import AgentResult
+
+            # Build a minimal state with continuation data
+            state = _build_initial_state(
+                query, thread_id,
+                draft_continuation=continuation,
+            )
+            state["task"] = "Drafting"
+            state["tasks_planned"] = ["Drafting"]
+
+            # Run the continue_draft_node directly with streaming
+            from langgraph.config import get_stream_writer
+
+            # Use a simple streaming approach: run the node via a mini graph
+            from langgraph.graph import StateGraph, END
+            from core.state import LegalAgentState
+
+            mini_graph = StateGraph(LegalAgentState)
+            mini_graph.add_node("continue_draft", continue_draft_node)
+            mini_graph.set_entry_point("continue_draft")
+            mini_graph.add_edge("continue_draft", END)
+            mini_compiled = mini_graph.compile()
+
+            async for event in mini_compiled.astream(
+                state, config={"configurable": {"thread_id": thread_id}},
+                stream_mode=["updates", "custom"],
+            ):
+                mode, chunk = event
+
+                if mode == "custom":
+                    if isinstance(chunk, dict):
+                        if chunk.get("type") == "token":
+                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
+                        elif chunk.get("type") == "token_reset":
+                            yield f"data: {json.dumps({'type': 'token_reset'})}\n\n"
+                        elif chunk.get("type") == "drafting_progress":
+                            yield "data: {}\n\n".format(json.dumps({
+                                "type": "drafting_progress",
+                                "section": chunk["section"],
+                                "total": chunk["total"],
+                                "title": chunk["title"],
+                            }))
+                        elif chunk.get("type") == "draft_incomplete":
+                            yield "data: {}\n\n".format(json.dumps({
+                                "type": "draft_incomplete",
+                                "failed_sections": chunk["failed_sections"],
+                                "total_sections": chunk["total_sections"],
+                                "completed_sections": chunk["completed_sections"],
+                            }))
+                    continue
+
+                for node_name, update in chunk.items():
+                    yield f"data: {json.dumps({'type': 'status', 'agent': 'drafting', 'message': 'Generating legal draft...'})}\n\n"
+
+                    if "agent_results" in update:
+                        drafting_result = update["agent_results"].get("Drafting")
+                        if drafting_result and drafting_result.content:
+                            final_response = drafting_result.content
+                            total_tokens += drafting_result.tokens_consumed or 0
+                            if drafting_result.sources:
+                                all_source_metadata = [
+                                    {k: v for k, v in s.__dict__.items() if v}
+                                    for s in drafting_result.sources
+                                ]
+
+                    if "draft_continuation" in update and update["draft_continuation"]:
+                        draft_continuation_data = update["draft_continuation"]
+
+        except Exception as e:
+            log.error("Continue draft stream error", error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+
+        # Send final response
+        if final_response:
+            yield f"data: {json.dumps({'type': 'response', 'content': final_response})}\n\n"
+
+        # Send sources
+        if all_source_metadata:
+            yield f"data: {json.dumps({'type': 'sources', 'data': all_source_metadata})}\n\n"
+
+        # Save updated response to chat history
+        conversation_turn = 0
+        if final_response:
+            try:
+                conversation_turn = await chat_store.save_turn(
+                    thread_id, f"[Continue draft] {query[:100]}", final_response
+                )
+            except Exception as e:
+                log.error("Failed to save continued draft", error=str(e))
+
+            # Save or clear continuation data
+            if draft_continuation_data:
+                await chat_store.save_draft_continuation(thread_id, draft_continuation_data)
+            else:
+                await chat_store.clear_draft_continuation(thread_id)
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        log.info("Continue draft completed", duration_ms=f"{elapsed_ms:.0f}")
+
+        done_event = {
+            "type": "done",
+            "agents_used": ["Drafting"],
+            "total_tokens": total_tokens,
+            "thread_id": thread_id,
+            "conversation_turn": conversation_turn,
+            "query_rewritten": False,
+            "effective_query": None,
+            "has_draft_continuation": draft_continuation_data is not None,
         }
         yield f"data: {json.dumps(done_event)}\n\n"
 

@@ -98,14 +98,14 @@ class AgentPlan(BaseModel):
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
 
-PLAN_PROMPT = """You are a legal query planner. Given a query and its primary task type, determine if MULTIPLE agents should handle it.
+PLAN_PROMPT = """You are a legal query planner. Given a query and its primary task type, determine which agents should handle it.
 
 Available agents:
 - Legislation: Central/state law sections and provisions (all acts EXCEPT the 6 below)
 - Judgment: Court case laws, citations, precedents (general / High Court / unspecified courts)
 - Newacts: ONLY these 6 acts: BNS/IPC, BNSS/CrPC, BSA/IEA
 - Drafting: Legal document templates and drafting
-- Scenario: Situational analysis with web search
+- Scenario: Situational analysis, legal advice, remedies, web search
 - Constitution: Constitutional provisions, fundamental rights, Articles
 - Maxim: Legal maxims and doctrines (Latin phrases like res judicata, audi alteram partem, estoppel)
 - Legal_Concepts: General legal explanations (use only when no specific category applies)
@@ -113,17 +113,18 @@ Available agents:
 
 Rules:
 1. Most queries need only the PRIMARY agent matching the task type.
-2. Use MULTIPLE agents when the query explicitly asks for different types:
+2. Use MULTIPLE agents when the query explicitly or implicitly asks for different types of information:
    - "Draft bail application with relevant case laws" → [Drafting, Judgment]
    - "Section 438 BNSS with SC precedents" → [Newacts, SCI_Judgment]
    - "Arguments on behalf of plaintiff and defendant" → [Scenario, Judgment]
    - "Explain Article 21 and related case laws" → [Constitution, Judgment]
-3. When a query mentions BOTH a constitutional concept AND a legal maxim/doctrine → [Constitution, Maxim]
-   - "Article 14 and res judicata" → [Constitution, Maxim]
-   - "Article 21 and audi alteram partem" → [Constitution, Maxim]
-4. When a query references a named SC landmark case (Puttaswamy, Maneka Gandhi, Kesavananda Bharati, Vishaka, etc.) alongside a constitutional topic → include SCI_Judgment with Constitution.
-5. For complex scenarios requesting statutes → add Legislation or Newacts alongside Scenario.
-6. NEVER include Drafting unless the user explicitly asks to draft/write/prepare a legal document. Asking "what legal options" or "how can I" is NOT a drafting request.
+3. COMPLEX SCENARIO QUERIES: When a query describes a factual situation AND asks for arguments, defences, legal provisions, citations, or remedies, use MULTIPLE agents:
+   - Scenario (for analysis/arguments/remedies) + Judgment (for case laws) + Legislation/Newacts (for statutory provisions)
+   - Example: "A doctor operated on wrong patient. What are the legal arguments and relevant case laws and statutory provisions?" → [Scenario, Judgment, Legislation]
+   - Example: "My landlord locked me out. Arguments with citations and relevant IPC sections" → [Scenario, Judgment, Newacts]
+4. When a query mentions BOTH a constitutional concept AND a legal maxim/doctrine → [Constitution, Maxim]
+5. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
+6. For drafting requests: ONLY include Drafting when the user explicitly asks to draft/write/prepare a legal document. "What legal options" or "how can I" is NOT a drafting request.
 7. Never use more than 3 agents.
 8. "Other" always maps to Scenario.
 
@@ -163,6 +164,63 @@ def _select_citation_agents(query: str) -> list[str]:
     return agents
 
 
+def _detect_multi_intent(query: str, task: str) -> list[str]:
+    """Keyword-based multi-intent detection as safety net.
+
+    Ensures complex queries that mention citations, arguments, provisions etc.
+    get routed to multiple agents even if the LLM planner returns only one.
+    Returns additional agents to add (may be empty).
+    """
+    q = query.lower()
+    extra = []
+
+    # Detect requests for case laws / citations / judgments
+    wants_cases = any(k in q for k in (
+        "case law", "case laws", "citation", "citations", "judgment", "judgement",
+        "precedent", "precedents", "court decision", "landmark case",
+        "relevant case", "supporting case", "judicial",
+    ))
+
+    # Detect requests for statutory provisions / sections / acts
+    wants_statutes = any(k in q for k in (
+        "section", "provision", "provisions", "statutory", "statute",
+        "act ", " act,", " act.", "legal provision", "under which law",
+        "applicable law", "relevant law", "penal", "ipc", "bns", "crpc", "bnss",
+    ))
+
+    # Detect requests for arguments / defences / remedies (scenario analysis)
+    wants_analysis = any(k in q for k in (
+        "argument", "arguments", "defence", "defense", "remedy", "remedies",
+        "legal option", "legal options", "on behalf of", "what can",
+        "how to fight", "how to defend", "legal recourse", "legal action",
+        "advice", "advise",
+    ))
+
+    # Detect drafting intent
+    wants_draft = any(k in q for k in (
+        "draft", "prepare", "write a", "template", "format of",
+        "application for", "petition for", "notice for",
+    ))
+
+    # Add missing agents based on detected intents
+    if wants_cases and task not in ("Judgment", "SCI_Judgment"):
+        extra.append("Judgment")
+    if wants_statutes and task not in ("Legislation", "Newacts"):
+        # Decide between Legislation and Newacts
+        newacts_acts = ("bns", "bnss", "bsa", "ipc", "crpc", "iea",
+                        "penal code", "criminal procedure", "evidence act")
+        if any(a in q for a in newacts_acts):
+            extra.append("Newacts")
+        else:
+            extra.append("Legislation")
+    if wants_analysis and task not in ("Scenario",):
+        extra.append("Scenario")
+    if wants_draft and task not in ("Drafting",):
+        extra.append("Drafting")
+
+    return extra
+
+
 def _plan_agents(query: str, task: str) -> list[str]:
     """Determine which domain agents to invoke for this query.
 
@@ -171,21 +229,9 @@ def _plan_agents(query: str, task: str) -> list[str]:
     For Drafting: always adds citation agents (Judgment + Legislation/Newacts).
     """
     # Short-circuit for simple task types
-    simple_mapping = {
-        "Non_legal": [],
-        "Legal_Concepts": ["Legal_Concepts"],
-    }
-    if task in simple_mapping:
-        log.debug("Simple task mapping used", task=task,
-                  agents=simple_mapping[task])
-        return simple_mapping[task]
-
-    # For queries with 100+ words, always go to Scenario (complex scenario)
-    word_count = len(query.split())
-    if word_count >= 100:
-        log.info("Long query detected, routing to Scenario",
-                 word_count=word_count)
-        return ["Scenario"]
+    if task == "Non_legal":
+        log.debug("Simple task mapping used", task=task, agents=[])
+        return []
 
     # Try multi-agent planning with LLM
     try:
@@ -203,8 +249,18 @@ def _plan_agents(query: str, task: str) -> list[str]:
                   error=str(e), fallback=task)
         agents = [task]
 
+    # Safety net: keyword-based multi-intent detection
+    extra = _detect_multi_intent(query, task)
+    for agent in extra:
+        if agent not in agents:
+            agents.append(agent)
+    if extra:
+        log.info("Multi-intent detection added agents",
+                 extra=extra, all_agents=agents)
+
     # For Drafting: ALWAYS add citation agents for court-filing quality
-    if task == "Drafting" or "Drafting" in agents:
+    has_drafting = task == "Drafting" or "Drafting" in agents
+    if has_drafting:
         if "Drafting" not in agents:
             agents.insert(0, "Drafting")
         citation_agents = _select_citation_agents(query)
@@ -214,8 +270,141 @@ def _plan_agents(query: str, task: str) -> list[str]:
         agents = agents[:4]  # allow up to 4 agents for drafting
         log.info("Drafting citation agents added",
                  agents=agents, citation_agents=citation_agents)
+    else:
+        agents = agents[:3]  # cap at 3 agents for non-drafting
 
     return agents
+
+
+# --- Per-Agent Query Rewriting ---
+
+import json as _json
+
+AGENT_QUERY_REWRITE_PROMPT = """You are a legal query optimizer. Rewrite the user's query into specialized search queries for each assigned agent.
+
+Each agent has a different database and purpose:
+- Judgment: Searches court case law database. Query should focus on: legal topic keywords, cause of action, type of case (e.g. "medical negligence", "consumer complaint", "property dispute"). NEVER include user-provided party names (they are fictional and won't match any real cases). Use generic terms like "doctor negligence hospital compensation" instead.
+- Legislation: Searches Indian act/statute database by full-text match. IMPORTANT: Focus on the SINGLE most relevant act and its specific sections. Do NOT list multiple acts — the search engine will match the first act name it finds. Example: "Consumer Protection Act 2019 Section 2 definition of consumer deficiency in service medical negligence" (not "Indian Contract Act; IPC; Consumer Protection Act").
+- Newacts: Searches BNS/IPC, BNSS/CrPC, BSA/IEA database. Query should mention the specific criminal code sections or topics.
+- Drafting: Creates legal documents. Query should specify: document type, parties, key facts, relief sought.
+- Scenario: Performs web-grounded legal analysis. Query should include: full factual situation, what analysis is needed (arguments, remedies, forum).
+- Constitution: Searches constitutional provisions database. Query should specify: Article numbers, fundamental rights, constitutional principles.
+- Maxim: Searches legal maxims database. Query should specify: maxim name, doctrine, Latin phrase.
+- Legal_Concepts: General legal explanation. Query should be the legal concept to explain.
+- SCI_Judgment: Searches Supreme Court database. Query should focus on: SC-specific case names, constitutional questions, landmark rulings.
+
+Rules:
+1. Each rewritten query must be self-contained and optimized for that agent's search database.
+2. Keep queries concise (under 100 words each). Scenario can be longer.
+3. Extract and include specific legal terms: act names, section numbers, doctrines, party types.
+4. For Legislation: pick the SINGLE most relevant act for the user's primary legal issue. Do NOT list multiple acts.
+5. For Judgment: NEVER include fictional party names from the user's scenario. Use only legal topics and case type keywords.
+6. Return valid JSON object mapping agent name to rewritten query.
+
+User Query: {query}
+Agents: {agents}
+
+Return JSON object like: {{"Judgment": "...", "Legislation": "..."}}"""
+
+
+class AgentQueries(BaseModel):
+    queries: dict[str, str] = Field(
+        ..., description="Map of agent name to its optimized query"
+    )
+
+
+# --- User Expectation Extraction + Query Normalization ---
+
+QUERY_NORMALIZE_PROMPT = """You are a legal query analyzer. Analyze the user's query and extract two things:
+
+1. **Normalized Query** (in English): Rewrite the user's query into clear, professional English. If the query is in Hindi, Hinglish, or any other language, translate it to English. Preserve all legal details (names, dates, sections, acts). Add explicit mention of what the user is asking for.
+
+2. **Response Instructions**: Extract what FORMAT and TYPE of response the user expects. Look for:
+   - Output type: draft/document, explanation, advice/opinion, comparison table, list, summary, step-by-step guide
+   - Specific format requests: table format, bullet points, numbered list, formal legal language
+   - Language preference: if the user wrote in Hindi/Hinglish, note "User prefers Hindi/bilingual response"
+   - Specific expectations: "on behalf of plaintiff", "with case laws", "with sections", "arguments and counter-arguments"
+   - Relief/remedy focus: compensation, bail, injunction, etc.
+
+If the user has no special format preference, return "Standard legal response with proper citations and markdown formatting."
+
+User Query: {query}
+
+Return JSON:
+{{"normalized_query": "...", "response_instructions": "..."}}"""
+
+
+class QueryAnalysis(BaseModel):
+    normalized_query: str = Field(..., description="Query rewritten in clear English with expectations embedded")
+    response_instructions: str = Field(..., description="What format/type of response the user expects")
+
+
+def _analyze_and_normalize_query(query: str) -> tuple[str, str]:
+    """Analyze user query: translate to English + extract response expectations.
+
+    Returns (normalized_query, response_instructions).
+    """
+    try:
+        with log_time(log, "Query analysis & normalization"):
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(QueryAnalysis)
+            prompt = ChatPromptTemplate.from_template(QUERY_NORMALIZE_PROMPT)
+            chain = prompt | llm
+            result = chain.invoke({"query": query})
+
+        log.info("Query normalized",
+                 original_len=len(query),
+                 normalized_len=len(result.normalized_query),
+                 instructions_len=len(result.response_instructions))
+        return result.normalized_query, result.response_instructions
+
+    except Exception as e:
+        log.warning("Query normalization failed, using original",
+                    error=str(e))
+        return query, ""
+
+
+def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]:
+    """Generate per-agent optimized queries using LLM.
+
+    For single-agent plans, returns empty dict (agent uses original query).
+    For multi-agent plans, rewrites the query for each agent's domain.
+    """
+    if len(agents) <= 1:
+        return {}
+
+    try:
+        with log_time(log, "Per-agent query rewriting"):
+            llm = get_gemini_flash(temperature=0.1)
+            prompt = ChatPromptTemplate.from_template(AGENT_QUERY_REWRITE_PROMPT)
+            chain = prompt | llm
+
+            response = chain.invoke({
+                "query": query,
+                "agents": ", ".join(agents),
+            })
+
+        # Parse JSON from response
+        text = response.content.strip()
+        # Strip markdown code fences if present
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+        parsed = _json.loads(text)
+        # Validate: only keep queries for planned agents
+        agent_queries = {k: v for k, v in parsed.items() if k in agents and isinstance(v, str)}
+
+        log.info("Per-agent queries generated",
+                 agents=list(agent_queries.keys()),
+                 query_lengths={k: len(v) for k, v in agent_queries.items()})
+        return agent_queries
+
+    except Exception as e:
+        log.warning("Per-agent query rewriting failed, agents will use original query",
+                    error=str(e))
+        return {}
 
 
 # --- Agent Nodes ---
@@ -224,33 +413,44 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     """Phase 1 — Classify task and create execution plan.
 
     Steps:
+    0. Normalize query (translate to English + extract user expectations)
     1. Classify query into task type
     2. Handle Non_legal rejection
     3. Plan which agents to invoke (single or multi-agent)
-    4. Return task + tasks_planned for graph routing
+    4. Rewrite query per-agent for multi-agent plans
+    5. Return task + tasks_planned + agent_queries + response_instructions
     """
     query = state.get("query", state["original_query"])
     summary = state.get("summary_text", "")
     log.info("Plan phase started", query=query[:100],
              has_summary=bool(summary))
 
-    # Step 1: Classify task
-    word_count = len(query.split())
-    if word_count >= 100:
-        task = "Scenario"
-        log.info("Long query bypass", word_count=word_count, task=task)
-    else:
-        try:
-            task = await asyncio.wait_for(
-                asyncio.to_thread(
-                    _classify_task, query, chat_summary=summary if summary else None
-                ),
-                timeout=30,
-            )
-        except asyncio.TimeoutError:
-            task = _classify_task_regex_fallback(query)
-            log.warning("Task classification timed out, using regex fallback",
-                        task=task, query=query[:80])
+    # Step 0: Normalize query + extract user expectations
+    response_instructions = ""
+    try:
+        normalized_query, response_instructions = await asyncio.wait_for(
+            asyncio.to_thread(_analyze_and_normalize_query, query),
+            timeout=10,
+        )
+        if normalized_query and normalized_query != query:
+            log.info("Query normalized",
+                     original=query[:80], normalized=normalized_query[:80])
+            query = normalized_query
+    except asyncio.TimeoutError:
+        log.warning("Query normalization timed out, using original")
+
+    # Step 1: Classify task (LLM with regex fallback on timeout)
+    try:
+        task = await asyncio.wait_for(
+            asyncio.to_thread(
+                _classify_task, query, chat_summary=summary if summary else None
+            ),
+            timeout=30,
+        )
+    except asyncio.TimeoutError:
+        task = _classify_task_regex_fallback(query)
+        log.warning("Task classification timed out, using regex fallback",
+                    task=task, query=query[:80])
 
     # Step 2: Handle non-legal
     if task == "Non_legal":
@@ -281,13 +481,30 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     except asyncio.TimeoutError:
         log.warning("Agent planning timed out, falling back to single agent", task=task)
         tasks_planned = [task] if task not in ("Non_legal",) else []
+
+    # Step 4: Per-agent query rewriting (only for multi-agent plans)
+    agent_queries = {}
+    if len(tasks_planned) > 1:
+        try:
+            agent_queries = await asyncio.wait_for(
+                asyncio.to_thread(_rewrite_queries_for_agents, query, tasks_planned),
+                timeout=15,
+            )
+        except asyncio.TimeoutError:
+            log.warning("Per-agent query rewriting timed out")
+
     log.info("Plan phase completed",
              task=task, agents_planned=tasks_planned,
-             agent_count=len(tasks_planned))
+             agent_count=len(tasks_planned),
+             agent_queries_generated=len(agent_queries),
+             has_response_instructions=bool(response_instructions))
 
     return {
+        "query": query,  # normalized English query replaces original
         "task": task,
         "tasks_planned": tasks_planned,
+        "agent_queries": agent_queries,
+        "response_instructions": response_instructions,
     }
 
 
@@ -299,9 +516,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     """
     agent_results: dict[str, AgentResult] = state.get("agent_results", {})
     query = state.get("query", state["original_query"])
+    response_instructions = state.get("response_instructions", "")
 
     log.info("Synthesize phase started",
-             agents_received=list(agent_results.keys()))
+             agents_received=list(agent_results.keys()),
+             has_response_instructions=bool(response_instructions))
 
     if not agent_results:
         log.warning("No agent results to synthesize")
@@ -348,9 +567,6 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             "source_metadata": [],
         }
 
-    # Pass through related_sections from state (populated by newacts agent)
-    related_sections = state.get("related_sections", [])
-
     # Single agent — pass through directly (with auto-citation for Drafting)
     if len(valid_results) == 1:
         name, result = next(iter(valid_results.items()))
@@ -369,8 +585,6 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                     "source_metadata": _serialize_sources(result),
                     "tokens_consumed": result.tokens_consumed,
                 }
-                if related_sections:
-                    return_dict["related_sections"] = related_sections
                 return return_dict
             except Exception as e:
                 log.warning("Auto-citation failed, passing draft through",
@@ -384,8 +598,6 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
         }
-        if related_sections:
-            return_dict["related_sections"] = related_sections
         return return_dict
 
     # --- Draft-Aware Synthesis ---
@@ -409,8 +621,19 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 total_tokens += result.tokens_consumed
                 all_serialized_sources.extend(_serialize_sources(result))
 
+        # For large drafts (>40K chars), LLM citation injection truncates the draft.
+        # Instead, append citations as a separate section at the end.
+        LARGE_DRAFT_THRESHOLD = 40_000
+
         try:
-            if citations_text.strip():
+            if len(drafting_result.content) > LARGE_DRAFT_THRESHOLD:
+                log.info("Draft too large for LLM injection, appending citations",
+                         draft_len=len(drafting_result.content),
+                         threshold=LARGE_DRAFT_THRESHOLD)
+                enriched = drafting_result.content
+                if citations_text.strip():
+                    enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
+            elif citations_text.strip():
                 enriched = await _inject_citations_into_draft(
                     query, drafting_result.content, citations_text
                 )
@@ -420,25 +643,19 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             log.info("Draft synthesis completed",
                      enriched_len=len(enriched), total_tokens=total_tokens)
 
-            return_dict = {
+            return {
                 "final_response": enriched,
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
             }
-            if related_sections:
-                return_dict["related_sections"] = related_sections
-            return return_dict
 
         except Exception as e:
             log.error("Draft synthesis failed, returning raw draft", error=str(e))
-            return_dict = {
+            return {
                 "final_response": drafting_result.content,
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
             }
-            if related_sections:
-                return_dict["related_sections"] = related_sections
-            return return_dict
 
     # --- Generic Multi-Agent Synthesis (non-drafting) ---
     log.info("Multi-agent synthesis starting",
@@ -464,7 +681,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             response = await stream_chain_response(chain, {
                 "query": query,
                 "agent_results": agent_results_text,
-            })
+                "response_instructions": response_instructions or "Standard legal response with proper citations and markdown formatting.",
+            }, timeout=180)  # Multi-agent synthesis needs more time
 
         synthesized = response.content
         synth_tokens = 0
@@ -483,14 +701,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             parts.append(result.content)
         synthesized = "\n\n---\n\n".join(parts)
 
-    return_dict = {
+    return {
         "final_response": synthesized,
         "source_metadata": all_serialized_sources,
         "tokens_consumed": total_tokens,
     }
-    if related_sections:
-        return_dict["related_sections"] = related_sections
-    return return_dict
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:
@@ -545,7 +760,7 @@ async def _inject_citations_into_draft(
             "query": query,
             "draft": draft,
             "citations": citations_text,
-        })
+        }, timeout=180)  # Citation injection on full draft needs more time
 
     tokens = 0
     if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -570,7 +785,7 @@ async def _auto_cite_draft(query: str, draft: str) -> str:
         response = await stream_chain_response(chain, {
             "query": query,
             "draft": draft,
-        })
+        }, timeout=180)  # Auto-citation on full draft needs more time
 
     tokens = 0
     if hasattr(response, "usage_metadata") and response.usage_metadata:

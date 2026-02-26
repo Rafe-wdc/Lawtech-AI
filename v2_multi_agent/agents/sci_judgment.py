@@ -38,8 +38,10 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
     3. Agent performs multi-step research (2-4 searches + case reads)
     4. Extract final response and wrap in AgentResult
     """
-    query = state.get("query", state["original_query"])
-    log.info("Agent started", query=query[:100])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("SCI_Judgment", state.get("query", state["original_query"]))
+    log.info("Agent started", query=query[:100],
+             using_agent_query="SCI_Judgment" in agent_queries)
 
     try:
         # Build ReAct agent with SCI tools

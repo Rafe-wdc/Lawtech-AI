@@ -100,11 +100,6 @@ def get_execution_plan(query: str, chat_summary: str = "") -> dict:
         Dict with keys: task (str), agents (list), reasoning (str)
     """
     # Step 1: Classify task
-    if len(query.split()) >= 100:
-        task = "Scenario"
-        reasoning = "Long query (100+ words) routed to Scenario agent"
-        return {"task": task, "agents": ["Scenario"], "reasoning": reasoning}
-
     try:
         prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
         llm = get_gpt4o().with_structured_output(IdentifyTaskSchema)

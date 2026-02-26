@@ -104,6 +104,8 @@ class LegalAgentState(MessagesState):
     # Task routing
     task: TaskType | None
     tasks_planned: list[str]
+    agent_queries: dict[str, str]   # per-agent rewritten queries
+    response_instructions: str      # user's expected output format/language/style
 
     # Conversation context
     chat_history: list[BaseMessage]
@@ -116,8 +118,10 @@ class LegalAgentState(MessagesState):
     is_blocked: bool
     block_reason: str | None
 
+    # Draft continuation (for incomplete drafts that need retry)
+    draft_continuation: dict[str, Any] | None
+
     # Final output
     final_response: str
     source_metadata: Annotated[list[dict[str, Any]], operator.add]
-    related_sections: Annotated[list[dict[str, Any]], operator.add]
     tokens_consumed: Annotated[int, _sum_tokens]

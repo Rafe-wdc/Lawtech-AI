@@ -268,9 +268,11 @@ async def newacts_node(state: LegalAgentState) -> dict:
     6. If no section/act, fall back to topic-based search
     7. Generate response with provisions
     """
-    query = state.get("query", state["original_query"])
+    agent_queries = state.get("agent_queries", {})
+    query = agent_queries.get("Newacts", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
-    log.info("Agent started", query=query[:100])
+    log.info("Agent started", query=query[:100],
+             using_agent_query="Newacts" in agent_queries)
 
     try:
         # Step 1: Extract metadata (GPT-4o in a thread, with timeout + regex fallback)
@@ -528,34 +530,6 @@ async def newacts_node(state: LegalAgentState) -> dict:
             if added:
                 log.info("Added mapping counterpart sections", count=added)
 
-        # Step 4c: Collect related sections for frontend (wider window, separate from hits)
-        related_sections_data = []
-        if has_section and has_act and metadata.section_number:
-            try:
-                center_sec = metadata.section_number[0]
-                nearby_for_ui = _get_nearby_sections(
-                    center_sec, metadata.act_name, window=2, timeout=5,
-                )
-                existing_secs_in_hits = {
-                    str(h["_source"].get("section_number", ""))
-                    for h in hits
-                    if h["_source"].get("section_number")
-                }
-                for nh in nearby_for_ui["hits"]:
-                    sec_str = str(nh.get("section_number", ""))
-                    if sec_str and sec_str not in existing_secs_in_hits:
-                        related_sections_data.append({
-                            "section_number": sec_str,
-                            "title": nh["content"].split('\n')[0][:120],
-                            "act_name": metadata.act_name or "",
-                            "content_preview": nh["content"][:200],
-                        })
-                if related_sections_data:
-                    log.info("Related sections collected for UI",
-                             count=len(related_sections_data))
-            except Exception as rel_err:
-                log.warning("Related sections collection failed",
-                            error=str(rel_err))
 
         if not hits:
             # Phase 1: Query rewrite + retry
@@ -581,7 +555,6 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 fallback_result.retry_attempted = True
                 return {
                     "agent_results": {"Newacts": fallback_result},
-                    "related_sections": related_sections_data,
                 }
 
         log.info("ES results found", hit_count=len(hits))
@@ -643,7 +616,6 @@ async def newacts_node(state: LegalAgentState) -> dict:
             fallback_result.tokens_consumed += tokens
             return {
                 "agent_results": {"Newacts": fallback_result},
-                "related_sections": related_sections_data,
             }
 
         # Determine display name for the act
@@ -685,9 +657,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
             tokens_consumed=0,
             error=str(e),
         )
-        related_sections_data = []
 
     return {
         "agent_results": {"Newacts": result},
-        "related_sections": related_sections_data,
     }

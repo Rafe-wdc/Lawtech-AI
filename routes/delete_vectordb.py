@@ -3,7 +3,10 @@ import os
 import time
 import shutil
 import gc
+import logging
 from werkzeug.utils import secure_filename
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pyapi", tags=["delete_vectordb"])
 vectordb_instances = {}
@@ -19,11 +22,11 @@ def delete_vectordb(unique_string: str):
         persist_dir = os.path.realpath(os.path.join(CHROMA_STORE_ROOT, safe_name))
         if not persist_dir.startswith(CHROMA_STORE_ROOT):
             raise HTTPException(status_code=400, detail="Invalid unique_string")
-        print("Trying to delete directory:", persist_dir)
+        logger.info("Trying to delete directory: %s", persist_dir)
 
         # --- Step 1: Check and remove from any global reference ---
         if unique_string in vectordb_instances:
-            print("Releasing Chroma instance...")
+            logger.info("Releasing Chroma instance...")
             del vectordb_instances[unique_string]
             gc.collect()  # Force garbage collection
 
@@ -32,12 +35,12 @@ def delete_vectordb(unique_string: str):
             for attempt in range(5):
                 try:
                     shutil.rmtree(persist_dir)
-                    print("Directory deleted successfully.")
+                    logger.info("Directory deleted successfully.")
                     return {
                         'message': f'VectorDB for unique string "{unique_string}" successfully deleted.'
                     }
                 except Exception as e:
-                    print(f"Attempt {attempt+1}: Failed to delete. Retrying... ({e})")
+                    logger.warning(f"Attempt {attempt+1}: Failed to delete. Retrying... ({e})")
                     time.sleep(1)
             # If still failing after retries
             raise HTTPException(status_code=500, detail=f"Failed to delete VectorDB {unique_string}")
@@ -45,6 +48,6 @@ def delete_vectordb(unique_string: str):
             raise HTTPException(status_code=404, detail=f"No vectordb found for {unique_string}")
 
     except Exception as e:
-        print(f"An error occurred while deleting the vectordb: {e}")
+        logger.error(f"An error occurred while deleting the vectordb: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     

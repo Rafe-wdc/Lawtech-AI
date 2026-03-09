@@ -6,6 +6,10 @@ from langchain_openai import ChatOpenAI
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.retrievers.ensemble import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
+import logging
+
+logger = logging.getLogger(__name__)
+
 from . import vectordbs
 
 
@@ -47,19 +51,19 @@ class BaseRetriever:
                 llm_chain=llm_chain,
                 parser_key="lines"
             )
-            print("🧠 MultiQueryRetriever initialized")
+            logger.info("MultiQueryRetriever initialized")
             unique_docs = multi_retriever.invoke(query)
             if unique_docs:
-                print(f"✅ MultiQueryRetriever returned {len(unique_docs)} docs")
+                logger.info("MultiQueryRetriever returned %d docs", len(unique_docs))
             else:
                 raise ValueError("MultiQueryRetriever returned no documents.")
         except Exception as e:
-            print(f"⚠️ MultiQueryRetriever failed: {e}")
-            print("🔁 Switching to BM25 + Chroma fallback...")
+            logger.warning("MultiQueryRetriever failed: %s", e)
+            logger.info("Switching to BM25 + Chroma fallback...")
             fallback_retriever = vectordb.as_retriever(search_kwargs={"k": 10})
             unique_docs = fallback_retriever.invoke(query)
             if not unique_docs:
-                print("❌ No fallback docs either.")
+                logger.error("No fallback docs either.")
                 return []
 
         # Step 3: Determine most common source
@@ -70,11 +74,11 @@ class BaseRetriever:
                 source_counts[source] = source_counts.get(source, 0) + 1
 
         if not source_counts:
-            print("❌ No valid sources in retrieved docs.")
+            logger.error("No valid sources in retrieved docs.")
             return []
 
         top_source = max(source_counts, key=source_counts.get)
-        print(f"🏆 Most frequent source: {top_source}")
+        logger.info("Most frequent source: %s", top_source)
 
         # Step 4: Get all documents from top source
         source_file = vectordb.get(where={"source": top_source})
@@ -102,8 +106,8 @@ class BaseRetriever:
             retrievers=[bm25_doc_retriever, chroma],
             weights=[0.5, 0.5]
         )
-        print("🚀 EnsembleRetriever (BM25 + Chroma) running...")
+        logger.info("EnsembleRetriever (BM25 + Chroma) running...")
         hybrid_search_results = ensemble.invoke(query)
-        print(f"✅ Hybrid search returned {len(hybrid_search_results)} relevant documents")
+        logger.info("Hybrid search returned %d relevant documents", len(hybrid_search_results))
 
         return hybrid_search_results

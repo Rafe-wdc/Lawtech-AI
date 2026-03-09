@@ -25,11 +25,13 @@ from .elasticsearch_tools import (
     map_old_to_new_law,
     validate_draft_format,
     translate_draft,
+    search_constitution,
+    search_constitution_by_part,
+    search_legal_maxims,
 )
 
-# --- VectorDB Tools ---
+# --- VectorDB Tools (PDF uploads only) ---
 from .vectordb_tools import (
-    search_chromadb_ensemble,
     search_pdf_collection,
     store_pdf_chunks,
 )
@@ -152,8 +154,11 @@ ALL_TOOLS = [
     map_old_to_new_law,
     validate_draft_format,
     translate_draft,
-    # VectorDB (3)
-    search_chromadb_ensemble,
+    # Constitution & Maxim ES (3)
+    search_constitution,
+    search_constitution_by_part,
+    search_legal_maxims,
+    # VectorDB — PDF uploads (2)
     search_pdf_collection,
     store_pdf_chunks,
     # LLM Extraction (5)
@@ -302,11 +307,12 @@ AGENT_TOOLS = {
         get_legal_news,
     ],
     "constitution": [
-        search_chromadb_ensemble,
+        search_constitution,
+        search_constitution_by_part,
         generate_legal_response,
     ],
     "maxim": [
-        search_chromadb_ensemble,
+        search_legal_maxims,
         generate_legal_response,
     ],
     "legal_concepts": [

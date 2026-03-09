@@ -8,7 +8,9 @@ import chromadb
 import os
 from elasticsearch import Elasticsearch
 import time
-from pprint import pprint
+import logging
+
+logger = logging.getLogger(__name__)
 
 es_url = os.getenv("ELASTICSEARCH_URL", "http://139.84.219.174:9200")
 
@@ -17,10 +19,10 @@ def get_es_client(max_retries: int = 1, sleep_time: int = 5) -> Elasticsearch:
     while i < max_retries:
         try:
             es = Elasticsearch(es_url, request_timeout=60)
-            pprint("Connected to Elasticsearch!")
+            logger.info("Connected to Elasticsearch!")
             return es
         except Exception:
-            pprint("Could not connect to Elasticsearch, retrying...")
+            logger.warning("Could not connect to Elasticsearch, retrying...")
             time.sleep(sleep_time)
             i += 1
     raise ConnectionError("Failed to connect to Elasticsearch after multiple attempts.")
@@ -46,7 +48,7 @@ def initialize_vectordbs(persist_directory_mapping: Dict[str, str]) -> Dict[str,
         dict: Mapping of names to Chroma vectorstores.
     """
     vectorstores = {}
-    print("Vectorstores initializing...")
+    logger.info("Vectorstores initializing...")
     for name, persist_dir in persist_directory_mapping.items():
         vectorstores[name] = Chroma(
             persist_directory=persist_dir,
@@ -88,4 +90,4 @@ persist_directory = {
     # 'Central': "./Routing db/central-db"
 }
 vectordbs = initialize_vectordbs(persist_directory)
-print("Vector databases initialized")
+logger.info("Vector databases initialized")

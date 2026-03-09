@@ -22,7 +22,10 @@ from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.clients import get_gemini_flash, get_qa_embeddings
+from core.logger import get_logger
 from core.settings import CHROMA_STORE_ROOT
+
+log = get_logger("DocumentTools")
 
 import chromadb
 
@@ -246,7 +249,7 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
         }
 
     except Exception as e:
-        print(f"[Document] Vision extraction failed: {e}")
+        log.error(f"[Document] Vision extraction failed: {e}")
         return {"text": "", "pages_processed": 0, "error": str(e)}
 
 
@@ -284,7 +287,7 @@ def compress_pdf(file_path: str) -> dict:
             pdf.save(pike_out, compress_streams=True)
         pike_size = os.path.getsize(pike_out)
     except Exception as e:
-        print(f"[Document] PikePDF failed: {e}")
+        log.error(f"[Document] PikePDF failed: {e}")
         pike_out = None
 
     if pike_out and pike_size < original_size * 0.97:
@@ -309,7 +312,7 @@ def compress_pdf(file_path: str) -> dict:
         subprocess.run(gs_cmd, check=True, timeout=120)
         gs_size = os.path.getsize(gs_out)
     except Exception as e:
-        print(f"[Document] Ghostscript failed: {e}")
+        log.error(f"[Document] Ghostscript failed: {e}")
         gs_out = None
 
     # Choose best result
@@ -374,11 +377,11 @@ def delete_pdf_vectorstore(unique_string: str) -> dict:
         if os.path.exists(chat_file):
             os.remove(chat_file)
 
-        print(f"[Document] Deleted collection: {unique_string}")
+        log.info(f"[Document] Deleted collection: {unique_string}")
         return {"deleted": True, "reason": None}
 
     except Exception as e:
-        print(f"[Document] Failed to delete collection {unique_string}: {e}")
+        log.error(f"[Document] Failed to delete collection {unique_string}: {e}")
         return {"deleted": False, "reason": str(e)}
 
 
@@ -427,7 +430,7 @@ def get_collection_metadata(unique_string: str) -> dict:
         collection = vectordb._collection
         doc_count = collection.count()
     except Exception as e:
-        print(f"[Document] Failed to get doc count for {unique_string}: {e}")
+        log.error(f"[Document] Failed to get doc count for {unique_string}: {e}")
 
     # Check chat history
     chat_file = os.path.join(CHROMA_STORE_ROOT, "chat_histories", f"{unique_string}_chat.json")

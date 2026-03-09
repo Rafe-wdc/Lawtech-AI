@@ -1,7 +1,7 @@
 """Shared Tools: Elasticsearch search operations.
 
 Reusable @tool functions for searching across all ES indices:
-- legislation, judgments, newacts, drafting
+- legislation, judgments, newacts, drafting, constitution, legal_maxims
 
 These tools encapsulate the raw ES query logic so agents
 can call them without embedding search code inline.
@@ -9,6 +9,7 @@ can call them without embedding search code inline.
 Also includes domain-specific helper tools:
 - create_search_variations, search_high_court, map_act_to_source,
   map_old_to_new_law, validate_draft_format, translate_draft
+- search_constitution, search_constitution_by_part, search_legal_maxims
 
 Uses: Elasticsearch client from core.clients
 """
@@ -24,8 +25,11 @@ from typing import Optional
 from langchain.tools import tool
 
 from core.clients import get_es_client, get_retriever_embeddings
+from core.logger import get_logger
 from core.settings import ES_INDICES
 from tools.inline.section_parser import parse_section_info
+
+log = get_logger("ElasticsearchTools")
 
 
 # --- Input Sanitization ---
@@ -180,7 +184,7 @@ def search_legislation(query: str) -> dict:
             if len(current_hits) > 5 and any(h["_score"] > 5.0 for h in current_hits):
                 break
         except Exception as e:
-            print(f"[ES:Legislation] Search failed for '{query_text}': {e}")
+            log.error(f"[ES:Legislation] Search failed for '{query_text}': {e}")
             continue
 
     if not sources_counter:
@@ -1294,5 +1298,204 @@ def translate_draft(draft: str, target_language: str) -> dict:
         }
 
     except Exception as e:
-        print(f"[Drafting] Translation failed: {e}")
+        log.error(f"[Drafting] Translation failed: {e}")
         return {"translated": "", "language": target_language, "tokens_consumed": 0}
+
+
+# ============================================================
+# Constitution Search Tools
+# ============================================================
+
+@tool
+def search_constitution(query: str, article_number: Optional[str] = None) -> dict:
+    """Search the Constitution of India index in Elasticsearch.
+
+    Supports full-text search on article text and optional filtering by
+    article number. Uses a two-phase approach: first discovers the best
+    matching articles, then retrieves full content.
+
+    Args:
+        query: The legal query about constitutional provisions
+        article_number: Optional specific article number to filter (e.g. "21", "19", "14")
+
+    Returns:
+        Dict with keys: documents (list of {content, source, article_number, article_name, part_name}), total
+    """
+    es = get_es_client()
+    index = ES_INDICES.get("constitution", "constitution")
+    query_text = _sanitize_es_input(query)
+
+    must_clauses = []
+    should_clauses = [
+        {"match": {"page_content": {"query": query_text, "boost": 2.0}}},
+        {"match_phrase": {"page_content": {"query": query_text, "boost": 3.0}}},
+        {"match": {"article_name": {"query": query_text, "boost": 2.5}}},
+        {"match": {"part_name": {"query": query_text, "boost": 1.0}}},
+    ]
+
+    if article_number:
+        sanitized_article = _sanitize_es_input(article_number, max_length=50)
+        # Search for "Article X" pattern in article_number field
+        should_clauses.append(
+            {"match_phrase": {"article_number": {"query": f"Article {sanitized_article}", "boost": 10.0}}}
+        )
+
+    body = {
+        "query": {
+            "bool": {
+                "must": must_clauses if must_clauses else [{"match_all": {}}],
+                "should": should_clauses,
+                "minimum_should_match": 1,
+            }
+        },
+        "size": 10,
+    }
+
+    try:
+        result = es.search(index=index, body=body)
+        hits = result["hits"]["hits"]
+
+        documents = []
+        for hit in hits:
+            src = hit["_source"]
+            documents.append({
+                "content": src.get("page_content", ""),
+                "source": src.get("source", ""),
+                "article_number": src.get("article_number", ""),
+                "article_name": src.get("article_name", ""),
+                "part_number": src.get("part_number", ""),
+                "part_name": src.get("part_name", ""),
+                "score": hit["_score"],
+            })
+
+        return {"documents": documents, "total": len(documents)}
+
+    except Exception as e:
+        log.error(f"[Constitution] Search failed: {e}")
+        return {"documents": [], "total": 0}
+
+
+@tool
+def search_constitution_by_part(query: str, part_name: str) -> dict:
+    """Search Constitution articles filtered by a specific Part.
+
+    Useful when the user asks about all articles in a specific Part
+    (e.g. "fundamental rights" → Part III, "directive principles" → Part IV).
+
+    Args:
+        query: The legal query about constitutional provisions
+        part_name: The Part name to filter by (e.g. "Fundamental Rights", "Part III")
+
+    Returns:
+        Dict with keys: documents (list of {content, article_number, article_name, part_name}), total
+    """
+    es = get_es_client()
+    index = ES_INDICES.get("constitution", "constitution")
+    query_text = _sanitize_es_input(query)
+    part_text = _sanitize_es_input(part_name, max_length=100)
+
+    body = {
+        "query": {
+            "bool": {
+                "must": [
+                    {"match": {"part_name": {"query": part_text}}},
+                ],
+                "should": [
+                    {"match": {"page_content": {"query": query_text, "boost": 2.0}}},
+                    {"match": {"article_name": {"query": query_text, "boost": 1.5}}},
+                ],
+            }
+        },
+        "size": 20,
+    }
+
+    try:
+        result = es.search(index=index, body=body)
+        hits = result["hits"]["hits"]
+
+        documents = []
+        for hit in hits:
+            src = hit["_source"]
+            documents.append({
+                "content": src.get("page_content", ""),
+                "source": src.get("source", ""),
+                "article_number": src.get("article_number", ""),
+                "article_name": src.get("article_name", ""),
+                "part_name": src.get("part_name", ""),
+                "score": hit["_score"],
+            })
+
+        return {"documents": documents, "total": len(documents)}
+
+    except Exception as e:
+        log.error(f"[Constitution] Part search failed: {e}")
+        return {"documents": [], "total": 0}
+
+
+# ============================================================
+# Legal Maxim Search Tools
+# ============================================================
+
+@tool
+def search_legal_maxims(query: str, maxim_name: Optional[str] = None) -> dict:
+    """Search the Legal Maxims index in Elasticsearch.
+
+    Searches across maxim names, meanings, and full text content.
+    Supports optional filtering by a specific maxim name.
+
+    Args:
+        query: The legal query about maxims (e.g. "hearing both sides", "res judicata")
+        maxim_name: Optional specific maxim name to search for (e.g. "Audi Alteram Partem")
+
+    Returns:
+        Dict with keys: documents (list of {content, source, maxim_name}), total
+    """
+    es = get_es_client()
+    index = ES_INDICES.get("maxims", "legal_maxims")
+    query_text = _sanitize_es_input(query)
+
+    should_clauses = [
+        {"match": {"page_content": {"query": query_text, "boost": 2.0}}},
+        {"match_phrase": {"page_content": {"query": query_text, "boost": 3.0}}},
+    ]
+
+    if maxim_name:
+        sanitized_maxim = _sanitize_es_input(maxim_name, max_length=100)
+        should_clauses.append(
+            {"match_phrase": {"maxim_name": {"query": sanitized_maxim, "boost": 10.0}}}
+        )
+    else:
+        # Also search the maxim_name field with the general query
+        should_clauses.append(
+            {"match": {"maxim_name": {"query": query_text, "boost": 5.0}}}
+        )
+
+    body = {
+        "query": {
+            "bool": {
+                "should": should_clauses,
+                "minimum_should_match": 1,
+            }
+        },
+        "size": 10,
+    }
+
+    try:
+        result = es.search(index=index, body=body)
+        hits = result["hits"]["hits"]
+
+        documents = []
+        for hit in hits:
+            src = hit["_source"]
+            documents.append({
+                "content": src.get("page_content", ""),
+                "source": src.get("source", ""),
+                "maxim_name": src.get("maxim_name", ""),
+                "score": hit["_score"],
+            })
+
+        return {"documents": documents, "total": len(documents)}
+
+    except Exception as e:
+        log.error(f"[Maxim] Search failed: {e}")
+        return {"documents": [], "total": 0}

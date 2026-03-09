@@ -18,7 +18,10 @@ from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.clients import get_gemini_flash, get_gpt4o
+from core.logger import get_logger
 from core.settings import LAWTTORNEY_API_BASE
+
+log = get_logger("MemoryTools")
 
 
 # --- Prompts ---
@@ -103,11 +106,11 @@ def rewrite_query(query: str, chat_history_text: str) -> str:
         if not rewritten or len(rewritten) > 1000:
             return query
 
-        print(f"[Memory] Query rewritten: '{query[:50]}' -> '{rewritten[:50]}'")
+        log.info(f"[Memory] Query rewritten: '{query[:50]}' -> '{rewritten[:50]}'")
         return rewritten
 
     except Exception as e:
-        print(f"[Memory] Rewrite failed, using original: {e}")
+        log.warning(f"[Memory] Rewrite failed, using original: {e}")
         return query
 
 
@@ -150,7 +153,7 @@ def summarize_conversation(conversation_text: str, task: str = "General") -> str
         return response.content.strip()
 
     except Exception as e:
-        print(f"[Memory] Summarization failed: {e}")
+        log.error(f"[Memory] Summarization failed: {e}")
         return conversation_text[:2000]
 
 
@@ -207,5 +210,5 @@ def save_chat_history(
         turn_number = chat_store._save_turn_sync(thread_id, query, response)
         return {"saved": True, "total_turns": turn_number}
     except Exception as e:
-        print(f"[Memory] Failed to save chat history: {e}")
+        log.error(f"[Memory] Failed to save chat history: {e}")
         return {"saved": False, "total_turns": 0}

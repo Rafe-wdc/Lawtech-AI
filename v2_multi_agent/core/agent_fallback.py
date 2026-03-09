@@ -1,7 +1,7 @@
 """Agent Fallback Utilities — Query Rewrite + Web Search Fallback
 
 Shared resilience layer for all domain agents. When an agent's primary
-data source (ES/ChromaDB) returns empty, these utilities provide:
+data source (Elasticsearch) returns empty, these utilities provide:
 
 1. rewrite_query_for_domain() — GPT-4o-mini rewrites the query for better search
 2. web_search_fallback() — Gemini 2.5 Flash + Google Search grounding
@@ -233,7 +233,7 @@ async def get_web_context(query: str, agent_name: str) -> str:
     """Fetch supplementary web context to enrich local retrieval results.
 
     Runs Gemini + Google Search grounding and returns the raw text only —
-    no streaming, no AgentResult. Used to augment ChromaDB context with
+    no streaming, no AgentResult. Used to augment ES retrieval context with
     examples, case laws, and practical application details.
 
     Returns empty string on failure (graceful degradation).

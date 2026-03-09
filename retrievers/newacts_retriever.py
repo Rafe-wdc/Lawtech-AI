@@ -5,6 +5,10 @@ from langchain_core.documents import Document
 
 from dotenv import load_dotenv
 from typing import Optional, List
+import logging
+
+logger = logging.getLogger(__name__)
+
 from . import get_es_client
 
 load_dotenv()
@@ -212,13 +216,13 @@ class NewactsRetriever:
     def retrieve_documents(self, query):
         try:
             query_metadata = select_file_path_metadata(query)
-            print(query_metadata)
+            logger.debug("Query metadata: %s", query_metadata)
             es = get_es_client()
             es_query = build_query(
                 metadata=query_metadata,
                 query_text=query,
             )
-            print(es_query)
+            logger.debug("ES query: %s", es_query)
             source_response = es.search(index="newacts_v1", body=es_query)
             langchain_docs = []
             for hit in source_response["hits"]["hits"]:
@@ -228,6 +232,6 @@ class NewactsRetriever:
                 langchain_docs.append(doc)
             return langchain_docs
         except Exception as e:
-            print(f"Error occurred while retrieving documents: {e}")
+            logger.error("Error occurred while retrieving documents: %s", e)
             return []
  

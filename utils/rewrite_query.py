@@ -2,6 +2,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
 from typing import List, Union
+import logging
+
+logger = logging.getLogger(__name__)
 
 REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query that incorporates relevant context from the conversation history.
 
@@ -66,12 +69,12 @@ def rewrite_query_with_context(
         rewritten = response.content.strip()
 
         if not rewritten or len(rewritten) > 1000:
-            print(f"Query rewrite produced invalid result, using original. Length: {len(rewritten) if rewritten else 0}")
+            logger.warning("Query rewrite produced invalid result, using original. Length: %d", len(rewritten) if rewritten else 0)
             return query
 
-        print(f"Query rewritten: '{query}' -> '{rewritten}'")
+        logger.info("Query rewritten: '%s' -> '%s'", query, rewritten)
         return rewritten
 
     except Exception as e:
-        print(f"Error in query rewriting, using original query: {e}")
+        logger.error("Error in query rewriting, using original query: %s", e)
         return query

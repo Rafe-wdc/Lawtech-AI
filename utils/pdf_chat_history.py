@@ -2,6 +2,9 @@ import json
 import os
 from typing import List, Tuple
 from langchain_core.messages import HumanMessage, AIMessage
+import logging
+
+logger = logging.getLogger(__name__)
 
 CHROMA_STORE_ROOT = "./chroma_store"
 
@@ -36,7 +39,7 @@ def load_pdf_chat_history(unique_string: str) -> Tuple[List, List[dict]]:
                 chat_history.append(HumanMessage(content=turn.get("user", "")))
                 chat_history.append(AIMessage(content=turn.get("ai", "")))
     except (json.JSONDecodeError, IOError) as e:
-        print(f"Error loading PDF chat history for {unique_string}: {e}")
+        logger.error("Error loading PDF chat history for %s: %s", unique_string, e)
         all_chats = []
 
     return chat_history, all_chats
@@ -64,7 +67,7 @@ def save_pdf_chat_history(unique_string: str, question: str, answer: str, all_ch
         with open(history_path, "w", encoding="utf-8") as f:
             json.dump(all_chats, f, ensure_ascii=False, indent=2)
 
-        print(f"PDF chat history saved for {unique_string} ({len(all_chats)} turns)")
+        logger.info("PDF chat history saved for %s (%d turns)", unique_string, len(all_chats))
 
     except IOError as e:
-        print(f"Error saving PDF chat history for {unique_string}: {e}")
+        logger.error("Error saving PDF chat history for %s: %s", unique_string, e)

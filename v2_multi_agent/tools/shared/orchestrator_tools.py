@@ -17,7 +17,10 @@ from langchain.tools import tool
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 
 from core.clients import get_gpt4o, get_gemini_flash
+from core.logger import get_logger
 from config.prompts import TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT
+
+log = get_logger("Orchestrator")
 
 
 # --- Structured Output Schemas ---
@@ -107,7 +110,7 @@ def get_execution_plan(query: str, chat_summary: str = "") -> dict:
         result = llm.invoke(formatted)
         task = result.task
     except Exception as e:
-        print(f"[Orchestrator] Classification failed: {e}")
+        log.error(f"Classification failed: {e}")
         task = "Scenario"
 
     # Step 2: Handle non-legal
@@ -139,7 +142,7 @@ def get_execution_plan(query: str, chat_summary: str = "") -> dict:
             "reasoning": plan.reasoning,
         }
     except Exception as e:
-        print(f"[Orchestrator] Planning failed: {e}")
+        log.error(f"Planning failed: {e}")
         return {"task": task, "agents": [task], "reasoning": f"Fallback to single agent: {task}"}
 
 
@@ -293,7 +296,7 @@ def merge_results(
             "tokens_consumed": tokens,
         }
     except Exception as e:
-        print(f"[Orchestrator] LLM synthesis failed: {e}")
+        log.error(f"LLM synthesis failed: {e}")
         parts = [r["content"] for r in valid]
         return {
             "merged_content": "\n\n---\n\n".join(parts),
@@ -329,7 +332,7 @@ def request_clarification(query: str, ambiguity: str = "") -> dict:
             "options": result.options,
         }
     except Exception as e:
-        print(f"[Orchestrator] Clarification generation failed: {e}")
+        log.error(f"Clarification generation failed: {e}")
         return {
             "question": f"Could you please clarify your query? {ambiguity}",
             "options": [],

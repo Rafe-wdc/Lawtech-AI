@@ -6,6 +6,10 @@ from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from .hc_judgement_retriever import HCJudgementRetriever
+import logging
+
+logger = logging.getLogger(__name__)
+
 from . import get_es_client
 class CaseMetadata(BaseModel):
     court_name: Optional[str] = Field(
@@ -331,10 +335,10 @@ class JudgementRetriever:
     def retrieve_documents(self,query: str,top_k=17) -> List[Document]:
         try: 
             query_metadata = query_metadata_llm(query)
-            print(query_metadata)
-    
+            logger.debug("Query metadata: %s", query_metadata)
+
             es_query = build_query(metadata= query_metadata,query_text= query,)
-            print(es_query)
+            logger.debug("ES query: %s", es_query)
             es = get_es_client()
 
             source_response = es.options(request_timeout=50).search(index="judgements", body=es_query)
@@ -349,8 +353,8 @@ class JudgementRetriever:
                 metadata = {"source": source, "source_name": title,"court":court}
                 doc = Document(page_content=content, metadata=metadata)
                 langchain_docs.append(doc)
-            print(langchain_docs)
+            logger.debug("Retrieved docs: %s", langchain_docs)
             return langchain_docs
         except Exception as e:
-            print(f"⚠️ Hybrid search failed: {e}")
+            logger.error("Hybrid search failed: %s", e)
             return []

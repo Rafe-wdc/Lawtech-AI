@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 import fitz
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from utils.rewrite_query import rewrite_query_with_context
@@ -100,17 +103,17 @@ async def extract_pdf_intelligently(pdf_path, google_api_key):
         start_page = num_pages - len(batch_images)
         batches.append((batch_images.copy(), start_page))
 
-    print(f"PDF has {num_pages} pages")
-    print(f"Extracted raw text length = {text_length}")
-    print(f"Batches prepared = {len(batches)}")
-    print(f"Images detected? {has_images}")
+    logger.info(f"PDF has {num_pages} pages")
+    logger.debug(f"Extracted raw text length = {text_length}")
+    logger.debug(f"Batches prepared = {len(batches)}")
+    logger.debug(f"Images detected? {has_images}")
 
     # if text_length > num_pages * TEXT_PER_PAGE_THRESHOLD and not has_images:
     if text_length > num_pages * TEXT_PER_PAGE_THRESHOLD:
-        print("✔ Using normal text extraction")
+        logger.info("Using normal text extraction")
         return "\n".join(extracted_text)
 
-    print("⚠ Using Vision fallback")
+    logger.warning("Using Vision fallback")
     return await run_parallel_vision(batches, google_api_key)
 
 
@@ -249,7 +252,7 @@ async def upload_validate(
                         shutil.move(tmp_pdf_path, stored_path)
                         stored_files.append(filename)
                         file_result['stored'] = True
-                        print(f"✅ Stored: {filename} at {stored_path}")
+                        logger.info(f"Stored: {filename} at {stored_path}")
 
                     validation_results.append(file_result)
 
@@ -289,7 +292,7 @@ async def upload_validate(
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(f"Validation error: {e}")
+        logger.error(f"Validation error: {e}")
         raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
 
@@ -340,7 +343,7 @@ async def processing(request: ProcessingRequest):
                 }
             )
 
-        print(f"Processing {len(pdf_files)} files from: {temp_dir}")
+        logger.info(f"Processing {len(pdf_files)} files from: {temp_dir}")
 
         documents = []
         processed_filenames = []
@@ -357,7 +360,7 @@ async def processing(request: ProcessingRequest):
                 num_pages = len(doc)
                 doc.close()
                 
-                print(f"Processing {filename} ({num_pages} pages)...")
+                logger.info(f"Processing {filename} ({num_pages} pages)...")
                 extracted_text = await extract_pdf_intelligently(compressed_path, GOOGLE_API_KEY)
 
                 # Clean up compressed file if different from original
@@ -368,12 +371,12 @@ async def processing(request: ProcessingRequest):
                     doc = Document(page_content=extracted_text, metadata={'source': filename})
                     documents.append(doc)
                     processed_filenames.append(filename)
-                    print(f"✅ Successfully processed: {filename}")
+                    logger.info(f"Successfully processed: {filename}")
                 else:
-                    print(f"⚠️ No text extracted from {filename}")
+                    logger.warning(f"No text extracted from {filename}")
 
             except Exception as e:
-                print(f"❌ Error processing {filename}: {e}")
+                logger.error(f"Error processing {filename}: {e}")
                 # Continue processing other files instead of failing completely
                 continue
 
@@ -385,7 +388,7 @@ async def processing(request: ProcessingRequest):
                 detail={'code': 'NO_TEXT_EXTRACTED', 'message': 'No text could be extracted from any PDF'}
             )
 
-        print(f"Documents processed: {len(documents)}")
+        logger.info(f"Documents processed: {len(documents)}")
 
         # Chunking
         split_start = time.time()
@@ -395,21 +398,21 @@ async def processing(request: ProcessingRequest):
             chunk_overlap=200
         )
         texts = text_splitter.split_documents(documents)
-        print(f"Chunks created: {len(texts)} (Time: {round(time.time() - split_start, 2)}s)")
+        logger.info(f"Chunks created: {len(texts)} (Time: {round(time.time() - split_start, 2)}s)")
 
         # Chroma DB setup
         collection_name = f"collection_{unique_string}"
         persist_dir = _safe_persist_dir(unique_string)
         os.makedirs(persist_dir, exist_ok=True)
 
-        print("Creating/Updating Chroma DB...")
+        logger.info("Creating/Updating Chroma DB...")
 
         # Check if collection exists
         existing_filenames = []
         collection_exists = os.path.exists(os.path.join(persist_dir, 'chroma.sqlite3'))
 
         if collection_exists:
-            print("Loading existing collection...")
+            logger.debug("Loading existing collection...")
             vectordb = Chroma(
                 embedding_function=qa_instructor_embeddings,
                 collection_name=collection_name,
@@ -423,15 +426,15 @@ async def processing(request: ProcessingRequest):
                     existing_filenames_str = existing_metadata.get("filenames", "")
                     existing_filenames = existing_filenames_str.split(",") if existing_filenames_str else []
                     existing_filenames = [f for f in existing_filenames if f]
-                    print(f"Existing filenames: {existing_filenames}")
+                    logger.debug(f"Existing filenames: {existing_filenames}")
             except Exception as e:
-                print(f"Could not load existing metadata: {e}")
+                logger.warning(f"Could not load existing metadata: {e}")
             
             # Add new documents
             vectordb.add_documents(texts)
-            print("Added documents to existing collection")
+            logger.debug("Added documents to existing collection")
         else:
-            print("Creating new collection...")
+            logger.debug("Creating new collection...")
             vectordb = Chroma.from_documents(
                 documents=texts,
                 embedding=qa_instructor_embeddings,
@@ -468,16 +471,16 @@ async def processing(request: ProcessingRequest):
             # Verify
             check_metadata = vectordb._collection.metadata
             if check_metadata and check_metadata.get("filenames"):
-                print(f"✅ Metadata persisted: {check_metadata.get('filenames')}")
+                logger.debug(f"Metadata persisted: {check_metadata.get('filenames')}")
         except Exception as e:
-            print(f"Persist warning: {e}")
+            logger.warning(f"Persist warning: {e}")
 
         # Clean up temporary directory after successful processing
         try:
             shutil.rmtree(temp_dir)
-            print(f"✅ Cleaned up temp directory: {temp_dir}")
+            logger.info(f"Cleaned up temp directory: {temp_dir}")
         except Exception as e:
-            print(f"⚠️ Warning: Could not clean up temp directory: {e}")
+            logger.warning(f"Could not clean up temp directory: {e}")
 
         total_time = round(time.time() - start_time, 2)
         
@@ -495,7 +498,7 @@ async def processing(request: ProcessingRequest):
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(f"Processing error: {e}")
+        logger.error(f"Processing error: {e}")
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
@@ -559,7 +562,7 @@ async def chat(request: ChatRequest):
                 detail={'code': 'COLLECTION_NOT_FOUND', 'message': f'No documents found for uniqueString: {unique_string}. Please upload and process documents first.'}
             )
 
-        print(f"Loading Chroma DB from: {persist_dir}")
+        logger.info(f"Loading Chroma DB from: {persist_dir}")
 
         vectordb = Chroma(
             embedding_function=qa_instructor_embeddings,
@@ -574,9 +577,9 @@ async def chat(request: ChatRequest):
             filenames = filenames_str.split(",") if filenames_str else []
             upload_date = metadata.get("upload_date", "Unknown")
             file_count = metadata.get("file_count", "0")
-            print(f"Loaded files: {filenames} (Total: {file_count})")
+            logger.debug(f"Loaded files: {filenames} (Total: {file_count})")
         except Exception as e:
-            print(f"Could not retrieve metadata: {e}")
+            logger.warning(f"Could not retrieve metadata: {e}")
             filenames = []
             upload_date = "Unknown"
             file_count = "0"
@@ -650,7 +653,7 @@ Format rules (must follow strictly):
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(f"Chat error: {e}")
+        logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 

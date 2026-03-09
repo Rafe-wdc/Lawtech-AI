@@ -19,6 +19,9 @@ from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.clients import get_gemini_flash, get_gemini_pro
+from core.logger import get_logger
+
+log = get_logger("GuardrailTools")
 
 
 # --- Constants ---
@@ -187,7 +190,7 @@ def detect_injection_llm(query: str) -> dict:
             "confidence": result.confidence,
         }
     except Exception as e:
-        print(f"[Guardrail] LLM injection check failed: {e}")
+        log.error(f"[Guardrail] LLM injection check failed: {e}")
         return {"is_injection": False, "confidence": "low"}
 
 
@@ -272,5 +275,5 @@ def flag_hallucination(content: str, sources: list[str]) -> dict:
             "suspicious_claims": result.suspicious_claims,
         }
     except Exception as e:
-        print(f"[Guardrail] Hallucination check failed: {e}")
+        log.error(f"[Guardrail] Hallucination check failed: {e}")
         return {"has_suspicious_claims": False, "suspicious_claims": []}

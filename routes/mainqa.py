@@ -1,6 +1,9 @@
 from fastapi import APIRouter, UploadFile, File, Form, Request, Header, HTTPException
 import fitz
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from utils.rewrite_query import rewrite_query_with_context
@@ -44,7 +47,7 @@ async def mainqa(
 ):
     try:
         # usecase = request.headers.get('usecase')
-        print("Usecase:", usecase)
+        logger.info("Usecase: %s", usecase)
 
         if usecase == 'upload':
             start_time = time.time()
@@ -72,7 +75,7 @@ async def mainqa(
                         pdf_doc = fitz.open(tmp_pdf_path)
                         num_pages = len(pdf_doc)
                         TEXT_LENGTH_THRESHOLD = num_pages * 700
-                        print(f"PDF has {num_pages} pages; using TEXT_LENGTH_THRESHOLD = {TEXT_LENGTH_THRESHOLD}")
+                        logger.info(f"PDF has {num_pages} pages; using TEXT_LENGTH_THRESHOLD = {TEXT_LENGTH_THRESHOLD}")
 
                         extracted_text = ""
                         for i in range(num_pages):
@@ -80,14 +83,14 @@ async def mainqa(
                             text = page.get_text("text")
                             extracted_text += text + "\n"
                         pdf_doc.close()
-                        print(f"Extracted text length from {filename}: {len(extracted_text.strip())} characters")
+                        logger.debug(f"Extracted text length from {filename}: {len(extracted_text.strip())} characters")
 
                         if len(extracted_text.strip()) < TEXT_LENGTH_THRESHOLD:
-                            print(f"Low or no meaningful text found in {filename}, using Vision GPT fallback")
+                            logger.warning(f"Low or no meaningful text found in {filename}, using Vision GPT fallback")
                             pdf_text = extract_text_with_mask_from_pdf_with_gemini(tmp_pdf_path, GOOGLE_API_KEY)
-                            print(f"Vision GPT extracted text length: {len(pdf_text.strip())} characters")
+                            logger.debug(f"Vision GPT extracted text length: {len(pdf_text.strip())} characters")
                         else:
-                            print(f"Text length OK from {filename}, skipping Vision GPT")
+                            logger.info(f"Text length OK from {filename}, skipping Vision GPT")
                             pdf_text = extracted_text
 
                         if pdf_text.strip():
@@ -95,36 +98,36 @@ async def mainqa(
                             documents.append(doc)
                             processed_filenames.append(filename)  # ✨ Add to list
                         else:
-                            print(f"No text could be extracted from {filename}, even with fallback.")
+                            logger.warning(f"No text could be extracted from {filename}, even with fallback.")
 
                     except Exception as e:
-                        print(f"Error processing {filename}: {e}")
+                        logger.error(f"Error processing {filename}: {e}")
 
             if not documents:
                 return {'status': False, 'error': 'No text extracted from PDFs'}
 
-            print("Documents processed:", len(documents))
+            logger.info("Documents processed: %d", len(documents))
 
             # Chunking
             split_start = time.time()
             text_splitter = RecursiveCharacterTextSplitter(separators=[""], chunk_size=15000, chunk_overlap=200)
             texts = text_splitter.split_documents(documents)
-            print("Chunks created:", len(texts))
-            print("Chunking time:", round(time.time() - split_start, 2), "sec")
+            logger.info("Chunks created: %d", len(texts))
+            logger.debug("Chunking time: %s sec", round(time.time() - split_start, 2))
 
             # Chroma DB setup
             collection_name = f"collection_{unique_string}"
             persist_dir = _safe_persist_dir(unique_string)
             os.makedirs(persist_dir, exist_ok=True)
 
-            print("Creating Chroma DB...")
+            logger.info("Creating Chroma DB...")
 
             # ✨ Check if collection already exists
             existing_filenames = []
             collection_exists = os.path.exists(os.path.join(persist_dir, 'chroma.sqlite3'))
 
             if collection_exists:
-                print("DEBUG: Collection exists, loading existing collection...")
+                logger.debug("DEBUG: Collection exists, loading existing collection...")
                 # Load existing collection
                 vectordb = Chroma(
                     embedding_function=qa_instructor_embeddings,
@@ -139,18 +142,18 @@ async def mainqa(
                         existing_filenames_str = existing_metadata.get("filenames", "")
                         existing_filenames = existing_filenames_str.split(",") if existing_filenames_str else []
                         existing_filenames = [f for f in existing_filenames if f]
-                        print(f"DEBUG: Found existing filenames: {existing_filenames}")
+                        logger.debug(f"DEBUG: Found existing filenames: {existing_filenames}")
                     else:
-                        print("DEBUG: No metadata found in existing collection")
+                        logger.debug("DEBUG: No metadata found in existing collection")
                 except Exception as e:
-                    print(f"DEBUG: Could not load existing metadata: {e}")
+                    logger.debug(f"DEBUG: Could not load existing metadata: {e}")
                 
                 # ✨ Add new documents to existing collection
                 vectordb.add_documents(texts)
-                print("DEBUG: Added documents to existing collection")
+                logger.debug("DEBUG: Added documents to existing collection")
                 
             else:
-                print("DEBUG: Creating new collection...")
+                logger.debug("DEBUG: Creating new collection...")
                 # Create new collection
                 vectordb = Chroma.from_documents(
                     documents=texts,
@@ -163,9 +166,9 @@ async def mainqa(
             all_filenames = list(set(existing_filenames + processed_filenames))
             all_filenames = [f for f in all_filenames if f]
 
-            print(f"DEBUG: Existing filenames: {existing_filenames}")
-            print(f"DEBUG: New filenames: {processed_filenames}")
-            print(f"DEBUG: Combined filenames: {all_filenames}")
+            logger.debug(f"DEBUG: Existing filenames: {existing_filenames}")
+            logger.debug(f"DEBUG: New filenames: {processed_filenames}")
+            logger.debug(f"DEBUG: Combined filenames: {all_filenames}")
 
             # ✨ Store combined filenames
             vectordb._collection.modify(
@@ -182,29 +185,29 @@ async def mainqa(
                 # Method 1: Try to persist the client (works in some ChromaDB versions)
                 if hasattr(vectordb._client, 'persist'):
                     vectordb._client.persist()
-                    print("DEBUG: ✅ Forced client persist")
+                    logger.debug("DEBUG: Forced client persist")
                 
                 # Method 2: Access the collection's internal persist (more reliable)
                 if hasattr(vectordb._collection, '_client'):
                     vectordb._collection._client.persist()
-                    print("DEBUG: ✅ Forced collection persist")
+                    logger.debug("DEBUG: Forced collection persist")
                 
                 # Method 3: Small delay to ensure write completes (fallback)
                 time.sleep(0.2)
-                print("DEBUG: ✅ Waited for persist")
+                logger.debug("DEBUG: Waited for persist")
                 
                 # Verify metadata was written
                 check_metadata = vectordb._collection.metadata
                 if check_metadata and check_metadata.get("filenames"):
-                    print(f"DEBUG: ✅ VERIFIED metadata persisted: {check_metadata.get('filenames')}")
+                    logger.debug(f"DEBUG: VERIFIED metadata persisted: {check_metadata.get('filenames')}")
                 else:
-                    print("DEBUG: ⚠️  WARNING: Metadata verification failed!")
+                    logger.warning("DEBUG: Metadata verification failed!")
                     
             except Exception as e:
-                print(f"DEBUG: Persist attempt: {e}")
+                logger.debug(f"DEBUG: Persist attempt: {e}")
 
-            print("Chroma DB saved in:", persist_dir)
-            print(f"Stored filenames: {all_filenames} (Total: {len(all_filenames)})")
+            logger.info("Chroma DB saved in: %s", persist_dir)
+            logger.info(f"Stored filenames: {all_filenames} (Total: {len(all_filenames)})")
 
             total_time = round(time.time() - start_time, 2)
             return {
@@ -238,7 +241,7 @@ async def mainqa(
 
             collection_name = f"collection_{unique_string}"
             persist_dir = _safe_persist_dir(unique_string)
-            print("Loading Chroma DB from:", persist_dir)
+            logger.info("Loading Chroma DB from: %s", persist_dir)
 
             vectordb = Chroma(
                 embedding_function=qa_instructor_embeddings,
@@ -252,10 +255,10 @@ async def mainqa(
                 filenames_str = metadata.get("filenames", "")
                 filenames = filenames_str.split(",") if filenames_str else []
                 upload_date = metadata.get("upload_date", "Unknown")
-                print(f"Loaded filenames: {filenames}")
-                print(f"Upload date: {upload_date}")
+                logger.debug(f"Loaded filenames: {filenames}")
+                logger.debug(f"Upload date: {upload_date}")
             except Exception as e:
-                print(f"Could not retrieve metadata: {e}")
+                logger.warning(f"Could not retrieve metadata: {e}")
                 filenames = []
                 upload_date = "Unknown"
 
@@ -311,5 +314,5 @@ Format rules (must follow strictly):
             raise HTTPException(status_code=400, detail="Invalid usecase")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))

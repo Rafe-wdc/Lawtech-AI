@@ -1,203 +1,116 @@
 """Agents #9a, #9b, #9c — Constitution, Maxim, and Legal Concepts
 
 Split into THREE separate node functions so they can run in parallel
-via LangGraph Send API. Previously a single combined node ran them
-sequentially, which meant if Constitution failed, Maxim was unaffected
-but the results were still merged in one pass.
+via LangGraph Send API.
 
 Now:
-- constitution_node: Handles Constitution queries (ChromaDB + LLM fallback)
-- maxim_node: Handles Maxim queries (ChromaDB + LLM fallback)
+- constitution_node: Handles Constitution queries (Elasticsearch + LLM fallback)
+- maxim_node: Handles Maxim queries (Elasticsearch + LLM fallback)
 - legal_concepts_node: Handles Legal_Concepts queries (direct LLM, no retrieval)
 
-Uses ChromaDB vectorstores with MultiQuery + BM25 ensemble retrieval.
+Uses Elasticsearch indices for Constitution and Legal Maxim retrieval.
 
 Handles: "Article 21", "fundamental duties", "audi alteram partem", etc.
 
-Uses: Gemini Flash Lite (generation), GPT-4o (multi-query generation)
-Data Source: ChromaDB vectorstores (constitution db, legal maxim db)
+Uses: Gemini Flash Lite (generation)
+Data Source: Elasticsearch indices (constitution, legal_maxims)
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import threading
 from datetime import date
-from typing import List
 
 from langchain_core.documents import Document
-from langchain_core.output_parsers import BaseOutputParser
-from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.vectorstores import Chroma
-from langchain_classic.retrievers.multi_query import MultiQueryRetriever
-from langchain_classic.retrievers.ensemble import EnsembleRetriever
-from langchain_community.retrievers import BM25Retriever
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
-from core.clients import get_gpt4o, get_gemini_flash, get_retriever_embeddings
-from core.settings import CHROMA_PERSIST_DIRS
+from core.clients import get_gemini_flash, get_es_client
+from core.settings import ES_INDICES
 from core.logger import get_logger, log_time
 from config.prompts import (
     CONSTITUTION_SYSTEM_PROMPT,
     MAXIM_SYSTEM_PROMPT,
     LEGAL_CONCEPTS_PROMPT,
 )
-
-import chromadb
+from tools.shared.elasticsearch_tools import (
+    _sanitize_es_input,
+)
 
 log = get_logger("ConstitutionMaxim")
 
 
-# --- Multi-Query Output Parser ---
+# --- Elasticsearch Retrieval ---
 
-class LineListOutputParser(BaseOutputParser[List[str]]):
-    """Parse LLM output into a list of query variations (one per line)."""
-    def parse(self, text: str) -> List[str]:
-        lines = text.strip().split("\n")
-        return list(filter(None, lines))
+def _retrieve_from_es(task: str, query: str) -> list[Document]:
+    """Retrieve documents from Elasticsearch for Constitution or Maxim queries.
 
-
-_output_parser = LineListOutputParser()
-
-_MULTI_QUERY_PROMPT = PromptTemplate(
-    input_variables=["question"],
-    template="""You are an AI language model assistant. Your task is to generate five
-    different versions of the given user question to retrieve relevant documents from a vector
-    database. By generating multiple perspectives on the user question, your goal is to help
-    the user overcome some of the limitations of the distance-based similarity search.
-    Provide these alternative questions separated by newlines.
-    Original question: {question}""",
-)
-
-
-# --- ChromaDB Initialization ---
-
-_vectordbs: dict[str, Chroma] = {}
-_vectordb_lock = threading.Lock()
-
-
-def _get_vectordb(task: str) -> Chroma:
-    """Get or initialize a ChromaDB vectorstore for the given task.
-
-    Thread-safe: uses a lock to prevent race conditions when Constitution
-    and Maxim agents initialize their vectorstores in parallel.
+    Uses BM25 full-text search with boosted match_phrase for precision.
     """
-    if task in _vectordbs:
-        return _vectordbs[task]
+    es = get_es_client()
+    query_text = _sanitize_es_input(query)
 
-    with _vectordb_lock:
-        # Double-check after acquiring lock
-        if task in _vectordbs:
-            return _vectordbs[task]
+    if task == "Constitution":
+        index = ES_INDICES.get("constitution", "constitution")
+        body = {
+            "query": {
+                "bool": {
+                    "should": [
+                        {"match": {"page_content": {"query": query_text, "boost": 2.0}}},
+                        {"match_phrase": {"page_content": {"query": query_text, "boost": 3.0}}},
+                        {"match": {"article_name": {"query": query_text, "boost": 2.5}}},
+                        {"match": {"part_name": {"query": query_text, "boost": 1.0}}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            },
+            "size": 10,
+        }
+    else:  # Maxim
+        index = ES_INDICES.get("maxims", "legal_maxims")
+        body = {
+            "query": {
+                "bool": {
+                    "should": [
+                        {"match": {"page_content": {"query": query_text, "boost": 2.0}}},
+                        {"match_phrase": {"page_content": {"query": query_text, "boost": 3.0}}},
+                        {"match": {"maxim_name": {"query": query_text, "boost": 5.0}}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            },
+            "size": 10,
+        }
 
-        task_lower = task.lower()
-        if task_lower not in CHROMA_PERSIST_DIRS:
-            raise ValueError(f"No ChromaDB directory configured for task: {task}")
-
-        persist_dir = CHROMA_PERSIST_DIRS[task_lower]
-        embeddings = get_retriever_embeddings()
-
-        _vectordbs[task] = Chroma(
-            persist_directory=persist_dir,
-            embedding_function=embeddings,
-        )
-        log.info("ChromaDB initialized", task=task, persist_dir=persist_dir)
-
-    return _vectordbs[task]
-
-
-# --- ChromaDB Retrieval with MultiQuery + BM25 Ensemble ---
-
-def _retrieve_from_chromadb(task: str, query: str) -> list[Document]:
-    """Retrieve documents using MultiQuery → find top source → BM25+Chroma ensemble.
-
-    Steps:
-    1. Generate 5 query variations via LLM
-    2. MultiQuery retrieval from ChromaDB
-    3. Find the most frequently occurring source document
-    4. Get all documents from that source
-    5. BM25 + Chroma ensemble retrieval for final ranking
-    """
-    vectordb = _get_vectordb(task)
-
-    # Step 1: MultiQuery retrieval
     try:
-        with log_time(log, "MultiQuery retrieval", task=task):
-            llm = get_gpt4o(temperature=0.0)
-            llm_chain = _MULTI_QUERY_PROMPT | llm | _output_parser
+        with log_time(log, "ES retrieval", task=task):
+            result = es.search(index=index, body=body)
 
-            base_retriever = vectordb.as_retriever(search_kwargs={"k": 10})
-            multi_retriever = MultiQueryRetriever(
-                retriever=base_retriever,
-                llm_chain=llm_chain,
-                parser_key="lines",
-            )
-            unique_docs = multi_retriever.invoke(query)
-
-        if not unique_docs:
-            raise ValueError("MultiQueryRetriever returned no documents")
-
-        log.info("MultiQuery returned docs",
-                 count=len(unique_docs), task=task)
-
-    except Exception as e:
-        log.warning("MultiQuery failed, using fallback",
-                    error=str(e), task=task)
-        fallback = vectordb.as_retriever(search_kwargs={"k": 10})
-        unique_docs = fallback.invoke(query)
-        if not unique_docs:
+        hits = result["hits"]["hits"]
+        if not hits:
+            log.warning("ES returned no results", task=task, query=query_text[:80])
             return []
 
-    # Step 2: Find most common source
-    source_counts: dict[str, int] = {}
-    for doc in unique_docs:
-        source = doc.metadata.get("source")
-        if source:
-            source_counts[source] = source_counts.get(source, 0) + 1
+        docs = []
+        for hit in hits:
+            src = hit["_source"]
+            metadata = {"source": src.get("source", ""), "score": hit["_score"]}
+            if task == "Constitution":
+                metadata["article_number"] = src.get("article_number", "")
+                metadata["article_name"] = src.get("article_name", "")
+                metadata["part_name"] = src.get("part_name", "")
+            else:
+                metadata["maxim_name"] = src.get("maxim_name", "")
+            docs.append(Document(page_content=src.get("page_content", ""), metadata=metadata))
 
-    if not source_counts:
-        return unique_docs[:5]
+        log.info("ES retrieval done", task=task, result_count=len(docs),
+                 top_score=hits[0]["_score"])
+        return docs
 
-    top_source = max(source_counts, key=source_counts.get)
-    log.info("Top source identified",
-             source=top_source, frequency=source_counts[top_source],
-             total_sources=len(source_counts))
-
-    # Step 3: Get all docs from that source
-    source_file = vectordb.get(where={"source": top_source})
-    source_docs = []
-    for content, metadata in zip(source_file["documents"], source_file["metadatas"]):
-        source_docs.append(Document(
-            page_content=content,
-            metadata={"source": metadata.get("source"), "row": metadata.get("row")},
-        ))
-
-    if not source_docs:
-        return unique_docs[:5]
-
-    log.debug("Source docs loaded",
-              source=top_source, doc_count=len(source_docs))
-
-    # Step 4: BM25 + Chroma ensemble
-    with log_time(log, "BM25+Chroma ensemble"):
-        bm25_retriever = BM25Retriever.from_documents(source_docs)
-        bm25_retriever.k = 4
-
-        chroma_retriever = vectordb.as_retriever(
-            search_type="mmr",
-            search_kwargs={"filter": {"source": top_source}, "k": 4},
-        )
-
-        ensemble = EnsembleRetriever(
-            retrievers=[bm25_retriever, chroma_retriever],
-            weights=[0.5, 0.5],
-        )
-
-        results = ensemble.invoke(query)
-
-    log.info("Ensemble retrieval done", result_count=len(results))
-    return results
+    except Exception as e:
+        log.error("ES retrieval failed", task=task, error=str(e), exc_info=True)
+        return []
 
 
 # --- Task Handlers ---
@@ -211,22 +124,22 @@ async def _handle_legal_concepts(query: str, chat_history: list) -> AgentResult:
 
 
 async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list) -> AgentResult:
-    """Handle Constitution or Maxim task — ChromaDB retrieval + web enrichment + LLM generation."""
+    """Handle Constitution or Maxim task — ES retrieval + web enrichment + LLM generation."""
     system_prompt = (
         CONSTITUTION_SYSTEM_PROMPT if task == "Constitution"
         else MAXIM_SYSTEM_PROMPT
     )
 
-    # Run ChromaDB retrieval and web enrichment in parallel
+    # Run ES retrieval and web enrichment in parallel
     from core.agent_fallback import get_web_context
-    with log_time(log, "ChromaDB + web enrichment (parallel)", task=task):
+    with log_time(log, "ES + web enrichment (parallel)", task=task):
         docs, web_context = await asyncio.gather(
-            asyncio.to_thread(_retrieve_from_chromadb, task, query),
+            asyncio.to_thread(_retrieve_from_es, task, query),
             get_web_context(query, task),
         )
 
     if not docs:
-        log.warning("No documents found in ChromaDB, using web search fallback", task=task)
+        log.warning("No documents found in ES, using web search fallback", task=task)
         from core.agent_fallback import web_search_fallback
         result = await web_search_fallback(query, task, system_prompt)
         return result
@@ -234,7 +147,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     docs_text = "\n\n".join(d.page_content for d in docs)
     source_name = docs[0].metadata.get("source", "unknown")
 
-    # Combine ChromaDB text with web context for richer input
+    # Combine ES text with web context for richer input
     combined_context = docs_text
     if web_context:
         combined_context = (
@@ -323,7 +236,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
 # --- Separate Agent Nodes (parallel via LangGraph Send) ---
 
 async def constitution_node(state: LegalAgentState) -> dict:
-    """Handle Constitution queries — ChromaDB retrieval + LLM fallback.
+    """Handle Constitution queries — ES retrieval + LLM fallback.
 
     Runs as its own graph node so it executes in parallel with maxim_node.
     """
@@ -351,7 +264,7 @@ async def constitution_node(state: LegalAgentState) -> dict:
 
 
 async def maxim_node(state: LegalAgentState) -> dict:
-    """Handle Maxim queries — ChromaDB retrieval + LLM fallback.
+    """Handle Maxim queries — ES retrieval + LLM fallback.
 
     Runs as its own graph node so it executes in parallel with constitution_node.
     """

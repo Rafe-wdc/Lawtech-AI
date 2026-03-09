@@ -1,5 +1,8 @@
 import textwrap
 import tiktoken
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def count_tokens(text: str, model: str = "gpt-4") -> int:
@@ -34,7 +37,7 @@ def wrap_text_preserve_newlines(text: str, width: int = 110) -> str:
         wrapped_text = '\n'.join(wrapped_lines)
         return wrapped_text
     except Exception as e:
-        print(str(e))
+        logger.error("Error in wrap_text_preserve_newlines: %s", e)
         return {'error': str(e)}
 
 def process_llm_response(llm_response: dict, query: str):
@@ -49,7 +52,7 @@ def process_llm_response(llm_response: dict, query: str):
         None
     """
     try:
-        print(wrap_text_preserve_newlines(llm_response['result']))
+        logger.debug("LLM response: %s", wrap_text_preserve_newlines(llm_response['result']))
     except Exception as e:
-        print(str(e))
+        logger.error("Error in process_llm_response: %s", e)
         return {'error': str(e)}

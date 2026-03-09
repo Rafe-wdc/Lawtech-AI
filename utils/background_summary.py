@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 # import requests
 # from .summarize_chat_history import summarize_chat_history
 
@@ -57,14 +61,14 @@ def background_store_recent_conversations(query, llm_content, thread_id, recent_
             update_response = requests.post(update_url, json=payload)
 
             if update_response.status_code == 200:
-                print("✅ Recent conversations successfully stored in thread history.")
+                logger.info("Recent conversations successfully stored in thread history.")
             else:
-                print(f"⚠️ Failed to store recent conversations. Status: {update_response.status_code}")
+                logger.warning("Failed to store recent conversations. Status: %s", update_response.status_code)
 
         return recent_chats  # return updated conversation log for next call
 
     except Exception as e:
-        print(f"❌ Error in background_store_recent_conversations: {e}")
+        logger.error("Error in background_store_recent_conversations: %s", e)
         return recent_chats
 import json, requests
 
@@ -105,13 +109,13 @@ def background_store_recent(query, llm_content, thread_id, recent_chats=None, al
             }
             response = requests.post(update_url, json=payload)
             if response.status_code == 200:
-                print("✅ All conversations stored successfully.")
+                logger.info("All conversations stored successfully.")
             else:
-                print(f"⚠️ Failed to store conversations. Status: {response.status_code}")
+                logger.warning("Failed to store conversations. Status: %s", response.status_code)
 
         # Return both for next call
         return recent_chats, all_chats
 
     except Exception as e:
-        print(f"❌ Error in background_store_recent: {e}")
+        logger.error("Error in background_store_recent: %s", e)
         return recent_chats or [], all_chats or []

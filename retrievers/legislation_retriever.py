@@ -6,6 +6,10 @@ from langchain_core.documents import Document
 from collections import Counter
 from dotenv import load_dotenv
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
 from . import get_es_client
 
 load_dotenv()
@@ -266,16 +270,16 @@ def improved_legislation_search(es, index_name, user_query):
                 break
  
         except Exception as e:
-            print(f"Search failed for query '{query_text}': {e}")
+            logger.error("Search failed for query '%s': %s", query_text, e)
             continue
  
     # Step 4: Find the most relevant source
     if not sources_counter:
-        print("No results found")
+        logger.warning("No results found")
         return []
  
     most_common_source = sources_counter.most_common(1)[0][0]
-    print(f"Most Common Source: {most_common_source}")
+    logger.info("Most Common Source: %s", most_common_source)
  
     # Step 5: Enhanced search within the most common source
     best_query = search_queries[0]  # Use the best query variation
@@ -390,7 +394,7 @@ class LegislationRetriever:
             hits = improved_legislation_search(es, index_name, query)
         
             if not hits:
-                print("❌ No results found")
+                logger.warning("No results found")
                 return []
         
             # Step 4: Convert to LangChain Document objects (your existing code)
@@ -400,10 +404,10 @@ class LegislationRetriever:
                 metadata = {"source": hit["_source"]["source"]}
                 doc = Document(page_content=content, metadata=metadata)
                 langchain_docs.append(doc)
-            print(langchain_docs)
+            logger.debug("Retrieved docs: %s", langchain_docs)
             return langchain_docs
         except Exception as e:
-            print(f"Error during retrieval: {e}")
+            logger.error("Error during retrieval: %s", e)
             return []
     
  

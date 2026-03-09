@@ -19,6 +19,9 @@ import requests
 from langchain.tools import tool
 
 from core.settings import S3_BUCKET, S3_REGION, CHROMA_STORE_ROOT, LAWTTORNEY_API_BASE
+from core.logger import get_logger
+
+log = get_logger("Storage")
 
 
 # --- S3 Existence Check (cached per server lifetime) ---
@@ -110,7 +113,7 @@ def load_pdf_chat_history(unique_string: str) -> dict:
         recent = all_chats[-5:] if len(all_chats) > 5 else all_chats
         return {"recent": recent, "all_chats": all_chats}
     except Exception as e:
-        print(f"[Storage] Failed to load chat history for {unique_string}: {e}")
+        log.error(f"Failed to load chat history for {unique_string}: {e}")
         return {"recent": [], "all_chats": []}
 
 
@@ -153,7 +156,7 @@ def save_pdf_chat_history(
             json.dump(all_chats, f, ensure_ascii=False, indent=2)
         return {"saved": True, "total_messages": len(all_chats)}
     except Exception as e:
-        print(f"[Storage] Failed to save chat history for {unique_string}: {e}")
+        log.error(f"Failed to save chat history for {unique_string}: {e}")
         return {"saved": False, "total_messages": len(all_chats)}
 
 
@@ -196,7 +199,7 @@ def load_chat_history_from_api(thread_id: str) -> dict:
             if res_json.get("status") and res_json.get("data"):
                 summary_text = res_json["data"].get("chatSummary", "").strip()
     except Exception as e:
-        print(f"[Storage] Error fetching chat history for thread {thread_id}: {e}")
+        log.error(f"Error fetching chat history for thread {thread_id}: {e}")
 
     if summary_text:
         try:

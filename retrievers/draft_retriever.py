@@ -5,6 +5,10 @@ from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
 
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
+
 from . import get_es_client
 
 load_dotenv()
@@ -45,9 +49,9 @@ class DraftRetriever:
             }
            response = es.search(index="drafting", body=es_query)
            file_paths = [hit["_source"]["source"] for hit in response["hits"]["hits"]]
-           print('file_paths: ',file_paths)
+           logger.debug("file_paths: %s", file_paths)
            source = select_file_source_draft(query, file_paths).strip()
-           print('source: ',source)
+           logger.debug("source: %s", source)
            query_by_source = {
                 "size": 1,
                 "query": {
@@ -67,5 +71,5 @@ class DraftRetriever:
            return langchain_docs
 
         except Exception as e:
-            print(f"⚠️ DraftRetriever failed: {e}")
+            logger.error("DraftRetriever failed: %s", e)
             return []

@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from typing import Optional
 import threading
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 from utils.task_identifer import identify_task
 from utils.get_chat_history_from_thread import get_chat_history_from_thread
 from utils.expand_legal_abbreviations import expand_legal_abbreviations
@@ -19,17 +22,17 @@ class SearchRequest(BaseModel):
 # === Search Endpoint ===
 @router.post("/search")
 async def llm_answer(data: SearchRequest):
-    print("inside llm_answer new")
+    logger.info("inside llm_answer new")
     try:
         chat_history = []
         query = expand_legal_abbreviations(data.Promptquery)
         thread_id = data.globalThreadId
-        print(query)
+        logger.debug("Expanded query: %s", query)
 
         # Input guardrails: validate query and check for prompt injection
         guardrail_result = run_input_guardrails(data.Promptquery)
         if guardrail_result.blocked:
-            print(f"Input guardrail blocked: {guardrail_result.reason}")
+            logger.warning(f"Input guardrail blocked: {guardrail_result.reason}")
             return {
                 "globalThreadId": thread_id,
                 "result": guardrail_result.reason,
@@ -42,9 +45,9 @@ async def llm_answer(data: SearchRequest):
         final_summary = ""
         original_query = query
         if thread_id is not None:
-            print(f"Thread ID provided: {thread_id}")
+            logger.info(f"Thread ID provided: {thread_id}")
             chat_history, summary_text  = get_chat_history_from_thread(thread_id)
-            print(chat_history,summary_text )
+            logger.debug("Chat history: %s, Summary: %s", chat_history, summary_text)
 
             # Rewrite query with conversational context for better retrieval
             query = rewrite_query_with_context(query, chat_history)
@@ -71,7 +74,7 @@ async def llm_answer(data: SearchRequest):
 
         # 🤖 LLM response
         llm_response = generate_response(query,chat_history,task)
-        print("done")
+        logger.info("LLM response generated successfully")
         # 📤 Extract source and token usage
         source = llm_response.metadata.get("source", "unknown") if hasattr(llm_response, "metadata") else "unknown"
         total_tokens_consumed = getattr(llm_response, 'tokens_consumed', 0)
@@ -96,7 +99,7 @@ async def llm_answer(data: SearchRequest):
 
             final_summary = "Recent conversations are being stored..."
         else:
-            print("No thread ID provided, storing current turn only.")
+            logger.info("No thread ID provided, storing current turn only.")
             final_summary = [{"user": original_query.strip(), "ai": llm_response.content.strip()}]
                         
         # Output guardrails: sanitize markdown + add legal disclaimer
@@ -113,6 +116,6 @@ async def llm_answer(data: SearchRequest):
 
 
     except Exception as e:
-        print(f"Error in llm_answer: {e}")
+        logger.error(f"Error in llm_answer: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
    

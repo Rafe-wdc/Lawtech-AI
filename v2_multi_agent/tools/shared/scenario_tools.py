@@ -15,7 +15,10 @@ from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.clients import get_genai_client, get_gpt4o, get_gemini_pro
+from core.logger import get_logger
 from config.prompts import SCENARIO_SYSTEM_PROMPT
+
+log = get_logger("Scenario")
 
 
 # --- Structured Output Schemas ---
@@ -93,7 +96,7 @@ def web_search_grounded(query: str, chat_history_text: str = "") -> dict:
         return {"content": content, "tokens_consumed": tokens}
 
     except Exception as e:
-        print(f"[Scenario] Web search grounded failed: {e}")
+        log.error(f"Web search grounded failed: {e}")
         return {"content": "", "tokens_consumed": 0}
 
 
@@ -145,7 +148,7 @@ Scenario: {query}"""
         return {"analysis": content, "tokens_consumed": tokens}
 
     except Exception as e:
-        print(f"[Scenario] Analysis failed: {e}")
+        log.error(f"Analysis failed: {e}")
         return {"analysis": "", "tokens_consumed": 0}
 
 
@@ -183,7 +186,7 @@ def cite_provisions(scenario: str) -> dict:
             ]
         }
     except Exception as e:
-        print(f"[Scenario] Provision citation failed: {e}")
+        log.error(f"Provision citation failed: {e}")
         return {"provisions": []}
 
 
@@ -242,7 +245,7 @@ def find_similar_cases(scenario: str) -> dict:
             return {"cases": [], "raw_response": content}
 
     except Exception as e:
-        print(f"[Scenario] Case finding failed: {e}")
+        log.error(f"Case finding failed: {e}")
         return {"cases": []}
 
 
@@ -280,7 +283,7 @@ def suggest_remedies(scenario: str) -> dict:
             ]
         }
     except Exception as e:
-        print(f"[Scenario] Remedy suggestion failed: {e}")
+        log.error(f"Remedy suggestion failed: {e}")
         return {"remedies": []}
 
 
@@ -328,5 +331,5 @@ def get_legal_news(topic: str) -> dict:
         return {"news": content, "tokens_consumed": tokens}
 
     except Exception as e:
-        print(f"[Scenario] Legal news search failed: {e}")
+        log.error(f"Legal news search failed: {e}")
         return {"news": "", "tokens_consumed": 0}

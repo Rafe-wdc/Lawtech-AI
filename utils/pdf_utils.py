@@ -2,6 +2,9 @@ import os
 import pikepdf
 import subprocess
 import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def compress_pdf(input_path: str) -> str:
@@ -11,7 +14,7 @@ def compress_pdf(input_path: str) -> str:
     """
 
     original_size = os.path.getsize(input_path)
-    print(f"[PDF] Original size: {original_size} bytes")
+    logger.info("[PDF] Original size: %d bytes", original_size)
 
     # -----------------------------------------
     # Step 1: Try PikePDF (lossless compression)
@@ -24,15 +27,15 @@ def compress_pdf(input_path: str) -> str:
                 compress_streams=True
             )
         pike_size = os.path.getsize(pike_out)
-        print(f"[PDF] PikePDF size: {pike_size} bytes")
+        logger.info("[PDF] PikePDF size: %d bytes", pike_size)
     except Exception as e:
-        print("[PDF] PikePDF failed:", e)
+        logger.error("[PDF] PikePDF failed: %s", e)
         pike_out = None
         pike_size = float("inf")
 
     # If PikePDF gives good compression → return it
     if pike_out and pike_size < original_size * 0.97:
-        print("[PDF] Using PikePDF result")
+        logger.info("[PDF] Using PikePDF result")
         return pike_out
 
     # -----------------------------------------
@@ -54,9 +57,9 @@ def compress_pdf(input_path: str) -> str:
         ]
         subprocess.run(gs_cmd, check=True)
         gs_size = os.path.getsize(gs_out)
-        print(f"[PDF] Ghostscript size: {gs_size} bytes")
+        logger.info("[PDF] Ghostscript size: %d bytes", gs_size)
     except Exception as e:
-        print("[PDF] Ghostscript failed:", e)
+        logger.error("[PDF] Ghostscript failed: %s", e)
         gs_out = None
         gs_size = float("inf")
 
@@ -66,15 +69,15 @@ def compress_pdf(input_path: str) -> str:
     compressed_path = None
 
     if gs_out and gs_size < pike_size:
-        print("[PDF] Using Ghostscript result")
+        logger.info("[PDF] Using Ghostscript result")
         compressed_path = gs_out
         if pike_out: os.remove(pike_out)
     elif pike_out:
-        print("[PDF] Using PikePDF result (fallback)")
+        logger.info("[PDF] Using PikePDF result (fallback)")
         compressed_path = pike_out
         if gs_out: os.remove(gs_out)
     else:
-        print("[PDF] No compression possible")
+        logger.warning("[PDF] No compression possible")
         compressed_path = input_path
 
     return compressed_path

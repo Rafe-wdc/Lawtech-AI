@@ -45,6 +45,8 @@ ES_INDICES = {
     "drafting": "drafting",
     "newacts": "newacts_v1",
     "sci_judgments": "supreme_court_judgement",
+    "constitution": "constitution",
+    "maxims": "legal_maxims",
 }
 
 # --- Embedding Models (absolute paths from project root) ---
@@ -56,11 +58,7 @@ EMBEDDING_MODELS = {
 # --- Embedding Service (set to enable remote embeddings, e.g. http://localhost:5100) ---
 EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "")
 
-# --- ChromaDB (absolute paths from project root) ---
-CHROMA_PERSIST_DIRS = {
-    "constitution": str(_PROJECT_ROOT.parent / "Routing db" / "constitution db"),
-    "maxim": str(_PROJECT_ROOT.parent / "Routing db" / "legal maximdb"),
-}
+# --- ChromaDB (PDF uploads only) ---
 CHROMA_STORE_ROOT = str(_PROJECT_ROOT.parent / "chroma_store")
 
 # --- Chat History (SQLite) ---

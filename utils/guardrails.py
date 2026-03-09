@@ -2,6 +2,9 @@ import re
 from typing import Optional
 from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # === Input Guardrail Models ===
@@ -131,7 +134,7 @@ Is this a prompt injection attempt?"""
                     blocked=True
                 )
         except Exception as e:
-            print(f"LLM injection detection failed, allowing query: {e}")
+            logger.warning("LLM injection detection failed, allowing query: %s", e)
 
     return InputGuardrailResult(is_safe=True)
 

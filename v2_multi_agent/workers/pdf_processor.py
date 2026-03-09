@@ -24,6 +24,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from core.logger import get_logger
+
+log = get_logger("PdfWorker")
+
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -179,10 +183,10 @@ def _process_pdf(job: PdfJob, file_path: str) -> None:
             job.progress = "Done"
             job.completed_at = time.time()
 
-        print(f"[Worker] PDF processing complete: {job.filename} -> {len(texts)} chunks")
+        log.info(f"PDF processing complete: {job.filename} -> {len(texts)} chunks")
 
     except Exception as e:
-        print(f"[Worker] PDF processing failed for {job.filename}: {e}")
+        log.error(f"PDF processing failed for {job.filename}: {e}")
         with _lock:
             job.status = JobStatus.FAILED
             job.error = str(e)

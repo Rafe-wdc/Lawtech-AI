@@ -5,6 +5,10 @@ from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
 from dotenv import load_dotenv
 from typing import Optional, List
+import logging
+
+logger = logging.getLogger(__name__)
+
 from . import get_es_client
 
 load_dotenv()
@@ -175,10 +179,10 @@ class HCJudgementRetriever:
     def retrieve_documents(self,query: str):
         try:
             query_metadata = query_metadata_llm(query)
-            print(query_metadata)
+            logger.debug("Query metadata: %s", query_metadata)
 
             es_query = build_query(metadata= query_metadata,query_text= query,)
-            print(es_query)
+            logger.debug("ES query: %s", es_query)
 
             source_response = _get_es().search(index="judgements", body=es_query)
             langchain_docs = []
@@ -194,7 +198,7 @@ class HCJudgementRetriever:
                 langchain_docs.append(doc)
             return langchain_docs
         except Exception as e:
-            print(f"⚠️ HC Judgement retrieval failed: {e}")
+            logger.error("HC Judgement retrieval failed: %s", e)
             return []
 
  

@@ -3,6 +3,9 @@ from typing import Dict, List, Optional, Literal
 #from langchain_openai import ChatOpenAI
 from langchain_openai.chat_models.base import ChatOpenAI
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.prompts import PromptTemplate
 
@@ -72,8 +75,8 @@ def identify_task(query: str, chatSummary: str) -> str:
     llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
     prompt_task = prompt_template_task.format(USER_QUERY=query, chat_history=chatSummary)
 
-    print("Identifying task with prompt Started...")
+    logger.info("Identifying task with prompt Started...")
     result = llm.with_structured_output(IdentifyTaskSchema).invoke(prompt_task)
-    print("Task identified:", result)
+    logger.info("Task identified: %s", result)
     final = result.task
     return final

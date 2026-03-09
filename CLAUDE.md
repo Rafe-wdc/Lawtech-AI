@@ -1,120 +1,152 @@
 # Lawtech-AI
 
-Legal AI backend powered by FastAPI, LangChain, and multiple LLM providers.
+Legal AI backend powered by FastAPI, LangGraph, LangChain, and multiple LLM providers.
 
 ## Project Overview
 
 This is a **Legal AI API** that provides intelligent legal assistance including:
 - Legal document Q&A (Judgments, Legislation, Drafts, New Acts)
-- Scenario-based legal analysis
+- Scenario-based legal analysis with web search grounding
 - PDF upload and processing with vector storage
 - Legal concept explanations
-- Legal drafting assistance
+- Legal drafting assistance with per-section generation and continuation
 
 ## Tech Stack
 
 - **Framework**: FastAPI (Python), runs on port 5000 via uvicorn
+- **Agent Orchestration**: LangGraph multi-agent system with 10 agents
 - **LLM Orchestration**: LangChain
-- **LLM Providers**: OpenAI (GPT-4o for drafting), Google GenAI (Gemini 2.5 Flash/Pro), Perplexity (Sonar for web search)
+- **LLM Providers**: OpenAI (GPT-4o for orchestration/metadata), Google GenAI (Gemini 2.5 Flash/Pro for generation), Google Search grounding for web fallback
 - **Vector Store**: ChromaDB with HuggingFace embeddings (BGE-large-en-v1.5, all-MiniLM-L6-v2)
 - **PDF Processing**: PyMuPDF (fitz), with Gemini Vision fallback for scanned PDFs
-- **Storage**: AWS S3 (lawttorney bucket, ap-south-1) for judgment PDFs
-- **Search**: Elasticsearch for certain retrievers
+- **Storage**: AWS S3 (lawttorney bucket, ap-south-1) for judgment PDFs, SQLite for chat history
+- **Search**: Elasticsearch for legal document retrieval
 
 ## Project Structure
 
 ```
-├── main.py                  # FastAPI app entry point, CORS, router registration
-├── generate_response.py     # Core response generation with task routing
-├── requirements.txt         # Python dependencies
-├── retrievers/              # Document retrieval modules
-│   ├── __init__.py          # Embedding init, vector DB setup, state paths
-│   ├── base_retriever.py    # Base retriever class
-│   ├── draft_retriever.py   # Legal draft retrieval
-│   ├── judgement_retriever.py   # Court judgment retrieval
-│   ├── legislation_retriever.py # Legislation retrieval
-│   ├── newacts_retriever.py     # New acts retrieval
-│   └── hc_judgement_retriever.py # High Court judgment retrieval
-├── routes/                  # API route handlers
-│   ├── test.py              # Test endpoints
-│   ├── llm_answer.py        # LLM answer endpoint
-│   ├── mainqa.py            # Main Q&A with PDF upload/query
-│   ├── mainqa_test.py       # Test variant of mainqa
-│   ├── mainqa11.py          # Alternate mainqa version
-│   ├── mainqa33.py          # Alternate mainqa version
-│   └── delete_vectordb.py   # Vector DB deletion endpoint
-├── utils/                   # Utility modules
-│   ├── util.py              # Token counting, text wrapping
-│   ├── custom_prompts.py    # Prompt templates
-│   ├── task_identifer.py    # Task classification (Drafting/Legislation/Judgment/etc.)
-│   ├── scenario.py          # Scenario-based Q&A via Gemini
-│   ├── check_relevance.py   # Document relevance checking
-│   ├── text_extraction.py   # PDF text extraction (PyMuPDF + Gemini Vision)
-│   ├── pdf_utils.py         # PDF utilities
-│   ├── customized_draft.py  # Custom draft generation
-│   ├── expand_legal_abbreviations.py  # Legal abbreviation expansion
-│   ├── summarize_chat_history.py      # Chat history summarization
-│   ├── get_chat_history_from_thread.py # Thread history retrieval
-│   └── background_summary.py          # Background summarization
-└── models/                  # Local ML models (not in git)
-    ├── bge-large-en-v1.5/
-    └── all-MiniLM-L6-v2/
+v2_multi_agent/
+├── core/
+│   ├── gateway.py           # FastAPI app, SSE streaming, all API endpoints
+│   ├── graph.py             # LangGraph graph definition and compilation
+│   ├── state.py             # Shared state schema (LegalAgentState)
+│   ├── settings.py          # All configuration, env vars, model IDs
+│   ├── clients.py           # LLM client singletons (GPT-4o, Gemini, ES)
+│   ├── chat_store.py        # SQLite chat history store
+│   ├── agent_fallback.py    # Query rewrite + web search fallback utilities
+│   └── logger.py            # Structured logging setup
+├── agents/
+│   ├── guardrail.py         # Input/output guardrail agents
+│   ├── memory.py            # Chat history + query rewriting agent
+│   ├── orchestrator.py      # Task planning + result synthesis agent
+│   ├── legislation.py       # Legislation search agent (ES)
+│   ├── judgment.py          # Judgment search agent (ES + S3)
+│   ├── newacts.py           # New acts search agent (ES)
+│   ├── drafting.py          # Legal document drafting agent (per-section)
+│   ├── scenario.py          # Scenario analysis agent (web grounded)
+│   ├── constitution_maxim.py # Constitution + Maxim + Legal Concepts agent
+│   └── document.py          # PDF upload/chat agent
+├── tools/shared/            # @tool functions used by agents
+│   ├── elasticsearch_tools.py
+│   ├── vectordb_tools.py
+│   ├── llm_tools.py
+│   ├── storage_tools.py
+│   ├── guardrail_tools.py
+│   ├── memory_tools.py
+│   ├── orchestrator_tools.py
+│   ├── scenario_tools.py
+│   ├── document_tools.py
+│   └── judgment_search.py   # Smart judgment search with metadata extraction
+├── config/
+│   └── prompts.py           # All system prompts
+├── tests/                   # Test suites and evaluation scripts
+├── services/                # Embedding service for remote deployment
+├── workers/                 # Background PDF processing worker
+├── frontend.html            # Built-in test UI
+└── requirements.txt         # Python dependencies
 ```
 
 ## Environment Variables
 
 Required in `.env`:
-- `OPENAI_API_KEY` - OpenAI API key (for GPT-4o drafting)
-- `GOOGLE_API_KEY` - Google API key (for Gemini models)
-- `PPLX_API_KEY` - Perplexity API key (for web search)
+- `OPENAI_API_KEY` - OpenAI API key (GPT-4o, GPT-4o-mini)
+- `GOOGLE_API_KEY` - Google API key (Gemini models + Search grounding)
+
+Optional:
+- `ELASTICSEARCH_URL` - ES URL (default: `http://139.84.219.174:9200`)
+- `EMBEDDING_SERVICE_URL` - Remote embedding service URL
+- `LOG_LEVEL` - Logging level (default: DEBUG)
 
 ## Commands
 
 ```bash
 # Install dependencies
+cd v2_multi_agent
 pip install -r requirements.txt
 
 # Run the server
-python main.py
-# Or: uvicorn main:app --host 0.0.0.0 --port 5000
+python core/gateway.py
+# Or: python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5000
 
 # Run with auto-reload (development)
-uvicorn main:app --host 0.0.0.0 --port 5000 --reload
+python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5000 --reload
+
+# Run tests
+python tests/test_agents.py --concurrency 3
+python tests/evaluate_agents.py
 ```
 
 ## API Routes
 
 All routes are prefixed with `/pyapi`:
-- `POST /pyapi/test` - Test endpoint
-- `POST /pyapi/llm_answer` - Main LLM answer endpoint with task routing
-- `POST /pyapi/mainqa` - PDF upload & Q&A (usecase: 'upload' or 'qa')
-- `POST /pyapi/mainqa_test` - Test Q&A endpoint
-- `DELETE /pyapi/delete_vectordb` - Delete vector DB collections
+- `POST /pyapi/search` - Batch mode legal Q&A
+- `POST /pyapi/search/stream` - Streaming legal Q&A (Server-Sent Events)
+- `POST /pyapi/continue_draft` - Continue incomplete drafts
+- `POST /pyapi/mainqa` - PDF upload & Q&A
+- `POST /pyapi/upload_async` - Background PDF upload
+- `GET /pyapi/job_status/{job_id}` - Check async job status
+- `DELETE /pyapi/delete_vectordb/{unique_string}` - Delete PDF collections
+- `POST /pyapi/feedback` - Submit feedback
+- `GET /pyapi/health` - Health check
+- `GET /` - Frontend UI
 
 ## Task Types
 
-The system classifies queries into tasks via `task_identifer.py`:
-- **Drafting** - Legal document drafting (uses GPT-4o)
-- **Legislation** - Legislation lookup
-- **Judgment** - Court judgment search (with S3 PDF links)
-- **Newacts** - New acts/amendments
-- **Scenario** - Scenario-based analysis (uses Gemini web search)
-- **Legal_Concepts** - General legal concepts (uses Gemini Flash)
-- **Other** - Fallback to web search
+The orchestrator classifies queries into tasks:
+- **Drafting** - Legal document drafting (per-section generation with Gemini Flash)
+- **Legislation** - Legislation lookup (Elasticsearch)
+- **Judgment** - Court judgment search (ES + S3 PDF links)
+- **SCI_Judgment** - Supreme Court judgment search
+- **Newacts** - New acts/amendments (BNS, BNSS, BSA)
+- **Scenario** - Scenario-based analysis (Gemini + Google Search grounding)
+- **Constitution** - Constitutional provisions
+- **Maxim** - Legal maxims and doctrines
+- **Legal_Concepts** - General legal concepts (web-grounded)
+- **Non_legal** - Non-legal query detection
+- **Other** - Fallback
+
+## Agent Resilience
+
+All domain agents have a 3-tier fallback:
+1. **Primary search** — Elasticsearch/ChromaDB retrieval
+2. **Query rewrite + retry** — GPT-4o-mini rewrites query, retries search
+3. **Web search fallback** — Gemini 2.5 Flash + Google Search grounding
+
+Shared utilities in `core/agent_fallback.py`.
 
 ## Code Style
 
-- Python 3.10+
+- Python 3.12+
 - Use type hints for function signatures
-- Follow existing patterns for new retrievers (extend base_retriever.py)
+- Use `core.logger.get_logger("ModuleName")` for structured logging (never print())
 - Use Pydantic models for request/response schemas
-- Keep route handlers in `routes/`, utilities in `utils/`, retrievers in `retrievers/`
 - Use `langchain` abstractions for LLM chains and prompts
+- State accessed as dict: `state["key"]` or `state.get("key")` (TypedDict)
+- LangChain imports: `langchain.messages` for message types, `langchain_core.messages` for BaseMessage
 
 ## Important Notes
 
-- Local embedding models are stored in `./models/` directory (not committed to git)
-- Vector DBs are stored in `./Routing db/` and `./chroma_store/` directories
-- The app references Indian legal codes (IPC/BNS, CrPC/BNSS, IEA/BSA) - both old and new provisions
-- Elasticsearch is used at `http://139.84.219.174:9200` for certain retrievers
+- Local embedding models stored in `./models/` directory (not committed to git)
+- The app references Indian legal codes (IPC/BNS, CrPC/BNSS, IEA/BSA) — both old and new provisions
+- ES indices: legislation, judgements, drafting, newacts_v1, supreme_court_judgement, constitution, legal_maxims
 - Never commit `.env` files or API keys

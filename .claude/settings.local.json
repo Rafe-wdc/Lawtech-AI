@@ -37,7 +37,8 @@
       "Bash(bash start.sh:*)",
       "Bash(ssh:*)",
       "Bash(tar czf:*)",
-      "Bash(scp:*)"
+      "Bash(scp:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\"; head -50 {}')"
     ]
   }
 }

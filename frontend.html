@@ -80,6 +80,55 @@
   .nav-item.active { background: var(--accent); color: #1c1917; font-weight: 600; }
   .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
 
+  /* --- Session History --- */
+  .session-divider {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text2);
+    padding: 12px 14px 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+  }
+  .session-item {
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text2);
+    transition: all 0.15s;
+    margin-bottom: 2px;
+    border: 1px solid transparent;
+  }
+  .session-item:hover { background: var(--surface2); color: var(--text); }
+  .session-item.active { background: rgba(200,146,12,0.15); border-color: var(--accent); color: var(--text); }
+  .session-item .session-preview {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .session-item .session-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text2);
+  }
+  .session-empty {
+    padding: 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text2);
+    font-style: italic;
+  }
+
   .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
   /* --- Tabs Content --- */
@@ -207,6 +256,66 @@
     padding: 16px 24px;
     border-top: 1px solid var(--border);
     background: var(--surface);
+  }
+  .file-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .file-chip .file-icon { font-size: 14px; }
+  .file-chip .file-size { color: var(--text2); font-size: 11px; }
+  .file-chip .file-remove {
+    cursor: pointer;
+    color: var(--text2);
+    font-size: 14px;
+    line-height: 1;
+    margin-left: 2px;
+  }
+  .file-chip .file-remove:hover { color: var(--red); }
+  .file-chip-img {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    object-fit: cover;
+  }
+  .btn-attach {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text2);
+    padding: 10px 12px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    transition: all 0.15s;
+  }
+  .btn-attach:hover { background: var(--surface2); color: var(--text); border-color: var(--accent); }
+  .chat-drop-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(200,146,12,0.08);
+    border: 2px dashed var(--accent);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: var(--accent);
+    font-weight: 600;
+    z-index: 10;
+    pointer-events: none;
   }
   .input-row {
     display: flex;
@@ -799,10 +908,14 @@
         <span class="icon">&#128203;</span> Request Logs
       </div>
     </div>
+    <div class="session-divider">Recent Sessions</div>
+    <div class="session-list" id="sessionList">
+      <div class="session-empty">Loading sessions...</div>
+    </div>
     <div style="padding: 12px; border-top: 1px solid var(--border);">
       <div class="field-group" style="margin-bottom: 8px;">
         <label>API Base URL</label>
-        <input type="text" id="apiBase" value="http://localhost:5055" />
+        <input type="text" id="apiBase" value="http://localhost:5000" />
       </div>
       <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="checkHealth()">
         Test Connection
@@ -828,8 +941,13 @@
       <div class="chat-messages" id="chatMessages">
         <div class="msg system">Ask any legal question — the multi-agent system will classify, route, and respond.</div>
       </div>
-      <div class="chat-input-area">
+      <div class="chat-input-area" style="position:relative;" id="chatInputArea">
+        <input type="file" id="chatFileInput" multiple
+               accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.csv,.xlsx" style="display:none"
+               onchange="handleChatFiles(this.files)" />
+        <div class="file-chips" id="fileChips" style="display:none;"></div>
         <div class="input-row">
+          <button class="btn-attach" id="attachBtn" onclick="document.getElementById('chatFileInput').click()" title="Attach files (PDF, images, DOCX, TXT, CSV, XLSX)">&#x1F4CE;</button>
           <textarea id="chatInput" placeholder="Ask a legal question... (Shift+Enter for newline)" rows="1"
                     onkeydown="handleChatKey(event)"></textarea>
           <button class="btn btn-primary" id="chatSendBtn" onclick="sendChat()">Send</button>
@@ -1027,6 +1145,110 @@ async function checkHealth() {
 }
 
 // ============================================================
+// Session History
+// ============================================================
+async function loadSessionList() {
+  const container = document.getElementById('sessionList');
+  try {
+    const r = await fetch(getBase() + '/pyapi/threads?limit=30');
+    if (!r.ok) throw new Error('Failed to fetch');
+    const d = await r.json();
+    const threads = d.threads || [];
+
+    if (threads.length === 0) {
+      container.innerHTML = '<div class="session-empty">No previous sessions</div>';
+      return;
+    }
+
+    container.innerHTML = threads.map(t => {
+      const preview = t.preview || 'Empty conversation';
+      const isActive = currentThreadId === t.thread_id;
+      const ago = timeAgo(t.updated_at);
+      return `<div class="session-item${isActive ? ' active' : ''}"
+                   data-thread-id="${t.thread_id}"
+                   onclick="restoreSession('${t.thread_id}', ${t.total_turns})"
+                   title="${escapeHtml(preview)}">
+        <div class="session-preview">${escapeHtml(preview)}</div>
+        <div class="session-meta">
+          <span>${t.total_turns} turn${t.total_turns !== 1 ? 's' : ''}</span>
+          <span>${ago}</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<div class="session-empty">Could not load sessions</div>';
+  }
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr + 'Z'); // SQLite dates are UTC
+    const now = new Date();
+    const diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+    return d.toLocaleDateString();
+  } catch { return ''; }
+}
+
+async function restoreSession(threadId, totalTurns) {
+  // Update state
+  persistThread(threadId, totalTurns);
+  document.getElementById('threadId').value = threadId;
+
+  // Switch to chat tab
+  switchTab('chat');
+
+  // Show loading
+  const chatMessages = document.getElementById('chatMessages');
+  chatMessages.innerHTML = '<div class="msg system">Loading conversation...</div>';
+  document.getElementById('chatMeta').textContent =
+    `Thread: ${threadId.substring(0, 8)}... | ${totalTurns} turns | Loading...`;
+
+  // Highlight active session in sidebar
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.threadId === threadId);
+  });
+
+  try {
+    const r = await fetch(getBase() + `/pyapi/threads/${threadId}/messages`);
+    if (!r.ok) throw new Error('Failed to load messages');
+    const d = await r.json();
+    const messages = d.messages || [];
+
+    chatMessages.innerHTML = '';
+
+    if (messages.length === 0) {
+      addChatMsg('system', 'No messages found in this conversation.');
+      return;
+    }
+
+    // Render each turn
+    messages.forEach(msg => {
+      addChatMsg('user', msg.user_query);
+      addChatMsg('ai', msg.ai_response);
+    });
+
+    document.getElementById('chatMeta').textContent =
+      `Thread: ${threadId.substring(0, 8)}... | Turn ${totalTurns} | Restored`;
+    updateContextBar({ turn: totalTurns, threadId: threadId });
+
+    // Scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  } catch (e) {
+    chatMessages.innerHTML = '';
+    addChatMsg('system', `Restored thread ${threadId.substring(0, 8)}... (turn ${totalTurns}). Previous messages could not be loaded, but you can continue the conversation.`);
+    document.getElementById('chatMeta').textContent =
+      `Thread: ${threadId.substring(0, 8)}... | Turn ${totalTurns}`;
+    updateContextBar({ turn: totalTurns, threadId: threadId });
+  }
+}
+
+// ============================================================
 // Legal Q&A Chat
 // ============================================================
 function newChat() {
@@ -1036,6 +1258,8 @@ function newChat() {
     '<div class="msg system">New conversation started.</div>';
   document.getElementById('chatMeta').textContent = 'New conversation';
   document.getElementById('contextBar').innerHTML = '';
+  // Update sidebar — deselect active session
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
 }
 
 function handleChatKey(e) {
@@ -1044,6 +1268,95 @@ function handleChatKey(e) {
     sendChat();
   }
 }
+
+// --- File Attachment ---
+let pendingFiles = [];
+const ALLOWED_EXTS = ['.pdf','.jpg','.jpeg','.png','.webp','.docx','.txt','.md','.csv','.xlsx'];
+const MAX_ATTACH_FILES = 5;
+const MAX_ATTACH_SIZE = 50 * 1024 * 1024;
+
+function handleChatFiles(fileList) {
+  for (const f of fileList) {
+    if (pendingFiles.length >= MAX_ATTACH_FILES) {
+      addLog('warn', `Max ${MAX_ATTACH_FILES} files allowed`);
+      break;
+    }
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    if (!ALLOWED_EXTS.includes(ext)) {
+      addLog('warn', `Unsupported file type: ${ext}`);
+      continue;
+    }
+    if (f.size > MAX_ATTACH_SIZE) {
+      addLog('warn', `File too large: ${f.name} (${(f.size/1024/1024).toFixed(1)} MB)`);
+      continue;
+    }
+    pendingFiles.push(f);
+  }
+  renderFileChips();
+  document.getElementById('chatFileInput').value = '';
+}
+
+function renderFileChips() {
+  const container = document.getElementById('fileChips');
+  if (!pendingFiles.length) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  container.style.display = 'flex';
+  container.innerHTML = pendingFiles.map((f, i) => {
+    const sizeMB = (f.size / 1024 / 1024).toFixed(1);
+    const sizeStr = f.size < 1024*1024 ? `${(f.size/1024).toFixed(0)} KB` : `${sizeMB} MB`;
+    const ext = f.name.split('.').pop().toLowerCase();
+    const isImg = ['jpg','jpeg','png','webp'].includes(ext);
+    let icon = isImg ? '' : (ext === 'pdf' ? '\u{1F4C4}' : '\u{1F4C3}');
+    let imgTag = '';
+    if (isImg) {
+      imgTag = `<img class="file-chip-img" src="${URL.createObjectURL(f)}" alt="${f.name}" />`;
+    }
+    return `<span class="file-chip">${imgTag}<span class="file-icon">${icon}</span>${f.name} <span class="file-size">(${sizeStr})</span><span class="file-remove" onclick="removeFile(${i})">\u00D7</span></span>`;
+  }).join('');
+}
+
+function removeFile(idx) {
+  pendingFiles.splice(idx, 1);
+  renderFileChips();
+}
+
+// Drag and drop on chat area
+(function() {
+  const area = document.getElementById('chatInputArea');
+  if (!area) return;
+  let dragCounter = 0;
+  let overlay = null;
+
+  area.addEventListener('dragenter', e => {
+    e.preventDefault();
+    dragCounter++;
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'chat-drop-overlay';
+      overlay.textContent = 'Drop files here';
+      area.appendChild(overlay);
+    }
+  });
+  area.addEventListener('dragleave', e => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0 && overlay) {
+      overlay.remove();
+      overlay = null;
+      dragCounter = 0;
+    }
+  });
+  area.addEventListener('dragover', e => e.preventDefault());
+  area.addEventListener('drop', e => {
+    e.preventDefault();
+    dragCounter = 0;
+    if (overlay) { overlay.remove(); overlay = null; }
+    if (e.dataTransfer.files.length) handleChatFiles(e.dataTransfer.files);
+  });
+})();
 
 async function sendChat() {
   const input = document.getElementById('chatInput');
@@ -1054,20 +1367,31 @@ async function sendChat() {
   const threadInput = document.getElementById('threadId').value.trim();
   const threadId = threadInput || currentThreadId || null;
 
-  // Add user message
-  addChatMsg('user', query);
+  // Add user message (with file names if attached)
+  let displayQuery = query;
+  if (pendingFiles.length) {
+    const fnames = pendingFiles.map(f => f.name).join(', ');
+    displayQuery = `\u{1F4CE} [${fnames}]\n${query}`;
+  }
+  addChatMsg('user', displayQuery);
   input.value = '';
   input.style.height = 'auto';
 
   // Disable send
   const btn = document.getElementById('chatSendBtn');
   btn.disabled = true;
-  btn.textContent = streaming ? 'Streaming...' : 'Thinking...';
 
   try {
-    if (streaming) {
+    if (pendingFiles.length > 0) {
+      btn.textContent = 'Uploading...';
+      await sendChatWithFiles(query, threadId);
+      pendingFiles = [];
+      renderFileChips();
+    } else if (streaming) {
+      btn.textContent = 'Streaming...';
       await sendChatStream(query, threadId);
     } else {
+      btn.textContent = 'Thinking...';
       await sendChatBatch(query, threadId);
     }
   } catch (e) {
@@ -1077,6 +1401,123 @@ async function sendChat() {
 
   btn.disabled = false;
   btn.textContent = 'Send';
+  loadSessionList(); // refresh sidebar
+}
+
+async function sendChatWithFiles(query, threadId) {
+  const formData = new FormData();
+  formData.append('query', query);
+  if (threadId) formData.append('globalThreadId', threadId);
+  pendingFiles.forEach(f => formData.append('files', f));
+
+  addLog('info', `POST /pyapi/chat (files: ${pendingFiles.length}) \u2014 "${query.substring(0, 60)}..."`);
+
+  const r = await fetch(getBase() + '/pyapi/chat', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!r.ok) {
+    const err = await r.text();
+    addChatMsg('error', `Error ${r.status}: ${err}`);
+    return;
+  }
+
+  // Same SSE reader as sendChatStream
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let msgDiv = null;
+  let contentEl = null;
+  let statusEl = null;
+  let accumulatedContent = '';
+  let lastAgents = [];
+  let lastTokens = 0;
+  let startTime = Date.now();
+  let fullResponse = '';
+  let allSources = [];
+
+  // Create AI message container
+  msgDiv = document.createElement('div');
+  msgDiv.className = 'msg ai';
+  statusEl = document.createElement('div');
+  statusEl.className = 'stream-status';
+  statusEl.innerHTML = '<span class="typing-indicator"></span> Processing files...';
+  msgDiv.appendChild(statusEl);
+  contentEl = document.createElement('div');
+  contentEl.className = 'msg-content';
+  msgDiv.appendChild(contentEl);
+  document.getElementById('chatMessages').appendChild(msgDiv);
+  msgDiv.scrollIntoView({behavior: 'smooth', block: 'end'});
+
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, {stream: true});
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const evt = JSON.parse(line.slice(6));
+
+        if (evt.type === 'thread_id') {
+          persistThread(evt.data, currentTurnCount);
+          document.getElementById('threadId').value = currentThreadId;
+        } else if (evt.type === 'file_processing') {
+          statusEl.innerHTML = `<span class="typing-indicator"></span> ${evt.message}`;
+        } else if (evt.type === 'status') {
+          statusEl.innerHTML = `<span class="typing-indicator"></span> ${evt.message}`;
+        } else if (evt.type === 'agents_planned') {
+          lastAgents = evt.agents;
+          statusEl.innerHTML = `<span class="typing-indicator"></span> Agents: ${evt.agents.join(', ')}`;
+        } else if (evt.type === 'context') {
+          if (evt.query_rewritten) {
+            updateContextBar({rewritten: true, effectiveQuery: evt.effective_query, threadId: currentThreadId, turn: currentTurnCount});
+          }
+        } else if (evt.type === 'token') {
+          accumulatedContent += evt.content;
+          contentEl.innerHTML = renderMarkdown(accumulatedContent);
+          msgDiv.scrollIntoView({behavior: 'smooth', block: 'end'});
+        } else if (evt.type === 'token_reset') {
+          accumulatedContent = '';
+          contentEl.innerHTML = '';
+        } else if (evt.type === 'response') {
+          fullResponse = evt.content;
+          if (!accumulatedContent) {
+            contentEl.innerHTML = renderMarkdown(evt.content);
+          }
+        } else if (evt.type === 'sources') {
+          allSources = evt.data;
+        } else if (evt.type === 'followup_suggestions' && evt.data) {
+          renderFollowupChips(msgDiv, evt.data);
+        } else if (evt.type === 'drafting_progress') {
+          statusEl.innerHTML = `<span class="typing-indicator"></span> Drafting section ${evt.section}/${evt.total}: ${evt.title}`;
+        } else if (evt.type === 'draft_incomplete') {
+          const note = document.createElement('div');
+          note.className = 'draft-incomplete-note';
+          note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${evt.completed_sections}/${evt.total_sections} sections completed. ${evt.failed_sections} section(s) failed. <button class="btn btn-secondary btn-sm" onclick="continueDraft()">Retry failed sections</button>`;
+          msgDiv.appendChild(note);
+        } else if (evt.type === 'done') {
+          lastTokens = evt.total_tokens || 0;
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          statusEl.remove();
+          persistThread(evt.thread_id, evt.conversation_turn || currentTurnCount + 1);
+          document.getElementById('chatMeta').textContent =
+            `Thread: ${currentThreadId.substring(0,8)}... | Turn ${currentTurnCount} | Agents: ${(evt.agents_used||[]).join(', ')||'none'}`;
+          addLog('success', `Files+Chat: ${(evt.agents_used||[]).join(',')} | ${lastTokens} tokens | ${elapsed}s`);
+
+          if (allSources.length && typeof renderSources === 'function') {
+            renderSources(msgDiv, allSources);
+          }
+        } else if (evt.type === 'error') {
+          addChatMsg('error', evt.data);
+        }
+      } catch(e) { /* skip parse errors */ }
+    }
+  }
+  loadSessionList(); // refresh sidebar
 }
 
 async function sendChatBatch(query, threadId) {
@@ -2269,6 +2710,7 @@ document.getElementById('chatInput').addEventListener('input', function() {
 // Init
 // ============================================================
 checkHealth();
+loadSessionList();
 
 // Restore thread state from sessionStorage
 if (currentThreadId) {

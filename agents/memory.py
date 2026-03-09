@@ -18,7 +18,7 @@ from typing import Union
 from langchain.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.state import LegalAgentState
+from core.state import LegalAgentState, FileContextData
 from core.clients import get_gemini_flash
 from core.chat_store import chat_store
 from core.settings import LAWTTORNEY_API_BASE, CHAT_HISTORY_USE_LEGACY_API
@@ -255,7 +255,13 @@ async def memory_node(state: LegalAgentState) -> dict:
                  has_summary=bool(summary_text))
 
         # Step 3: Rewrite query with context (run sync LLM call in thread)
-        query = await asyncio.to_thread(_rewrite_query, query, chat_history)
+        # Skip rewrite when files are attached — the query is about the file, not a follow-up
+        fc = FileContextData.from_state(state)
+        if fc and (fc.inline_text or fc.chromadb_collections):
+            log.info("Skipping query rewrite — files attached",
+                     file_names=fc.file_names)
+        else:
+            query = await asyncio.to_thread(_rewrite_query, query, chat_history)
 
     log.info("Agent completed",
              final_query=query[:100],

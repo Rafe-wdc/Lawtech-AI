@@ -16,7 +16,7 @@ from langgraph.graph import MessagesState
 TaskType = Literal[
     "Drafting", "Judgment", "Legislation", "Constitution",
     "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-    "SCI_Judgment",
+    "SCI_Judgment", "Document",
     "Non_legal", "Other",
 ]
 
@@ -118,6 +118,9 @@ class LegalAgentState(MessagesState):
     is_blocked: bool
     block_reason: str | None
 
+    # File attachments (inline chat uploads)
+    file_context: dict | None
+
     # Draft continuation (for incomplete drafts that need retry)
     draft_continuation: dict[str, Any] | None
 
@@ -125,3 +128,21 @@ class LegalAgentState(MessagesState):
     final_response: str
     source_metadata: Annotated[list[dict[str, Any]], operator.add]
     tokens_consumed: Annotated[int, _sum_tokens]
+
+
+@dataclass
+class FileContextData:
+    """Helper for agents to access file context from state."""
+    inline_text: str = ""
+    image_data: list[dict] = field(default_factory=list)
+    chromadb_collections: list[str] = field(default_factory=list)
+    file_names: list[str] = field(default_factory=list)
+    summary: str = ""
+
+    @classmethod
+    def from_state(cls, state: dict) -> FileContextData | None:
+        """Deserialize file_context dict from state, or None if absent."""
+        fc = state.get("file_context")
+        if not fc:
+            return None
+        return cls(**{k: v for k, v in fc.items() if k in cls.__dataclass_fields__})

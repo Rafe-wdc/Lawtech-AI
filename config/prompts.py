@@ -40,6 +40,8 @@ Identify the PRIMARY legal task from the query. Choose EXACTLY ONE task from the
                          If the query mentions a specific Article, Section, case name, or legal maxim,
                          prefer the more specific category (Constitution, Legislation, Judgment, Maxim) over this.
 
+    **Document** → Questions about uploaded files/documents (PDFs, images, DOCX, etc.) attached to the chat
+
     **Non_legal** → Queries clearly NOT related to legal matters
 
     **Other** → Legal-adjacent queries that don't fit other categories

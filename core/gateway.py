@@ -155,6 +155,7 @@ def _build_initial_state(
     query: str, thread_id: str,
     unique_string: str | None = None,
     draft_continuation: dict | None = None,
+    file_context: dict | None = None,
 ) -> dict:
     """Build the initial LangGraph state with all required fields."""
     return {
@@ -172,6 +173,7 @@ def _build_initial_state(
         "agent_results": {},
         "is_blocked": False,
         "block_reason": None,
+        "file_context": file_context,
         "draft_continuation": draft_continuation,
         "final_response": "",
         "source_metadata": [],
@@ -490,6 +492,229 @@ async def search_stream(data: SearchRequest, request: Request):
             "has_draft_continuation": draft_continuation_data is not None,
         }
         yield f"data: {json.dumps(done_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ============================================================
+# Chat with Files (inline file attachments)
+# ============================================================
+
+@app.post("/pyapi/chat")
+@limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
+async def chat_with_files(
+    request: Request,
+    query: str = Form(...),
+    globalThreadId: Optional[str] = Form(None),
+    files: List[UploadFile] = File(default=[]),
+):
+    """Chat endpoint with inline file attachments (SSE streaming).
+
+    Accepts multipart/form-data with query text and optional files.
+    Processes files (PDF, images, DOCX, TXT, CSV, XLSX), then runs
+    the full agent graph with file context injected into state.
+    """
+    from .file_processor import process_files, validate_upload, MAX_FILES
+
+    thread_id = globalThreadId or str(uuid.uuid4())
+    req_id = set_request_id(thread_id[:8])
+
+    log.info("Chat with files request",
+             query=query[:100], thread_id=thread_id,
+             file_count=len(files) if files else 0)
+
+    # Validate query
+    if not query or len(query) > 5000:
+        raise HTTPException(status_code=400, detail="Query must be 1-5000 characters")
+
+    # Validate and save files to temp dir
+    file_tuples: list[tuple[str, str, int]] = []
+    temp_paths: list[str] = []
+
+    if files:
+        if len(files) > MAX_FILES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum {MAX_FILES} files allowed",
+            )
+
+        for f in files:
+            if not f.filename or f.filename == "":
+                continue
+
+            filename = secure_filename(f.filename)
+            if not filename:
+                continue
+
+            # Save to temp file
+            suffix = os.path.splitext(filename)[1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                f.file.seek(0)
+                content = await f.read()
+                tmp.write(content)
+                tmp_path = tmp.name
+                temp_paths.append(tmp_path)
+
+            err = validate_upload(filename, len(content))
+            if err:
+                log.warning("File rejected in chat", file=filename, reason=err)
+                continue
+
+            file_tuples.append((tmp_path, filename, len(content)))
+
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
+        start = time.perf_counter()
+
+        # Process files if any
+        file_context_dict = None
+        if file_tuples:
+            async def status_cb(msg: str):
+                pass  # Status sent via SSE below
+
+            yield f"data: {json.dumps({'type': 'file_processing', 'message': 'Processing uploaded files...'})}\n\n"
+
+            try:
+                fc = await process_files(file_tuples, thread_id)
+                file_context_dict = fc.to_dict()
+
+                # Send file processing summary
+                yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"
+                log.info("Files processed for chat", summary=fc.summary)
+
+            except Exception as e:
+                log.error("File processing failed", error=str(e))
+                yield f"data: {json.dumps({'type': 'file_processing', 'message': f'File processing failed: {e}', 'files': []})}\n\n"
+
+        # Build state and run agent graph
+        initial_state = _build_initial_state(
+            query, thread_id, file_context=file_context_dict,
+        )
+        config = {"configurable": {"thread_id": thread_id}}
+
+        step_count = 0
+        final_response = ""
+        agents_used = []
+        total_tokens = 0
+        all_source_metadata = []
+        effective_query = query
+        query_rewritten = False
+        draft_continuation_data = None
+
+        try:
+            async for event in agent_graph.astream(
+                initial_state,
+                config=config,
+                stream_mode=["updates", "custom"],
+            ):
+                mode, chunk = event
+
+                if mode == "custom":
+                    if isinstance(chunk, dict):
+                        if chunk.get("type") == "token":
+                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
+                        elif chunk.get("type") == "token_reset":
+                            yield f"data: {json.dumps({'type': 'token_reset'})}\n\n"
+                        elif chunk.get("type") == "drafting_progress":
+                            yield "data: {}\n\n".format(json.dumps({
+                                "type": "drafting_progress",
+                                "section": chunk["section"],
+                                "total": chunk["total"],
+                                "title": chunk["title"],
+                            }))
+                        elif chunk.get("type") == "draft_incomplete":
+                            yield "data: {}\n\n".format(json.dumps({
+                                "type": "draft_incomplete",
+                                "failed_sections": chunk["failed_sections"],
+                                "total_sections": chunk["total_sections"],
+                                "completed_sections": chunk["completed_sections"],
+                            }))
+                    continue
+
+                for node_name, update in chunk.items():
+                    step_count += 1
+                    status_msg = _NODE_STATUS.get(node_name, f"Processing {node_name}...")
+                    yield f"data: {json.dumps({'type': 'status', 'agent': node_name, 'message': status_msg})}\n\n"
+
+                    if node_name == "memory" and "query" in update:
+                        effective_query = update["query"]
+                        query_rewritten = effective_query != query
+                        history_msgs = update.get("chat_history", [])
+                        yield f"data: {json.dumps({'type': 'context', 'query_rewritten': query_rewritten, 'effective_query': effective_query if query_rewritten else None, 'history_turns': len(history_msgs) // 2, 'has_summary': bool(update.get('summary_text'))})}\n\n"
+
+                    if "final_response" in update and update["final_response"]:
+                        final_response = update["final_response"]
+
+                    if "tasks_planned" in update and update["tasks_planned"]:
+                        agents_used = update["tasks_planned"]
+                        yield f"data: {json.dumps({'type': 'agents_planned', 'agents': agents_used})}\n\n"
+
+                    if "agent_results" in update:
+                        for name, r in update["agent_results"].items():
+                            if hasattr(r, "tokens_consumed"):
+                                total_tokens += r.tokens_consumed or 0
+
+                    if "source_metadata" in update and update["source_metadata"]:
+                        all_source_metadata = update["source_metadata"]
+
+                    if "draft_continuation" in update and update["draft_continuation"]:
+                        draft_continuation_data = update["draft_continuation"]
+
+        except Exception as e:
+            log.error("Chat stream error", error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+
+        # Send final response
+        if final_response:
+            yield f"data: {json.dumps({'type': 'response', 'content': final_response})}\n\n"
+
+        if all_source_metadata:
+            yield f"data: {json.dumps({'type': 'sources', 'data': all_source_metadata})}\n\n"
+
+        # Follow-up suggestions
+        if final_response:
+            try:
+                suggestions = await _generate_followup_suggestions(query, final_response, agents_used)
+                if suggestions:
+                    yield f"data: {json.dumps({'type': 'followup_suggestions', 'data': suggestions})}\n\n"
+            except Exception as e:
+                log.warning("Followup suggestions failed (chat)", error=str(e))
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        log.info("Chat stream completed", steps=step_count, duration_ms=f"{elapsed_ms:.0f}")
+
+        # Save chat history
+        conversation_turn = 0
+        if final_response:
+            try:
+                conversation_turn = await chat_store.save_turn(thread_id, effective_query, final_response)
+            except Exception as e:
+                log.error("Failed to save chat history (chat)", error=str(e))
+
+        if draft_continuation_data:
+            try:
+                await chat_store.save_draft_continuation(thread_id, draft_continuation_data)
+            except Exception as e:
+                log.error("Failed to save draft continuation (chat)", error=str(e))
+
+        # Done event
+        yield f"data: {json.dumps({'type': 'done', 'agents_used': agents_used, 'total_tokens': total_tokens, 'thread_id': thread_id, 'conversation_turn': conversation_turn, 'query_rewritten': query_rewritten, 'effective_query': effective_query if query_rewritten else None, 'has_draft_continuation': draft_continuation_data is not None})}\n\n"
+
+        # Cleanup temp files
+        for tp in temp_paths:
+            try:
+                if os.path.exists(tp):
+                    os.remove(tp)
+            except Exception:
+                pass
 
     return StreamingResponse(
         event_generator(),
@@ -1014,6 +1239,32 @@ async def job_status(job_id: str):
 async def health():
     """Simple health check endpoint."""
     return {"status": "ok", "version": "2.0.0"}
+
+
+@app.get("/pyapi/threads")
+async def list_threads(limit: int = 50, offset: int = 0):
+    """List recent chat sessions for the sidebar history."""
+    try:
+        threads = await chat_store.list_threads(limit=min(limit, 100), offset=offset)
+        return {"status": "ok", "threads": threads}
+    except Exception as e:
+        log.error("Failed to list threads", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list threads")
+
+
+@app.get("/pyapi/threads/{thread_id}/messages")
+async def get_thread_messages(thread_id: str, limit: int = 50):
+    """Load all messages for a specific thread (for session restore)."""
+    try:
+        messages = await chat_store.load_thread_messages(thread_id, limit=min(limit, 100))
+        if not messages:
+            raise HTTPException(status_code=404, detail="Thread not found or empty")
+        return {"status": "ok", "thread_id": thread_id, "messages": messages}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("Failed to load thread messages", error=str(e), thread_id=thread_id[:12])
+        raise HTTPException(status_code=500, detail="Failed to load thread messages")
 
 
 @app.post("/pyapi/feedback")

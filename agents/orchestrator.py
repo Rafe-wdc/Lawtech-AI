@@ -15,7 +15,7 @@ from typing import Literal
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from core.state import LegalAgentState, AgentResult
+from core.state import LegalAgentState, AgentResult, FileContextData
 from core.clients import get_gpt4o, get_gemini_flash, get_gemini_pro, get_drafting_llm
 from core.logger import get_logger, log_time
 from config.prompts import (
@@ -32,7 +32,7 @@ class IdentifyTaskSchema(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment",
+        "SCI_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="The primary legal task type")
 
@@ -440,17 +440,31 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.warning("Query normalization timed out, using original")
 
     # Step 1: Classify task (LLM with regex fallback on timeout)
+    # If files are attached, hint the classifier about them
+    fc = FileContextData.from_state(state)
+    classify_query = query
+    if fc and (fc.inline_text or fc.chromadb_collections):
+        file_hint = f" [User has uploaded files: {', '.join(fc.file_names)}. This query is about the uploaded document(s).]"
+        classify_query = query + file_hint
+        log.info("File context hint added for classification", file_names=fc.file_names)
+
     try:
         task = await asyncio.wait_for(
             asyncio.to_thread(
-                _classify_task, query, chat_summary=summary if summary else None
+                _classify_task, classify_query, chat_summary=summary if summary else None
             ),
             timeout=30,
         )
     except asyncio.TimeoutError:
-        task = _classify_task_regex_fallback(query)
+        task = _classify_task_regex_fallback(classify_query)
         log.warning("Task classification timed out, using regex fallback",
                     task=task, query=query[:80])
+
+    # Override: if files are attached and task isn't Document, force Document
+    if fc and (fc.inline_text or fc.chromadb_collections) and task != "Document":
+        log.info("Overriding task to Document due to file context",
+                 original_task=task, file_names=fc.file_names)
+        task = "Document"
 
     # Step 2: Handle non-legal
     if task == "Non_legal":
@@ -473,14 +487,27 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         }
 
     # Step 3: Plan agents
-    try:
-        tasks_planned = await asyncio.wait_for(
-            asyncio.to_thread(_plan_agents, query, task),
-            timeout=25,
-        )
-    except asyncio.TimeoutError:
-        log.warning("Agent planning timed out, falling back to single agent", task=task)
-        tasks_planned = [task] if task not in ("Non_legal",) else []
+    # For Document task with file context, skip LLM planner — go directly to Document agent
+    if task == "Document" and fc and (fc.inline_text or fc.chromadb_collections):
+        tasks_planned = ["Document"]
+        log.info("Document task with file context — using Document agent directly",
+                 file_names=fc.file_names)
+    else:
+        try:
+            tasks_planned = await asyncio.wait_for(
+                asyncio.to_thread(_plan_agents, query, task),
+                timeout=25,
+            )
+        except asyncio.TimeoutError:
+            log.warning("Agent planning timed out, falling back to single agent", task=task)
+            tasks_planned = [task] if task not in ("Non_legal",) else []
+
+        # Step 3b: File context — ensure Document agent is planned if files in ChromaDB
+        if fc:
+            if fc.chromadb_collections and "Document" not in tasks_planned:
+                tasks_planned.append("Document")
+                log.info("Document agent added for uploaded file collections",
+                         collections=fc.chromadb_collections)
 
     # Step 4: Per-agent query rewriting (only for multi-agent plans)
     agent_queries = {}
@@ -517,6 +544,13 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     agent_results: dict[str, AgentResult] = state.get("agent_results", {})
     query = state.get("query", state["original_query"])
     response_instructions = state.get("response_instructions", "")
+
+    # Inject file context into query for synthesis
+    fc = FileContextData.from_state(state)
+    if fc and fc.inline_text:
+        query = f"{query}\n\n--- Uploaded File Content ---\n{fc.inline_text[:50000]}"
+        log.info("File context injected into synthesis",
+                 inline_chars=len(fc.inline_text))
 
     log.info("Synthesize phase started",
              agents_received=list(agent_results.keys()),
@@ -568,7 +602,9 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         }
 
     # Single agent — pass through directly (with auto-citation for Drafting)
-    if len(valid_results) == 1:
+    # BUT if file context has inline text, always synthesize so file content is used
+    has_file_text = fc is not None and fc.inline_text
+    if len(valid_results) == 1 and not has_file_text:
         name, result = next(iter(valid_results.items()))
 
         # Drafting solo: auto-enrich with AI-generated citations

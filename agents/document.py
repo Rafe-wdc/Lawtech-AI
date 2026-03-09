@@ -24,7 +24,7 @@ from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from core.state import LegalAgentState, AgentResult, SourceMetadata
+from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
 from core.clients import get_gemini_pro, get_qa_embeddings
 from core.settings import CHROMA_STORE_ROOT
 from core.logger import get_logger, log_time
@@ -201,11 +201,72 @@ async def document_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query", state["original_query"])
     unique_string = state.get("unique_string")
+
+    # Check file_context for inline-uploaded collections
+    if not unique_string:
+        fc = FileContextData.from_state(state)
+        if fc and fc.chromadb_collections:
+            unique_string = fc.chromadb_collections[0]
+            log.info("Using inline file collection", collection=unique_string)
+
     log.info("Agent started",
              collection=unique_string, query=query[:100])
 
     if not unique_string:
-        log.warning("No unique_string provided")
+        # Check for inline file text (small files not stored in ChromaDB)
+        fc = FileContextData.from_state(state) if not unique_string else None
+        if fc and fc.inline_text:
+            log.info("Using inline file text for document QA",
+                     inline_chars=len(fc.inline_text), files=fc.file_names)
+            try:
+                with log_time(log, "Inline document QA"):
+                    llm = get_gemini_pro(temperature=0.3)
+                    prompt = ChatPromptTemplate.from_messages([
+                        ("system", "You are Lawttorney, a legal AI assistant. Answer questions about the uploaded document(s) using only the provided content. Be thorough, detailed, and cite specific sections, clauses, parties, dates, and legal provisions when possible."),
+                        ("user", "Document content:\n{docs}"),
+                        ("user", "Current Date: {date}"),
+                        ("user", "Question: {query}"),
+                    ])
+                    chain = prompt | llm
+                    response = chain.invoke({
+                        "query": query,
+                        "docs": fc.inline_text[:80000],
+                        "date": str(date.today()),
+                    })
+
+                tokens = 0
+                if hasattr(response, "usage_metadata") and response.usage_metadata:
+                    tokens = response.usage_metadata.get("total_tokens", 0)
+
+                log.info("Inline document QA completed",
+                         response_len=len(response.content), tokens=tokens)
+
+                sources = [SourceMetadata(
+                    source_type="document",
+                    title=f"Uploaded: {fn}",
+                    content=["Inline file analysis"],
+                    file_name=fn,
+                    agent_name="Document",
+                ) for fn in fc.file_names[:5]]
+
+                return {"agent_results": {"Document": AgentResult(
+                    agent_name="Document",
+                    content=response.content,
+                    sources=sources,
+                    tokens_consumed=tokens,
+                )}}
+
+            except Exception as e:
+                log.error("Inline document QA failed", error=str(e), exc_info=True)
+                return {"agent_results": {"Document": AgentResult(
+                    agent_name="Document",
+                    content="",
+                    sources=[],
+                    tokens_consumed=0,
+                    error=str(e),
+                )}}
+
+        log.warning("No unique_string provided and no inline text")
         return {
             "agent_results": {"Document": AgentResult(
                 agent_name="Document",

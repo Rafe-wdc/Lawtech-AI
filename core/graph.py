@@ -45,6 +45,7 @@ AGENT_NODE_MAP = {
     "Maxim": "maxim",
     "Legal_Concepts": "legal_concepts",
     "SCI_Judgment": "sci_judgment",
+    "Document": "document",
 }
 
 

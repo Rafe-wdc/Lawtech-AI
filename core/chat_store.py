@@ -511,6 +511,107 @@ class ChatHistoryStore:
         )
 
     # ------------------------------------------------------------------
+    # List Threads (for session history sidebar)
+    # ------------------------------------------------------------------
+
+    def _list_threads_sync(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List recent threads with their first message preview.
+
+        Returns list of dicts:
+          {thread_id, created_at, updated_at, total_turns, preview, summary_text}
+        Ordered by most recently updated first.
+        """
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT
+                    t.thread_id,
+                    t.created_at,
+                    t.updated_at,
+                    t.total_turns,
+                    t.summary_text,
+                    (SELECT m.user_query FROM messages m
+                     WHERE m.thread_id = t.thread_id
+                     ORDER BY m.turn_number ASC LIMIT 1
+                    ) AS first_query
+                FROM threads t
+                WHERE t.total_turns > 0
+                ORDER BY t.updated_at DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset)).fetchall()
+
+            return [
+                {
+                    "thread_id": r["thread_id"],
+                    "created_at": r["created_at"],
+                    "updated_at": r["updated_at"],
+                    "total_turns": r["total_turns"],
+                    "preview": (r["first_query"] or "")[:120],
+                    "summary_text": (r["summary_text"] or "")[:300],
+                }
+                for r in rows
+            ]
+        finally:
+            conn.close()
+
+    async def list_threads(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Async wrapper for list_threads."""
+        return await asyncio.to_thread(
+            self._list_threads_sync, limit, offset
+        )
+
+    def _load_thread_messages_sync(
+        self,
+        thread_id: str,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Load all messages for a thread (for session restore).
+
+        Returns list of {turn_number, user_query, ai_response, created_at}.
+        """
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT turn_number, user_query, ai_response, created_at
+                FROM messages
+                WHERE thread_id = ?
+                ORDER BY turn_number ASC
+                LIMIT ?
+            """, (thread_id, limit)).fetchall()
+
+            return [
+                {
+                    "turn_number": r["turn_number"],
+                    "user_query": r["user_query"],
+                    "ai_response": r["ai_response"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+        finally:
+            conn.close()
+
+    async def load_thread_messages(
+        self,
+        thread_id: str,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Async wrapper for load_thread_messages."""
+        return await asyncio.to_thread(
+            self._load_thread_messages_sync, thread_id, limit
+        )
+
+    # ------------------------------------------------------------------
     # Feedback
     # ------------------------------------------------------------------
 

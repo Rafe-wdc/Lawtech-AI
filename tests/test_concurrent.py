@@ -1,6 +1,6 @@
 """Run all 70 test prompts CONCURRENTLY against the live API.
 
-Usage (from v2_multi_agent/):
+Usage:
     python tests/test_concurrent.py [--concurrency N] [--timeout N] [--api-url URL]
 
 Defaults:

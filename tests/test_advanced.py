@@ -8,7 +8,7 @@ this suite focuses on:
   - Natural language phrasing (how real users actually type)
   - Response quality validation (not just routing correctness)
 
-Usage (from v2_multi_agent/):
+Usage:
     python tests/test_advanced.py [--api-url URL] [--timeout N] [--concurrency N]
 
 Outputs:

@@ -5,7 +5,7 @@ its own copy of BGE-large-en-v1.5 (~1.3GB), this service loads it once and
 all API workers call it via HTTP.
 
 Run:
-    PYTHONPATH=v2_multi_agent python -m services.embedding_service
+    python -m services.embedding_service
 
 Endpoints:
     POST /embed          — embed one or more texts, returns vectors

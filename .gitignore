@@ -33,12 +33,9 @@ env/
 
 # Local models (large files)
 models/
-v2_multi_agent/models/
 
 # Vector databases
-Routing db/
 chroma_store/
-v2_multi_agent/chroma_store/
 
 # OS files
 .DS_Store
@@ -52,11 +49,11 @@ desktop.ini
 
 # Logs
 *.log
-v2_multi_agent/logs/
+logs/
 
 # Test result artifacts (large JSON dumps)
-v2_multi_agent/tests/test_results_*.json
-v2_multi_agent/tests/test_eval_results.json
+tests/test_results_*.json
+tests/test_eval_results.json
 
 # Temporary files
 tmp/

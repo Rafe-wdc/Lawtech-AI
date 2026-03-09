@@ -3,7 +3,7 @@
 Reads test_results_full.json (from test_concurrent.py) and uses GPT-4o-mini
 to score each response on Relevance, Completeness, and Accuracy (0-10).
 
-Usage (from v2_multi_agent/):
+Usage:
     python tests/evaluate_results.py [--input tests/test_results_full.json] [--concurrency 10]
 """
 

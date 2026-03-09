@@ -7,7 +7,7 @@ Tests the full drafting pipeline:
   - Natural language phrasing (how real users ask)
   - Edge cases: vague requests, specific section references, multi-party docs
 
-Usage (from v2_multi_agent/):
+Usage:
     python tests/test_drafting.py [--api-url URL] [--timeout N] [--concurrency N]
 
 Outputs:

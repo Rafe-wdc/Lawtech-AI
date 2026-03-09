@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Project root (v2_multi_agent/)
+# Project root (Lawtech-AI/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # --- API Keys ---
@@ -51,15 +51,15 @@ ES_INDICES = {
 
 # --- Embedding Models (absolute paths from project root) ---
 EMBEDDING_MODELS = {
-    "retriever": str(_PROJECT_ROOT.parent / "models" / "bge-large-en-v1.5"),
-    "pdf_qa": str(_PROJECT_ROOT.parent / "models" / "all-MiniLM-L6-v2"),
+    "retriever": str(_PROJECT_ROOT / "models" / "bge-large-en-v1.5"),
+    "pdf_qa": str(_PROJECT_ROOT / "models" / "all-MiniLM-L6-v2"),
 }
 
 # --- Embedding Service (set to enable remote embeddings, e.g. http://localhost:5100) ---
 EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "")
 
 # --- ChromaDB (PDF uploads only) ---
-CHROMA_STORE_ROOT = str(_PROJECT_ROOT.parent / "chroma_store")
+CHROMA_STORE_ROOT = str(_PROJECT_ROOT / "chroma_store")
 
 # --- Chat History (SQLite) ---
 CHAT_HISTORY_DB_PATH = os.getenv(

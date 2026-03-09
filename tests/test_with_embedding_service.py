@@ -1,6 +1,6 @@
 """End-to-end test: start embedding service + API server, then run all 27 prompts.
 
-Usage (from v2_multi_agent/):
+Usage:
     python tests/test_with_embedding_service.py [--workers N] [--embedding-port PORT] [--api-port PORT]
 
 Defaults:
@@ -311,7 +311,7 @@ def main():
     parser.add_argument("--warmup-timeout", type=int, default=600, help="Model warmup timeout in seconds")
     args = parser.parse_args()
 
-    # Resolve project root (v2_multi_agent/)
+    # Resolve project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
 

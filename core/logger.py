@@ -8,9 +8,9 @@ Provides:
 - Timing helper for measuring step durations
 - Real-time file flushing (no buffering delay)
 
-Log file: v2_multi_agent/logs/agent.log
+Log file: logs/agent.log
 - Rotates at 10 MB, keeps last 5 backup files (agent.log.1 ... agent.log.5)
-- Tail in real time:  tail -f v2_multi_agent/logs/agent.log
+- Tail in real time:  tail -f logs/agent.log
 - Configurable via LOG_DIR and LOG_LEVEL env vars in settings.py
 
 Usage:

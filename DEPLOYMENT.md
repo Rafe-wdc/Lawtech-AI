@@ -14,7 +14,7 @@ Client (browser)
   ▼
 nginx (443 SSL)
   ├── /pyapi/*     → 127.0.0.1:5000  (v1 — Fast-api/)
-  ├── /pyapiv2/*   → 127.0.0.1:5001  (v2 — v2_multi_agent/)
+  ├── /pyapiv2/*   → 127.0.0.1:5001  (v2 — Lawtech-AI/)
   └── /v2test.html → static frontend  (/var/www/html/v2test.html)
 ```
 
@@ -24,7 +24,7 @@ nginx (443 SSL)
 
 - Ubuntu 22.04+ with Python 3.10+
 - nginx with SSL (Certbot/Let's Encrypt)
-- Embedding models at `/root/models/` (symlinked from `/root/Fast-api/models/`)
+- Embedding models at `/root/models/` (symlinked from `/root/Fast-api/models/` or `/root/Lawtech-AI/models/`)
   - `bge-large-en-v1.5` (~1.3GB)
   - `all-MiniLM-L6-v2` (~80MB)
 - ChromaDB databases at `/root/Routing db/`
@@ -49,30 +49,30 @@ From your local machine:
 ```bash
 # Create tarball (exclude caches and logs)
 cd /path/to/Lawtech-AI
-tar czf /tmp/v2_multi_agent.tar.gz \
+tar czf /tmp/Lawtech-AI.tar.gz \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
     --exclude='.pytest_cache' \
     --exclude='logs' \
     --exclude='data' \
     --exclude='venv' \
-    v2_multi_agent/
+    .
 
 # Upload to server
-scp /tmp/v2_multi_agent.tar.gz root@64.176.97.182:/root/v2_multi_agent.tar.gz
+scp /tmp/Lawtech-AI.tar.gz root@64.176.97.182:/root/Lawtech-AI.tar.gz
 ```
 
 On the server:
 
 ```bash
 cd /root
-tar xzf v2_multi_agent.tar.gz
-rm v2_multi_agent.tar.gz
+mkdir -p Lawtech-AI && tar xzf Lawtech-AI.tar.gz -C Lawtech-AI
+rm Lawtech-AI.tar.gz
 ```
 
 ### 3. Symlink embedding models
 
-The v2 settings expect models at `../models/` relative to `v2_multi_agent/`, which resolves to `/root/models/`. If models already exist at `/root/Fast-api/models/`, create a symlink:
+The v2 settings expect models at `./models/` relative to the project root (`/root/Lawtech-AI/`). If models already exist at `/root/Fast-api/models/`, create a symlink:
 
 ```bash
 ln -sf /root/Fast-api/models /root/models
@@ -87,10 +87,10 @@ ls /root/models/
 
 ### 4. Configure environment variables
 
-Create `/root/v2_multi_agent/.env`:
+Create `/root/Lawtech-AI/.env`:
 
 ```bash
-cat > /root/v2_multi_agent/.env << 'EOF'
+cat > /root/Lawtech-AI/.env << 'EOF'
 OPENAI_API_KEY="sk-..."
 GOOGLE_API_KEY="AIza..."
 PORT=5001
@@ -112,21 +112,21 @@ Required keys:
 ### 5. Create virtual environment and install dependencies
 
 ```bash
-python3 -m venv /root/v2_multi_agent/venv
-/root/v2_multi_agent/venv/bin/pip install --upgrade pip
-/root/v2_multi_agent/venv/bin/pip install -r /root/v2_multi_agent/requirements.txt
+python3 -m venv /root/Lawtech-AI/venv
+/root/Lawtech-AI/venv/bin/pip install --upgrade pip
+/root/Lawtech-AI/venv/bin/pip install -r /root/Lawtech-AI/requirements.txt
 ```
 
 This installs ~150 packages including LangChain 1.x, LangGraph, ChromaDB, sentence-transformers, PyTorch, FastAPI, etc.
 
 ### 6. Create the startup script
 
-Create `/root/v2_multi_agent/run_v2.sh`:
+Create `/root/Lawtech-AI/run_v2.sh`:
 
 ```bash
-cat > /root/v2_multi_agent/run_v2.sh << 'EOF'
+cat > /root/Lawtech-AI/run_v2.sh << 'EOF'
 #!/bin/bash
-cd /root/v2_multi_agent
+cd /root/Lawtech-AI
 source venv/bin/activate
 export $(grep -v "^#" .env | xargs)
 export PORT=5001
@@ -141,20 +141,20 @@ nohup python -m uvicorn core.gateway:app \
 echo $! > logs/api.pid
 echo "Started with PID $!"
 EOF
-chmod +x /root/v2_multi_agent/run_v2.sh
+chmod +x /root/Lawtech-AI/run_v2.sh
 ```
 
 ### 7. Start the v2 server
 
 ```bash
-bash /root/v2_multi_agent/run_v2.sh
+bash /root/Lawtech-AI/run_v2.sh
 ```
 
 Verify it started:
 
 ```bash
 # Check logs
-tail -20 /root/v2_multi_agent/logs/api.log
+tail -20 /root/Lawtech-AI/logs/api.log
 
 # Expected output:
 # ... | Compiling agent graph at startup
@@ -210,7 +210,7 @@ curl -s https://tool.lawttorney.com/pyapiv2/health
 Copy the frontend HTML to the nginx web root, replacing API paths to point to v2:
 
 ```bash
-cp /root/v2_multi_agent/frontend.html /var/www/html/v2test.html
+cp /root/Lawtech-AI/frontend.html /var/www/html/v2test.html
 
 # Replace default API base URL
 sed -i 's|http://localhost:5055|https://tool.lawttorney.com|g' /var/www/html/v2test.html
@@ -228,21 +228,21 @@ Frontend is now accessible at: `https://tool.lawttorney.com/v2test.html`
 ### Restart the server
 
 ```bash
-kill $(cat /root/v2_multi_agent/logs/api.pid)
-bash /root/v2_multi_agent/run_v2.sh
+kill $(cat /root/Lawtech-AI/logs/api.pid)
+bash /root/Lawtech-AI/run_v2.sh
 ```
 
 ### View live logs
 
 ```bash
-tail -f /root/v2_multi_agent/logs/api.log
+tail -f /root/Lawtech-AI/logs/api.log
 ```
 
 ### Check server status
 
 ```bash
 # Is the process running?
-ps -p $(cat /root/v2_multi_agent/logs/api.pid 2>/dev/null) 2>/dev/null && echo "RUNNING" || echo "STOPPED"
+ps -p $(cat /root/Lawtech-AI/logs/api.pid 2>/dev/null) 2>/dev/null && echo "RUNNING" || echo "STOPPED"
 
 # Port check
 lsof -i :5001
@@ -254,7 +254,7 @@ curl -s http://localhost:5001/pyapi/health
 ### Stop the server
 
 ```bash
-kill $(cat /root/v2_multi_agent/logs/api.pid)
+kill $(cat /root/Lawtech-AI/logs/api.pid)
 ```
 
 ### Redeploy updated code
@@ -264,26 +264,26 @@ From your local machine:
 ```bash
 # Repackage and upload
 cd /path/to/Lawtech-AI
-tar czf /tmp/v2_multi_agent.tar.gz \
+tar czf /tmp/Lawtech-AI.tar.gz \
     --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='.pytest_cache' --exclude='logs' \
     --exclude='data' --exclude='venv' --exclude='.env' \
-    v2_multi_agent/
+    .
 
-scp /tmp/v2_multi_agent.tar.gz root@64.176.97.182:/root/
+scp /tmp/Lawtech-AI.tar.gz root@64.176.97.182:/root/
 
 # On the server:
 ssh root@64.176.97.182
-kill $(cat /root/v2_multi_agent/logs/api.pid)
+kill $(cat /root/Lawtech-AI/logs/api.pid)
 cd /root
 # Preserve venv, .env, logs, data
-cp -r v2_multi_agent/venv /tmp/v2_venv_backup
-cp v2_multi_agent/.env /tmp/v2_env_backup
-tar xzf v2_multi_agent.tar.gz
-mv /tmp/v2_venv_backup v2_multi_agent/venv
-cp /tmp/v2_env_backup v2_multi_agent/.env
-rm v2_multi_agent.tar.gz
-bash /root/v2_multi_agent/run_v2.sh
+cp -r Lawtech-AI/venv /tmp/v2_venv_backup
+cp Lawtech-AI/.env /tmp/v2_env_backup
+tar xzf Lawtech-AI.tar.gz -C Lawtech-AI
+mv /tmp/v2_venv_backup Lawtech-AI/venv
+cp /tmp/v2_env_backup Lawtech-AI/.env
+rm Lawtech-AI.tar.gz
+bash /root/Lawtech-AI/run_v2.sh
 ```
 
 ---
@@ -301,7 +301,7 @@ bash /root/v2_multi_agent/run_v2.sh
 ├── Routing db/                   # ChromaDB databases (shared)
 │   ├── constitution db/
 │   └── legal maximdb/
-├── v2_multi_agent/               # v2 deployment (port 5001)
+├── Lawtech-AI/                   # v2 deployment (port 5001)
 │   ├── .env                      # v2 API keys + PORT=5001
 │   ├── run_v2.sh                 # Startup script
 │   ├── venv/                     # Python virtual environment
@@ -358,13 +358,13 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/v2_multi_agent
-EnvironmentFile=/root/v2_multi_agent/.env
-ExecStart=/root/v2_multi_agent/venv/bin/python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5001 --log-level info --timeout-keep-alive 120 --workers 1
+WorkingDirectory=/root/Lawtech-AI
+EnvironmentFile=/root/Lawtech-AI/.env
+ExecStart=/root/Lawtech-AI/venv/bin/python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5001 --log-level info --timeout-keep-alive 120 --workers 1
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:/root/v2_multi_agent/logs/api.log
-StandardError=append:/root/v2_multi_agent/logs/api.log
+StandardOutput=append:/root/Lawtech-AI/logs/api.log
+StandardError=append:/root/Lawtech-AI/logs/api.log
 
 [Install]
 WantedBy=multi-user.target

@@ -5,7 +5,7 @@ to score each response on Relevance, Completeness, and Accuracy (0-10).
 
 Also evaluates multi-turn conversation coherence.
 
-Usage (from v2_multi_agent/):
+Usage:
     python tests/evaluate_agents.py [--input tests/test_results_agents_full.json] [--concurrency 10]
 """
 

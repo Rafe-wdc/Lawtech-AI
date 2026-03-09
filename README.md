@@ -3,7 +3,6 @@
 ## Structure
 
 ```
-v2_multi_agent/
 ├── core/                          # Core infrastructure
 │   ├── state.py                   # Shared agent state (LangGraph state schema)
 │   ├── graph.py                   # LangGraph graph definition (agent wiring)
@@ -103,5 +102,5 @@ Request → Gateway → Guardrail → Memory → Orchestrator
 This is Phase 3 of the migration plan:
 - Phase 1 (DONE in v1): Redis caching + async + connection pooling
 - Phase 2: Extract tools into MCP servers
-- Phase 3: Build LangGraph agent graph (this folder)
+- Phase 3: Build LangGraph agent graph (this project)
 - Phase 4: WebSocket streaming, Celery workers, production hardening

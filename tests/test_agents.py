@@ -3,7 +3,7 @@
 Tests routing correctness, response quality, multi-agent fan-out,
 and multi-turn conversation across 9 domain agents.
 
-Usage (from v2_multi_agent/):
+Usage:
     python tests/test_agents.py [--concurrency N] [--timeout N] [--api-url URL]
 
 Agents Tested:

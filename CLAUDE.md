@@ -25,7 +25,6 @@ This is a **Legal AI API** that provides intelligent legal assistance including:
 ## Project Structure
 
 ```
-v2_multi_agent/
 ├── core/
 │   ├── gateway.py           # FastAPI app, SSE streaming, all API endpoints
 │   ├── graph.py             # LangGraph graph definition and compilation
@@ -81,12 +80,10 @@ Optional:
 
 ```bash
 # Install dependencies
-cd v2_multi_agent
 pip install -r requirements.txt
 
 # Run the server
-python core/gateway.py
-# Or: python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5000
+python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5000
 
 # Run with auto-reload (development)
 python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5000 --reload

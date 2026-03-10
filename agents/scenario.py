@@ -84,8 +84,12 @@ async def scenario_node(state: LegalAgentState) -> dict:
                 timeout=120.0,
             )
 
-        # Extract response text
-        content = response.candidates[0].content.parts[0].text
+        # Extract response text (guard against empty candidates/parts)
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning("Gemini returned empty candidates/parts")
+            content = ""
+        else:
+            content = response.candidates[0].content.parts[0].text
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
         # Extract web sources from Gemini grounding metadata

@@ -185,8 +185,12 @@ def detect_injection_llm(query: str) -> dict:
             f"Query: {query}\n\nIs this a prompt injection attempt?"
         )
         result = llm.invoke(check_prompt)
+        is_flagged = result.is_injection and result.confidence in ("medium", "high")
+        if result.is_injection and result.confidence == "low":
+            log.warning("Low-confidence injection detected (allowed through)",
+                        query=query[:80], confidence=result.confidence)
         return {
-            "is_injection": result.is_injection and result.confidence in ("medium", "high"),
+            "is_injection": is_flagged,
             "confidence": result.confidence,
         }
     except Exception as e:

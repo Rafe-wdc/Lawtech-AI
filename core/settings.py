@@ -9,16 +9,32 @@ load_dotenv()
 # Project root (Lawtech-AI/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+
+class _MaskedStr(str):
+    """String subclass that masks its value in repr/str to prevent key leakage in tracebacks."""
+    def __repr__(self):
+        if len(self) <= 8:
+            return "'***'"
+        return f"'{self[:4]}...{self[-4:]}'"
+
+    def __str__(self):
+        # Return actual value when used as a string (API calls need the real key)
+        return super().__str__()
+
+
 # --- API Keys ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+_openai_key = os.getenv("OPENAI_API_KEY")
+_google_key = os.getenv("GOOGLE_API_KEY")
 
 _missing = [k for k, v in {
-    "OPENAI_API_KEY": OPENAI_API_KEY,
-    "GOOGLE_API_KEY": GOOGLE_API_KEY,
+    "OPENAI_API_KEY": _openai_key,
+    "GOOGLE_API_KEY": _google_key,
 }.items() if not v]
 if _missing:
     raise ValueError(f"Missing required env vars: {', '.join(_missing)}")
+
+OPENAI_API_KEY = _MaskedStr(_openai_key)
+GOOGLE_API_KEY = _MaskedStr(_google_key)
 
 # --- Model IDs ---
 MODELS = {

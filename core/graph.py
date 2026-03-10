@@ -108,6 +108,18 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
 
 # --- Graph Construction ---
 
+def _validate_agent_map():
+    """Ensure all TaskType values (except Non_legal) have an AGENT_NODE_MAP entry."""
+    from core.state import TaskType
+    task_types = set(TaskType.__args__)
+    unmapped = task_types - set(AGENT_NODE_MAP.keys()) - {"Non_legal"}
+    if unmapped:
+        log.warning("TaskTypes missing from AGENT_NODE_MAP (will fallback to scenario)",
+                    unmapped=list(unmapped))
+
+_validate_agent_map()
+
+
 def build_graph() -> StateGraph:
     """Build the complete LangGraph agent graph.
 

@@ -90,6 +90,9 @@ def web_search_grounded(query: str, chat_history_text: str = "") -> dict:
             },
         )
 
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning("Web search grounded returned empty response")
+            return {"content": "", "tokens_consumed": 0}
         content = response.candidates[0].content.parts[0].text
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
@@ -142,6 +145,9 @@ Scenario: {query}"""
             },
         )
 
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning("Scenario analysis returned empty response")
+            return {"analysis": "", "tokens_consumed": 0}
         content = response.candidates[0].content.parts[0].text
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
@@ -227,6 +233,9 @@ def find_similar_cases(scenario: str) -> dict:
             },
         )
 
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning("Find similar cases returned empty response")
+            return {"cases": [], "raw_response": "", "tokens_consumed": 0}
         content = response.candidates[0].content.parts[0].text
 
         # Try to parse structured cases from the response

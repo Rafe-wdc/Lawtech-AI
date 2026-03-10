@@ -213,8 +213,75 @@ async def document_node(state: LegalAgentState) -> dict:
              collection=unique_string, query=query[:100])
 
     if not unique_string:
-        # Check for inline file text (small files not stored in ChromaDB)
         fc = FileContextData.from_state(state) if not unique_string else None
+
+        # Check for image data — use Gemini multimodal vision
+        if fc and fc.image_data:
+            log.info("Using image data for multimodal document QA",
+                     image_count=len(fc.image_data), files=fc.file_names)
+            try:
+                with log_time(log, "Image document QA (multimodal)"):
+                    llm = get_gemini_pro(temperature=0.3)
+                    # Build multimodal message with images
+                    user_parts = []
+                    for img in fc.image_data[:3]:
+                        mime = img.get("mime", "image/jpeg")
+                        b64 = img.get("base64", "")
+                        if not b64:
+                            log.warning("Skipping image with empty base64")
+                            continue
+                        user_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{b64}"},
+                        })
+                    user_parts.append({
+                        "type": "text",
+                        "text": f"Current Date: {date.today()}\n\nQuestion: {query}",
+                    })
+
+                    # Also include inline text if available (e.g. PDF + image combo)
+                    messages = [
+                        ("system", "You are Lawttorney, a legal AI assistant. Analyze the uploaded image(s) carefully. Extract all visible text, identify the document type, and answer the user's question thoroughly. Cite specific details like names, dates, section numbers, case numbers, court names, and legal provisions visible in the document."),
+                    ]
+                    if fc.inline_text:
+                        messages.append(("user", f"Additional document text:\n{fc.inline_text[:40000]}"))
+                    messages.append(("user", user_parts))
+
+                    response = llm.invoke(messages)
+
+                tokens = 0
+                if hasattr(response, "usage_metadata") and response.usage_metadata:
+                    tokens = response.usage_metadata.get("total_tokens", 0)
+
+                log.info("Image document QA completed",
+                         response_len=len(response.content), tokens=tokens)
+
+                sources = [SourceMetadata(
+                    source_type="document",
+                    title=f"Uploaded: {fn}",
+                    content=["Image analysis (multimodal)"],
+                    file_name=fn,
+                    agent_name="Document",
+                ) for fn in fc.file_names[:5]]
+
+                return {"agent_results": {"Document": AgentResult(
+                    agent_name="Document",
+                    content=response.content,
+                    sources=sources,
+                    tokens_consumed=tokens,
+                )}}
+
+            except Exception as e:
+                log.error("Image document QA failed", error=str(e), exc_info=True)
+                return {"agent_results": {"Document": AgentResult(
+                    agent_name="Document",
+                    content="",
+                    sources=[],
+                    tokens_consumed=0,
+                    error=str(e),
+                )}}
+
+        # Check for inline file text (small files not stored in ChromaDB)
         if fc and fc.inline_text:
             log.info("Using inline file text for document QA",
                      inline_chars=len(fc.inline_text), files=fc.file_names)
@@ -266,7 +333,7 @@ async def document_node(state: LegalAgentState) -> dict:
                     error=str(e),
                 )}}
 
-        log.warning("No unique_string provided and no inline text")
+        log.warning("No unique_string provided and no file content")
         return {
             "agent_results": {"Document": AgentResult(
                 agent_name="Document",

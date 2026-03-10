@@ -63,7 +63,10 @@ def _classify_task_regex_fallback(query: str) -> str:
         return "Scenario"
     if any(k in q for k in ("section ", "act ", "rule ", "regulation", "provision",
                               "statute", "law ", " act,", " act.")):
-        return "Legislation"
+        # Avoid misclassifying constitutional queries that mention "section"
+        if not any(k in q for k in ("constitution", "constitutional", "article ",
+                                     "fundamental right", "directive principle")):
+            return "Legislation"
     return "Legal_Concepts"
 
 
@@ -93,7 +96,7 @@ def _classify_task(query: str, chat_summary: str | None = None) -> str:
 class AgentPlan(BaseModel):
     agents: list[str] = Field(
         ...,
-        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment",
+        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, Document",
     )
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
@@ -110,6 +113,7 @@ Available agents:
 - Maxim: Legal maxims and doctrines (Latin phrases like res judicata, audi alteram partem, estoppel)
 - Legal_Concepts: General legal explanations (use only when no specific category applies)
 - SCI_Judgment: Supreme Court of India case search
+- Document: Answers questions about user-uploaded documents (PDFs, images, DOCX). Use when user has uploaded files.
 
 Rules:
 1. Most queries need only the PRIMARY agent matching the task type.
@@ -232,6 +236,11 @@ def _plan_agents(query: str, task: str) -> list[str]:
     if task == "Non_legal":
         log.debug("Simple task mapping used", task=task, agents=[])
         return []
+
+    # "Other" always maps to Scenario (as per PLAN_PROMPT contract)
+    if task == "Other":
+        log.debug("Mapping 'Other' task to Scenario")
+        task = "Scenario"
 
     # Try multi-agent planning with LLM
     try:
@@ -436,6 +445,8 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             log.info("Query normalized",
                      original=query[:80], normalized=normalized_query[:80])
             query = normalized_query
+            # Note: state["original_query"] is preserved unmodified for agents
+            # that need verbatim ES search terms (section numbers, case citations).
     except asyncio.TimeoutError:
         log.warning("Query normalization timed out, using original")
 
@@ -443,7 +454,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # If files are attached, hint the classifier about them
     fc = FileContextData.from_state(state)
     classify_query = query
-    if fc and (fc.inline_text or fc.chromadb_collections):
+    if fc and fc.has_content:
         file_hint = f" [User has uploaded files: {', '.join(fc.file_names)}. This query is about the uploaded document(s).]"
         classify_query = query + file_hint
         log.info("File context hint added for classification", file_names=fc.file_names)
@@ -460,19 +471,20 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.warning("Task classification timed out, using regex fallback",
                     task=task, query=query[:80])
 
-    # Override: if files are attached and task isn't Document, force Document
-    if fc and (fc.inline_text or fc.chromadb_collections) and task != "Document":
-        log.info("Overriding task to Document due to file context",
-                 original_task=task, file_names=fc.file_names)
-        task = "Document"
+    # Note: if files are attached and task isn't Document, we'll add Document
+    # to the plan alongside the classified task (see Step 3 below) instead of
+    # overriding, to support multi-intent queries (e.g., "find judgments related
+    # to this uploaded contract").
 
-    # Step 2: Handle non-legal
-    if task == "Non_legal":
+    # Step 2: Handle non-legal (but allow if files are attached — user may just
+    # be asking about the document content)
+    if task == "Non_legal" and not (fc and fc.has_content):
         log.warning("Non-legal query blocked", query=query[:80])
         return {
             "task": task,
             "tasks_planned": [],
             "is_blocked": True,
+            "tokens_consumed": 0,
             "block_reason": (
                 "👋 Hello! I'm **Lawttorney**, your AI-powered Indian legal assistant.\n\n"
                 "I'm here to help you with all your legal queries. Here's what I can do for you:\n\n"
@@ -485,10 +497,14 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                 "Please ask me a legal question and I'll get right on it!"
             ),
         }
+    # If Non_legal but has files, treat as Document task
+    if task == "Non_legal" and fc and fc.has_content:
+        log.info("Non-legal overridden to Document due to file context")
+        task = "Document"
 
     # Step 3: Plan agents
     # For Document task with file context, skip LLM planner — go directly to Document agent
-    if task == "Document" and fc and (fc.inline_text or fc.chromadb_collections):
+    if task == "Document" and fc and fc.has_content:
         tasks_planned = ["Document"]
         log.info("Document task with file context — using Document agent directly",
                  file_names=fc.file_names)
@@ -502,12 +518,11 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             log.warning("Agent planning timed out, falling back to single agent", task=task)
             tasks_planned = [task] if task not in ("Non_legal",) else []
 
-        # Step 3b: File context — ensure Document agent is planned if files in ChromaDB
-        if fc:
-            if fc.chromadb_collections and "Document" not in tasks_planned:
-                tasks_planned.append("Document")
-                log.info("Document agent added for uploaded file collections",
-                         collections=fc.chromadb_collections)
+        # Step 3b: File context — ensure Document agent is planned if files attached
+        if fc and fc.has_content and "Document" not in tasks_planned:
+            tasks_planned.append("Document")
+            log.info("Document agent added for file context (multi-intent support)",
+                     file_names=fc.file_names)
 
     # Step 4: Per-agent query rewriting (only for multi-agent plans)
     agent_queries = {}
@@ -561,6 +576,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         return {
             "final_response": "No results were found for your query. Please try rephrasing.",
             "source_metadata": [],
+            "tokens_consumed": 0,
         }
 
     # Filter out empty/errored results
@@ -599,12 +615,16 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         return {
             "final_response": "The agents could not find relevant information. Please try a different query.",
             "source_metadata": [],
+            "tokens_consumed": 0,
         }
 
     # Single agent — pass through directly (with auto-citation for Drafting)
     # BUT if file context has inline text, always synthesize so file content is used
-    has_file_text = fc is not None and fc.inline_text
-    if len(valid_results) == 1 and not has_file_text:
+    # If file context has inline text but single result is NOT from Document agent,
+    # force synthesis so file content gets incorporated. Otherwise pass through.
+    has_unprocessed_file = (fc is not None and fc.inline_text
+                           and "Document" not in valid_results)
+    if len(valid_results) == 1 and not has_unprocessed_file:
         name, result = next(iter(valid_results.items()))
 
         # Drafting solo: auto-enrich with AI-generated citations
@@ -612,14 +632,16 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             log.info("Drafting solo — auto-citation enrichment starting",
                      draft_len=len(result.content))
             try:
-                enriched = await _auto_cite_draft(query, result.content)
+                enriched, cite_tokens = await _auto_cite_draft(
+                    query, result.content, response_instructions
+                )
                 log.info("Auto-citation enrichment completed",
                          original_len=len(result.content),
                          enriched_len=len(enriched))
                 return_dict = {
                     "final_response": enriched,
                     "source_metadata": _serialize_sources(result),
-                    "tokens_consumed": result.tokens_consumed,
+                    "tokens_consumed": result.tokens_consumed + cite_tokens,
                 }
                 return return_dict
             except Exception as e:
@@ -670,11 +692,13 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 if citations_text.strip():
                     enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
             elif citations_text.strip():
-                enriched = await _inject_citations_into_draft(
+                enriched, cite_tokens = await _inject_citations_into_draft(
                     query, drafting_result.content, citations_text
                 )
+                total_tokens += cite_tokens
             else:
-                enriched = await _auto_cite_draft(query, drafting_result.content)
+                enriched, cite_tokens = await _auto_cite_draft(query, drafting_result.content)
+                total_tokens += cite_tokens
 
             log.info("Draft synthesis completed",
                      enriched_len=len(enriched), total_tokens=total_tokens)
@@ -781,10 +805,11 @@ def _serialize_sources(result: AgentResult) -> list[dict]:
 
 async def _inject_citations_into_draft(
     query: str, draft: str, citations_text: str
-) -> str:
+) -> tuple[str, int]:
     """Preserve full draft and inject real citations from ALL agents.
 
     Uses Gemini 2.5 Flash for fast citation injection.
+    Returns: (enriched_content, tokens_consumed)
     """
     with log_time(log, "Draft citation injection"):
         llm = get_drafting_llm()
@@ -804,23 +829,31 @@ async def _inject_citations_into_draft(
     log.info("Citation injection completed",
              draft_len=len(draft), enriched_len=len(response.content),
              tokens=tokens)
-    return response.content
+    return response.content, tokens
 
 
-async def _auto_cite_draft(query: str, draft: str) -> str:
+async def _auto_cite_draft(
+    query: str, draft: str, response_instructions: str = ""
+) -> tuple[str, int]:
     """Add AI-generated citations when no database agents provided results.
 
     Uses Gemini 2.5 Flash for fast auto-citation.
+    Returns: (enriched_content, tokens_consumed)
     """
     with log_time(log, "Draft auto-citation"):
         llm = get_drafting_llm()
         prompt = ChatPromptTemplate.from_template(DRAFT_CITATION_PROMPT)
         chain = prompt | llm
 
+        instructions_text = ""
+        if response_instructions:
+            instructions_text = f"User's format preferences: {response_instructions}"
+
         from core.streaming import stream_chain_response
         response = await stream_chain_response(chain, {
             "query": query,
             "draft": draft,
+            "response_instructions": instructions_text,
         }, timeout=180)  # Auto-citation on full draft needs more time
 
     tokens = 0
@@ -829,4 +862,4 @@ async def _auto_cite_draft(query: str, draft: str) -> str:
     log.info("Auto-citation completed",
              draft_len=len(draft), enriched_len=len(response.content),
              tokens=tokens)
-    return response.content
+    return response.content, tokens

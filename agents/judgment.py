@@ -214,8 +214,19 @@ def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
 
         petitioner = hit.get("petitioner_names", ["Unknown"])
         respondent = hit.get("respondent_names", ["Unknown"])
-        pet_name = petitioner[0] if petitioner else "Unknown"
-        resp_name = respondent[0] if respondent else "Unknown"
+        # Handle string, list, or other types from ES
+        if isinstance(petitioner, str):
+            pet_name = petitioner or "Unknown"
+        elif isinstance(petitioner, list):
+            pet_name = petitioner[0] if petitioner else "Unknown"
+        else:
+            pet_name = str(petitioner) if petitioner else "Unknown"
+        if isinstance(respondent, str):
+            resp_name = respondent or "Unknown"
+        elif isinstance(respondent, list):
+            resp_name = respondent[0] if respondent else "Unknown"
+        else:
+            resp_name = str(respondent) if respondent else "Unknown"
         title = f"{pet_name} vs {resp_name}"
 
         docs_text_parts.append(content)
@@ -255,7 +266,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
     4. Generate response with citations (Gemini Flash, streaming)
     """
     agent_queries = state.get("agent_queries", {})
-    query = agent_queries.get("Judgment", state.get("query", state["original_query"]))
+    # Prefer agent-specific query > original_query > normalized query
+    # Original preserves exact party names/citations for ES matching
+    query = agent_queries.get("Judgment", state.get("original_query", state.get("query", "")))
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
              using_agent_query="Judgment" in agent_queries)
@@ -267,8 +280,11 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 asyncio.to_thread(_extract_case_metadata, query),
                 timeout=20,
             )
-        except (asyncio.TimeoutError, Exception) as meta_err:
-            log.warning("Metadata extraction failed/timed out, using regex fallback",
+        except asyncio.TimeoutError:
+            log.warning("Metadata extraction timed out, using regex fallback")
+            metadata = _judgment_regex_fallback(query)
+        except Exception as meta_err:
+            log.warning("Metadata extraction failed, using regex fallback",
                         error=str(meta_err))
             metadata = _judgment_regex_fallback(query)
 

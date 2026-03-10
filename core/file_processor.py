@@ -16,12 +16,15 @@ import csv
 import io
 import os
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.logger import get_logger
 from core.settings import CHROMA_STORE_ROOT
+
+_chroma_cache_lock = threading.Lock()
 
 log = get_logger("FileProcessor")
 
@@ -253,7 +256,9 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     os.makedirs(persist_dir, exist_ok=True)
 
     embeddings = get_qa_embeddings()
-    chromadb.api.client.SharedSystemClient.clear_system_cache()
+    # Lock around cache clear to prevent race with concurrent workers
+    with _chroma_cache_lock:
+        chromadb.api.client.SharedSystemClient.clear_system_cache()
 
     metadatas = [{"source": filename, "chunk": i} for i in range(len(chunks))]
     Chroma.from_texts(
@@ -275,7 +280,8 @@ def _extract_image(file_path: str) -> ProcessedFile:
     result = ProcessedFile(original_name=name, file_type="image", size_bytes=size)
 
     try:
-        data = open(file_path, "rb").read()
+        with open(file_path, "rb") as f:
+            data = f.read()
 
         # Resize if too large
         if len(data) > MAX_IMAGE_BYTES:

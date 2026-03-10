@@ -61,10 +61,9 @@ def _format_hits(hits: list[dict]) -> list[dict]:
 
 def _has_good_results(hits: list[dict], min_hits: int = _MIN_GOOD_HITS) -> bool:
     """Check if results are sufficient in quantity and quality."""
-    return (
-        len(hits) >= min_hits
-        and (hits[0].get("score", 0) or 0) >= _MIN_SCORE
-    )
+    if not hits or len(hits) < min_hits:
+        return False
+    return (hits[0].get("score", 0) or 0) >= _MIN_SCORE
 
 
 def _es_search(body: dict, timeout: int = 30) -> list[dict]:

@@ -225,7 +225,7 @@ def search_by_case_number(case_number: str) -> str:
                     "should": [
                         {"match_phrase": {"case_no": {"query": case_number, "boost": 3}}},
                         {"match": {"case_no": {"query": case_number, "boost": 1}}},
-                        {"wildcard": {"case_no.keyword": {"value": f"*{case_number}*", "boost": 2}}},
+                        {"wildcard": {"case_no.keyword": {"value": f"*{case_number.replace('*', '').replace('?', '')}*", "boost": 2}}},
                     ],
                     "minimum_should_match": 1,
                 }

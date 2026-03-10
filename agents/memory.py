@@ -192,7 +192,7 @@ def _rewrite_query(
             if isinstance(msg, HumanMessage):
                 history_lines.append(f"User: {msg.content}")
             elif isinstance(msg, AIMessage):
-                content = msg.content[:1500] + "..." if len(msg.content) > 1500 else msg.content
+                content = (msg.content[:1500] + "...") if msg.content and len(msg.content) > 1500 else (msg.content or "")
                 history_lines.append(f"Assistant: {content}")
 
         chat_history_text = "\n".join(history_lines)
@@ -231,7 +231,7 @@ async def memory_node(state: LegalAgentState) -> dict:
     3. Rewrite query with conversation context if follow-up
     4. Return processed query + chat history
     """
-    original_query = state["original_query"]
+    original_query = state.get("original_query", "")
     thread_id = state.get("thread_id")
 
     log.info("Agent started",
@@ -257,7 +257,7 @@ async def memory_node(state: LegalAgentState) -> dict:
         # Step 3: Rewrite query with context (run sync LLM call in thread)
         # Skip rewrite when files are attached — the query is about the file, not a follow-up
         fc = FileContextData.from_state(state)
-        if fc and (fc.inline_text or fc.chromadb_collections):
+        if fc and fc.has_content:
             log.info("Skipping query rewrite — files attached",
                      file_names=fc.file_names)
         else:

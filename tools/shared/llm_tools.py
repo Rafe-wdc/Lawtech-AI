@@ -276,7 +276,16 @@ def select_best_template(query: str, file_paths: list[str]) -> str:
     prompt = ChatPromptTemplate.from_template(_TEMPLATE_SELECTION_PROMPT)
     chain = prompt | llm
     result = chain.invoke({"query": query, "files_path": "\n".join(file_paths)})
-    return result.source.strip()
+    selected = result.source.strip()
+    # Validate: LLM must select from the provided list, not hallucinate a path
+    if selected not in file_paths:
+        # Try partial match (LLM may return just the filename)
+        matches = [fp for fp in file_paths if selected in fp or fp in selected]
+        if matches:
+            selected = matches[0]
+        elif file_paths:
+            selected = file_paths[0]  # Safe fallback to first option
+    return selected
 
 
 @tool

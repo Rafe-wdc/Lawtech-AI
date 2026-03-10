@@ -213,6 +213,8 @@ class ChatHistoryStore:
     ) -> int:
         """Save a Q&A turn. Returns the new turn_number."""
         self._ensure_schema()
+
+        # Step 1: Save turn inside write lock
         with self._write_lock:
             conn = self._get_connection()
             try:
@@ -246,16 +248,14 @@ class ChatHistoryStore:
                 conn.commit()
                 log.debug("Turn saved",
                           thread_id=thread_id[:12], turn=new_turn)
-
-                return new_turn
             except Exception:
                 conn.rollback()
                 raise
             finally:
                 conn.close()
 
-        # Summary regeneration runs OUTSIDE the write lock so it doesn't
-        # block other writes during the LLM call (~1-3 seconds).
+        # Step 2: Summary regeneration runs OUTSIDE the write lock so it
+        # doesn't block other writes during the LLM call (~1-3 seconds).
         try:
             conn = self._get_connection()
             try:
@@ -265,6 +265,8 @@ class ChatHistoryStore:
         except Exception as e:
             log.error("Post-save summary regeneration failed",
                       thread_id=thread_id[:12], error=str(e))
+
+        return new_turn
 
     async def save_turn(
         self,
@@ -478,7 +480,12 @@ class ChatHistoryStore:
                 (thread_id,),
             ).fetchone()
             if row:
-                return json.loads(row["data_json"])
+                try:
+                    return json.loads(row["data_json"])
+                except (json.JSONDecodeError, TypeError) as e:
+                    log.error("Corrupted draft continuation JSON",
+                              thread_id=thread_id, error=str(e))
+                    return None
             return None
         finally:
             conn.close()

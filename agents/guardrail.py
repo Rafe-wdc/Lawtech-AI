@@ -126,7 +126,7 @@ async def guardrail_input_node(state: LegalAgentState) -> dict:
     2. Regex-based prompt injection patterns (instant)
     3. LLM-based injection detection if suspicious keywords found (~500ms)
     """
-    query = state["original_query"]
+    query = state.get("original_query", "")
     log.info("Input check started",
              query=query[:100], query_len=len(query))
 

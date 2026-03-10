@@ -15,10 +15,18 @@ Ref: https://docs.langchain.com/oss/python/langchain/streaming/overview
 All intelligence lives in the agents.
 """
 
+import asyncio
 import json
 import os
+
+# asyncio.timeout() is Python 3.11+; fall back to async_timeout on 3.10
+try:
+    from asyncio import timeout as _async_timeout
+except ImportError:
+    from async_timeout import timeout as _async_timeout
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 from typing import Optional, List
@@ -38,6 +46,17 @@ from .logger import get_logger, set_request_id, log_time
 from .chat_store import chat_store
 
 log = get_logger("Gateway")
+
+# --- Collection-level locks for concurrent upload protection ---
+_collection_locks: dict[str, threading.Lock] = {}
+_collection_locks_guard = threading.Lock()
+
+def _get_collection_lock(unique_string: str) -> threading.Lock:
+    """Get or create a per-collection lock to prevent concurrent modification."""
+    with _collection_locks_guard:
+        if unique_string not in _collection_locks:
+            _collection_locks[unique_string] = threading.Lock()
+        return _collection_locks[unique_string]
 
 # --- Rate Limiter ---
 limiter = Limiter(key_func=get_remote_address)
@@ -139,7 +158,11 @@ async def _generate_followup_suggestions(
     match = re.search(r'\[.*\]', text, re.DOTALL)
     if match:
         text = match.group(0)
-    suggestions = json.loads(text)
+    try:
+        suggestions = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        log.debug("Followup suggestions JSON parse failed", text=text[:100])
+        return []
     # Handle dict wrapper like {"suggestions": [...]}
     if isinstance(suggestions, dict):
         for v in suggestions.values():
@@ -215,7 +238,13 @@ async def search(data: SearchRequest, request: Request):
 
     try:
         with log_time(log, "Full graph execution"):
-            final_state = await agent_graph.ainvoke(initial_state, config=config)
+            final_state = await asyncio.wait_for(
+                agent_graph.ainvoke(initial_state, config=config),
+                timeout=300,  # 5 minute hard timeout
+            )
+    except asyncio.TimeoutError:
+        log.error("Agent graph execution timed out after 300s", query=data.prompt_query[:100])
+        raise HTTPException(status_code=504, detail="Request timed out. Please try a simpler query.")
     except Exception as e:
         log.error("Agent graph execution failed", exc_info=True, error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -342,6 +371,7 @@ async def search_stream(data: SearchRequest, request: Request):
         draft_continuation_data = None
 
         try:
+          async with _async_timeout(300):  # 5 min hard timeout on streaming
             async for event in agent_graph.astream(
                 initial_state,
                 config=config,
@@ -424,6 +454,9 @@ async def search_stream(data: SearchRequest, request: Request):
                     if "draft_continuation" in update and update["draft_continuation"]:
                         draft_continuation_data = update["draft_continuation"]
 
+        except TimeoutError:
+            log.error("Stream timed out after 300s", thread_id=thread_id[:12])
+            yield f"data: {json.dumps({'type': 'error', 'data': 'Request timed out. Please try a simpler query.'})}\n\n"
         except Exception as e:
             log.error("Stream error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
@@ -610,6 +643,7 @@ async def chat_with_files(
         draft_continuation_data = None
 
         try:
+          async with _async_timeout(300):  # 5 min hard timeout on streaming
             async for event in agent_graph.astream(
                 initial_state,
                 config=config,
@@ -668,6 +702,9 @@ async def chat_with_files(
                     if "draft_continuation" in update and update["draft_continuation"]:
                         draft_continuation_data = update["draft_continuation"]
 
+        except TimeoutError:
+            log.error("Chat stream timed out after 300s", thread_id=thread_id[:12])
+            yield f"data: {json.dumps({'type': 'error', 'data': 'Request timed out. Please try a simpler query.'})}\n\n"
         except Exception as e:
             log.error("Chat stream error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
@@ -945,11 +982,20 @@ async def mainqa(
                 continue
 
             filename = secure_filename(filex.filename)
+            if not filename:
+                continue
             tmp_path = None
             try:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     filex.file.seek(0)
-                    tmp.write(await filex.read())
+                    content_bytes = await filex.read()
+                    # Validate file size (max 50MB)
+                    if len(content_bytes) > 50 * 1024 * 1024:
+                        log.warning("PDF too large in mainqa",
+                                    file=filename,
+                                    size_mb=len(content_bytes) / (1024 * 1024))
+                        continue
+                    tmp.write(content_bytes)
                     tmp_path = tmp.name
 
                 pdf_doc = fitz.open(tmp_path)
@@ -1003,7 +1049,7 @@ async def mainqa(
         texts = text_splitter.split_documents(documents)
         log.info("Documents chunked", chunks=len(texts), files=len(processed_filenames))
 
-        # Store in ChromaDB
+        # Store in ChromaDB (locked per-collection to prevent concurrent races)
         collection_name = f"collection_{uniqueString}"
         persist_dir = _safe_persist_dir(uniqueString)
         os.makedirs(persist_dir, exist_ok=True)
@@ -1011,48 +1057,50 @@ async def mainqa(
         from langchain_community.vectorstores import Chroma
 
         embeddings = get_qa_embeddings()
-        collection_exists = os.path.exists(os.path.join(persist_dir, "chroma.sqlite3"))
+        col_lock = _get_collection_lock(uniqueString)
+        with col_lock:
+            collection_exists = os.path.exists(os.path.join(persist_dir, "chroma.sqlite3"))
 
-        existing_filenames = []
-        if collection_exists:
-            vectordb = Chroma(
-                embedding_function=embeddings,
-                collection_name=collection_name,
-                persist_directory=persist_dir,
-            )
-            try:
-                metadata = vectordb._collection.metadata
-                if metadata:
-                    fnames_str = metadata.get("filenames", "")
-                    existing_filenames = [f for f in fnames_str.split(",") if f]
-            except Exception:
-                pass
-            # Skip files already in the collection to prevent duplicate chunks
-            existing_set = set(existing_filenames)
-            new_texts = [doc for doc in texts if doc.metadata.get("source") not in existing_set]
-            if new_texts:
-                vectordb.add_documents(new_texts)
-                log.info("Added new chunks to existing collection",
-                         new_chunks=len(new_texts), skipped=len(texts) - len(new_texts))
+            existing_filenames = []
+            if collection_exists:
+                vectordb = Chroma(
+                    embedding_function=embeddings,
+                    collection_name=collection_name,
+                    persist_directory=persist_dir,
+                )
+                try:
+                    metadata = vectordb._collection.metadata
+                    if metadata:
+                        fnames_str = metadata.get("filenames", "")
+                        existing_filenames = [f for f in fnames_str.split(",") if f]
+                except Exception:
+                    pass
+                # Skip files already in the collection to prevent duplicate chunks
+                existing_set = set(existing_filenames)
+                new_texts = [doc for doc in texts if doc.metadata.get("source") not in existing_set]
+                if new_texts:
+                    vectordb.add_documents(new_texts)
+                    log.info("Added new chunks to existing collection",
+                             new_chunks=len(new_texts), skipped=len(texts) - len(new_texts))
+                else:
+                    log.info("All files already in collection, skipping re-upload",
+                             unique_string=uniqueString, existing=list(existing_set))
             else:
-                log.info("All files already in collection, skipping re-upload",
-                         unique_string=uniqueString, existing=list(existing_set))
-        else:
-            vectordb = Chroma.from_documents(
-                documents=texts,
-                embedding=embeddings,
-                collection_name=collection_name,
-                persist_directory=persist_dir,
-            )
+                vectordb = Chroma.from_documents(
+                    documents=texts,
+                    embedding=embeddings,
+                    collection_name=collection_name,
+                    persist_directory=persist_dir,
+                )
 
-        all_filenames = list(set(existing_filenames + processed_filenames))
-        vectordb._collection.modify(
-            metadata={
-                "filenames": ",".join(all_filenames),
-                "upload_date": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "file_count": str(len(all_filenames)),
-            }
-        )
+            all_filenames = list(set(existing_filenames + processed_filenames))
+            vectordb._collection.modify(
+                metadata={
+                    "filenames": ",".join(all_filenames),
+                    "upload_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "file_count": str(len(all_filenames)),
+                }
+            )
 
         total_time = round(time.time() - start_time, 2)
         log.info("PDF upload completed",
@@ -1209,15 +1257,22 @@ async def upload_async(
     filename = secure_filename(file.filename)
 
     # Save to temp file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        file.file.seek(0)
-        tmp.write(await file.read())
-        tmp_path = tmp.name
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            file.file.seek(0)
+            tmp.write(await file.read())
+            tmp_path = tmp.name
 
-    job_id = submit_pdf_job(tmp_path, uniqueString, filename)
-    log.info("Async PDF upload submitted",
-             job_id=job_id, filename=filename, unique_string=uniqueString)
-    return {"job_id": job_id, "status": "pending", "filename": filename}
+        job_id = submit_pdf_job(tmp_path, uniqueString, filename)
+        log.info("Async PDF upload submitted",
+                 job_id=job_id, filename=filename, unique_string=uniqueString)
+        return {"job_id": job_id, "status": "pending", "filename": filename}
+    except Exception as e:
+        # Clean up temp file if job submission fails
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 @app.get("/pyapi/job_status/{job_id}")

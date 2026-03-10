@@ -272,7 +272,9 @@ async def legislation_node(state: LegalAgentState) -> dict:
     5. Generate response using retrieved statute text
     """
     agent_queries = state.get("agent_queries", {})
-    query = agent_queries.get("Legislation", state.get("query", state["original_query"]))
+    # Prefer agent-specific query > original_query > normalized query
+    # Original preserves exact section numbers/citations for ES matching
+    query = agent_queries.get("Legislation", state.get("original_query", state.get("query", "")))
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
              using_agent_query="Legislation" in agent_queries)
@@ -362,8 +364,10 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 return {"agent_results": {"Legislation": fallback_result}}
 
         # Step 4: Convert hits to documents
-        docs_text = "\n\n".join(h["_source"]["page_content"] for h in hits)
-        source_file = hits[0]["_source"].get("source", "unknown")
+        docs_text = "\n\n".join(
+            h.get("_source", {}).get("page_content", "") for h in hits
+        )
+        source_file = hits[0].get("_source", {}).get("source", "unknown") if hits else "unknown"
         source_display = os.path.splitext(os.path.basename(source_file))[0]
 
         log.debug("Generating response",

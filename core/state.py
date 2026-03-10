@@ -139,6 +139,11 @@ class FileContextData:
     file_names: list[str] = field(default_factory=list)
     summary: str = ""
 
+    @property
+    def has_content(self) -> bool:
+        """True if any file content is available (text, images, or ChromaDB)."""
+        return bool(self.inline_text or self.image_data or self.chromadb_collections)
+
     @classmethod
     def from_state(cls, state: dict) -> FileContextData | None:
         """Deserialize file_context dict from state, or None if absent."""

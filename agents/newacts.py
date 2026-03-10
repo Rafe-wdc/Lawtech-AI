@@ -269,7 +269,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
     7. Generate response with provisions
     """
     agent_queries = state.get("agent_queries", {})
-    query = agent_queries.get("Newacts", state.get("query", state["original_query"]))
+    # Prefer agent-specific query > original for ES matching
+    query = agent_queries.get("Newacts", state.get("original_query", state.get("query", "")))
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
              using_agent_query="Newacts" in agent_queries)
@@ -281,8 +282,11 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 asyncio.to_thread(_extract_act_metadata, query),
                 timeout=20,
             )
-        except (asyncio.TimeoutError, Exception) as meta_err:
-            log.warning("GPT-4o metadata extraction failed/timed out, using regex fallback",
+        except asyncio.TimeoutError:
+            log.warning("GPT-4o metadata extraction timed out, using regex fallback")
+            metadata = _regex_fallback_metadata(query)
+        except Exception as meta_err:
+            log.warning("GPT-4o metadata extraction failed, using regex fallback",
                         error=str(meta_err))
             metadata = _regex_fallback_metadata(query)
 
@@ -494,9 +498,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 )
                 added = 0
                 existing_ids = {
-                    h["_source"].get("section_number")
+                    h.get("_source", {}).get("section_number")
                     for h in hits
-                    if h["_source"].get("section_number")
+                    if h.get("_source", {}).get("section_number")
                 }
                 for nh in nearby["hits"]:
                     if nh.get("section_number") not in existing_ids:

@@ -1164,14 +1164,16 @@ async function loadSessionList() {
       const preview = t.preview || 'Empty conversation';
       const isActive = currentThreadId === t.thread_id;
       const ago = timeAgo(t.updated_at);
+      const safeId = escapeHtml(t.thread_id);
+      const safeTurns = parseInt(t.total_turns, 10) || 0;
       return `<div class="session-item${isActive ? ' active' : ''}"
-                   data-thread-id="${t.thread_id}"
-                   onclick="restoreSession('${t.thread_id}', ${t.total_turns})"
+                   data-thread-id="${safeId}"
+                   onclick="restoreSession('${safeId}', ${safeTurns})"
                    title="${escapeHtml(preview)}">
         <div class="session-preview">${escapeHtml(preview)}</div>
         <div class="session-meta">
-          <span>${t.total_turns} turn${t.total_turns !== 1 ? 's' : ''}</span>
-          <span>${ago}</span>
+          <span>${safeTurns} turn${safeTurns !== 1 ? 's' : ''}</span>
+          <span>${escapeHtml(ago)}</span>
         </div>
       </div>`;
     }).join('');
@@ -1312,9 +1314,9 @@ function renderFileChips() {
     let icon = isImg ? '' : (ext === 'pdf' ? '\u{1F4C4}' : '\u{1F4C3}');
     let imgTag = '';
     if (isImg) {
-      imgTag = `<img class="file-chip-img" src="${URL.createObjectURL(f)}" alt="${f.name}" />`;
+      imgTag = `<img class="file-chip-img" src="${URL.createObjectURL(f)}" alt="${escapeHtml(f.name)}" />`;
     }
-    return `<span class="file-chip">${imgTag}<span class="file-icon">${icon}</span>${f.name} <span class="file-size">(${sizeStr})</span><span class="file-remove" onclick="removeFile(${i})">\u00D7</span></span>`;
+    return `<span class="file-chip">${imgTag}<span class="file-icon">${icon}</span>${escapeHtml(f.name)} <span class="file-size">(${sizeStr})</span><span class="file-remove" onclick="removeFile(${i})">\u00D7</span></span>`;
   }).join('');
 }
 
@@ -1497,7 +1499,7 @@ async function sendChatWithFiles(query, threadId) {
         } else if (evt.type === 'draft_incomplete') {
           const note = document.createElement('div');
           note.className = 'draft-incomplete-note';
-          note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${evt.completed_sections}/${evt.total_sections} sections completed. ${evt.failed_sections} section(s) failed. <button class="btn btn-secondary btn-sm" onclick="continueDraft()">Retry failed sections</button>`;
+          note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${parseInt(evt.completed_sections)||0}/${parseInt(evt.total_sections)||0} sections completed. ${parseInt(evt.failed_sections)||0} section(s) failed. <button class="btn btn-secondary btn-sm" onclick="continueDraft()">Retry failed sections</button>`;
           msgDiv.appendChild(note);
         } else if (evt.type === 'done') {
           lastTokens = evt.total_tokens || 0;
@@ -1545,7 +1547,7 @@ async function sendChatBatch(query, threadId) {
   persistThread(data.globalThreadId, data.conversation_turn || currentTurnCount + 1);
   document.getElementById('threadId').value = currentThreadId;
   document.getElementById('chatMeta').textContent =
-    `Thread: ${currentThreadId.substring(0, 8)}... | Turn ${currentTurnCount} | Agents: ${data.agents_used.join(', ') || 'none'}`;
+    `Thread: ${currentThreadId.substring(0, 8)}... | Turn ${currentTurnCount} | Agents: ${(data.agents_used||[]).join(', ') || 'none'}`;
 
   updateContextBar({
     turn: currentTurnCount,
@@ -1614,6 +1616,11 @@ async function sendChatStream(query, threadId) {
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
+    // Safety cap: if buffer exceeds 1MB without newlines, discard oldest data
+    if (buffer.length > 1048576) {
+      const lastNewline = buffer.lastIndexOf('\n');
+      buffer = lastNewline > 0 ? buffer.slice(lastNewline + 1) : buffer.slice(-65536);
+    }
     const lines = buffer.split('\n');
     buffer = lines.pop();
 
@@ -1859,7 +1866,7 @@ async function sendChatStream(query, threadId) {
           const agentsEl = document.getElementById('streamAgents');
           if (agentsEl && agents.length) {
             agentsEl.innerHTML = agents.map(a =>
-              `<span class="agent-tag">${a}</span>`
+              `<span class="agent-tag">${escapeHtml(a)}</span>`
             ).join('');
           }
           addLog('success', `Stream complete: ${agents.join(', ')} | ${totalTokens} tokens | Turn ${currentTurnCount}`);
@@ -1974,7 +1981,13 @@ function addChatMsg(type, text, agents, tokens, elapsed, sources, turnNumber, fo
     div.textContent = text;
   }
 
-  document.getElementById('chatMessages').appendChild(div);
+  const container = document.getElementById('chatMessages');
+  container.appendChild(div);
+  // Cap DOM messages to prevent memory bloat in long sessions
+  const MAX_DOM_MESSAGES = 200;
+  while (container.children.length > MAX_DOM_MESSAGES) {
+    container.removeChild(container.firstChild);
+  }
   scrollChat();
 }
 
@@ -2060,8 +2073,13 @@ function renderMarkdown(text) {
 // PDF Upload
 // ============================================================
 function handleFiles(files) {
+  const MAX_PDF_SIZE = 50 * 1024 * 1024; // 50MB
   for (const f of files) {
     if (f.type === 'application/pdf') {
+      if (f.size > MAX_PDF_SIZE) {
+        alert(`File too large: ${f.name} (${(f.size/1024/1024).toFixed(1)} MB, max 50 MB)`);
+        continue;
+      }
       selectedFiles.push(f);
     }
   }
@@ -2072,7 +2090,7 @@ function renderFileList() {
   const el = document.getElementById('fileList');
   el.innerHTML = selectedFiles.map((f, i) =>
     `<div class="file-item">
-      <span>&#128196; ${f.name}</span>
+      <span>&#128196; ${escapeHtml(f.name)}</span>
       <span class="size">${(f.size / 1024 / 1024).toFixed(2)} MB</span>
       <span class="remove" onclick="removeFile(${i})">&#10005;</span>
     </div>`

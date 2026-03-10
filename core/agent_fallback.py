@@ -156,7 +156,12 @@ async def web_search_fallback(
         if response is None:
             raise RuntimeError("All models failed")
 
-        content = response.candidates[0].content.parts[0].text
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning("Gemini web fallback returned empty candidates/parts",
+                        agent=agent_name)
+            content = ""
+        else:
+            content = response.candidates[0].content.parts[0].text
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
         # Stream the fallback content as tokens to the frontend
@@ -275,7 +280,12 @@ async def get_web_context(query: str, agent_name: str) -> str:
         if response is None:
             return ""
 
-        text = response.candidates[0].content.parts[0].text or ""
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning("Web enrichment returned empty candidates/parts",
+                        agent=agent_name)
+            text = ""
+        else:
+            text = response.candidates[0].content.parts[0].text or ""
         log.debug("Web context enrichment completed",
                   agent=agent_name, context_len=len(text))
         return text

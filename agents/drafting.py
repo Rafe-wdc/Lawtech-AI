@@ -499,7 +499,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
     template_source = continuation["template_source"]
     completed_sections = continuation["completed_sections"]
     failed_indices = continuation["failed_indices"]
-    outline = DraftOutline(**continuation["outline"])
+    outline = DraftOutline.model_validate(continuation["outline"])
 
     log.info("Continue draft started",
              failed_sections=len(failed_indices),
@@ -630,7 +630,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
     6. Assemble with section titles + court filing footer
     """
     agent_queries = state.get("agent_queries", {})
-    query = agent_queries.get("Drafting", state.get("query", state["original_query"]))
+    query = agent_queries.get("Drafting") or state.get("query") or state.get("original_query", "")
     log.info("Agent started", query=query[:100],
              using_agent_query="Drafting" in agent_queries)
 

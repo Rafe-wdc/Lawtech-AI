@@ -30,7 +30,9 @@ from core.settings import CHROMA_STORE_ROOT
 from core.logger import get_logger, log_time
 
 import chromadb
+import threading
 
+_chroma_cache_lock = threading.Lock()
 log = get_logger("Document")
 
 
@@ -96,7 +98,8 @@ def _get_or_create_collection(unique_string: str) -> Chroma:
     embeddings = get_qa_embeddings()
     persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
 
-    chromadb.api.client.SharedSystemClient.clear_system_cache()
+    with _chroma_cache_lock:
+        chromadb.api.client.SharedSystemClient.clear_system_cache()
 
     return Chroma(
         collection_name=unique_string,
@@ -199,7 +202,7 @@ async def document_node(state: LegalAgentState) -> dict:
     Note: PDF upload/processing is handled separately via the gateway
     API route, not through the LangGraph agent flow.
     """
-    query = state.get("query", state["original_query"])
+    query = state.get("query") or state.get("original_query", "")
     unique_string = state.get("unique_string")
 
     # Check file_context for inline-uploaded collections

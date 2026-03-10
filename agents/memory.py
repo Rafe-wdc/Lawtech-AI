@@ -265,6 +265,7 @@ async def memory_node(state: LegalAgentState) -> dict:
     # Step 2: Load chat history if thread exists
     chat_history = []
     summary_text = ""
+    restored_file_context: dict | None = None
 
     if thread_id:
         log.debug("Loading chat history", thread_id=thread_id[:12])
@@ -275,7 +276,6 @@ async def memory_node(state: LegalAgentState) -> dict:
 
         # Step 3: Check file context — attached this turn OR restore from thread history
         fc = FileContextData.from_state(state)
-        restored_file_context: dict | None = None
 
         if fc and fc.has_content:
             # New files uploaded this turn — skip query rewrite

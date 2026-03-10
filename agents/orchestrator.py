@@ -448,7 +448,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             # Note: state["original_query"] is preserved unmodified for agents
             # that need verbatim ES search terms (section numbers, case citations).
     except asyncio.TimeoutError:
-        log.warning("Query normalization timed out, using original")
+        log.warning("Query normalization timed out, using original", exc_info=True)
 
     # Step 1: Classify task (LLM with regex fallback on timeout)
     # If files are attached, hint the classifier about them

@@ -60,6 +60,17 @@ _ABBREVIATION_MAP = {
     "code of criminal procedure": "The Code of Criminal Procedure 1973",
     "indian penal code": "The Indian Penal Code, 1860",
     "indian evidence act": "Indian Evidence Act 1872",
+    # Informal / partial name variants
+    "new penal code": "The Bharatiya Nyaya Sanhita, 2023",
+    "new criminal law": "The Bharatiya Nyaya Sanhita, 2023",
+    "new criminal procedure": "The Bharatiya Nagarik Suraksha Sanhita, 2023",
+    "new criminal procedure code": "The Bharatiya Nagarik Suraksha Sanhita, 2023",
+    "new code of criminal procedure": "The Bharatiya Nagarik Suraksha Sanhita, 2023",
+    "new evidence act": "The Bharatiya Sakshya Adhiniyam, 2023",
+    "new evidence law": "The Bharatiya Sakshya Adhiniyam, 2023",
+    "criminal procedure code": "The Code of Criminal Procedure 1973",
+    "penal code": "The Indian Penal Code, 1860",
+    "evidence act": "Indian Evidence Act 1872",
 }
 
 

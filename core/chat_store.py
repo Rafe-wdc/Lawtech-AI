@@ -406,9 +406,12 @@ class ChatHistoryStore:
     # Draft continuation (incomplete draft metadata)
     # ------------------------------------------------------------------
 
+    _DRAFT_SCHEMA_VERSION = 1
+
     def _save_draft_continuation_sync(self, thread_id: str, data: dict) -> None:
         """Save or update draft continuation data for a thread."""
         self._ensure_schema()
+        versioned = {**data, "_schema_version": self._DRAFT_SCHEMA_VERSION}
         with self._write_lock:
             conn = self._get_connection()
             try:
@@ -418,7 +421,7 @@ class ChatHistoryStore:
                     ON CONFLICT(thread_id) DO UPDATE SET
                         data_json = excluded.data_json,
                         created_at = datetime('now')
-                """, (thread_id, json.dumps(data)))
+                """, (thread_id, json.dumps(versioned)))
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -442,7 +445,15 @@ class ChatHistoryStore:
             ).fetchone()
             if row:
                 try:
-                    return json.loads(row["data_json"])
+                    data = json.loads(row["data_json"])
+                    version = data.get("_schema_version", 0)
+                    if version != self._DRAFT_SCHEMA_VERSION:
+                        log.warning("Draft continuation schema version mismatch, discarding",
+                                    thread_id=thread_id,
+                                    stored_version=version,
+                                    expected=self._DRAFT_SCHEMA_VERSION)
+                        return None
+                    return data
                 except (json.JSONDecodeError, TypeError) as e:
                     log.error("Corrupted draft continuation JSON",
                               thread_id=thread_id, error=str(e))

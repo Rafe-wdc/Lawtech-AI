@@ -14,7 +14,7 @@ This is a **Legal AI API** that provides intelligent legal assistance including:
 ## Tech Stack
 
 - **Framework**: FastAPI (Python), runs on port 5000 via uvicorn
-- **Agent Orchestration**: LangGraph multi-agent system with 10 agents
+- **Agent Orchestration**: LangGraph multi-agent system with 11 agents
 - **LLM Orchestration**: LangChain
 - **LLM Providers**: OpenAI (GPT-4o for orchestration/metadata), Google GenAI (Gemini 2.5 Flash/Pro for generation), Google Search grounding for web fallback
 - **Vector Store**: ChromaDB with HuggingFace embeddings (BGE-large-en-v1.5, all-MiniLM-L6-v2)
@@ -39,7 +39,8 @@ This is a **Legal AI API** that provides intelligent legal assistance including:
 │   ├── memory.py            # Chat history + query rewriting agent
 │   ├── orchestrator.py      # Task planning + result synthesis agent
 │   ├── legislation.py       # Legislation search agent (ES)
-│   ├── judgment.py          # Judgment search agent (ES + S3)
+│   ├── judgment.py          # High Court judgment search agent (ES + S3)
+│   ├── sci_judgment.py      # Supreme Court judgment search agent (ES + S3)
 │   ├── newacts.py           # New acts search agent (ES)
 │   ├── drafting.py          # Legal document drafting agent (per-section)
 │   ├── scenario.py          # Scenario analysis agent (web grounded)

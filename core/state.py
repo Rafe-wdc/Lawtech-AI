@@ -134,6 +134,9 @@ class LegalAgentState(MessagesState):
 class FileContextData:
     """Helper for agents to access file context from state."""
     inline_text: str = ""
+    # Gemini Files API parts — [{file_data: {file_uri, mime_type}, name}]
+    gemini_file_parts: list[dict] = field(default_factory=list)
+    # Legacy base64 image_data (backward compat with old persisted state)
     image_data: list[dict] = field(default_factory=list)
     chromadb_collections: list[str] = field(default_factory=list)
     file_names: list[str] = field(default_factory=list)
@@ -141,8 +144,32 @@ class FileContextData:
 
     @property
     def has_content(self) -> bool:
-        """True if any file content is available (text, images, or ChromaDB)."""
-        return bool(self.inline_text or self.image_data or self.chromadb_collections)
+        """True if any file content is available."""
+        return bool(
+            self.inline_text
+            or self.gemini_file_parts
+            or self.image_data
+            or self.chromadb_collections
+        )
+
+    @property
+    def all_gemini_parts(self) -> list[dict]:
+        """All Gemini-compatible content parts (URI-based + legacy base64).
+
+        Returns gemini_file_parts first, then any legacy image_data converted
+        to inline_data format for backward compatibility.
+        """
+        parts: list[dict] = list(self.gemini_file_parts)
+        for img in self.image_data:  # backward compat
+            if img.get("base64"):
+                parts.append({
+                    "inline_data": {
+                        "data": img["base64"],
+                        "mime_type": img.get("mime", "image/jpeg"),
+                    },
+                    "name": img.get("name", "image"),
+                })
+        return parts
 
     @classmethod
     def from_state(cls, state: dict) -> FileContextData | None:

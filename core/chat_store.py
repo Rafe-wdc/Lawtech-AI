@@ -99,7 +99,8 @@ class ChatHistoryStore:
                     updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
                     summary_text      TEXT NOT NULL DEFAULT '',
                     summary_turn_count INTEGER NOT NULL DEFAULT 0,
-                    total_turns       INTEGER NOT NULL DEFAULT 0
+                    total_turns       INTEGER NOT NULL DEFAULT 0,
+                    file_context_json TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS messages (
@@ -132,8 +133,53 @@ class ChatHistoryStore:
                     data_json   TEXT NOT NULL,
                     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
                 );
+
             """)
             conn.commit()
+
+            # Migration: add file_context_json if upgrading from older schema
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(threads)").fetchall()]
+            if "file_context_json" not in cols:
+                conn.execute("ALTER TABLE threads ADD COLUMN file_context_json TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+                log.info("Migrated threads table: added file_context_json")
+
+            # Migration: create thread_files if not present (executescript cannot use
+            # datetime('now') as DEFAULT on all SQLite versions, so we create it here)
+            existing_tables = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "thread_files" not in existing_tables:
+                conn.execute("""
+                    CREATE TABLE thread_files (
+                        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                        thread_id            TEXT    NOT NULL REFERENCES threads(thread_id),
+                        file_id              TEXT    NOT NULL,
+                        filename             TEXT    NOT NULL,
+                        file_type            TEXT    NOT NULL DEFAULT '',
+                        mime_type            TEXT    NOT NULL DEFAULT '',
+                        size_bytes           INTEGER NOT NULL DEFAULT 0,
+                        local_path           TEXT    NOT NULL DEFAULT '',
+                        extracted_text       TEXT    NOT NULL DEFAULT '',
+                        chromadb_collection  TEXT    NOT NULL DEFAULT '',
+                        gemini_uri           TEXT    NOT NULL DEFAULT '',
+                        gemini_name          TEXT    NOT NULL DEFAULT '',
+                        gemini_expiry        TEXT    NOT NULL DEFAULT '',
+                        gemini_supported     INTEGER NOT NULL DEFAULT 0,
+                        page_count           INTEGER NOT NULL DEFAULT 0,
+                        upload_error         TEXT    NOT NULL DEFAULT '',
+                        created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
+                        UNIQUE(thread_id, file_id)
+                    )
+                """)
+                conn.execute(
+                    "CREATE INDEX idx_thread_files_thread ON thread_files(thread_id, created_at DESC)"
+                )
+                conn.commit()
+                log.info("Migrated: created thread_files table")
+
             self._initialized = True
             log.info("Schema initialized", db_path=self._db_path)
         finally:
@@ -357,91 +403,6 @@ class ChatHistoryStore:
                       thread_id=thread_id[:12], error=str(e))
 
     # ------------------------------------------------------------------
-    # Migration helper (import from legacy API response)
-    # ------------------------------------------------------------------
-
-    def _import_from_api_response_sync(
-        self,
-        thread_id: str,
-        summary_text: str,
-    ) -> None:
-        """Import legacy API summary into SQLite.
-
-        Parses JSON array format [{"user": "...", "ai": "..."}] or
-        stores raw text as a summary if not parseable.
-        """
-        self._ensure_schema()
-        with self._write_lock:
-            conn = self._get_connection()
-            try:
-                # Check if thread already exists
-                existing = conn.execute(
-                    "SELECT total_turns FROM threads WHERE thread_id = ?",
-                    (thread_id,),
-                ).fetchone()
-                if existing and existing["total_turns"] > 0:
-                    return  # Already has data, skip import
-
-                # Try to parse as JSON array of turns
-                turns = []
-                try:
-                    parsed = json.loads(summary_text)
-                    if isinstance(parsed, list):
-                        turns = parsed
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-                if turns:
-                    # Insert as individual turns
-                    conn.execute("""
-                        INSERT INTO threads (thread_id, total_turns, summary_text, summary_turn_count)
-                        VALUES (?, ?, '', 0)
-                        ON CONFLICT(thread_id) DO UPDATE SET
-                            total_turns = excluded.total_turns
-                    """, (thread_id, len(turns)))
-
-                    for i, turn in enumerate(turns, 1):
-                        user_q = turn.get("user", "")
-                        ai_r = turn.get("ai", "")
-                        if user_q or ai_r:
-                            conn.execute("""
-                                INSERT INTO messages (thread_id, turn_number, user_query, ai_response)
-                                VALUES (?, ?, ?, ?)
-                            """, (thread_id, i, user_q, ai_r))
-
-                    log.info("Legacy turns imported",
-                             thread_id=thread_id[:12], turns=len(turns))
-                else:
-                    # Store raw text as summary only (no individual turns)
-                    conn.execute("""
-                        INSERT INTO threads (thread_id, total_turns, summary_text, summary_turn_count)
-                        VALUES (?, 0, ?, 0)
-                        ON CONFLICT(thread_id) DO UPDATE SET
-                            summary_text = excluded.summary_text
-                    """, (thread_id, summary_text))
-
-                    log.info("Legacy summary imported",
-                             thread_id=thread_id[:12],
-                             summary_len=len(summary_text))
-
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
-
-    async def import_from_api_response(
-        self,
-        thread_id: str,
-        summary_text: str,
-    ) -> None:
-        """Async wrapper for legacy import."""
-        return await asyncio.to_thread(
-            self._import_from_api_response_sync, thread_id, summary_text
-        )
-
-    # ------------------------------------------------------------------
     # Draft continuation (incomplete draft metadata)
     # ------------------------------------------------------------------
 
@@ -515,6 +476,217 @@ class ChatHistoryStore:
     async def clear_draft_continuation(self, thread_id: str) -> None:
         return await asyncio.to_thread(
             self._clear_draft_continuation_sync, thread_id
+        )
+
+    # ------------------------------------------------------------------
+    # Thread Files Registry (ChatGPT-style per-thread file persistence)
+    # ------------------------------------------------------------------
+
+    def _save_thread_file_sync(self, thread_id: str, pf) -> None:
+        """Insert or update a file record in thread_files."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                # Ensure thread row exists before inserting a file
+                conn.execute("""
+                    INSERT INTO threads (thread_id, total_turns)
+                    VALUES (?, 0)
+                    ON CONFLICT(thread_id) DO NOTHING
+                """, (thread_id,))
+                conn.execute("""
+                    INSERT INTO thread_files (
+                        thread_id, file_id, filename, file_type, mime_type,
+                        size_bytes, local_path, extracted_text,
+                        chromadb_collection, gemini_uri, gemini_name,
+                        gemini_expiry, gemini_supported, page_count, upload_error
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(thread_id, file_id) DO UPDATE SET
+                        gemini_uri    = excluded.gemini_uri,
+                        gemini_name   = excluded.gemini_name,
+                        gemini_expiry = excluded.gemini_expiry,
+                        upload_error  = excluded.upload_error
+                """, (
+                    thread_id,
+                    getattr(pf, "file_id", ""),
+                    getattr(pf, "original_name", ""),
+                    getattr(pf, "file_type", ""),
+                    getattr(pf, "mime_type", ""),
+                    getattr(pf, "size_bytes", 0),
+                    getattr(pf, "local_path", ""),
+                    getattr(pf, "extracted_text", ""),
+                    getattr(pf, "chromadb_collection", ""),
+                    getattr(pf, "gemini_uri", ""),
+                    getattr(pf, "gemini_name", ""),
+                    getattr(pf, "gemini_expiry", ""),
+                    int(getattr(pf, "gemini_supported", False)),
+                    getattr(pf, "page_count", 0),
+                    getattr(pf, "error", "") or "",
+                ))
+                conn.commit()
+                log.debug("Thread file saved",
+                          thread_id=thread_id[:12],
+                          file=getattr(pf, "original_name", ""),
+                          gemini=bool(getattr(pf, "gemini_uri", "")))
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def save_thread_file(self, thread_id: str, pf) -> None:
+        """Async wrapper for saving a thread file record."""
+        return await asyncio.to_thread(self._save_thread_file_sync, thread_id, pf)
+
+    def _load_thread_files_sync(self, thread_id: str) -> list[dict]:
+        """Load all file records for a thread, oldest first."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT file_id, filename, file_type, mime_type, size_bytes,
+                       local_path, extracted_text, chromadb_collection,
+                       gemini_uri, gemini_name, gemini_expiry,
+                       gemini_supported, page_count, upload_error
+                FROM thread_files
+                WHERE thread_id = ?
+                ORDER BY created_at ASC
+            """, (thread_id,)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    async def load_thread_files(self, thread_id: str) -> list[dict]:
+        """Async wrapper for loading all thread file records."""
+        return await asyncio.to_thread(self._load_thread_files_sync, thread_id)
+
+    def _update_gemini_uri_sync(
+        self,
+        thread_id: str,
+        file_id: str,
+        new_uri: str,
+        new_name: str,
+        new_expiry: str,
+    ) -> None:
+        """Update Gemini URI/name/expiry after a re-upload."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("""
+                    UPDATE thread_files
+                    SET gemini_uri = ?, gemini_name = ?, gemini_expiry = ?
+                    WHERE thread_id = ? AND file_id = ?
+                """, (new_uri, new_name, new_expiry, thread_id, file_id))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def update_gemini_uri(
+        self,
+        thread_id: str,
+        file_id: str,
+        new_uri: str,
+        new_name: str,
+        new_expiry: str,
+    ) -> None:
+        """Async wrapper for updating Gemini URI after re-upload."""
+        return await asyncio.to_thread(
+            self._update_gemini_uri_sync, thread_id, file_id, new_uri, new_name, new_expiry
+        )
+
+    def _get_thread_storage_bytes_sync(self, thread_id: str) -> tuple[int, int]:
+        """Return (file_count, total_bytes) for a thread."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute("""
+                SELECT COUNT(*) as cnt, COALESCE(SUM(size_bytes), 0) as total
+                FROM thread_files WHERE thread_id = ?
+            """, (thread_id,)).fetchone()
+            return row["cnt"], row["total"]
+        finally:
+            conn.close()
+
+    async def get_thread_storage(self, thread_id: str) -> tuple[int, int]:
+        """Async wrapper — returns (file_count, total_bytes) for a thread."""
+        return await asyncio.to_thread(self._get_thread_storage_bytes_sync, thread_id)
+
+    # ------------------------------------------------------------------
+    # File Context Persistence (for multi-turn file memory)
+    # ------------------------------------------------------------------
+
+    def _save_file_context_sync(self, thread_id: str, file_context: dict) -> None:
+        """Persist file context for a thread (inline_text, chromadb_collections, file_names).
+
+        Images are NOT persisted — they are too large (base64) and cannot be
+        meaningfully re-used without the original bytes in a follow-up.
+        """
+        self._ensure_schema()
+        # Strip images before saving
+        safe_ctx = {
+            "inline_text": file_context.get("inline_text", ""),
+            "chromadb_collections": file_context.get("chromadb_collections", []),
+            "file_names": file_context.get("file_names", []),
+            "image_data": [],  # intentionally empty — images not persisted
+        }
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO threads (thread_id, file_context_json)
+                    VALUES (?, ?)
+                    ON CONFLICT(thread_id) DO UPDATE SET
+                        file_context_json = excluded.file_context_json,
+                        updated_at = datetime('now')
+                """, (thread_id, json.dumps(safe_ctx)))
+                conn.commit()
+                log.debug("File context saved",
+                          thread_id=thread_id[:12],
+                          files=safe_ctx["file_names"],
+                          chromadb=len(safe_ctx["chromadb_collections"]),
+                          inline_chars=len(safe_ctx["inline_text"]))
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def save_file_context(self, thread_id: str, file_context: dict) -> None:
+        """Async wrapper for saving file context."""
+        return await asyncio.to_thread(
+            self._save_file_context_sync, thread_id, file_context
+        )
+
+    def _load_file_context_sync(self, thread_id: str) -> dict | None:
+        """Load persisted file context for a thread, or None if absent."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT file_context_json FROM threads WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+            if row and row["file_context_json"]:
+                try:
+                    ctx = json.loads(row["file_context_json"])
+                    # Only return if it has meaningful content
+                    if ctx.get("inline_text") or ctx.get("chromadb_collections") or ctx.get("file_names"):
+                        return ctx
+                except (json.JSONDecodeError, TypeError) as e:
+                    log.error("Corrupted file_context_json",
+                              thread_id=thread_id, error=str(e))
+            return None
+        finally:
+            conn.close()
+
+    async def load_file_context(self, thread_id: str) -> dict | None:
+        """Async wrapper for loading file context."""
+        return await asyncio.to_thread(
+            self._load_file_context_sync, thread_id
         )
 
     # ------------------------------------------------------------------

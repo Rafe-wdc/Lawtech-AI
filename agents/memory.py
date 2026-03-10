@@ -2,7 +2,7 @@
 
 Manages conversation state across turns:
 - Expands legal abbreviations
-- Loads chat history from local SQLite store (with legacy API fallback)
+- Loads chat history from local SQLite store
 - Rewrites follow-up queries into standalone queries
 
 Uses: Gemini 2.5 Flash Lite for query rewriting.
@@ -11,8 +11,7 @@ Uses: Gemini 2.5 Flash Lite for query rewriting.
 from __future__ import annotations
 
 import asyncio
-import json
-import requests
+import os
 from typing import Union
 
 from langchain.messages import HumanMessage, AIMessage
@@ -21,21 +20,19 @@ from langchain_core.prompts import ChatPromptTemplate
 from core.state import LegalAgentState, FileContextData
 from core.clients import get_gemini_flash
 from core.chat_store import chat_store
-from core.settings import LAWTTORNEY_API_BASE, CHAT_HISTORY_USE_LEGACY_API
 from core.logger import get_logger, log_time
 from tools.inline.abbreviation import expand_abbreviations
 
 log = get_logger("Memory")
 
 
-# --- Chat History Loading (SQLite-first with legacy fallback) ---
+# --- Chat History Loading ---
 
 async def _load_chat_history(thread_id: str) -> tuple[list, str]:
-    """Load chat history from SQLite, with optional legacy API fallback.
+    """Load chat history from SQLite.
 
     Returns: (chat_history as HumanMessage/AIMessage list, summary_text str)
     """
-    # Step 1: Try SQLite (fast, local)
     with log_time(log, "SQLite history load", thread_id=thread_id):
         result = await chat_store.load_history(thread_id, max_recent_turns=5)
 
@@ -47,82 +44,11 @@ async def _load_chat_history(thread_id: str) -> tuple[list, str]:
                  has_summary=bool(result.summary_text))
         return result.chat_history, result.summary_text
 
-    # Step 2: If SQLite empty and legacy API enabled, try external API
-    if CHAT_HISTORY_USE_LEGACY_API:
-        log.debug("SQLite empty, trying legacy API", thread_id=thread_id[:12])
-        chat_history, summary_text = await asyncio.to_thread(
-            _load_from_legacy_api, thread_id
-        )
-
-        # If API had real data, import into SQLite for future use
-        if summary_text and "Fresh chat started" not in summary_text:
-            try:
-                await chat_store.import_from_api_response(thread_id, summary_text)
-                log.info("Legacy history imported to SQLite",
-                         thread_id=thread_id[:12])
-            except Exception as e:
-                log.error("Failed to import legacy history",
-                          thread_id=thread_id[:12], error=str(e))
-
-        return chat_history, summary_text
-
-    # Step 3: No history found — return fresh-chat placeholder
     log.debug("No history found", thread_id=thread_id[:12])
     return [
         HumanMessage(content="Previous summary:"),
         AIMessage(content="Fresh chat started."),
     ], ""
-
-
-def _load_from_legacy_api(thread_id: str) -> tuple[list, str]:
-    """Fetch chat history from external lawttorney.ai API (legacy fallback).
-
-    Returns: (chat_history as HumanMessage/AIMessage list, raw summary_text)
-    """
-    chat_history = []
-    summary_text = ""
-
-    try:
-        url = f"{LAWTTORNEY_API_BASE}/users/getChatSummary/{thread_id}"
-        with log_time(log, "Legacy API call", thread_id=thread_id):
-            response = requests.get(url, timeout=10)
-
-        if response.status_code == 200:
-            res_json = response.json()
-            if res_json.get("status") and res_json.get("data"):
-                summary_text = res_json["data"].get("chatSummary", "").strip()
-                log.debug("Legacy API summary received",
-                          thread_id=thread_id[:12],
-                          summary_len=len(summary_text))
-        else:
-            log.warning("Legacy API returned non-200",
-                        status_code=response.status_code,
-                        thread_id=thread_id[:12])
-    except Exception as e:
-        log.error("Legacy API fetch failed",
-                  thread_id=thread_id[:12], error=str(e))
-
-    if summary_text:
-        try:
-            parsed = json.loads(summary_text)
-            if isinstance(parsed, list):
-                for turn in parsed[-5:]:
-                    chat_history.append(HumanMessage(content=turn.get("user", "")))
-                    chat_history.append(AIMessage(content=turn.get("ai", "")))
-                log.debug("Chat history parsed as list",
-                          turns=len(parsed), used=min(5, len(parsed)))
-            else:
-                chat_history.append(HumanMessage(content="Previous summary:"))
-                chat_history.append(AIMessage(content=summary_text))
-        except json.JSONDecodeError:
-            chat_history.append(HumanMessage(content="Previous summary:"))
-            chat_history.append(AIMessage(content=summary_text))
-            log.debug("Chat history is raw text, not JSON")
-    else:
-        chat_history.append(HumanMessage(content="Previous summary:"))
-        chat_history.append(AIMessage(content="Fresh chat started."))
-
-    return chat_history, summary_text
 
 
 # --- Query Rewriting ---
@@ -220,6 +146,99 @@ def _rewrite_query(
         return query
 
 
+# --- File Context Restoration ---
+
+async def _restore_file_context(thread_id: str) -> dict | None:
+    """Load thread files from SQLite, re-upload any expired Gemini URIs, and
+    reconstruct a FileContext dict for injection into state.
+
+    - Gemini URI valid  → use as-is (no upload)
+    - Gemini URI expired → re-upload from local_path, update SQLite
+    - DOCX / XLSX       → use extracted_text directly
+    - Large PDFs        → restore chromadb_collection ID
+    - Missing local file → log warning, skip
+    """
+    from core.gemini_files import is_uri_valid, upload_to_gemini
+
+    thread_files = await chat_store.load_thread_files(thread_id)
+    if not thread_files:
+        return None
+
+    gemini_file_parts: list[dict] = []
+    chromadb_collections: list[str] = []
+    inline_parts: list[str] = []
+    file_names: list[str] = []
+
+    for record in thread_files:
+        if record.get("upload_error") and not record.get("local_path"):
+            continue  # permanently failed, skip
+
+        filename = record.get("filename", "")
+        file_names.append(filename)
+
+        # Restore Gemini-hosted files (images, PDFs, TXT, CSV, MD)
+        if record.get("gemini_supported"):
+            uri = record.get("gemini_uri", "")
+            expiry = record.get("gemini_expiry", "")
+            mime = record.get("mime_type", "")
+
+            if uri and is_uri_valid(expiry):
+                # URI still good — use directly
+                gemini_file_parts.append({
+                    "file_data": {"file_uri": uri, "mime_type": mime},
+                    "name": filename,
+                })
+            else:
+                # Expired — re-upload from local storage
+                local_path = record.get("local_path", "")
+                if local_path and os.path.exists(local_path):
+                    try:
+                        new_uri, new_name, new_expiry = await asyncio.to_thread(
+                            upload_to_gemini, local_path, mime, filename,
+                        )
+                        await chat_store.update_gemini_uri(
+                            thread_id, record["file_id"],
+                            new_uri, new_name, new_expiry,
+                        )
+                        gemini_file_parts.append({
+                            "file_data": {"file_uri": new_uri, "mime_type": mime},
+                            "name": filename,
+                        })
+                        log.info("Re-uploaded expired Gemini file",
+                                 file=filename, thread=thread_id[:12])
+                    except Exception as e:
+                        log.error("Failed to re-upload file",
+                                  file=filename, error=str(e))
+                else:
+                    log.warning("Local file missing, cannot re-upload",
+                                file=filename, path=local_path)
+
+        # Restore ChromaDB collections for large PDFs
+        coll = record.get("chromadb_collection", "")
+        if coll and coll not in chromadb_collections:
+            chromadb_collections.append(coll)
+
+        # Restore extracted text (DOCX, XLSX, CSV fallback)
+        text = record.get("extracted_text", "")
+        if text:
+            inline_parts.append(f"[File: {filename}]\n{text}")
+
+    if not (gemini_file_parts or chromadb_collections or inline_parts):
+        return None
+
+    combined = "\n\n---\n\n".join(inline_parts)
+    if len(combined) > 100_000:
+        combined = combined[:100_000] + "\n\n[... truncated]"
+
+    return {
+        "inline_text": combined,
+        "gemini_file_parts": gemini_file_parts,
+        "chromadb_collections": chromadb_collections,
+        "summary": f"Restored {len(file_names)} file(s) from thread history",
+        "file_names": file_names,
+    }
+
+
 # --- Agent Node ---
 
 async def memory_node(state: LegalAgentState) -> dict:
@@ -254,22 +273,36 @@ async def memory_node(state: LegalAgentState) -> dict:
                  messages=len(chat_history),
                  has_summary=bool(summary_text))
 
-        # Step 3: Rewrite query with context (run sync LLM call in thread)
-        # Skip rewrite when files are attached — the query is about the file, not a follow-up
+        # Step 3: Check file context — attached this turn OR restore from thread history
         fc = FileContextData.from_state(state)
+        restored_file_context: dict | None = None
+
         if fc and fc.has_content:
-            log.info("Skipping query rewrite — files attached",
+            # New files uploaded this turn — skip query rewrite
+            log.info("Skipping query rewrite — files attached this turn",
                      file_names=fc.file_names)
         else:
+            # No new files — restore from thread_files registry (re-uploads if expired)
+            restored_file_context = await _restore_file_context(thread_id)
+            if restored_file_context:
+                log.info("Restored file context from thread history",
+                         files=restored_file_context.get("file_names", []),
+                         gemini_parts=len(restored_file_context.get("gemini_file_parts", [])),
+                         chromadb=len(restored_file_context.get("chromadb_collections", [])))
+
             query = await asyncio.to_thread(_rewrite_query, query, chat_history)
 
     log.info("Agent completed",
              final_query=query[:100],
              query_changed=query != original_query,
-             history_messages=len(chat_history))
+             history_messages=len(chat_history),
+             file_context_restored=restored_file_context is not None)
 
-    return {
+    result: dict = {
         "query": query,
         "chat_history": chat_history,
         "summary_text": summary_text,
     }
+    if restored_file_context is not None:
+        result["file_context"] = restored_file_context
+    return result

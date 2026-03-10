@@ -77,24 +77,25 @@ EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "")
 # --- ChromaDB (PDF uploads only) ---
 CHROMA_STORE_ROOT = str(_PROJECT_ROOT / "chroma_store")
 
+# --- File Upload Storage ---
+UPLOADS_ROOT = str(_PROJECT_ROOT / "uploads")
+MAX_FILES_PER_REQUEST = 30          # max files per single message
+MAX_FILES_PER_THREAD = 30           # max accumulated files per conversation thread
+MAX_FILE_SIZE_MB = 1024             # per-file size limit (1 GB)
+MAX_THREAD_STORAGE_MB = 1024        # 1 GB total per thread
+GEMINI_URI_EXPIRY_BUFFER_HOURS = 2  # re-upload if Gemini URI expires within this window
+
 # --- Chat History (SQLite) ---
 CHAT_HISTORY_DB_PATH = os.getenv(
     "CHAT_HISTORY_DB_PATH",
     str(_PROJECT_ROOT / "data" / "chat_history.db"),
 )
-CHAT_HISTORY_USE_LEGACY_API = os.getenv(
-    "CHAT_HISTORY_USE_LEGACY_API", "true"
-).lower() == "true"
-
 # --- AWS S3 ---
 S3_BUCKET = os.getenv("S3_BUCKET", "lawttorney")
 S3_REGION = os.getenv("S3_REGION", "ap-south-1")
 
 # --- Redis ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-
-# --- External APIs ---
-LAWTTORNEY_API_BASE = os.getenv("LAWTTORNEY_API_BASE", "https://lawttorney.ai/api")
 
 # --- Server ---
 HOST = os.getenv("HOST", "0.0.0.0")

@@ -555,7 +555,8 @@ async def chat_with_files(
     Processes files (PDF, images, DOCX, TXT, CSV, XLSX), then runs
     the full agent graph with file context injected into state.
     """
-    from .file_processor import process_files, validate_upload, MAX_FILES
+    from .file_processor import process_files, validate_upload
+    from .settings import MAX_FILES_PER_REQUEST as MAX_FILES
 
     thread_id = globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
@@ -618,6 +619,8 @@ async def chat_with_files(
             try:
                 fc = await process_files(file_tuples, thread_id)
                 file_context_dict = fc.to_dict()
+                # Note: process_files() already persists each file to thread_files table.
+                # No need for save_file_context() here.
 
                 # Send file processing summary
                 yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"

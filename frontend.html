@@ -257,88 +257,227 @@
     border-top: 1px solid var(--border);
     background: var(--surface);
   }
-  .file-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-  .file-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
+  /* ── File attachment UI (ChatGPT-style) ── */
+  .chat-input-box {
     background: var(--surface2);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: var(--radius);
+    transition: border-color 0.15s;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .chat-input-box:focus-within { border-color: var(--accent); }
+
+  /* File preview cards (above textarea, inside the box) */
+  .file-preview-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px 0;
+  }
+  .file-preview-bar:empty { display: none; }
+
+  .file-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    max-width: 200px;
+    min-width: 120px;
+    cursor: default;
+    transition: border-color 0.15s;
+  }
+  .file-card:hover { border-color: var(--accent); }
+  .file-card.is-image {
+    padding: 0;
+    overflow: hidden;
+    width: 72px;
+    min-width: 72px;
+    height: 72px;
+    border-radius: 8px;
+    background: #000;
+  }
+  .file-card.is-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 7px;
+    display: block;
+  }
+  .file-card-icon {
+    font-size: 22px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .file-card-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .file-card-name {
     font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--text);
   }
-  .file-chip .file-icon { font-size: 14px; }
-  .file-chip .file-size { color: var(--text2); font-size: 11px; }
-  .file-chip .file-remove {
+  .file-card-meta {
+    font-size: 10px;
+    color: var(--text2);
+    margin-top: 1px;
+  }
+  .file-type-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-right: 3px;
+  }
+  .badge-pdf   { background: #fee2e2; color: #dc2626; }
+  .badge-img   { background: #dbeafe; color: #2563eb; }
+  .badge-docx  { background: #dbeafe; color: #1d4ed8; }
+  .badge-xlsx  { background: #dcfce7; color: #16a34a; }
+  .badge-csv   { background: #d1fae5; color: #059669; }
+  .badge-txt   { background: var(--surface2); color: var(--text2); }
+  .badge-md    { background: #f3f4f6; color: #374151; }
+  .file-card-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    font-size: 11px;
+    line-height: 17px;
+    text-align: center;
     cursor: pointer;
     color: var(--text2);
-    font-size: 14px;
-    line-height: 1;
-    margin-left: 2px;
+    display: none;
+    z-index: 2;
   }
-  .file-chip .file-remove:hover { color: var(--red); }
-  .file-chip-img {
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    object-fit: cover;
+  .file-card:hover .file-card-remove { display: block; }
+  .file-card-remove:hover { background: var(--red); color: #fff; border-color: var(--red); }
+
+  /* Persistent files bar (files from prior turns, grayed) */
+  .persistent-files-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text2);
+  }
+  .persistent-files-bar:empty { display: none; }
+  .persistent-file-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-size: 11px;
+    color: var(--text2);
+    opacity: 0.7;
+  }
+  .persistent-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    opacity: 0.6;
+    margin-right: 2px;
+  }
+
+  /* Bottom row: attach + textarea + send — all inside the box */
+  .input-inner {
+    display: flex;
+    align-items: flex-end;
+    gap: 0;
   }
   .btn-attach {
     background: none;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border: none;
     color: var(--text2);
-    padding: 10px 12px;
+    padding: 10px 10px 10px 12px;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 18px;
     line-height: 1;
-    transition: all 0.15s;
+    transition: color 0.15s;
+    flex-shrink: 0;
+    align-self: flex-end;
+    margin-bottom: 2px;
   }
-  .btn-attach:hover { background: var(--surface2); color: var(--text); border-color: var(--accent); }
-  .chat-drop-overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(200,146,12,0.08);
-    border: 2px dashed var(--accent);
-    border-radius: var(--radius);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    color: var(--accent);
-    font-weight: 600;
-    z-index: 10;
-    pointer-events: none;
-  }
-  .input-row {
+  .btn-attach:hover { color: var(--accent); }
+  .btn-attach.has-files { color: var(--accent); }
+  .input-row, .input-inner {
     display: flex;
     gap: 10px;
     align-items: flex-end;
   }
-  .input-row textarea {
+  .input-row textarea, .input-inner textarea {
     flex: 1;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    background: transparent;
+    border: none;
+    outline: none;
     color: var(--text);
-    padding: 12px 16px;
+    padding: 12px 12px 12px 4px;
     font-size: 14px;
     font-family: inherit;
     resize: none;
     min-height: 44px;
-    max-height: 120px;
-    outline: none;
+    max-height: 160px;
     transition: border-color 0.15s;
   }
-  .input-row textarea:focus { border-color: var(--accent); }
-  .input-row textarea::placeholder { color: var(--text2); }
+  .input-row textarea:focus, .input-inner textarea:focus { outline: none; }
+  .input-row textarea::placeholder, .input-inner textarea::placeholder { color: var(--text2); }
+
+  /* Storage indicator */
+  .storage-indicator {
+    font-size: 10px;
+    color: var(--text2);
+    padding: 3px 12px 6px;
+    display: none;
+  }
+  .storage-indicator.visible { display: block; }
+  .storage-indicator.warn { color: var(--orange); }
+
+  /* Drag-drop overlay — full chat panel */
+  .chat-drop-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(200,146,12,0.07);
+    border: 2px dashed var(--accent);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 18px;
+    color: var(--accent);
+    font-weight: 600;
+    z-index: 20;
+    pointer-events: none;
+    backdrop-filter: blur(2px);
+  }
+  .chat-drop-overlay .drop-sub {
+    font-size: 12px;
+    font-weight: 400;
+    opacity: 0.7;
+  }
 
   .btn {
     padding: 10px 20px;
@@ -945,14 +1084,35 @@
         <input type="file" id="chatFileInput" multiple
                accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.csv,.xlsx" style="display:none"
                onchange="handleChatFiles(this.files)" />
-        <div class="file-chips" id="fileChips" style="display:none;"></div>
-        <div class="input-row">
-          <button class="btn-attach" id="attachBtn" onclick="document.getElementById('chatFileInput').click()" title="Attach files (PDF, images, DOCX, TXT, CSV, XLSX)">&#x1F4CE;</button>
-          <textarea id="chatInput" placeholder="Ask a legal question... (Shift+Enter for newline)" rows="1"
-                    onkeydown="handleChatKey(event)"></textarea>
-          <button class="btn btn-primary" id="chatSendBtn" onclick="sendChat()">Send</button>
+
+        <!-- Persistent files from prior turns -->
+        <div class="persistent-files-bar" id="persistentFilesBar"></div>
+
+        <!-- ChatGPT-style input box with file cards inside -->
+        <div class="chat-input-box" id="chatInputBox">
+          <!-- File preview cards (shown when files are queued) -->
+          <div class="file-preview-bar" id="filePreviewBar"></div>
+
+          <!-- Attach + textarea + send in one row -->
+          <div class="input-inner">
+            <button class="btn-attach" id="attachBtn"
+                    onclick="document.getElementById('chatFileInput').click()"
+                    title="Attach files — PDF, images, DOCX, TXT, CSV, XLSX&#10;Up to 30 files · 1 GB each">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </button>
+            <textarea id="chatInput" placeholder="Ask a legal question..." rows="1"
+                      onkeydown="handleChatKey(event)"
+                      oninput="autoResizeTextarea(this)"
+                      onpaste="handlePaste(event)"></textarea>
+            <button class="btn btn-primary" id="chatSendBtn" onclick="sendChat()"
+                    style="margin: 6px 8px 6px 0; padding: 8px 18px; align-self: flex-end;">Send</button>
+          </div>
+          <div class="storage-indicator" id="storageIndicator"></div>
         </div>
-        <div class="toggle-row">
+
+        <div class="toggle-row" style="margin-top:8px;">
           <label><input type="checkbox" id="streamToggle" /> Streaming (SSE)</label>
           <label>Thread:
             <input type="text" id="threadId" placeholder="auto" style="width: 180px;" />
@@ -1185,7 +1345,7 @@ async function loadSessionList() {
 function timeAgo(dateStr) {
   if (!dateStr) return '';
   try {
-    const d = new Date(dateStr + 'Z'); // SQLite dates are UTC
+    const d = new Date(dateStr.replace(' ', 'T') + 'Z'); // SQLite dates are UTC, space→T for strict ISO 8601
     const now = new Date();
     const diff = Math.floor((now - d) / 1000);
     if (diff < 60) return 'just now';
@@ -1260,6 +1420,7 @@ function newChat() {
     '<div class="msg system">New conversation started.</div>';
   document.getElementById('chatMeta').textContent = 'New conversation';
   document.getElementById('contextBar').innerHTML = '';
+  document.getElementById('persistentFilesBar').innerHTML = '';
   // Update sidebar — deselect active session
   document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
 }
@@ -1271,92 +1432,177 @@ function handleChatKey(e) {
   }
 }
 
-// --- File Attachment ---
+// --- File Attachment (ChatGPT-style) ---
 let pendingFiles = [];
 const ALLOWED_EXTS = ['.pdf','.jpg','.jpeg','.png','.webp','.docx','.txt','.md','.csv','.xlsx'];
-const MAX_ATTACH_FILES = 5;
-const MAX_ATTACH_SIZE = 50 * 1024 * 1024;
+const MAX_ATTACH_FILES = 30;
+const MAX_ATTACH_SIZE_MB = 1024;
+const MAX_ATTACH_SIZE = MAX_ATTACH_SIZE_MB * 1024 * 1024;
+
+const FILE_ICONS = {
+  pdf: '📄', docx: '📝', xlsx: '📊', csv: '📋',
+  txt: '📃', md: '📃', jpg: '🖼', jpeg: '🖼', png: '🖼', webp: '🖼',
+};
+const FILE_BADGE_CLASS = {
+  pdf: 'badge-pdf', jpg: 'badge-img', jpeg: 'badge-img', png: 'badge-img', webp: 'badge-img',
+  docx: 'badge-docx', xlsx: 'badge-xlsx', csv: 'badge-csv', txt: 'badge-txt', md: 'badge-md',
+};
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024*1024) return `${(bytes/1024).toFixed(0)} KB`;
+  if (bytes < 1024*1024*1024) return `${(bytes/1024/1024).toFixed(1)} MB`;
+  return `${(bytes/1024/1024/1024).toFixed(2)} GB`;
+}
 
 function handleChatFiles(fileList) {
   for (const f of fileList) {
     if (pendingFiles.length >= MAX_ATTACH_FILES) {
-      addLog('warn', `Max ${MAX_ATTACH_FILES} files allowed`);
+      addLog('warn', `Max ${MAX_ATTACH_FILES} files per message`);
       break;
     }
     const ext = '.' + f.name.split('.').pop().toLowerCase();
     if (!ALLOWED_EXTS.includes(ext)) {
-      addLog('warn', `Unsupported file type: ${ext}`);
+      addLog('warn', `Unsupported type: ${ext} — allowed: PDF, images, DOCX, TXT, CSV, XLSX`);
       continue;
     }
     if (f.size > MAX_ATTACH_SIZE) {
-      addLog('warn', `File too large: ${f.name} (${(f.size/1024/1024).toFixed(1)} MB)`);
+      addLog('warn', `${f.name} too large (${fmtSize(f.size)}) — max ${MAX_ATTACH_SIZE_MB} MB`);
       continue;
     }
+    // Avoid duplicates by name
+    if (pendingFiles.some(p => p.name === f.name && p.size === f.size)) continue;
     pendingFiles.push(f);
   }
-  renderFileChips();
+  renderFileCards();
   document.getElementById('chatFileInput').value = '';
 }
 
-function renderFileChips() {
-  const container = document.getElementById('fileChips');
+// Paste image from clipboard
+function handlePaste(e) {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const f = item.getAsFile();
+      if (f) {
+        // Rename to include type
+        const ext = item.type.split('/')[1] || 'png';
+        const named = new File([f], `pasted_image.${ext}`, { type: item.type });
+        handleChatFiles([named]);
+      }
+    }
+  }
+}
+
+function renderFileCards() {
+  const bar = document.getElementById('filePreviewBar');
+  const attachBtn = document.getElementById('attachBtn');
+  const storageEl = document.getElementById('storageIndicator');
+
   if (!pendingFiles.length) {
-    container.style.display = 'none';
-    container.innerHTML = '';
+    bar.innerHTML = '';
+    attachBtn.classList.remove('has-files');
+    storageEl.className = 'storage-indicator';
     return;
   }
-  container.style.display = 'flex';
-  container.innerHTML = pendingFiles.map((f, i) => {
-    const sizeMB = (f.size / 1024 / 1024).toFixed(1);
-    const sizeStr = f.size < 1024*1024 ? `${(f.size/1024).toFixed(0)} KB` : `${sizeMB} MB`;
+
+  attachBtn.classList.add('has-files');
+
+  bar.innerHTML = pendingFiles.map((f, i) => {
     const ext = f.name.split('.').pop().toLowerCase();
     const isImg = ['jpg','jpeg','png','webp'].includes(ext);
-    let icon = isImg ? '' : (ext === 'pdf' ? '\u{1F4C4}' : '\u{1F4C3}');
-    let imgTag = '';
+    const badge = FILE_BADGE_CLASS[ext] || 'badge-txt';
+    const icon = FILE_ICONS[ext] || '📎';
+    const shortName = f.name.length > 22 ? f.name.slice(0,19) + '…' + f.name.slice(-4) : f.name;
+
     if (isImg) {
-      imgTag = `<img class="file-chip-img" src="${URL.createObjectURL(f)}" alt="${escapeHtml(f.name)}" />`;
+      const objUrl = URL.createObjectURL(f);
+      return `<div class="file-card is-image" title="${escapeHtml(f.name)} · ${fmtSize(f.size)}">
+        <img src="${objUrl}" alt="${escapeHtml(f.name)}" onload="URL.revokeObjectURL(this.src)" />
+        <span class="file-card-remove" onclick="removeFile(${i})" title="Remove">×</span>
+      </div>`;
     }
-    return `<span class="file-chip">${imgTag}<span class="file-icon">${icon}</span>${escapeHtml(f.name)} <span class="file-size">(${sizeStr})</span><span class="file-remove" onclick="removeFile(${i})">\u00D7</span></span>`;
+
+    return `<div class="file-card" title="${escapeHtml(f.name)} · ${fmtSize(f.size)}">
+      <div class="file-card-icon">${icon}</div>
+      <div class="file-card-info">
+        <div class="file-card-name">${escapeHtml(shortName)}</div>
+        <div class="file-card-meta"><span class="file-type-badge ${badge}">${ext.toUpperCase()}</span>${fmtSize(f.size)}</div>
+      </div>
+      <span class="file-card-remove" onclick="removeFile(${i})" title="Remove">×</span>
+    </div>`;
   }).join('');
+
+  // Storage indicator
+  const totalBytes = pendingFiles.reduce((s, f) => s + f.size, 0);
+  const pct = Math.round((pendingFiles.length / MAX_ATTACH_FILES) * 100);
+  storageEl.textContent = `${pendingFiles.length}/${MAX_ATTACH_FILES} files · ${fmtSize(totalBytes)} · Shift+Enter for new line`;
+  storageEl.className = 'storage-indicator visible' + (pct >= 80 ? ' warn' : '');
 }
 
 function removeFile(idx) {
   pendingFiles.splice(idx, 1);
-  renderFileChips();
+  renderFileCards();
 }
 
-// Drag and drop on chat area
+// Show persistent files from prior turns in this thread
+function renderPersistentFiles(fileNames) {
+  const bar = document.getElementById('persistentFilesBar');
+  if (!bar) return;
+  if (!fileNames || !fileNames.length) { bar.innerHTML = ''; return; }
+  bar.innerHTML =
+    `<span class="persistent-label">📎 Thread files</span>` +
+    fileNames.slice(0, 8).map(n => {
+      const ext = n.split('.').pop().toLowerCase();
+      const icon = FILE_ICONS[ext] || '📎';
+      const short = n.length > 20 ? n.slice(0,17) + '…' : n;
+      return `<span class="persistent-file-tag">${icon} ${escapeHtml(short)}</span>`;
+    }).join('') +
+    (fileNames.length > 8 ? `<span class="persistent-file-tag">+${fileNames.length-8} more</span>` : '');
+}
+
+// Auto-resize textarea
+function autoResizeTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+// Drag-drop — cover entire chat panel (not just input area)
 (function() {
-  const area = document.getElementById('chatInputArea');
-  if (!area) return;
+  const panel = document.getElementById('chatMessages') || document.getElementById('chatInputArea');
+  if (!panel) return;
   let dragCounter = 0;
   let overlay = null;
 
-  area.addEventListener('dragenter', e => {
+  panel.addEventListener('dragenter', e => {
+    if (![...e.dataTransfer.types].includes('Files')) return;
     e.preventDefault();
     dragCounter++;
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.className = 'chat-drop-overlay';
-      overlay.textContent = 'Drop files here';
-      area.appendChild(overlay);
+      overlay.innerHTML = '📎 Drop files here<div class="drop-sub">PDF · Images · DOCX · TXT · CSV · XLSX</div>';
+      panel.style.position = 'relative';
+      panel.appendChild(overlay);
     }
   });
-  area.addEventListener('dragleave', e => {
-    e.preventDefault();
+  panel.addEventListener('dragleave', e => {
     dragCounter--;
-    if (dragCounter <= 0 && overlay) {
-      overlay.remove();
-      overlay = null;
+    if (dragCounter <= 0) {
+      if (overlay) { overlay.remove(); overlay = null; }
       dragCounter = 0;
     }
   });
-  area.addEventListener('dragover', e => e.preventDefault());
-  area.addEventListener('drop', e => {
+  panel.addEventListener('dragover', e => e.preventDefault());
+  panel.addEventListener('drop', e => {
     e.preventDefault();
     dragCounter = 0;
     if (overlay) { overlay.remove(); overlay = null; }
-    if (e.dataTransfer.files.length) handleChatFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files.length) {
+      handleChatFiles(e.dataTransfer.files);
+      document.getElementById('chatInput').focus();
+    }
   });
 })();
 
@@ -1369,11 +1615,11 @@ async function sendChat() {
   const threadInput = document.getElementById('threadId').value.trim();
   const threadId = threadInput || currentThreadId || null;
 
-  // Add user message (with file names if attached)
+  // Add user message — show file cards above the text bubble
   let displayQuery = query;
   if (pendingFiles.length) {
-    const fnames = pendingFiles.map(f => f.name).join(', ');
-    displayQuery = `\u{1F4CE} [${fnames}]\n${query}`;
+    const fnames = pendingFiles.map(f => f.name).join(' · ');
+    displayQuery = `📎 **${fnames}**\n\n${query}`;
   }
   addChatMsg('user', displayQuery);
   input.value = '';
@@ -1388,7 +1634,7 @@ async function sendChat() {
       btn.textContent = 'Uploading...';
       await sendChatWithFiles(query, threadId);
       pendingFiles = [];
-      renderFileChips();
+      renderFileCards();
     } else if (streaming) {
       btn.textContent = 'Streaming...';
       await sendChatStream(query, threadId);
@@ -1468,7 +1714,10 @@ async function sendChatWithFiles(query, threadId) {
           persistThread(evt.data, currentTurnCount);
           document.getElementById('threadId').value = currentThreadId;
         } else if (evt.type === 'file_processing') {
-          statusEl.innerHTML = `<span class="typing-indicator"></span> ${evt.message}`;
+          const fileList = (evt.files || []).slice(0,4).join(' · ');
+          statusEl.innerHTML = `<span class="typing-indicator"></span> ${escapeHtml(evt.message)}${fileList ? ' — ' + escapeHtml(fileList) : ''}`;
+          // Update persistent files bar when files are confirmed processed
+          if (evt.files && evt.files.length) renderPersistentFiles(evt.files);
         } else if (evt.type === 'status') {
           statusEl.innerHTML = `<span class="typing-indicator"></span> ${evt.message}`;
         } else if (evt.type === 'agents_planned') {
@@ -1492,14 +1741,17 @@ async function sendChatWithFiles(query, threadId) {
           }
         } else if (evt.type === 'sources') {
           allSources = evt.data;
-        } else if (evt.type === 'followup_suggestions' && evt.data) {
-          renderFollowupChips(msgDiv, evt.data);
+        } else if (evt.type === 'followup_suggestions' && evt.data && evt.data.length) {
+          const sugDiv = document.createElement('div');
+          sugDiv.innerHTML = renderFollowupSuggestions(evt.data);
+          msgDiv.appendChild(sugDiv);
+          scrollChat();
         } else if (evt.type === 'drafting_progress') {
           statusEl.innerHTML = `<span class="typing-indicator"></span> Drafting section ${evt.section}/${evt.total}: ${evt.title}`;
         } else if (evt.type === 'draft_incomplete') {
           const note = document.createElement('div');
           note.className = 'draft-incomplete-note';
-          note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${parseInt(evt.completed_sections)||0}/${parseInt(evt.total_sections)||0} sections completed. ${parseInt(evt.failed_sections)||0} section(s) failed. <button class="btn btn-secondary btn-sm" onclick="continueDraft()">Retry failed sections</button>`;
+          note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${parseInt(evt.completed_sections)||0}/${parseInt(evt.total_sections)||0} sections completed. ${parseInt(evt.failed_sections)||0} section(s) failed. <button class="btn btn-secondary btn-sm" onclick="continueDraft(this)">Retry failed sections</button>`;
           msgDiv.appendChild(note);
         } else if (evt.type === 'done') {
           lastTokens = evt.total_tokens || 0;
@@ -1509,9 +1761,10 @@ async function sendChatWithFiles(query, threadId) {
           document.getElementById('chatMeta').textContent =
             `Thread: ${currentThreadId.substring(0,8)}... | Turn ${currentTurnCount} | Agents: ${(evt.agents_used||[]).join(', ')||'none'}`;
           addLog('success', `Files+Chat: ${(evt.agents_used||[]).join(',')} | ${lastTokens} tokens | ${elapsed}s`);
-
-          if (allSources.length && typeof renderSources === 'function') {
-            renderSources(msgDiv, allSources);
+          if (allSources.length) {
+            const citDiv = document.createElement('div');
+            citDiv.innerHTML = renderCitations(allSources);
+            msgDiv.appendChild(citDiv);
           }
         } else if (evt.type === 'error') {
           addChatMsg('error', evt.data);
@@ -2295,10 +2548,6 @@ function clearLogs() {
   document.getElementById('logPanel').innerHTML = '';
 }
 
-function escapeHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
 // ============================================================
 // Citation Rendering
 // ============================================================
@@ -2716,13 +2965,6 @@ function sendFollowup(chip) {
   sendChat();
 }
 
-// ============================================================
-// Auto-resize textarea
-// ============================================================
-document.getElementById('chatInput').addEventListener('input', function() {
-  this.style.height = 'auto';
-  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-});
 
 // ============================================================
 // Init
@@ -2730,13 +2972,9 @@ document.getElementById('chatInput').addEventListener('input', function() {
 checkHealth();
 loadSessionList();
 
-// Restore thread state from sessionStorage
+// Restore thread state from sessionStorage — auto-load full history
 if (currentThreadId) {
-  document.getElementById('threadId').value = currentThreadId;
-  document.getElementById('chatMeta').textContent =
-    `Thread: ${currentThreadId.substring(0, 8)}... | Turn ${currentTurnCount} | Continuing conversation`;
-  updateContextBar({ turn: currentTurnCount, threadId: currentThreadId });
-  addChatMsg('system', `Continuing thread ${currentThreadId.substring(0, 8)}... (turn ${currentTurnCount}). Type a follow-up question or click New Chat to start fresh.`);
+  restoreSession(currentThreadId, currentTurnCount);
 }
 </script>
 </body>

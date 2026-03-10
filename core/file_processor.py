@@ -1,54 +1,55 @@
 """Unified file processing for inline chat attachments.
 
-Handles PDF, images, DOCX, TXT/MD, CSV, and XLSX files uploaded
-alongside chat messages. Reuses existing PyMuPDF and Gemini Vision
-OCR patterns from document_tools.
+ChatGPT-style file persistence:
+- All files saved permanently to ./uploads/{thread_id}/
+- Gemini-supported types (PDF, images, TXT, CSV, MD) uploaded to Gemini Files API
+  → persistent URI replaces base64 (48h TTL, auto re-upload from local if expired)
+- DOCX / XLSX → text extracted inline (not supported by Gemini Files API)
+- Large PDFs (>20 pages) → also stored in ChromaDB for targeted retrieval
 
-Small files (PDF ≤20 pages, text files) → inline text injection.
-Large PDFs (>20 pages or >100K chars) → ChromaDB vector storage.
-Images → base64 for Gemini multimodal.
+Limits: 30 files/request, 30 files/thread, 1 GB/file, 1 GB/thread total.
 """
 
 from __future__ import annotations
 
-import base64
+import asyncio
 import csv
 import io
 import os
-import tempfile
+import shutil
 import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.logger import get_logger
-from core.settings import CHROMA_STORE_ROOT
+from core.settings import (
+    CHROMA_STORE_ROOT,
+    UPLOADS_ROOT,
+    MAX_FILES_PER_REQUEST,
+    MAX_FILES_PER_THREAD,
+    MAX_FILE_SIZE_MB,
+    MAX_THREAD_STORAGE_MB,
+)
+from core.gemini_files import (
+    get_mime_type,
+    is_gemini_supported,
+    upload_to_gemini,
+    GEMINI_SUPPORTED_MIMES,
+)
 
 _chroma_cache_lock = threading.Lock()
-
 log = get_logger("FileProcessor")
 
 # --- Constants ---
 
-MAX_FILES = 5
-MAX_FILE_SIZE_MB = 50
 MAX_INLINE_TEXT_CHARS = 100_000
 MAX_INLINE_PDF_PAGES = 20
-MAX_IMAGES = 3
-MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2MB before resize
 VISION_BATCH_SIZE = 5
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".jpg", ".jpeg", ".png", ".webp",
     ".docx", ".txt", ".md", ".csv", ".xlsx",
-}
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-IMAGE_MIME_MAP = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
 }
 
 
@@ -58,32 +59,38 @@ IMAGE_MIME_MAP = {
 class ProcessedFile:
     """Result of processing a single uploaded file."""
     original_name: str
-    file_type: str  # "pdf", "image", "docx", "txt", "csv", "xlsx"
+    file_type: str      # "pdf", "image", "docx", "txt", "csv", "xlsx"
+    mime_type: str
     size_bytes: int
-    extracted_text: str = ""
-    image_base64: str = ""
-    image_mime: str = ""
+    file_id: str = ""           # stable UUID per file in this thread
+    local_path: str = ""        # ./uploads/{thread_id}/{file_id}_{filename}
+    # Content routing (one or more may be set)
+    gemini_uri: str = ""        # Gemini Files API URI
+    gemini_name: str = ""       # Gemini handle e.g. "files/abc123"
+    gemini_expiry: str = ""     # ISO 8601 expiry
+    extracted_text: str = ""    # DOCX / XLSX / fallback text
+    chromadb_collection: str = ""   # large PDFs stored in ChromaDB
     page_count: int = 0
-    stored_in_chromadb: bool = False
-    unique_string: str = ""
+    gemini_supported: bool = False
     error: str | None = None
 
 
 @dataclass
 class FileContext:
-    """Aggregated result of processing all uploaded files."""
+    """Aggregated result of processing all uploaded files for one turn."""
     files: list[ProcessedFile] = field(default_factory=list)
     inline_text: str = ""
-    image_data: list[dict] = field(default_factory=list)  # [{base64, mime}]
+    gemini_file_parts: list[dict] = field(default_factory=list)
+    # [{file_data: {file_uri, mime_type}, name}] — passed to Gemini content
     chromadb_collections: list[str] = field(default_factory=list)
     summary: str = ""
     file_names: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        """Serialize for LangGraph state (must be JSON-serializable)."""
+        """Serialize for LangGraph state (JSON-serializable)."""
         return {
             "inline_text": self.inline_text,
-            "image_data": self.image_data,
+            "gemini_file_parts": self.gemini_file_parts,
             "chromadb_collections": self.chromadb_collections,
             "summary": self.summary,
             "file_names": self.file_names,
@@ -105,75 +112,36 @@ def validate_upload(filename: str, size_bytes: int) -> str | None:
     return None
 
 
-# --- Per-Type Extractors ---
+# --- PDF helpers ---
 
-def _extract_pdf(file_path: str, thread_id: str) -> ProcessedFile:
-    """Extract text from PDF. Small → inline, large → ChromaDB."""
+def _extract_pdf_text(file_path: str) -> tuple[str, int]:
+    """Extract text from PDF with PyMuPDF. Returns (text, page_count)."""
     import fitz
 
-    name = os.path.basename(file_path)
-    size = os.path.getsize(file_path)
-    result = ProcessedFile(original_name=name, file_type="pdf", size_bytes=size)
-
-    try:
-        doc = fitz.open(file_path)
-    except Exception as e:
-        result.error = f"Cannot open PDF: {e}"
-        return result
+    doc = fitz.open(file_path)
+    page_count = doc.page_count
 
     if doc.is_encrypted:
         doc.close()
-        result.error = "PDF is encrypted/password-protected"
-        return result
+        raise ValueError("PDF is encrypted/password-protected")
 
-    result.page_count = doc.page_count
-
-    if doc.page_count == 0:
+    if page_count == 0:
         doc.close()
-        result.error = "PDF has no pages"
-        return result
+        raise ValueError("PDF has no pages")
 
-    # Extract text with PyMuPDF
     all_text = []
     for page_num, page in enumerate(doc):
         text = page.get_text("text")
         if text and text.strip():
             all_text.append(f"--- Page {page_num + 1} ---\n{text.strip()}")
 
-    full_text = "\n\n".join(all_text)
-
-    # If scanned (no text), try Vision OCR
-    if not full_text.strip() and doc.page_count > 0:
-        doc.close()
-        full_text = _vision_ocr_pdf(file_path, 0, result.page_count - 1)
-        if not full_text:
-            result.error = "Could not extract text from scanned PDF"
-            return result
-
     doc.close()
-
-    # Decide: inline vs ChromaDB
-    if result.page_count > MAX_INLINE_PDF_PAGES or len(full_text) > MAX_INLINE_TEXT_CHARS:
-        # Store in ChromaDB
-        collection_id = f"inline_{thread_id}_{uuid.uuid4().hex[:8]}"
-        try:
-            _store_in_chromadb(full_text, collection_id, name)
-            result.stored_in_chromadb = True
-            result.unique_string = collection_id
-            log.info("PDF stored in ChromaDB",
-                     file=name, pages=result.page_count, collection=collection_id)
-        except Exception as e:
-            log.error("Failed to store PDF in ChromaDB", error=str(e))
-            # Fall back to truncated inline
-            result.extracted_text = full_text[:MAX_INLINE_TEXT_CHARS]
-    else:
-        result.extracted_text = full_text
-
-    return result
+    return "\n\n".join(all_text), page_count
 
 
-def _vision_ocr_pdf(file_path: str, start_page: int, end_page: int) -> str:
+def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
     """Run Gemini Vision OCR on PDF pages. Returns extracted text."""
+    import base64
     import fitz
     from core.clients import get_gemini_flash
 
@@ -183,7 +151,7 @@ def _vision_ocr_pdf(file_path: str, start_page: int, end_page: int) -> str:
         results = []
         batch_images: list[str] = []
 
-        for i in range(start_page, end_page + 1):
+        for i in range(page_count):
             page = doc[i]
             pix = page.get_pixmap(dpi=120)
             buf = io.BytesIO()
@@ -196,7 +164,7 @@ def _vision_ocr_pdf(file_path: str, start_page: int, end_page: int) -> str:
                 batch_images = []
 
         if batch_images:
-            results.append(_ocr_batch(llm, batch_images, end_page - len(batch_images) + 1))
+            results.append(_ocr_batch(llm, batch_images, page_count - len(batch_images)))
 
         doc.close()
         return "\n\n".join(results)
@@ -207,7 +175,6 @@ def _vision_ocr_pdf(file_path: str, start_page: int, end_page: int) -> str:
 
 
 def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
-    """OCR a batch of page images using Gemini Vision."""
     content = [
         {
             "role": "user",
@@ -256,7 +223,6 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     os.makedirs(persist_dir, exist_ok=True)
 
     embeddings = get_qa_embeddings()
-    # Lock around cache clear to prevent race with concurrent workers
     with _chroma_cache_lock:
         chromadb.api.client.SharedSystemClient.clear_system_cache()
 
@@ -271,189 +237,66 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     log.info("Stored in ChromaDB", collection=collection_id, chunks=len(chunks))
 
 
-def _extract_image(file_path: str) -> ProcessedFile:
-    """Read image file and base64 encode for Gemini multimodal."""
-    name = os.path.basename(file_path)
-    size = os.path.getsize(file_path)
-    ext = Path(file_path).suffix.lower()
-    mime = IMAGE_MIME_MAP.get(ext, "image/jpeg")
-    result = ProcessedFile(original_name=name, file_type="image", size_bytes=size)
+# --- Text-only extractors (for DOCX / XLSX that Gemini Files API can't handle) ---
 
-    try:
-        with open(file_path, "rb") as f:
-            data = f.read()
-
-        # Resize if too large
-        if len(data) > MAX_IMAGE_BYTES:
-            data = _resize_image(data, mime)
-
-        result.image_base64 = base64.b64encode(data).decode("utf-8")
-        result.image_mime = mime
-    except Exception as e:
-        result.error = f"Failed to read image: {e}"
-
-    return result
-
-
-def _resize_image(data: bytes, mime: str) -> bytes:
-    """Resize image to fit within 2MB using PIL."""
-    try:
-        from PIL import Image
-
-        img = Image.open(io.BytesIO(data))
-        # Scale down proportionally
-        scale = (MAX_IMAGE_BYTES / len(data)) ** 0.5
-        new_w = int(img.width * scale)
-        new_h = int(img.height * scale)
-        img = img.resize((new_w, new_h), Image.LANCZOS)
-
-        buf = io.BytesIO()
-        fmt = "JPEG" if "jpeg" in mime else "PNG"
-        img.save(buf, format=fmt, quality=85)
-        return buf.getvalue()
-    except ImportError:
-        log.warning("PIL not available, returning original image")
-        return data
+def _extract_docx_text(file_path: str) -> str:
+    from docx import Document
+    doc = Document(file_path)
+    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+    table_texts = []
+    for table in doc.tables:
+        rows = []
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            rows.append(" | ".join(cells))
+        if rows:
+            header = rows[0]
+            sep = " | ".join(["---"] * len(table.rows[0].cells))
+            table_texts.append("\n".join([header, sep] + rows[1:]))
+    parts = paragraphs
+    if table_texts:
+        parts.append("\n\n--- Tables ---\n")
+        parts.extend(table_texts)
+    return "\n\n".join(parts)
 
 
-def _extract_docx(file_path: str) -> ProcessedFile:
-    """Extract text from DOCX using python-docx."""
-    name = os.path.basename(file_path)
-    size = os.path.getsize(file_path)
-    result = ProcessedFile(original_name=name, file_type="docx", size_bytes=size)
-
-    try:
-        from docx import Document
-
-        doc = Document(file_path)
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-
-        # Extract tables
-        table_texts = []
-        for table in doc.tables:
-            rows = []
-            for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
-                rows.append(" | ".join(cells))
-            if rows:
-                header = rows[0]
-                separator = " | ".join(["---"] * len(table.rows[0].cells))
-                table_text = "\n".join([header, separator] + rows[1:])
-                table_texts.append(table_text)
-
-        parts = paragraphs
-        if table_texts:
-            parts.append("\n\n--- Tables ---\n")
-            parts.extend(table_texts)
-
-        result.extracted_text = "\n\n".join(parts)
-        result.page_count = len(doc.paragraphs) // 40 or 1  # rough estimate
-
-    except Exception as e:
-        result.error = f"Failed to read DOCX: {e}"
-
-    return result
+def _extract_csv_text(file_path: str) -> str:
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        rows = []
+        for i, row in enumerate(reader):
+            if i >= 100:
+                rows.append(["... (truncated)"])
+                break
+            rows.append(row)
+    if not rows:
+        return ""
+    header = " | ".join(rows[0])
+    sep = " | ".join(["---"] * len(rows[0]))
+    body = "\n".join(" | ".join(r) for r in rows[1:])
+    return f"{header}\n{sep}\n{body}"
 
 
-def _extract_text_file(file_path: str) -> ProcessedFile:
-    """Extract text from TXT/MD files."""
-    name = os.path.basename(file_path)
-    size = os.path.getsize(file_path)
-    result = ProcessedFile(original_name=name, file_type="txt", size_bytes=size)
-
-    try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            result.extracted_text = f.read(MAX_INLINE_TEXT_CHARS)
-    except Exception as e:
-        result.error = f"Failed to read text file: {e}"
-
-    return result
-
-
-def _extract_csv(file_path: str) -> ProcessedFile:
-    """Extract CSV data as markdown table (first 100 rows)."""
-    name = os.path.basename(file_path)
-    size = os.path.getsize(file_path)
-    result = ProcessedFile(original_name=name, file_type="csv", size_bytes=size)
-
-    try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            reader = csv.reader(f)
-            rows = []
-            for i, row in enumerate(reader):
-                if i >= 100:
-                    rows.append(["... (truncated)"])
-                    break
-                rows.append(row)
-
+def _extract_xlsx_text(file_path: str) -> str:
+    from openpyxl import load_workbook
+    wb = load_workbook(file_path, read_only=True, data_only=True)
+    sheets_text = []
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows = []
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i >= 100:
+                rows.append(["... (truncated)"])
+                break
+            rows.append([str(c) if c is not None else "" for c in row])
         if not rows:
-            result.error = "CSV file is empty"
-            return result
-
-        # Convert to markdown table
+            continue
         header = " | ".join(rows[0])
-        separator = " | ".join(["---"] * len(rows[0]))
+        sep = " | ".join(["---"] * len(rows[0]))
         body = "\n".join(" | ".join(r) for r in rows[1:])
-        result.extracted_text = f"{header}\n{separator}\n{body}"
-
-    except Exception as e:
-        result.error = f"Failed to read CSV: {e}"
-
-    return result
-
-
-def _extract_xlsx(file_path: str) -> ProcessedFile:
-    """Extract XLSX data as markdown tables (one per sheet, first 100 rows each)."""
-    name = os.path.basename(file_path)
-    size = os.path.getsize(file_path)
-    result = ProcessedFile(original_name=name, file_type="xlsx", size_bytes=size)
-
-    try:
-        from openpyxl import load_workbook
-
-        wb = load_workbook(file_path, read_only=True, data_only=True)
-        sheets_text = []
-
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            rows = []
-            for i, row in enumerate(ws.iter_rows(values_only=True)):
-                if i >= 100:
-                    rows.append(["... (truncated)"])
-                    break
-                rows.append([str(cell) if cell is not None else "" for cell in row])
-
-            if not rows:
-                continue
-
-            header = " | ".join(rows[0])
-            separator = " | ".join(["---"] * len(rows[0]))
-            body = "\n".join(" | ".join(r) for r in rows[1:])
-            sheets_text.append(f"### Sheet: {sheet_name}\n\n{header}\n{separator}\n{body}")
-
-        wb.close()
-        result.extracted_text = "\n\n".join(sheets_text)
-
-    except Exception as e:
-        result.error = f"Failed to read XLSX: {e}"
-
-    return result
-
-
-# --- Extractor Dispatch ---
-
-_EXTRACTORS = {
-    ".pdf": lambda fp, tid: _extract_pdf(fp, tid),
-    ".jpg": lambda fp, _: _extract_image(fp),
-    ".jpeg": lambda fp, _: _extract_image(fp),
-    ".png": lambda fp, _: _extract_image(fp),
-    ".webp": lambda fp, _: _extract_image(fp),
-    ".docx": lambda fp, _: _extract_docx(fp),
-    ".txt": lambda fp, _: _extract_text_file(fp),
-    ".md": lambda fp, _: _extract_text_file(fp),
-    ".csv": lambda fp, _: _extract_csv(fp),
-    ".xlsx": lambda fp, _: _extract_xlsx(fp),
-}
+        sheets_text.append(f"### Sheet: {sheet_name}\n\n{header}\n{sep}\n{body}")
+    wb.close()
+    return "\n\n".join(sheets_text)
 
 
 # --- Main Processing Function ---
@@ -463,83 +306,211 @@ async def process_files(
     thread_id: str,
     status_callback=None,
 ) -> FileContext:
-    """Process uploaded files and return aggregated FileContext.
+    """Process uploaded files with local storage + Gemini Files API persistence.
 
     Args:
         files: List of (temp_file_path, original_filename, size_bytes) tuples.
-        thread_id: Thread ID for ChromaDB collection naming.
-        status_callback: Optional async callable(message: str) for SSE status updates.
+        thread_id: Used for upload dir, ChromaDB collection naming, and DB record.
+        status_callback: Optional async callable(message: str) for SSE status.
 
     Returns:
-        FileContext with inline text, image data, and ChromaDB collection IDs.
+        FileContext with gemini_file_parts, inline_text, and chromadb_collections.
     """
+    from core.chat_store import chat_store
+
     ctx = FileContext()
 
-    if len(files) > MAX_FILES:
-        log.warning("Too many files", count=len(files), max=MAX_FILES)
-        files = files[:MAX_FILES]
+    if len(files) > MAX_FILES_PER_REQUEST:
+        log.warning("Too many files in request", count=len(files), max=MAX_FILES_PER_REQUEST)
+        files = files[:MAX_FILES_PER_REQUEST]
 
-    image_count = 0
+    # Check current thread storage
+    existing_count, existing_bytes = await chat_store.get_thread_storage(thread_id)
+    max_thread_bytes = MAX_THREAD_STORAGE_MB * 1024 * 1024
+
+    # Ensure uploads directory for this thread
+    thread_upload_dir = os.path.join(UPLOADS_ROOT, thread_id)
+    os.makedirs(thread_upload_dir, exist_ok=True)
+
     inline_parts: list[str] = []
 
     for file_path, filename, size_bytes in files:
         ext = Path(filename).suffix.lower()
         ctx.file_names.append(filename)
 
-        # Validate
+        # --- Thread-level limit checks ---
+        if existing_count >= MAX_FILES_PER_THREAD:
+            pf = ProcessedFile(
+                original_name=filename, file_type=ext.lstrip("."),
+                mime_type="", size_bytes=size_bytes,
+                error=f"Thread file limit ({MAX_FILES_PER_THREAD} files) reached",
+            )
+            ctx.files.append(pf)
+            log.warning("Thread file limit reached", thread=thread_id[:12], file=filename)
+            continue
+
+        if existing_bytes + size_bytes > max_thread_bytes:
+            pf = ProcessedFile(
+                original_name=filename, file_type=ext.lstrip("."),
+                mime_type="", size_bytes=size_bytes,
+                error=f"Thread storage limit ({MAX_THREAD_STORAGE_MB} MB) reached",
+            )
+            ctx.files.append(pf)
+            log.warning("Thread storage limit reached", thread=thread_id[:12], file=filename)
+            continue
+
+        # --- Basic validation ---
         err = validate_upload(filename, size_bytes)
         if err:
             pf = ProcessedFile(
                 original_name=filename, file_type=ext.lstrip("."),
-                size_bytes=size_bytes, error=err,
+                mime_type="", size_bytes=size_bytes, error=err,
             )
             ctx.files.append(pf)
             log.warning("File rejected", file=filename, reason=err)
             continue
 
-        # Status update
         if status_callback:
             await status_callback(f"Processing {filename}...")
 
-        # Extract
-        extractor = _EXTRACTORS.get(ext)
-        if not extractor:
+        mime = get_mime_type(ext)
+        gemini_ok = is_gemini_supported(ext)
+        file_id = uuid.uuid4().hex
+
+        # --- Step 1: Copy to permanent local storage ---
+        safe_name = Path(filename).name.replace(" ", "_")
+        local_filename = f"{file_id}_{safe_name}"
+        local_path = os.path.join(thread_upload_dir, local_filename)
+        try:
+            shutil.copy2(file_path, local_path)
+        except Exception as e:
             pf = ProcessedFile(
                 original_name=filename, file_type=ext.lstrip("."),
-                size_bytes=size_bytes, error=f"No extractor for {ext}",
+                mime_type=mime, size_bytes=size_bytes,
+                error=f"Failed to save file: {e}",
             )
             ctx.files.append(pf)
             continue
 
-        pf = extractor(file_path, thread_id)
-        ctx.files.append(pf)
+        pf = ProcessedFile(
+            original_name=filename,
+            file_type=ext.lstrip("."),
+            mime_type=mime,
+            size_bytes=size_bytes,
+            file_id=file_id,
+            local_path=local_path,
+            gemini_supported=gemini_ok,
+        )
 
-        if pf.error:
-            log.warning("Extraction failed", file=filename, error=pf.error)
-            continue
-
-        # Aggregate results
-        if pf.file_type == "image" and pf.image_base64:
-            if image_count < MAX_IMAGES:
-                ctx.image_data.append({
-                    "base64": pf.image_base64,
-                    "mime": pf.image_mime,
+        # --- Step 2: Upload to Gemini Files API (images, PDF, TXT, CSV, MD) ---
+        if gemini_ok:
+            try:
+                uri, gname, expiry = await asyncio.to_thread(
+                    upload_to_gemini, local_path, mime, filename
+                )
+                pf.gemini_uri = uri
+                pf.gemini_name = gname
+                pf.gemini_expiry = expiry
+                ctx.gemini_file_parts.append({
+                    "file_data": {"file_uri": uri, "mime_type": mime},
                     "name": filename,
                 })
-                image_count += 1
-            else:
-                log.warning("Max images reached, skipping", file=filename)
+                log.info("Gemini Files upload OK", file=filename, mime=mime)
+            except Exception as e:
+                log.error("Gemini Files upload failed, falling back to extraction",
+                          file=filename, error=str(e))
+                pf.error = f"Gemini upload failed: {e}"
+                # Fall through to text extraction below
 
-        elif pf.stored_in_chromadb:
-            ctx.chromadb_collections.append(pf.unique_string)
+        # --- Step 3: PDF-specific handling ---
+        if ext == ".pdf":
+            try:
+                text, page_count = await asyncio.to_thread(_extract_pdf_text, local_path)
+                pf.page_count = page_count
 
-        elif pf.extracted_text:
-            inline_parts.append(f"[File: {filename}]\n{pf.extracted_text}")
+                if not text.strip():
+                    # Scanned PDF — Vision OCR fallback
+                    text = await asyncio.to_thread(_vision_ocr_pdf, local_path, page_count)
 
-        log.info("File processed", file=filename, type=pf.file_type,
-                 text_len=len(pf.extracted_text), chromadb=pf.stored_in_chromadb)
+                if page_count > MAX_INLINE_PDF_PAGES or len(text) > MAX_INLINE_TEXT_CHARS:
+                    # Store in ChromaDB for retrieval
+                    collection_id = f"inline_{thread_id}_{file_id[:8]}"
+                    try:
+                        await asyncio.to_thread(_store_in_chromadb, text, collection_id, filename)
+                        pf.chromadb_collection = collection_id
+                        ctx.chromadb_collections.append(collection_id)
+                        log.info("Large PDF stored in ChromaDB",
+                                 file=filename, pages=page_count, collection=collection_id)
+                    except Exception as e:
+                        log.error("ChromaDB storage failed", error=str(e))
+                        # Fall back to truncated inline
+                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
+                        inline_parts.append(f"[File: {filename}]\n{pf.extracted_text}")
+                else:
+                    # Small PDF — use extracted text as fallback context
+                    # (Gemini URI already registered above for direct PDF access)
+                    if not pf.gemini_uri:
+                        pf.extracted_text = text
+                        inline_parts.append(f"[File: {filename}]\n{text}")
 
-    # Build inline text (truncate to limit)
+            except Exception as e:
+                if not pf.gemini_uri:
+                    pf.error = f"PDF processing failed: {e}"
+
+        # --- Step 4: Text extraction for DOCX / XLSX (Gemini Files API not supported) ---
+        elif ext == ".docx":
+            try:
+                text = await asyncio.to_thread(_extract_docx_text, local_path)
+                pf.extracted_text = text
+                inline_parts.append(f"[File: {filename}]\n{text}")
+            except Exception as e:
+                pf.error = f"Failed to read DOCX: {e}"
+
+        elif ext == ".xlsx":
+            try:
+                text = await asyncio.to_thread(_extract_xlsx_text, local_path)
+                pf.extracted_text = text
+                inline_parts.append(f"[File: {filename}]\n{text}")
+            except Exception as e:
+                pf.error = f"Failed to read XLSX: {e}"
+
+        # CSV / TXT / MD: also extract text as inline fallback
+        # (Gemini URI handles primary access; inline text is fallback context)
+        elif ext in (".csv",) and pf.gemini_uri:
+            try:
+                text = await asyncio.to_thread(_extract_csv_text, local_path)
+                pf.extracted_text = text
+            except Exception:
+                pass
+
+        elif ext in (".txt", ".md") and pf.gemini_uri:
+            try:
+                with open(local_path, "r", encoding="utf-8", errors="replace") as f:
+                    pf.extracted_text = f.read(MAX_INLINE_TEXT_CHARS)
+            except Exception:
+                pass
+
+        # If Gemini upload failed and no text was extracted, mark as error
+        if not pf.gemini_uri and not pf.extracted_text and not pf.chromadb_collection and not pf.error:
+            pf.error = "No content could be extracted from this file"
+
+        ctx.files.append(pf)
+
+        # --- Step 5: Persist to SQLite thread_files ---
+        try:
+            await chat_store.save_thread_file(thread_id, pf)
+        except Exception as e:
+            log.error("Failed to save thread_file record", file=filename, error=str(e))
+
+        existing_count += 1
+        existing_bytes += size_bytes
+
+        log.info("File processed",
+                 file=filename, type=pf.file_type,
+                 gemini=bool(pf.gemini_uri), chromadb=bool(pf.chromadb_collection),
+                 text_len=len(pf.extracted_text))
+
+    # Build combined inline text (truncated to limit)
     combined = "\n\n---\n\n".join(inline_parts)
     if len(combined) > MAX_INLINE_TEXT_CHARS:
         combined = combined[:MAX_INLINE_TEXT_CHARS] + "\n\n[... text truncated]"
@@ -550,13 +521,13 @@ async def process_files(
     for pf in ctx.files:
         if not pf.error:
             type_counts[pf.file_type] = type_counts.get(pf.file_type, 0) + 1
-    parts = [f"{count} {ftype}{'s' if count > 1 else ''}" for ftype, count in type_counts.items()]
+    parts = [f"{c} {t}{'s' if c > 1 else ''}" for t, c in type_counts.items()]
     ctx.summary = f"Processed {', '.join(parts)}" if parts else "No files processed"
 
     log.info("File processing complete",
              total=len(files), summary=ctx.summary,
+             gemini_parts=len(ctx.gemini_file_parts),
              inline_chars=len(ctx.inline_text),
-             images=len(ctx.image_data),
              chromadb=len(ctx.chromadb_collections))
 
     return ctx

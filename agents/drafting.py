@@ -1,46 +1,75 @@
-"""Agent #7 — Drafting Agent (Multi-Step Pipeline)
+"""Agent #7 -- Drafting Agent (Multi-Step Pipeline)
 
 Court-filing quality legal document generation using a multi-step pipeline:
-  Step 1: Retrieve best-matching template from Elasticsearch
-  Step 2: Generate detailed document outline (Gemini 2.5 Pro, structured output)
-  Step 3: Generate each section in full detail (Gemini 2.5 Pro × N sections)
-  Step 4: Assemble all sections into complete document
+  Step 1: Hybrid ES search (BM25 + kNN vector) for matching templates
+  Step 2: GPT-4o-mini selects best template (with content previews + validation)
+  Step 3: Fetch full template (no truncation -- templates are 2K-9K chars)
+  Step 4: Generate document outline (Gemini 2.5 Flash, structured output)
+  Step 5: Generate sections in parallel (Gemini 2.5 Flash, semaphore-limited)
+  Step 6: Assemble with section titles + court filing footer
 
 Citations are injected later by the orchestrator's draft-aware synthesis,
 which merges results from parallel Judgment/Legislation/Newacts agents.
 
 Handles: "Draft bail application", "Legal notice for property dispute", etc.
 
-Uses: Gemini 2.5 Pro (outline + sections), GPT-4o-mini (template selection)
-Data Source: Elasticsearch "drafting" index (497 templates)
+Uses: Gemini 2.5 Flash (outline + sections), GPT-4o-mini (template selection)
+Data Source: Elasticsearch "drafting" index (497 templates, BM25 + dense_vector)
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
+import unicodedata
 from datetime import date
 from typing import List
 
 from pydantic import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
-from core.clients import get_es_client, get_gpt4o_mini, get_drafting_llm
+from core.clients import (
+    get_es_client, get_gpt4o_mini, get_drafting_llm,
+    get_retriever_embeddings,
+)
 from core.settings import ES_INDICES
 from core.logger import get_logger, log_time
 from config.prompts import DRAFTING_SYSTEM_PROMPT, DRAFT_OUTLINE_PROMPT
 
 log = get_logger("Drafting")
 
+# Max concurrent section generations (avoids Gemini rate limits)
+_SECTION_CONCURRENCY = 3
 
-# --- Pydantic Models for Structured Outline ---
+# Max sections the outline can contain (aligned with prompt: 10-15 for complex docs)
+_MAX_SECTIONS = 12
+
+
+# --- Input Sanitization ---
+
+_LUCENE_SPECIAL = re.compile(r'([+\-=&|!(){}\[\]^"~*?:\\/])')
+
+
+def _sanitize_es_input(text: str, max_length: int = 500) -> str:
+    """Sanitize user input before embedding in ES query."""
+    if not isinstance(text, str):
+        return ""
+    text = unicodedata.normalize("NFC", text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = text[:max_length]
+    text = _LUCENE_SPECIAL.sub(r"\\\1", text)
+    return text
+
+
+# --- Pydantic Models ---
 
 class SectionPlan(BaseModel):
     title: str = Field(..., description="Section heading (e.g. 'Facts of the Case')")
     description: str = Field(
         ...,
-        description="What this section should contain — key points, arguments, details",
+        description="What this section should contain -- key points, arguments, details",
     )
     estimated_paragraphs: int = Field(
         5,
@@ -63,44 +92,160 @@ class DraftOutline(BaseModel):
     )
     sections: List[SectionPlan] = Field(
         ...,
-        description="Ordered list of all document sections (max 8 substantive sections)",
+        description=f"Ordered list of all document sections (max {_MAX_SECTIONS} substantive sections)",
     )
 
-
-# --- Template Selection (unchanged — uses GPT-4o-mini) ---
 
 class TemplateSource(BaseModel):
     source: str = Field(..., description="The most relevant source file path")
 
 
-TEMPLATE_SELECTION_PROMPT = """You are a legal AI assistant tasked with identifying the most relevant legal document template.
+# --- Step 1: Hybrid Template Search (BM25 + kNN, Python-side RRF merge) ---
 
-User query: {query}
-
-Select the most relevant file path from the list below:
-{files_path}
-
-Return only the most relevant file path."""
+_RRF_K = 60  # Standard RRF constant
 
 
-def _select_best_template(query: str, file_paths: list[str]) -> str:
-    """Use GPT-4o-mini to select the most relevant template from search results."""
+def _rrf_merge(bm25_hits: list[dict], knn_hits: list[dict], top_n: int = 15) -> list[dict]:
+    """Merge BM25 and kNN results using Reciprocal Rank Fusion (Python-side).
+
+    score(doc) = 1/(k + bm25_rank) + 1/(k + knn_rank)
+    Docs appearing in only one list get only that term.
+    Returns top_n hits sorted by combined RRF score, preserving _source.
+    """
+    scores: dict[str, float] = {}
+    hit_by_id: dict[str, dict] = {}
+
+    for rank, hit in enumerate(bm25_hits, start=1):
+        doc_id = hit["_source"]["source"]
+        scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (_RRF_K + rank)
+        hit_by_id[doc_id] = hit
+
+    for rank, hit in enumerate(knn_hits, start=1):
+        doc_id = hit["_source"]["source"]
+        scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (_RRF_K + rank)
+        hit_by_id.setdefault(doc_id, hit)
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [hit_by_id[doc_id] for doc_id, _ in ranked[:top_n]]
+
+
+async def _search_templates(query: str) -> list[dict]:
+    """Search drafting index with hybrid BM25 + kNN, merged via Python-side RRF.
+
+    Runs both searches concurrently, merges with RRF formula.
+    Falls back to BM25-only if kNN embedding fails.
+    Returns top 15 candidates.
+    """
+    es = get_es_client()
+    index = ES_INDICES["drafting"]
+    sanitized = _sanitize_es_input(query)
+
+    bm25_query = {
+        "size": 20,
+        "query": {"match": {"page_content": sanitized}},
+        "_source": ["source", "page_content"],
+    }
+
+    # Try hybrid (BM25 + kNN concurrent)
+    try:
+        embeddings = get_retriever_embeddings()
+        query_vector = await asyncio.to_thread(embeddings.embed_query, query)
+
+        knn_query = {
+            "size": 20,
+            "knn": {
+                "field": "embeddings",
+                "query_vector": query_vector,
+                "k": 20,
+                "num_candidates": 100,
+            },
+            "_source": ["source", "page_content"],
+        }
+
+        with log_time(log, "Hybrid template search (BM25 + kNN concurrent)"):
+            bm25_resp, knn_resp = await asyncio.gather(
+                asyncio.to_thread(es.search, index=index, body=bm25_query),
+                asyncio.to_thread(es.search, index=index, body=knn_query),
+            )
+
+        bm25_hits = bm25_resp["hits"]["hits"]
+        knn_hits = knn_resp["hits"]["hits"]
+        merged = _rrf_merge(bm25_hits, knn_hits, top_n=15)
+
+        log.info("Hybrid search completed", bm25_hits=len(bm25_hits),
+                 knn_hits=len(knn_hits), merged=len(merged))
+        return merged
+
+    except Exception as e:
+        log.warning("Hybrid search failed, falling back to BM25", error=str(e)[:200])
+
+    # Fallback: BM25-only
+    with log_time(log, "BM25 template search (fallback)"):
+        response = es.search(index=index, body=bm25_query)
+        return response["hits"]["hits"][:15]
+
+
+# --- Step 2: Template Selection (GPT-4o-mini with previews + validation) ---
+
+TEMPLATE_SELECTION_PROMPT = """You are a legal AI assistant selecting the best legal document template.
+
+User wants to draft: {query}
+
+Select the MOST relevant template. Each entry shows the file path and a content preview:
+
+{candidates}
+
+Return only the file path of the best matching template."""
+
+
+def _select_best_template(query: str, candidates: list[dict]) -> tuple[str, list[str]]:
+    """Use GPT-4o-mini to select the most relevant template.
+
+    Shows content previews alongside file paths for better selection.
+    Returns (selected_source, all_valid_paths) for fallback support.
+    """
+    valid_paths = list(dict.fromkeys(c["_source"]["source"] for c in candidates))
+
     with log_time(log, "Template selection (LLM)"):
+        # Build candidate list with previews
+        candidate_lines = []
+        for i, c in enumerate(candidates, 1):
+            path = c["_source"]["source"]
+            preview = c["_source"]["page_content"][:200].replace("\n", " ")
+            candidate_lines.append(f"{i}. {path}\n   Preview: {preview}...")
+
         llm = get_gpt4o_mini().with_structured_output(TemplateSource)
         prompt = ChatPromptTemplate.from_template(TEMPLATE_SELECTION_PROMPT)
         chain = prompt | llm
-        result = chain.invoke({"query": query, "files_path": "\n".join(file_paths)})
-    return result.source.strip()
+        result = chain.invoke({
+            "query": query,
+            "candidates": "\n".join(candidate_lines),
+        })
+
+    selected = result.source.strip()
+
+    # Validate: ensure selected path exists in candidates
+    if selected not in valid_paths:
+        # Fuzzy match
+        matches = [p for p in valid_paths if selected in p or p in selected]
+        if matches:
+            log.warning("Template path fuzzy-matched",
+                        returned=selected, matched=matches[0])
+            selected = matches[0]
+        else:
+            log.warning("Template path not found, using top candidate",
+                        returned=selected)
+            selected = valid_paths[0]
+
+    return selected, valid_paths
 
 
-# --- Step 1: Generate Document Outline ---
+# --- Step 3: Generate Document Outline ---
 
-async def _generate_outline(
-    query: str, template_text: str, chat_history: list
-) -> DraftOutline:
+async def _generate_outline(query: str, template_text: str) -> DraftOutline:
     """Generate a structured outline with all sections for the document.
 
-    Uses Gemini 2.5 Flash with structured output → reliable section list.
+    Uses Gemini 2.5 Flash with structured output for reliable section list.
     """
     with log_time(log, "Outline generation"):
         llm = get_drafting_llm().with_structured_output(DraftOutline)
@@ -111,14 +256,42 @@ async def _generate_outline(
             ("user", "User Query:\n{query}"),
         ])
         chain = prompt | llm
-        outline = await chain.ainvoke({
-            "query": query,
-            "template": template_text,
-            "date": str(date.today()),
-        })
+        try:
+            outline = await chain.ainvoke({
+                "query": query,
+                "template": template_text,
+                "date": str(date.today()),
+            })
+        except Exception as e:
+            log.error("Structured outline generation failed, using fallback",
+                      error=str(e)[:200])
+            # Fallback: 3-section outline (Facts/Arguments/Prayer)
+            outline = DraftOutline(
+                document_title="Legal Document",
+                court_details="[Court Details]",
+                sections=[
+                    SectionPlan(
+                        title="Facts and Background",
+                        description=f"State the facts and background for: {query[:300]}",
+                        estimated_paragraphs=8,
+                        needs_citations=False,
+                    ),
+                    SectionPlan(
+                        title="Legal Arguments and Grounds",
+                        description=f"Present legal arguments and statutory grounds for: {query[:300]}",
+                        estimated_paragraphs=10,
+                        needs_citations=True,
+                    ),
+                    SectionPlan(
+                        title="Prayer and Relief Sought",
+                        description="State the relief sought and prayer to the court.",
+                        estimated_paragraphs=3,
+                        needs_citations=False,
+                    ),
+                ],
+            )
 
-    # Remove meta-sections that don't need LLM generation (Index, Table of Contents, etc.)
-    # These cause the LLM to dump the entire document content into a single section
+    # Remove meta-sections that don't need LLM generation
     META_SECTION_KEYWORDS = ("index", "table of contents", "contents page")
     filtered = [s for s in outline.sections
                 if not any(kw in s.title.lower() for kw in META_SECTION_KEYWORDS)]
@@ -127,12 +300,11 @@ async def _generate_outline(
         log.info("Removed meta-sections from outline", removed=removed)
         outline.sections = filtered
 
-    # Cap sections at 8 to avoid excessive generation time
-    MAX_SECTIONS = 8
-    if len(outline.sections) > MAX_SECTIONS:
+    # Cap sections (aligned with prompt: bail 10-12, suits 12-15)
+    if len(outline.sections) > _MAX_SECTIONS:
         log.warning("Outline has too many sections, capping",
-                     original=len(outline.sections), capped=MAX_SECTIONS)
-        outline.sections = outline.sections[:MAX_SECTIONS]
+                     original=len(outline.sections), capped=_MAX_SECTIONS)
+        outline.sections = outline.sections[:_MAX_SECTIONS]
 
     log.info("Outline generated",
              title=outline.document_title[:80],
@@ -141,7 +313,7 @@ async def _generate_outline(
     return outline
 
 
-# --- Step 2: Generate Each Section ---
+# --- Step 4: Generate Each Section ---
 
 async def _generate_section(
     query: str,
@@ -154,9 +326,8 @@ async def _generate_section(
     """Generate one section of the document in full detail.
 
     Returns (section_text, tokens_consumed).
-    Each section gets the full token budget from Gemini 2.5 Pro.
+    Sends the FULL template (2K-9K chars) -- no truncation needed.
     """
-    # Build outline summary for context
     outline_summary = "\n".join(
         f"  {i+1}. {s.title}" for i, s in enumerate(outline.sections)
     )
@@ -167,7 +338,7 @@ async def _generate_section(
             ("system", DRAFTING_SYSTEM_PROMPT),
             ("user", "Document: {doc_title}\nCourt: {court_details}"),
             ("user", "Full Document Outline:\n{outline_summary}"),
-            ("user", "Reference Template (excerpt):\n{template}"),
+            ("user", "Reference Template:\n{template}"),
             ("user",
              "NOW WRITE section {section_num} of {total} IN FULL DETAIL:\n\n"
              "## {section_title}\n{section_desc}\n\n"
@@ -183,14 +354,14 @@ async def _generate_section(
             "doc_title": outline.document_title,
             "court_details": outline.court_details,
             "outline_summary": outline_summary,
-            "template": template_text[:3000],
+            "template": template_text,  # Full template (2K-9K chars, no truncation)
             "section_num": str(section_index + 1),
             "total": str(total_sections),
             "section_title": section.title,
             "section_desc": section.description,
             "est_paragraphs": str(section.estimated_paragraphs),
-            "needs_citations": "Yes — include [CITE: ...] markers" if section.needs_citations else "No",
-        }, timeout=180)  # Drafting sections need more time than default 90s
+            "needs_citations": "Yes -- include [CITE: ...] markers" if section.needs_citations else "No",
+        }, timeout=180)
 
     tokens = 0
     if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -202,22 +373,106 @@ async def _generate_section(
     return response.content, tokens
 
 
-# --- Step 3: Assemble Document ---
+# --- Step 5: Parallel Section Generation ---
+
+async def _generate_sections_parallel(
+    query: str,
+    template_text: str,
+    outline: DraftOutline,
+    writer=None,
+) -> tuple[list[str], list[int], int]:
+    """Generate all sections with bounded parallelism via asyncio.Semaphore.
+
+    Limits to _SECTION_CONCURRENCY concurrent Gemini calls.
+    Sections that fail get placeholder text; their indices are tracked.
+
+    Returns: (sections_list, failed_indices, total_tokens)
+    """
+    sem = asyncio.Semaphore(_SECTION_CONCURRENCY)
+    total = len(outline.sections)
+    # Each slot: (section_text | None, tokens, error | None)
+    results: list[tuple[str | None, int, Exception | None]] = [None] * total
+    progress_counter = {"count": 0}
+
+    async def _gen_one(i: int, plan: SectionPlan):
+        async with sem:
+            progress_counter["count"] += 1
+            if writer:
+                writer({
+                    "type": "drafting_progress",
+                    "section": progress_counter["count"],
+                    "total": total,
+                    "title": plan.title,
+                })
+            try:
+                text, tokens = await _generate_section(
+                    query, template_text, plan, i, total, outline,
+                )
+                results[i] = (text, tokens, None)
+            except Exception as e:
+                log.error("Section failed", section=i + 1, title=plan.title,
+                          error=str(e)[:200])
+                results[i] = (None, 0, e)
+
+    tasks = [_gen_one(i, plan) for i, plan in enumerate(outline.sections)]
+    await asyncio.gather(*tasks)
+
+    # Collect results in order
+    sections: list[str] = []
+    failed_indices: list[int] = []
+    total_tokens = 0
+
+    for i, (text, tokens, err) in enumerate(results):
+        if err is not None:
+            placeholder = (
+                f"\n\n---\n\n"
+                f"**[Section {i + 1}: {outline.sections[i].title} -- could not be generated. "
+                f"Click \"Continue\" below to complete this section.]**"
+                f"\n\n---\n"
+            )
+            sections.append(placeholder)
+            failed_indices.append(i)
+        else:
+            sections.append(text)
+            total_tokens += tokens
+
+    return sections, failed_indices, total_tokens
+
+
+# --- Step 6: Assemble Document ---
 
 def _assemble_document(outline: DraftOutline, sections: list[str]) -> str:
-    """Combine all sections into the final document."""
+    """Combine all sections into the final document with proper structure.
+
+    Ensures each section has a heading (injects from outline if LLM omitted it).
+    Adds standard court filing footer with signature and verification blocks.
+    """
     parts = [
         f"# {outline.document_title}",
-        "",
-        f"{outline.court_details}",
-        "",
+        outline.court_details,
         "---",
-        "",
     ]
 
-    for section_plan, section_text in zip(outline.sections, sections):
-        parts.append(section_text)
-        parts.append("")
+    for i, (section_plan, section_text) in enumerate(zip(outline.sections, sections)):
+        text = section_text.strip()
+
+        # Inject section heading from outline if LLM didn't include one
+        if not text.startswith("#"):
+            text = f"## {i + 1}. {section_plan.title}\n\n{text}"
+
+        parts.append(text)
+
+    # Standard court filing footer
+    parts.append("---")
+    parts.append(
+        "**Place:** [Place]\n\n"
+        "**Date:** [Date]\n\n"
+        "**Signature of the Petitioner/Applicant**\n\n"
+        "Through Counsel:\n\n"
+        "**[Name of Advocate]**\n"
+        "[Enrollment No.]\n"
+        "[Address of Advocate]"
+    )
 
     return "\n\n".join(parts)
 
@@ -251,19 +506,18 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
              total_sections=len(outline.sections))
 
     try:
-        # Emit progress via stream writer if available
         try:
             from langgraph.config import get_stream_writer
             writer = get_stream_writer()
         except (RuntimeError, ImportError):
             writer = None
 
-        # Rebuild full sections list, regenerating only the failed ones
-        sections: list[str] = list(completed_sections.values()) if completed_sections else [""] * len(outline.sections)
-        # Reconstruct sections list properly (indexed)
-        sections = [""] * len(outline.sections)
+        # Reconstruct sections list from completed sections (indexed by string key)
+        sections: list[str] = [""] * len(outline.sections)
         for idx_str, text in completed_sections.items():
-            sections[int(idx_str)] = text
+            idx = int(idx_str)
+            if 0 <= idx < len(sections):
+                sections[idx] = text
 
         total_tokens = 0
         new_failed: list[int] = []
@@ -294,7 +548,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                           error=str(sec_err))
                 sections[idx] = (
                     f"\n\n---\n\n"
-                    f"**[Section {idx + 1}: {section_plan.title} — "
+                    f"**[Section {idx + 1}: {section_plan.title} -- "
                     f"could not be generated after retry.]**"
                     f"\n\n---\n"
                 )
@@ -349,7 +603,6 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                 "failed_indices": new_failed,
             }
         else:
-            # Clear continuation data on success
             state_update["draft_continuation"] = None
 
     except Exception as e:
@@ -369,16 +622,15 @@ async def drafting_node(state: LegalAgentState) -> dict:
     """Multi-step legal draft generation pipeline.
 
     Flow:
-    1. Search ES "drafting" index for matching templates (top 100)
-    2. Use GPT-4o-mini to select most relevant template source
-    3. Fetch full template document from that source
-    4. Generate detailed document outline (Gemini 2.5 Pro, structured output)
-    5. Generate each section in full detail (Gemini 2.5 Pro × N sections)
-    6. Assemble all sections into complete document
+    1. Hybrid search ES "drafting" index (BM25 + kNN vector, top 15)
+    2. GPT-4o-mini selects best template (with content previews + validation)
+    3. Fetch full template document (no truncation)
+    4. Generate document outline (Gemini 2.5 Flash, structured output, max 12 sections)
+    5. Generate sections in parallel (Gemini 2.5 Flash, 3 concurrent via semaphore)
+    6. Assemble with section titles + court filing footer
     """
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Drafting", state.get("query", state["original_query"]))
-    chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
              using_agent_query="Drafting" in agent_queries)
 
@@ -386,14 +638,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
         es = get_es_client()
         index = ES_INDICES["drafting"]
 
-        # Step 1: Search for matching templates
-        with log_time(log, "Template search (ES)"):
-            search_query = {
-                "size": 100,
-                "query": {"match": {"page_content": query}},
-            }
-            response = es.search(index=index, body=search_query)
-            hits = response["hits"]["hits"]
+        # Step 1: Hybrid search for templates (BM25 + kNN, top 15)
+        hits = await _search_templates(query)
 
         if not hits:
             log.warning("No templates found")
@@ -403,18 +649,15 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     content="",
                     sources=[],
                     tokens_consumed=0,
+                    error="No matching templates found in our database.",
                 )},
             }
 
-        # Step 2: Get unique file paths and select best one
-        file_paths = list(dict.fromkeys(
-            h["_source"]["source"] for h in hits
-        ))
-        log.info("Template candidates found",
-                 total_hits=len(hits), unique_templates=len(file_paths))
+        log.info("Template candidates found", count=len(hits))
 
-        selected_source = await asyncio.to_thread(
-            _select_best_template, query, file_paths
+        # Step 2: Select best template (with content previews + validation)
+        selected_source, all_paths = await asyncio.to_thread(
+            _select_best_template, query, hits
         )
         log.info("Template selected", template=selected_source)
 
@@ -422,18 +665,33 @@ async def drafting_node(state: LegalAgentState) -> dict:
         source_query = {
             "size": 1,
             "query": {"term": {"source.keyword": selected_source}},
+            "_source": ["page_content", "source"],
         }
         source_response = es.search(index=index, body=source_query)
         source_hits = source_response["hits"]["hits"]
 
+        # Fallback: try next-best candidate if selected template not found
         if not source_hits:
-            log.error("Selected template not found in ES",
-                      template=selected_source)
+            log.warning("Selected template not found, trying fallback",
+                        template=selected_source)
+            for path in all_paths:
+                if path == selected_source:
+                    continue
+                fb_resp = es.search(index=index, body={
+                    "size": 1,
+                    "query": {"term": {"source.keyword": path}},
+                    "_source": ["page_content", "source"],
+                })
+                if fb_resp["hits"]["hits"]:
+                    source_hits = fb_resp["hits"]["hits"]
+                    selected_source = path
+                    log.info("Using fallback template", template=path)
+                    break
+
+        if not source_hits:
             return {
                 "agent_results": {"Drafting": AgentResult(
-                    agent_name="Drafting",
-                    content="",
-                    sources=[],
+                    agent_name="Drafting", content="", sources=[],
                     tokens_consumed=0,
                     error=f"Template source not found: {selected_source}",
                 )},
@@ -443,53 +701,21 @@ async def drafting_node(state: LegalAgentState) -> dict:
         log.debug("Template loaded",
                   template=selected_source, template_len=len(template_text))
 
-        # Step 4: Generate document outline
-        outline = await _generate_outline(query, template_text, chat_history)
+        # Step 4: Generate document outline (max 12 sections)
+        outline = await _generate_outline(query, template_text)
 
-        # Step 5: Generate each section (sequential, each streamed)
-        # Per-section error handling: if a section fails, mark it incomplete
-        # and continue with the rest. The partial draft is still returned.
-        sections: list[str] = []
-        failed_indices: list[int] = []
-        total_tokens = 0
-
-        # Emit progress via stream writer if available
+        # Step 5: Generate sections in parallel (semaphore-limited to 3)
         try:
             from langgraph.config import get_stream_writer
             writer = get_stream_writer()
         except (RuntimeError, ImportError):
             writer = None
 
-        for i, section_plan in enumerate(outline.sections):
-            if writer:
-                writer({
-                    "type": "drafting_progress",
-                    "section": i + 1,
-                    "total": len(outline.sections),
-                    "title": section_plan.title,
-                })
+        sections, failed_indices, total_tokens = await _generate_sections_parallel(
+            query, template_text, outline, writer,
+        )
 
-            try:
-                section_text, section_tokens = await _generate_section(
-                    query, template_text, section_plan,
-                    i, len(outline.sections), outline,
-                )
-                sections.append(section_text)
-                total_tokens += section_tokens
-            except Exception as sec_err:
-                log.error("Section failed, marking incomplete",
-                          section=i + 1, total=len(outline.sections),
-                          title=section_plan.title, error=str(sec_err))
-                placeholder = (
-                    f"\n\n---\n\n"
-                    f"**[Section {i + 1}: {section_plan.title} — could not be generated. "
-                    f"Click \"Continue\" below to complete this section.]**"
-                    f"\n\n---\n"
-                )
-                sections.append(placeholder)
-                failed_indices.append(i)
-
-        # Emit incomplete event so the frontend knows to show Continue button
+        # Emit incomplete event if needed
         if failed_indices and writer:
             writer({
                 "type": "draft_incomplete",
@@ -501,7 +727,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 "completed_sections": len(outline.sections) - len(failed_indices),
             })
 
-        # Step 6: Assemble complete document (may include placeholders)
+        # Step 6: Assemble complete document
         full_draft = _assemble_document(outline, sections)
 
         if failed_indices:
@@ -513,7 +739,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         total_content_len=len(full_draft),
                         total_tokens=total_tokens)
         else:
-            log.info("Agent completed — multi-step pipeline",
+            log.info("Agent completed -- multi-step pipeline",
                      template=selected_source,
                      sections_generated=len(sections),
                      total_content_len=len(full_draft),

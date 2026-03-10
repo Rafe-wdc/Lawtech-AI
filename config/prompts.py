@@ -116,14 +116,18 @@ Rules:
 2. Write in formal legal language suitable for filing in Indian courts.
 3. Use numbered paragraphs (continuing logically from the section number).
 4. Reference specific statutes with correct section numbers.
-5. Use formal legal phrases: "It is humbly submitted that...",
-   "The Hon'ble Court may be pleased to note...",
-   "That the petitioner/applicant/plaintiff...", etc.
-6. Write 2-5 pages worth of content for this section (detailed, not abbreviated).
+5. Use professional legal language. Do NOT repeat stock phrases like
+   "It is humbly submitted that", "The Hon'ble Court may be pleased to note",
+   or "in the interest of justice" more than TWICE in this section.
+   Vary your sentence openings — use direct statements, active voice, and
+   specific legal assertions instead of repetitive filler.
+6. Write substantive content — every paragraph must add NEW information,
+   a new argument, or a new legal point. Do NOT pad with restatements.
 7. Use placeholders for missing details: [Name of Petitioner], [Address], [Date], etc.
 8. Insert [CITE: brief description] markers where case law citations would strengthen
    the argument (e.g., [CITE: SC case on anticipatory bail conditions]).
-9. Never truncate or summarize — write every paragraph in full detail.
+9. Keep paragraphs focused and under 300 words each. Break long arguments
+   into sub-points with clear numbering.
 10. Use valid GitHub-flavored Markdown formatting.
 """
 
@@ -135,29 +139,29 @@ for a complete court-filing quality legal document.
 Rules:
 1. Include ALL standard sections for this document type.
 2. Each section needs: title, description of content, estimated paragraph count.
-3. Section count guidelines:
-   - Bail applications: 10-12 sections
-   - Suits/plaints: 12-15 sections
-   - Written statements: 10-12 sections
-   - Legal notices: 6-8 sections
-   - Agreements/deeds: 8-12 sections
-   - Petitions (divorce/maintenance): 10-12 sections
-   - Wills/succession: 6-8 sections
-   - Appeals/revisions: 10-14 sections
+3. Section count guidelines (HARD MAXIMUM: 12 sections):
+   - Bail applications: 6-8 sections
+   - Suits/plaints: 8-10 sections
+   - Written statements: 6-8 sections
+   - Legal notices: 4-6 sections
+   - Agreements/deeds: 6-8 sections
+   - Petitions (divorce/maintenance): 6-8 sections
+   - Wills/succession: 4-6 sections
+   - Appeals/revisions: 7-10 sections
 4. Standard sections to include (as applicable):
-   - Title page with court details
-   - Index of contents
    - Synopsis/brief facts
    - Detailed facts of the case
-   - Grounds/arguments (split into multiple sections for 8+ grounds)
+   - Grounds/arguments (consolidate related grounds — do NOT create separate
+     sections for each individual ground; group 3-5 grounds per section)
    - Legal provisions relied upon
-   - Case law arguments
-   - Merits/equities
-   - Prayer/relief sought
+   - Prayer/relief sought (MUST be the last substantive section)
    - Verification
    - Affidavit (if required)
 5. Mark sections that need case law citations with needs_citations=true.
-6. The outline should produce a document of 15-40 pages when all sections are written.
+6. Each section should have 3-8 paragraphs. Avoid sections with 10+ paragraphs —
+   split them into sub-sections instead.
+7. IMPORTANT: Prayer/relief section MUST appear as the final substantive section
+   before Verification/Affidavit.
 """
 
 # --- Drafting Pipeline: Citation Injection (with real DB results) ---
@@ -197,6 +201,8 @@ COMPLETE DRAFT:
 {draft}
 
 User Query: {query}
+
+{response_instructions}
 
 Rules:
 1. PRESERVE the full draft document EXACTLY — do NOT shorten, remove, or rephrase any content.

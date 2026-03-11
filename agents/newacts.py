@@ -31,6 +31,7 @@ from core.clients import (
     get_es_client, get_gpt4o, get_gemini_flash, get_retriever_embeddings,
 )
 from core.settings import ES_INDICES
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import NEWACTS_SYSTEM_PROMPT
 
@@ -280,8 +281,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
     7. Generate response with provisions
     """
     agent_queries = state.get("agent_queries", {})
-    # Prefer agent-specific query > original for ES matching
-    query = agent_queries.get("Newacts", state.get("original_query", state.get("query", "")))
+    # Prefer agent-specific query > normalized English query > original (for multilingual support)
+    query = agent_queries.get("Newacts", state.get("query", state.get("original_query", "")))
+    _system_prompt = localize_prompt(NEWACTS_SYSTEM_PROMPT, state.get("user_language", "en"))
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
              using_agent_query="Newacts" in agent_queries)
@@ -566,7 +568,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
             # Phase 2: Web search fallback if still empty
             if not hits:
                 log.warning("All searches exhausted, using web fallback")
-                fallback_result = await web_search_fallback(query, "Newacts", NEWACTS_SYSTEM_PROMPT)
+                fallback_result = await web_search_fallback(query, "Newacts", _system_prompt)
                 fallback_result.retry_attempted = True
                 return {
                     "agent_results": {"Newacts": fallback_result},
@@ -582,7 +584,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
         with log_time(log, "LLM generation"):
             llm = get_gemini_flash(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([
-                ("system", NEWACTS_SYSTEM_PROMPT),
+                ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),
                 ("user", "Act Provisions:\n{docs}"),
                 ("user", "Current Date: {date}"),
@@ -627,7 +629,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
             except RuntimeError:
                 pass
             from core.agent_fallback import web_search_fallback
-            fallback_result = await web_search_fallback(query, "Newacts", NEWACTS_SYSTEM_PROMPT)
+            fallback_result = await web_search_fallback(query, "Newacts", _system_prompt)
             fallback_result.tokens_consumed += tokens
             return {
                 "agent_results": {"Newacts": fallback_result},

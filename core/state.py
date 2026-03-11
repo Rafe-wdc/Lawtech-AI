@@ -100,6 +100,7 @@ class LegalAgentState(MessagesState):
     query: str
     thread_id: str | None
     unique_string: str | None
+    user_language: str          # ISO 639-1 code detected from original_query, default "en"
 
     # Task routing
     task: TaskType | None

@@ -18,7 +18,7 @@ from typing import Optional
 import requests
 from langchain.tools import tool
 
-from core.settings import S3_BUCKET, S3_REGION, CHROMA_STORE_ROOT, LAWTTORNEY_API_BASE
+from core.settings import S3_BUCKET, S3_REGION, CHROMA_STORE_ROOT
 from core.logger import get_logger
 
 log = get_logger("Storage")
@@ -186,36 +186,11 @@ def load_chat_history_from_api(thread_id: str) -> dict:
     except Exception:
         pass
 
-    # Fallback to legacy API
-    messages = []
-    summary_text = ""
-
-    try:
-        url = f"{LAWTTORNEY_API_BASE}/users/getChatSummary/{thread_id}"
-        response = requests.get(url, timeout=10)
-
-        if response.status_code == 200:
-            res_json = response.json()
-            if res_json.get("status") and res_json.get("data"):
-                summary_text = res_json["data"].get("chatSummary", "").strip()
-    except Exception as e:
-        log.error(f"Error fetching chat history for thread {thread_id}: {e}")
-
-    if summary_text:
-        try:
-            parsed = json.loads(summary_text)
-            if isinstance(parsed, list):
-                for turn in parsed[-5:]:
-                    messages.append({"role": "user", "content": turn.get("user", "")})
-                    messages.append({"role": "assistant", "content": turn.get("ai", "")})
-            else:
-                messages.append({"role": "user", "content": "Previous summary:"})
-                messages.append({"role": "assistant", "content": summary_text})
-        except json.JSONDecodeError:
-            messages.append({"role": "user", "content": "Previous summary:"})
-            messages.append({"role": "assistant", "content": summary_text})
-    else:
-        messages.append({"role": "user", "content": "Previous summary:"})
-        messages.append({"role": "assistant", "content": "Fresh chat started."})
-
-    return {"messages": messages, "summary_text": summary_text}
+    # No legacy API — return fresh start
+    return {
+        "messages": [
+            {"role": "user", "content": "Previous summary:"},
+            {"role": "assistant", "content": "Fresh chat started."},
+        ],
+        "summary_text": "",
+    }

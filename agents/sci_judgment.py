@@ -22,6 +22,7 @@ from langgraph.prebuilt import create_react_agent
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gpt4o
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
 from tools.shared import AGENT_TOOLS, search_by_topic
@@ -39,8 +40,9 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
     4. Extract final response and wrap in AgentResult
     """
     agent_queries = state.get("agent_queries", {})
-    # Prefer agent-specific query > original for ES matching
-    query = agent_queries.get("SCI_Judgment", state.get("original_query", state.get("query", "")))
+    # Prefer agent-specific query > normalized English query > original (for multilingual support)
+    query = agent_queries.get("SCI_Judgment", state.get("query", state.get("original_query", "")))
+    user_language = state.get("user_language", "en")
     log.info("Agent started", query=query[:100],
              using_agent_query="SCI_Judgment" in agent_queries)
 
@@ -53,7 +55,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         agent = create_react_agent(
             llm,
             tools,
-            prompt=SystemMessage(content=SCI_JUDGMENT_SYSTEM_PROMPT),
+            prompt=SystemMessage(content=localize_prompt(SCI_JUDGMENT_SYSTEM_PROMPT, user_language)),
         )
 
         # Invoke the ReAct sub-agent

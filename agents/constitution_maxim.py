@@ -28,6 +28,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gemini_flash, get_es_client
 from core.settings import ES_INDICES
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import (
     CONSTITUTION_SYSTEM_PROMPT,
@@ -115,19 +116,23 @@ def _retrieve_from_es(task: str, query: str) -> list[Document]:
 
 # --- Task Handlers ---
 
-async def _handle_legal_concepts(query: str, chat_history: list) -> AgentResult:
+async def _handle_legal_concepts(query: str, chat_history: list,
+                                   user_language: str = "en") -> AgentResult:
     """Handle Legal_Concepts task — web-grounded AI response for comprehensive coverage."""
     from core.agent_fallback import web_search_fallback
     log.info("Legal concepts using web search for comprehensive response")
-    result = await web_search_fallback(query, "Legal_Concepts", LEGAL_CONCEPTS_PROMPT)
+    result = await web_search_fallback(
+        query, "Legal_Concepts", localize_prompt(LEGAL_CONCEPTS_PROMPT, user_language)
+    )
     return result
 
 
-async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list) -> AgentResult:
+async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list,
+                                         user_language: str = "en") -> AgentResult:
     """Handle Constitution or Maxim task — ES retrieval + web enrichment + LLM generation."""
-    system_prompt = (
-        CONSTITUTION_SYSTEM_PROMPT if task == "Constitution"
-        else MAXIM_SYSTEM_PROMPT
+    system_prompt = localize_prompt(
+        CONSTITUTION_SYSTEM_PROMPT if task == "Constitution" else MAXIM_SYSTEM_PROMPT,
+        user_language,
     )
 
     # Run ES retrieval and web enrichment in parallel
@@ -243,11 +248,13 @@ async def constitution_node(state: LegalAgentState) -> dict:
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Constitution", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
+    user_language = state.get("user_language", "en")
     log.info("Constitution agent started", query=query[:100],
              using_agent_query="Constitution" in agent_queries)
 
     try:
-        result = await _handle_constitution_or_maxim("Constitution", query, chat_history)
+        result = await _handle_constitution_or_maxim("Constitution", query, chat_history,
+                                                      user_language)
     except Exception as e:
         log.error("Constitution agent failed", error=str(e), exc_info=True)
         result = AgentResult(
@@ -271,11 +278,13 @@ async def maxim_node(state: LegalAgentState) -> dict:
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Maxim", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
+    user_language = state.get("user_language", "en")
     log.info("Maxim agent started", query=query[:100],
              using_agent_query="Maxim" in agent_queries)
 
     try:
-        result = await _handle_constitution_or_maxim("Maxim", query, chat_history)
+        result = await _handle_constitution_or_maxim("Maxim", query, chat_history,
+                                                      user_language)
     except Exception as e:
         log.error("Maxim agent failed", error=str(e), exc_info=True)
         result = AgentResult(
@@ -296,11 +305,12 @@ async def legal_concepts_node(state: LegalAgentState) -> dict:
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Legal_Concepts", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
+    user_language = state.get("user_language", "en")
     log.info("Legal Concepts agent started", query=query[:100],
              using_agent_query="Legal_Concepts" in agent_queries)
 
     try:
-        result = await _handle_legal_concepts(query, chat_history)
+        result = await _handle_legal_concepts(query, chat_history, user_language)
     except Exception as e:
         log.error("Legal Concepts agent failed", error=str(e), exc_info=True)
         result = AgentResult(

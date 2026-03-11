@@ -17,6 +17,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from core.state import LegalAgentState, AgentResult, FileContextData
 from core.clients import get_gpt4o, get_gemini_flash, get_gemini_pro, get_drafting_llm
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import (
     TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT,
@@ -309,6 +310,7 @@ Rules:
 4. For Legislation: pick the SINGLE most relevant act for the user's primary legal issue. Do NOT list multiple acts.
 5. For Judgment: NEVER include fictional party names from the user's scenario. Use only legal topics and case type keywords.
 6. Return valid JSON object mapping agent name to rewritten query.
+7. CRITICAL: All rewritten queries MUST be in English, regardless of the input language. If the user query is in Hindi, Tamil, or any other language, translate the intent to English for every agent query.
 
 User Query: {query}
 Agents: {agents}
@@ -326,12 +328,15 @@ class AgentQueries(BaseModel):
 
 QUERY_NORMALIZE_PROMPT = """You are a legal query analyzer. Analyze the user's query and extract two things:
 
-1. **Normalized Query** (in English): Rewrite the user's query into clear, professional English. If the query is in Hindi, Hinglish, or any other language, translate it to English. Preserve all legal details (names, dates, sections, acts). Add explicit mention of what the user is asking for.
+1. **Normalized Query** (in English): Rewrite the user's query into clear, professional English.
+   - If the query is in any Indian language (Hindi, Bengali, Tamil, Telugu, Marathi, Kannada, Malayalam, Gujarati, Punjabi, Urdu, Odia, Assamese, etc.) or in Romanized/transliterated form (Hinglish, "kaise", "batao", etc.), translate it to English.
+   - Preserve all legal details verbatim: section numbers, act names (IPC, BNS, CrPC, BNSS, IEA, BSA), party names, case numbers, dates.
+   - Do NOT translate proper nouns: court names, party names, act abbreviations.
+   - Add explicit mention of what the user is asking for.
 
 2. **Response Instructions**: Extract what FORMAT and TYPE of response the user expects. Look for:
    - Output type: draft/document, explanation, advice/opinion, comparison table, list, summary, step-by-step guide
    - Specific format requests: table format, bullet points, numbered list, formal legal language
-   - Language preference: if the user wrote in Hindi/Hinglish, note "User prefers Hindi/bilingual response"
    - Specific expectations: "on behalf of plaintiff", "with case laws", "with sections", "arguments and counter-arguments"
    - Relief/remedy focus: compensation, bail, injunction, etc.
 
@@ -559,6 +564,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     agent_results: dict[str, AgentResult] = state.get("agent_results", {})
     query = state.get("query", state["original_query"])
     response_instructions = state.get("response_instructions", "")
+    user_language = state.get("user_language", "en")
 
     # Inject file context into query for synthesis
     fc = FileContextData.from_state(state)
@@ -633,7 +639,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                      draft_len=len(result.content))
             try:
                 enriched, cite_tokens = await _auto_cite_draft(
-                    query, result.content, response_instructions
+                    query, result.content, response_instructions, user_language
                 )
                 log.info("Auto-citation enrichment completed",
                          original_len=len(result.content),
@@ -693,11 +699,13 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                     enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
             elif citations_text.strip():
                 enriched, cite_tokens = await _inject_citations_into_draft(
-                    query, drafting_result.content, citations_text
+                    query, drafting_result.content, citations_text, user_language
                 )
                 total_tokens += cite_tokens
             else:
-                enriched, cite_tokens = await _auto_cite_draft(query, drafting_result.content)
+                enriched, cite_tokens = await _auto_cite_draft(
+                    query, drafting_result.content, user_language=user_language
+                )
                 total_tokens += cite_tokens
 
             log.info("Draft synthesis completed",
@@ -734,7 +742,9 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     try:
         with log_time(log, "LLM synthesis"):
             llm = get_gemini_flash(temperature=0.2)
-            prompt = ChatPromptTemplate.from_template(SYNTHESIS_PROMPT)
+            prompt = ChatPromptTemplate.from_template(
+                localize_prompt(SYNTHESIS_PROMPT, user_language)
+            )
             chain = prompt | llm
 
             from core.streaming import stream_chain_response
@@ -804,7 +814,7 @@ def _serialize_sources(result: AgentResult) -> list[dict]:
 # --- Draft Citation Helpers ---
 
 async def _inject_citations_into_draft(
-    query: str, draft: str, citations_text: str
+    query: str, draft: str, citations_text: str, user_language: str = "en",
 ) -> tuple[str, int]:
     """Preserve full draft and inject real citations from ALL agents.
 
@@ -813,7 +823,9 @@ async def _inject_citations_into_draft(
     """
     with log_time(log, "Draft citation injection"):
         llm = get_drafting_llm()
-        prompt = ChatPromptTemplate.from_template(DRAFT_SYNTHESIS_PROMPT)
+        prompt = ChatPromptTemplate.from_template(
+            localize_prompt(DRAFT_SYNTHESIS_PROMPT, user_language)
+        )
         chain = prompt | llm
 
         from core.streaming import stream_chain_response
@@ -833,7 +845,7 @@ async def _inject_citations_into_draft(
 
 
 async def _auto_cite_draft(
-    query: str, draft: str, response_instructions: str = ""
+    query: str, draft: str, response_instructions: str = "", user_language: str = "en",
 ) -> tuple[str, int]:
     """Add AI-generated citations when no database agents provided results.
 
@@ -842,7 +854,9 @@ async def _auto_cite_draft(
     """
     with log_time(log, "Draft auto-citation"):
         llm = get_drafting_llm()
-        prompt = ChatPromptTemplate.from_template(DRAFT_CITATION_PROMPT)
+        prompt = ChatPromptTemplate.from_template(
+            localize_prompt(DRAFT_CITATION_PROMPT, user_language)
+        )
         chain = prompt | llm
 
         instructions_text = ""

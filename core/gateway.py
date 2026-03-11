@@ -94,11 +94,17 @@ async def serve_frontend():
 
 # --- Request / Response Schemas ---
 
+_VALID_LANGUAGES = {
+    "en", "hi", "bn", "te", "mr", "ta", "kn", "ml", "gu", "pa", "ur", "or", "as", "sa",
+}
+
+
 class SearchRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     # alias keeps backward-compat with existing clients sending "Promptquery"
     prompt_query: str = Field(..., alias="Promptquery", min_length=1, max_length=5000)
     globalThreadId: Optional[str] = None
+    preferred_language: Optional[str] = None  # ISO 639-1 override (skips auto-detection)
 
 
 class SearchResponse(BaseModel):
@@ -179,14 +185,20 @@ def _build_initial_state(
     unique_string: str | None = None,
     draft_continuation: dict | None = None,
     file_context: dict | None = None,
+    preferred_language: str | None = None,
 ) -> dict:
     """Build the initial LangGraph state with all required fields."""
+    # Validate and normalise preferred_language (client override for user_language)
+    lang = ""
+    if preferred_language and preferred_language in _VALID_LANGUAGES:
+        lang = preferred_language
     return {
         "messages": [],
         "original_query": query,
         "query": query,
         "thread_id": thread_id,
         "unique_string": unique_string,
+        "user_language": lang,   # "" → memory node will auto-detect; non-empty → skip detection
         "task": None,
         "tasks_planned": [],
         "agent_queries": {},
@@ -229,7 +241,9 @@ async def search(data: SearchRequest, request: Request):
     """
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
-    initial_state = _build_initial_state(data.prompt_query, thread_id)
+    initial_state = _build_initial_state(
+        data.prompt_query, thread_id, preferred_language=data.preferred_language
+    )
     config = {"configurable": {"thread_id": thread_id}}
 
     log.info("Search request received",
@@ -350,7 +364,9 @@ async def search_stream(data: SearchRequest, request: Request):
     """
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
-    initial_state = _build_initial_state(data.prompt_query, thread_id)
+    initial_state = _build_initial_state(
+        data.prompt_query, thread_id, preferred_language=data.preferred_language
+    )
     config = {"configurable": {"thread_id": thread_id}}
 
     log.info("Stream request received",
@@ -547,6 +563,7 @@ async def chat_with_files(
     request: Request,
     query: str = Form(...),
     globalThreadId: Optional[str] = Form(None),
+    preferred_language: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -633,6 +650,7 @@ async def chat_with_files(
         # Build state and run agent graph
         initial_state = _build_initial_state(
             query, thread_id, file_context=file_context_dict,
+            preferred_language=preferred_language,
         )
         config = {"configurable": {"thread_id": thread_id}}
 

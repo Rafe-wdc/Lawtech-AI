@@ -31,6 +31,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gpt4o, get_gemini_flash
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
 from tools.shared.judgment_search import (
@@ -266,10 +267,10 @@ async def judgment_node(state: LegalAgentState) -> dict:
     4. Generate response with citations (Gemini Flash, streaming)
     """
     agent_queries = state.get("agent_queries", {})
-    # Prefer agent-specific query > original_query > normalized query
-    # Original preserves exact party names/citations for ES matching
-    query = agent_queries.get("Judgment", state.get("original_query", state.get("query", "")))
+    # Prefer agent-specific query > normalized English query > original (for multilingual support)
+    query = agent_queries.get("Judgment", state.get("query", state.get("original_query", "")))
     chat_history = state.get("chat_history", [])
+    _system_prompt = localize_prompt(JUDGMENT_SYSTEM_PROMPT, state.get("user_language", "en"))
     log.info("Agent started", query=query[:100],
              using_agent_query="Judgment" in agent_queries)
 
@@ -336,7 +337,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 log.warning("All searches exhausted, using web fallback",
                             strategies_tried=strategies_tried)
                 fallback_result = await web_search_fallback(
-                    query, "Judgment", JUDGMENT_SYSTEM_PROMPT)
+                    query, "Judgment", _system_prompt)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Judgment": fallback_result}}
 
@@ -356,7 +357,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
         with log_time(log, "LLM generation"):
             llm = get_gemini_flash(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([
-                ("system", JUDGMENT_SYSTEM_PROMPT),
+                ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),
                 ("user", "Court Judgments:\n{docs}"),
                 ("user", "Current Date: {date}"),
@@ -397,7 +398,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
             except RuntimeError:
                 pass
             from core.agent_fallback import web_search_fallback
-            fallback_result = await web_search_fallback(query, "Judgment", JUDGMENT_SYSTEM_PROMPT)
+            fallback_result = await web_search_fallback(query, "Judgment", _system_prompt)
             fallback_result.tokens_consumed += tokens
             return {"agent_results": {"Judgment": fallback_result}}
 

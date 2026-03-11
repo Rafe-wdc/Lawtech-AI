@@ -20,19 +20,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_genai_client
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import SCENARIO_SYSTEM_PROMPT
 
 log = get_logger("Scenario")
-
-
-# --- Build prompt for GenAI client ---
-
-_SCENARIO_CHAT_TEMPLATE = ChatPromptTemplate.from_messages([
-    ("system", SCENARIO_SYSTEM_PROMPT),
-    MessagesPlaceholder("chat_history", optional=True),
-    ("human", "{input}"),
-])
 
 
 # --- Agent Node ---
@@ -50,16 +42,20 @@ async def scenario_node(state: LegalAgentState) -> dict:
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Scenario", state.get("query", state["original_query"]))
     chat_history = state.get("chat_history", [])
+    user_language = state.get("user_language", "en")
     log.info("Agent started", query=query[:100],
              has_history=len(chat_history) > 0,
              using_agent_query="Scenario" in agent_queries)
 
     try:
-        # Build prompt using the LangChain template → convert to single string
-        prompt_messages = _SCENARIO_CHAT_TEMPLATE.format_messages(
-            input=query,
-            chat_history=chat_history,
-        )
+        # Build prompt dynamically so we can inject language instruction
+        system_prompt = localize_prompt(SCENARIO_SYSTEM_PROMPT, user_language)
+        template = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder("chat_history", optional=True),
+            ("human", "{input}"),
+        ])
+        prompt_messages = template.format_messages(input=query, chat_history=chat_history)
         full_prompt = "\n".join(msg.content for msg in prompt_messages)
 
         log.debug("Prompt built", prompt_len=len(full_prompt))

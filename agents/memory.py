@@ -20,6 +20,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from core.state import LegalAgentState, FileContextData
 from core.clients import get_gemini_flash
 from core.chat_store import chat_store
+from core.language import detect_language
 from core.logger import get_logger, log_time
 from tools.inline.abbreviation import expand_abbreviations
 
@@ -256,13 +257,22 @@ async def memory_node(state: LegalAgentState) -> dict:
     log.info("Agent started",
              query=original_query[:100], thread_id=thread_id or "none")
 
-    # Step 1: Expand abbreviations
+    # Step 1: Determine language — respect explicit client override, else auto-detect
+    gateway_lang = state.get("user_language", "")
+    if gateway_lang:
+        user_language = gateway_lang
+        log.info("Language: using client preference", lang=user_language)
+    else:
+        user_language = detect_language(original_query)
+        log.info("Language detected", lang=user_language, query=original_query[:60])
+
+    # Step 2: Expand abbreviations
     query = expand_abbreviations(original_query)
     if query != original_query:
         log.info("Abbreviations expanded",
                  original=original_query[:60], expanded=query[:60])
 
-    # Step 2: Load chat history if thread exists
+    # Step 3: Load chat history if thread exists
     chat_history = []
     summary_text = ""
     restored_file_context: dict | None = None
@@ -274,7 +284,7 @@ async def memory_node(state: LegalAgentState) -> dict:
                  messages=len(chat_history),
                  has_summary=bool(summary_text))
 
-        # Step 3: Check file context — attached this turn OR restore from thread history
+        # Step 4: Check file context — attached this turn OR restore from thread history
         fc = FileContextData.from_state(state)
 
         if fc and fc.has_content:
@@ -302,6 +312,7 @@ async def memory_node(state: LegalAgentState) -> dict:
         "query": query,
         "chat_history": chat_history,
         "summary_text": summary_text,
+        "user_language": user_language,
     }
     if restored_file_context is not None:
         result["file_context"] = restored_file_context

@@ -28,6 +28,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_es_client, get_gpt4o_mini, get_gemini_flash
 from core.settings import ES_INDICES
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import LEGISLATION_SYSTEM_PROMPT
 
@@ -272,10 +273,10 @@ async def legislation_node(state: LegalAgentState) -> dict:
     5. Generate response using retrieved statute text
     """
     agent_queries = state.get("agent_queries", {})
-    # Prefer agent-specific query > original_query > normalized query
-    # Original preserves exact section numbers/citations for ES matching
-    query = agent_queries.get("Legislation", state.get("original_query", state.get("query", "")))
+    # Prefer agent-specific query > normalized English query > original (for multilingual support)
+    query = agent_queries.get("Legislation", state.get("query", state.get("original_query", "")))
     chat_history = state.get("chat_history", [])
+    _system_prompt = localize_prompt(LEGISLATION_SYSTEM_PROMPT, state.get("user_language", "en"))
     log.info("Agent started", query=query[:100],
              using_agent_query="Legislation" in agent_queries)
 
@@ -359,7 +360,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 log.warning("All searches exhausted, using web fallback",
                             search_mode=search_mode)
                 fallback_result = await web_search_fallback(
-                    query, "Legislation", LEGISLATION_SYSTEM_PROMPT)
+                    query, "Legislation", _system_prompt)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Legislation": fallback_result}}
 
@@ -378,7 +379,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
         with log_time(log, "LLM generation"):
             llm = get_gemini_flash(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([
-                ("system", LEGISLATION_SYSTEM_PROMPT),
+                ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),
                 ("user", "Legislation provisions:\n{docs}"),
                 ("user", "Current Date: {date}"),

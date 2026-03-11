@@ -27,6 +27,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
 from core.clients import get_gemini_pro, get_qa_embeddings
 from core.settings import CHROMA_STORE_ROOT
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 
 import chromadb
@@ -204,6 +205,7 @@ async def document_node(state: LegalAgentState) -> dict:
     """
     query = state.get("query") or state.get("original_query", "")
     unique_string = state.get("unique_string")
+    user_language = state.get("user_language", "en")
 
     # Check file_context for inline-uploaded collections
     if not unique_string:
@@ -248,15 +250,15 @@ async def document_node(state: LegalAgentState) -> dict:
                         "text": f"Current Date: {date.today()}\n\nQuestion: {query}",
                     })
 
-                    messages = [
-                        ("system", (
-                            "You are Lawttorney, a legal AI assistant. Analyze the uploaded "
-                            "document(s) carefully. Extract all visible text, identify the "
-                            "document type, and answer the user's question thoroughly. Cite "
-                            "specific details: names, dates, section numbers, case numbers, "
-                            "court names, and legal provisions visible in the document."
-                        )),
-                    ]
+                    _doc_system = localize_prompt(
+                        "You are Lawttorney, a legal AI assistant. Analyze the uploaded "
+                        "document(s) carefully. Extract all visible text, identify the "
+                        "document type, and answer the user's question thoroughly. Cite "
+                        "specific details: names, dates, section numbers, case numbers, "
+                        "court names, and legal provisions visible in the document.",
+                        user_language,
+                    )
+                    messages = [("system", _doc_system)]
                     if fc.inline_text:
                         messages.append(("user", f"Additional document text:\n{fc.inline_text[:40000]}"))
                     messages.append(("user", user_content))
@@ -303,7 +305,13 @@ async def document_node(state: LegalAgentState) -> dict:
                 with log_time(log, "Inline document QA"):
                     llm = get_gemini_pro(temperature=0.3)
                     prompt = ChatPromptTemplate.from_messages([
-                        ("system", "You are Lawttorney, a legal AI assistant. Answer questions about the uploaded document(s) using only the provided content. Be thorough, detailed, and cite specific sections, clauses, parties, dates, and legal provisions when possible."),
+                        ("system", localize_prompt(
+                            "You are Lawttorney, a legal AI assistant. Answer questions about "
+                            "the uploaded document(s) using only the provided content. Be "
+                            "thorough, detailed, and cite specific sections, clauses, parties, "
+                            "dates, and legal provisions when possible.",
+                            user_language,
+                        )),
                         ("user", "Document content:\n{docs}"),
                         ("user", "Current Date: {date}"),
                         ("user", "Question: {query}"),

@@ -98,7 +98,6 @@ Rules:
 6. Keep the structure logical: Statutory Basis → Case Laws → Analysis → Remedies.
 7. Do not repeat information that appears in multiple agent results.
 8. Do not mention which "agent" provided what — present as unified response.
-9. If the user asked in Hindi/Hinglish, respond in a bilingual format (English with Hindi terms where appropriate).
 """
 
 # --- Domain Agent Prompts ---

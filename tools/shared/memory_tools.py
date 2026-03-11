@@ -19,7 +19,6 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from core.clients import get_gemini_flash, get_gpt4o
 from core.logger import get_logger
-from core.settings import LAWTTORNEY_API_BASE
 
 log = get_logger("MemoryTools")
 

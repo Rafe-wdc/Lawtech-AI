@@ -35,6 +35,7 @@ from core.clients import (
     get_retriever_embeddings,
 )
 from core.settings import ES_INDICES
+from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import DRAFTING_SYSTEM_PROMPT, DRAFT_OUTLINE_PROMPT
 
@@ -242,7 +243,7 @@ def _select_best_template(query: str, candidates: list[dict]) -> tuple[str, list
 
 # --- Step 3: Generate Document Outline ---
 
-async def _generate_outline(query: str, template_text: str) -> DraftOutline:
+async def _generate_outline(query: str, template_text: str, user_language: str = "en") -> DraftOutline:
     """Generate a structured outline with all sections for the document.
 
     Uses Gemini 2.5 Flash with structured output for reliable section list.
@@ -250,7 +251,7 @@ async def _generate_outline(query: str, template_text: str) -> DraftOutline:
     with log_time(log, "Outline generation"):
         llm = get_drafting_llm().with_structured_output(DraftOutline)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", DRAFT_OUTLINE_PROMPT),
+            ("system", localize_prompt(DRAFT_OUTLINE_PROMPT, user_language)),
             ("user", "Reference Template:\n{template}"),
             ("user", "Current Date: {date}"),
             ("user", "User Query:\n{query}"),
@@ -322,6 +323,7 @@ async def _generate_section(
     section_index: int,
     total_sections: int,
     outline: DraftOutline,
+    user_language: str = "en",
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
@@ -335,7 +337,7 @@ async def _generate_section(
     with log_time(log, f"Section {section_index+1}/{total_sections}: {section.title}"):
         llm = get_drafting_llm()
         prompt = ChatPromptTemplate.from_messages([
-            ("system", DRAFTING_SYSTEM_PROMPT),
+            ("system", localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language)),
             ("user", "Document: {doc_title}\nCourt: {court_details}"),
             ("user", "Full Document Outline:\n{outline_summary}"),
             ("user", "Reference Template:\n{template}"),
@@ -380,6 +382,7 @@ async def _generate_sections_parallel(
     template_text: str,
     outline: DraftOutline,
     writer=None,
+    user_language: str = "en",
 ) -> tuple[list[str], list[int], int]:
     """Generate all sections with bounded parallelism via asyncio.Semaphore.
 
@@ -406,7 +409,7 @@ async def _generate_sections_parallel(
                 })
             try:
                 text, tokens = await _generate_section(
-                    query, template_text, plan, i, total, outline,
+                    query, template_text, plan, i, total, outline, user_language,
                 )
                 results[i] = (text, tokens, None)
             except Exception as e:
@@ -441,11 +444,77 @@ async def _generate_sections_parallel(
 
 # --- Step 6: Assemble Document ---
 
-def _assemble_document(outline: DraftOutline, sections: list[str]) -> str:
+# Footer label translations for P1/P2 languages.
+# Keys: place, date, signature, through_counsel
+_FOOTER_LABELS: dict[str, dict[str, str]] = {
+    "hi": {
+        "place": "स्थान",
+        "date": "दिनांक",
+        "signature": "याचिकाकर्ता/आवेदक के हस्ताक्षर",
+        "through_counsel": "अधिवक्ता के माध्यम से",
+    },
+    "bn": {
+        "place": "স্থান",
+        "date": "তারিখ",
+        "signature": "আবেদনকারীর স্বাক্ষর",
+        "through_counsel": "আইনজীবীর মাধ্যমে",
+    },
+    "ta": {
+        "place": "இடம்",
+        "date": "தேதி",
+        "signature": "மனுதாரர்/விண்ணப்பதாரர் கையொப்பம்",
+        "through_counsel": "வழக்கறிஞர் மூலம்",
+    },
+    "te": {
+        "place": "స్థలం",
+        "date": "తేదీ",
+        "signature": "పిటిషనర్/దరఖాస్తుదారు సంతకం",
+        "through_counsel": "న్యాయవాది ద్వారా",
+    },
+    "mr": {
+        "place": "ठिकाण",
+        "date": "दिनांक",
+        "signature": "याचिकाकर्ता/अर्जदाराच्या सह्या",
+        "through_counsel": "वकिलांमार्फत",
+    },
+    "kn": {
+        "place": "ಸ್ಥಳ",
+        "date": "ದಿನಾಂಕ",
+        "signature": "ಅರ್ಜಿದಾರ/ಅರ್ಜಿದಾರರ ಸಹಿ",
+        "through_counsel": "ವಕೀಲರ ಮೂಲಕ",
+    },
+    "ml": {
+        "place": "സ്ഥലം",
+        "date": "തീയതി",
+        "signature": "ഹർജിക്കാരന്റെ/അപേക്ഷകന്റെ ഒപ്പ്",
+        "through_counsel": "അഭിഭാഷകൻ വഴി",
+    },
+    "gu": {
+        "place": "સ્થળ",
+        "date": "તારીખ",
+        "signature": "અરજદાર/અરજકર્તાની સહી",
+        "through_counsel": "વકીલ મારફત",
+    },
+    "pa": {
+        "place": "ਸਥਾਨ",
+        "date": "ਮਿਤੀ",
+        "signature": "ਅਰਜ਼ੀਕਰਤਾ ਦੇ ਦਸਤਖਤ",
+        "through_counsel": "ਵਕੀਲ ਰਾਹੀਂ",
+    },
+    "ur": {
+        "place": "جگہ",
+        "date": "تاریخ",
+        "signature": "درخواست گزار کے دستخط",
+        "through_counsel": "وکیل کے ذریعے",
+    },
+}
+
+
+def _assemble_document(outline: DraftOutline, sections: list[str], user_language: str = "en") -> str:
     """Combine all sections into the final document with proper structure.
 
     Ensures each section has a heading (injects from outline if LLM omitted it).
-    Adds standard court filing footer with signature and verification blocks.
+    Adds a court filing footer with labels translated for the user's language.
     """
     parts = [
         f"# {outline.document_title}",
@@ -462,13 +531,19 @@ def _assemble_document(outline: DraftOutline, sections: list[str]) -> str:
 
         parts.append(text)
 
-    # Standard court filing footer
+    # Court filing footer — labels translated for regional languages
+    labels = _FOOTER_LABELS.get(user_language, {})
+    place_label = labels.get("place", "Place")
+    date_label = labels.get("date", "Date")
+    signature_label = labels.get("signature", "Signature of the Petitioner/Applicant")
+    through_counsel_label = labels.get("through_counsel", "Through Counsel")
+
     parts.append("---")
     parts.append(
-        "**Place:** [Place]\n\n"
-        "**Date:** [Date]\n\n"
-        "**Signature of the Petitioner/Applicant**\n\n"
-        "Through Counsel:\n\n"
+        f"**{place_label}:** [Place]\n\n"
+        f"**{date_label}:** [Date]\n\n"
+        f"**{signature_label}**\n\n"
+        f"{through_counsel_label}:\n\n"
         "**[Name of Advocate]**\n"
         "[Enrollment No.]\n"
         "[Address of Advocate]"
@@ -539,6 +614,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                 section_text, section_tokens = await _generate_section(
                     query, template_text, section_plan,
                     idx, len(outline.sections), outline,
+                    state.get("user_language", "en"),
                 )
                 sections[idx] = section_text
                 total_tokens += section_tokens
@@ -565,7 +641,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                 "completed_sections": len(outline.sections) - len(new_failed),
             })
 
-        full_draft = _assemble_document(outline, sections)
+        full_draft = _assemble_document(outline, sections, state.get("user_language", "en"))
 
         if new_failed:
             log.warning("Continue draft: some sections still failed",
@@ -631,6 +707,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
     """
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Drafting") or state.get("query") or state.get("original_query", "")
+    user_language = state.get("user_language", "en")
     log.info("Agent started", query=query[:100],
              using_agent_query="Drafting" in agent_queries)
 
@@ -702,7 +779,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                   template=selected_source, template_len=len(template_text))
 
         # Step 4: Generate document outline (max 12 sections)
-        outline = await _generate_outline(query, template_text)
+        outline = await _generate_outline(query, template_text, user_language)
 
         # Step 5: Generate sections in parallel (semaphore-limited to 3)
         try:
@@ -712,7 +789,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             writer = None
 
         sections, failed_indices, total_tokens = await _generate_sections_parallel(
-            query, template_text, outline, writer,
+            query, template_text, outline, writer, user_language,
         )
 
         # Emit incomplete event if needed
@@ -728,7 +805,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             })
 
         # Step 6: Assemble complete document
-        full_draft = _assemble_document(outline, sections)
+        full_draft = _assemble_document(outline, sections, user_language)
 
         if failed_indices:
             log.warning("Agent completed with incomplete sections",

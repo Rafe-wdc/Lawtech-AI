@@ -40,7 +40,14 @@ class IdentifyTaskSchema(BaseModel):
 
 def _classify_task_regex_fallback(query: str) -> str:
     """Keyword-based task classification fallback when LLM is unavailable."""
-    q = query.lower()
+    q = query.lower().strip()
+    # Greeting / non-legal short-circuit (check before any legal keywords)
+    _greeting_tokens = {"hello", "hi", "hey", "hii", "helo", "hola", "namaste", "namaskar",
+                        "good morning", "good afternoon", "good evening", "good night",
+                        "how are you", "how r u", "what's up", "whats up", "sup",
+                        "who are you", "what are you", "what can you do"}
+    if q in _greeting_tokens or any(q.startswith(g) for g in _greeting_tokens):
+        return "Non_legal"
     if any(k in q for k in ("draft", "agreement", "notice", "plaint", "petition", "template", "format")):
         return "Drafting"
     if any(k in q for k in ("bns", "bnss", "bsa", "ipc", "crpc", "iea",
@@ -235,8 +242,8 @@ def _plan_agents(query: str, task: str) -> list[str]:
     """
     # Short-circuit for simple task types
     if task == "Non_legal":
-        log.debug("Simple task mapping used", task=task, agents=[])
-        return []
+        log.debug("Routing to non_legal agent", task=task)
+        return ["Non_legal"]
 
     # "Other" always maps to Scenario (as per PLAN_PROMPT contract)
     if task == "Other":
@@ -456,6 +463,30 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.warning("Query normalization timed out, using original", exc_info=True)
 
     # Step 1: Classify task (LLM with regex fallback on timeout)
+    # Fast pre-check: detect greetings before calling LLM
+    # Check BOTH the (possibly normalized) query AND the original raw query,
+    # because the normalizer may rewrite "what's up?" → "What is the user asking for?"
+    _original_query = state.get("original_query", query)
+    _GREETING_PREFIXES = (
+        "hello", "hi", "hey", "hii", "helo", "hola", "namaste", "namaskar",
+        "good morning", "good afternoon", "good evening", "good night",
+        "how are you", "how r u", "what's up", "whats up", "sup",
+        "who are you", "what are you", "how's it going", "hows it going",
+    )
+    _q_stripped = query.lower().strip().rstrip("!?,.")
+    _orig_stripped = _original_query.lower().strip().rstrip("!?,.")
+    if (
+        _q_stripped in _GREETING_PREFIXES
+        or _orig_stripped in _GREETING_PREFIXES
+        or any(_q_stripped.startswith(g) for g in _GREETING_PREFIXES)
+        or any(_orig_stripped.startswith(g) for g in _GREETING_PREFIXES)
+    ):
+        log.info("Greeting detected, short-circuiting classification",
+                 original=_original_query[:60])
+        task = "Non_legal"
+    else:
+        task = None  # will be set below
+
     # If files are attached, hint the classifier about them
     fc = FileContextData.from_state(state)
     classify_query = query
@@ -464,45 +495,26 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         classify_query = query + file_hint
         log.info("File context hint added for classification", file_names=fc.file_names)
 
-    try:
-        task = await asyncio.wait_for(
-            asyncio.to_thread(
-                _classify_task, classify_query, chat_summary=summary if summary else None
-            ),
-            timeout=30,
-        )
-    except asyncio.TimeoutError:
-        task = _classify_task_regex_fallback(classify_query)
-        log.warning("Task classification timed out, using regex fallback",
-                    task=task, query=query[:80])
+    if task is None:  # not already resolved by greeting pre-check
+        try:
+            task = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _classify_task, classify_query, chat_summary=summary if summary else None
+                ),
+                timeout=30,
+            )
+        except asyncio.TimeoutError:
+            task = _classify_task_regex_fallback(classify_query)
+            log.warning("Task classification timed out, using regex fallback",
+                        task=task, query=query[:80])
 
     # Note: if files are attached and task isn't Document, we'll add Document
     # to the plan alongside the classified task (see Step 3 below) instead of
     # overriding, to support multi-intent queries (e.g., "find judgments related
     # to this uploaded contract").
 
-    # Step 2: Handle non-legal (but allow if files are attached — user may just
-    # be asking about the document content)
-    if task == "Non_legal" and not (fc and fc.has_content):
-        log.warning("Non-legal query blocked", query=query[:80])
-        return {
-            "task": task,
-            "tasks_planned": [],
-            "is_blocked": True,
-            "tokens_consumed": 0,
-            "block_reason": (
-                "👋 Hello! I'm **Lawttorney**, your AI-powered Indian legal assistant.\n\n"
-                "I'm here to help you with all your legal queries. Here's what I can do for you:\n\n"
-                "1. ⚖️ **Court Judgments** — Search Supreme Court and High Court case laws by party name, citation, or legal issue\n"
-                "2. 📜 **Legislation & Acts** — Explain provisions of any Indian Act, section by section (Income Tax, Companies Act, GST, RERA, and more)\n"
-                "3. 📋 **New Criminal Codes** — Lookup BNS (IPC), BNSS (CrPC), and BSA (IEA) — old and new law equivalents\n"
-                "4. 🏛️ **Constitution & Maxims** — Explain Fundamental Rights, Directive Principles, Articles, and legal maxims like *audi alteram partem*\n"
-                "5. 📝 **Legal Drafting** — Generate professional legal documents — agreements, notices, plaints, petitions, and more\n"
-                "6. 🔍 **Legal Scenario Analysis** — Analyse your situation, identify applicable laws, and suggest remedies\n\n"
-                "Please ask me a legal question and I'll get right on it!"
-            ),
-        }
-    # If Non_legal but has files, treat as Document task
+    # Step 2: Handle non-legal queries
+    # If files are attached, a "non-legal" greeting may really be about the document
     if task == "Non_legal" and fc and fc.has_content:
         log.info("Non-legal overridden to Document due to file context")
         task = "Document"
@@ -521,7 +533,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             )
         except asyncio.TimeoutError:
             log.warning("Agent planning timed out, falling back to single agent", task=task)
-            tasks_planned = [task] if task not in ("Non_legal",) else []
+            tasks_planned = [task] if task else []
 
         # Step 3b: File context — ensure Document agent is planned if files attached
         if fc and fc.has_content and "Document" not in tasks_planned:

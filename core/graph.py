@@ -30,6 +30,7 @@ from agents.scenario import scenario_node
 from agents.constitution_maxim import constitution_node, maxim_node, legal_concepts_node
 from agents.document import document_node
 from agents.sci_judgment import sci_judgment_node
+from agents.non_legal import non_legal_node
 
 
 # --- Task → Node Mapping ---
@@ -46,6 +47,7 @@ AGENT_NODE_MAP = {
     "Legal_Concepts": "legal_concepts",
     "SCI_Judgment": "sci_judgment",
     "Document": "document",
+    "Non_legal": "non_legal",
 }
 
 
@@ -78,9 +80,9 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
     Each agent receives the full shared state and writes its results
     to agent_results[agent_name] — the custom reducer merges them.
     """
-    # Handle blocked queries (Non_legal)
+    # Handle guardrail-blocked queries (PII, injection, etc.)
     if state.get("is_blocked"):
-        log.info("Routing to blocked_response (non-legal)")
+        log.info("Routing to blocked_response (guardrail blocked)")
         return [Send("blocked_response", state)]
 
     planned = state.get("tasks_planned", [])
@@ -112,7 +114,7 @@ def _validate_agent_map():
     """Ensure all TaskType values (except Non_legal) have an AGENT_NODE_MAP entry."""
     from core.state import TaskType
     task_types = set(TaskType.__args__)
-    unmapped = task_types - set(AGENT_NODE_MAP.keys()) - {"Non_legal"}
+    unmapped = task_types - set(AGENT_NODE_MAP.keys())
     if unmapped:
         log.warning("TaskTypes missing from AGENT_NODE_MAP (will fallback to scenario)",
                     unmapped=list(unmapped))
@@ -168,6 +170,7 @@ def build_graph() -> StateGraph:
     graph.add_node("legal_concepts", legal_concepts_node)
     graph.add_node("document", document_node)
     graph.add_node("sci_judgment", sci_judgment_node)
+    graph.add_node("non_legal", non_legal_node)
 
     # --- Add Edges ---
 
@@ -198,7 +201,7 @@ def build_graph() -> StateGraph:
     domain_agents = [
         "legislation", "judgment", "newacts", "drafting",
         "scenario", "constitution", "maxim", "legal_concepts",
-        "document", "sci_judgment",
+        "document", "sci_judgment", "non_legal",
     ]
     for agent_name in domain_agents:
         graph.add_edge(agent_name, "orchestrator_synthesize")

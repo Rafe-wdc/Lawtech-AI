@@ -25,7 +25,8 @@ Identify the PRIMARY legal task from the query. Choose EXACTLY ONE task from the
                        Articles of the Constitution, or queries about landmark constitutional judgments
                        (e.g. Puttaswamy, Kesavananda Bharati, Maneka Gandhi, basic structure doctrine).
 
-    **Scenario** → Situational legal query, real-life legal situation analysis, legal advice
+    **Scenario** → Situational legal query, real-life legal situation analysis, legal advice.
+                   IMPORTANT: Do NOT use Scenario for greetings, casual conversation, or non-legal queries.
 
     **Judgment** → Case law, court decisions, precedents, rulings, case citations (general / High Court / unspecified courts)
 
@@ -42,7 +43,12 @@ Identify the PRIMARY legal task from the query. Choose EXACTLY ONE task from the
 
     **Document** → Questions about uploaded files/documents (PDFs, images, DOCX, etc.) attached to the chat
 
-    **Non_legal** → Queries clearly NOT related to legal matters
+    **Non_legal** → Queries clearly NOT related to legal matters. This includes:
+                   - Greetings and salutations: "hello", "hi", "hey", "good morning", "how are you", "namaste", "what's up", "hii", "sup"
+                   - Casual conversation, compliments, or chit-chat (e.g. "what's up?", "how's it going?")
+                   - Non-legal topics: weather, sports, cooking, math, general knowledge, jokes
+                   - Questions about the bot itself: "who are you", "what can you do"
+                   NOTE: Short casual openers are Non_legal, NOT Scenario — even if they could theoretically be situational.
 
     **Other** → Legal-adjacent queries that don't fit other categories
 

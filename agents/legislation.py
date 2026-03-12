@@ -303,7 +303,8 @@ async def legislation_node(state: LegalAgentState) -> dict:
                      act=multi_parsed["act_name"])
 
             with log_time(log, "Multi-section ES retrieval"):
-                result = _search_legislation_multi_section(
+                result = await asyncio.to_thread(
+                    _search_legislation_multi_section,
                     clean_query,
                     multi_parsed["section_numbers"],
                     multi_parsed["act_name"],
@@ -323,14 +324,14 @@ async def legislation_node(state: LegalAgentState) -> dict:
         else:
             # --- Standard single-section path (use clean_query) ---
             with log_time(log, "ES retrieval"):
-                hits, source_name = _search_legislation(clean_query)
+                hits, source_name = await asyncio.to_thread(_search_legislation, clean_query)
 
         # Step 3: Topic fallback if no hits and no section was identified
         if not hits and not multi_parsed:
             search_mode = "topic"
             log.info("No section hits, trying topic-based search")
             with log_time(log, "Topic ES retrieval"):
-                topic_result = _search_legislation_by_topic(clean_query)
+                topic_result = await asyncio.to_thread(_search_legislation_by_topic, clean_query)
 
             if topic_result["hits"]:
                 source_name = topic_result["source"]
@@ -348,7 +349,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
             if rewritten != query:
                 log.info("Retrying with rewritten query", rewritten=rewritten[:100])
                 try:
-                    retry_hits, retry_source = _search_legislation(rewritten)
+                    retry_hits, retry_source = await asyncio.to_thread(_search_legislation, rewritten)
                     if retry_hits:
                         hits, source_name = retry_hits, retry_source
                         log.info("Retry search succeeded", hit_count=len(hits))

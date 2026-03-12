@@ -385,9 +385,12 @@ async def document_node(state: LegalAgentState) -> dict:
         )
 
         # Retrieve from ChromaDB and generate answer (blocking I/O + LLM → off-thread)
+        # 90s timeout: ChromaDB MMR (k=30) + Gemini Pro generation can be slow,
+        # but if ChromaDB hangs on a locked/stalled disk this prevents infinite hang.
         with log_time(log, "Full document QA pipeline"):
-            answer, tokens, retrieved_docs = await asyncio.to_thread(
-                _retrieve_and_answer, unique_string, query, recent_history
+            answer, tokens, retrieved_docs = await asyncio.wait_for(
+                asyncio.to_thread(_retrieve_and_answer, unique_string, query, recent_history),
+                timeout=90.0,
             )
 
         # Save chat history (sync file I/O → off-thread)

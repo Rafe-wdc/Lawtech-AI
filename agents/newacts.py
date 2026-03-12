@@ -348,10 +348,11 @@ async def newacts_node(state: LegalAgentState) -> dict:
                                      old=f"{old_abbrev.upper()} {sec}",
                                      new=f"{mapped['new_act']} {mapped['new_section']}",
                                      desc=mapped["description"])
-                            # Fetch new section
+                            # Fetch new section (sync ES call → off-thread)
                             try:
-                                nearby = _get_nearby_sections(
-                                    mapped["new_section"], new_act_full, window=0,
+                                nearby = await asyncio.to_thread(
+                                    _get_nearby_sections,
+                                    mapped["new_section"], new_act_full, 0,
                                 )
                                 for nh in nearby["hits"]:
                                     mapping_extra_hits.append({
@@ -393,8 +394,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
                                      old=f"{mapped['old_act']} {mapped['old_section']}",
                                      desc=mapped["description"])
                             try:
-                                nearby = _get_nearby_sections(
-                                    mapped["old_section"], old_act_full, window=0,
+                                nearby = await asyncio.to_thread(
+                                    _get_nearby_sections,
+                                    mapped["old_section"], old_act_full, 0,
                                 )
                                 for nh in nearby["hits"]:
                                     mapping_extra_hits.append({
@@ -431,8 +433,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
             metadata.section_number = metadata.section_number[:_SECTION_RANGE_CAP]
             # Use BM25 topic search across the act — returns representative sections
             with log_time(log, "Topic BM25 search (large range)"):
-                topic_result = _search_newacts_by_topic(
-                    query, metadata.act_name if has_act else None, size=20,
+                topic_result = await asyncio.to_thread(
+                    _search_newacts_by_topic,
+                    query, metadata.act_name if has_act else None, 20,
                 )
             hits = [
                 {
@@ -450,7 +453,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
         elif not has_section and not has_act and metadata.hybrid_search:
             log.info("No section/act identified, using topic search")
             with log_time(log, "Topic BM25 search"):
-                topic_result = _search_newacts_by_topic(query)
+                topic_result = await asyncio.to_thread(_search_newacts_by_topic, query)
 
             hits = [
                 {
@@ -466,20 +469,23 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
         else:
             # Step 3: Build and execute query
-            es_query = _build_newacts_query(metadata, query)
+            # _build_newacts_query may call embeddings.embed_query (CPU/network);
+            # es.search is a blocking network call — both go off-thread.
+            def _build_and_search() -> list:
+                q = _build_newacts_query(metadata, query)
+                es = get_es_client()
+                return es.search(index=ES_INDICES["newacts"], body=q)["hits"]["hits"]
 
             with log_time(log, "ES search"):
-                es = get_es_client()
                 try:
-                    response = es.search(index=ES_INDICES["newacts"], body=es_query)
-                    hits = response["hits"]["hits"]
+                    hits = await asyncio.to_thread(_build_and_search)
                 except Exception as es_err:
                     err_msg = str(es_err).lower()
                     if "embedding" in err_msg or "script" in err_msg or "illegal_argument" in err_msg:
                         log.warning("Hybrid search failed, falling back to BM25-only",
                                     error=str(es_err))
-                        bm25_result = _search_newacts_by_topic(
-                            query, metadata.act_name,
+                        bm25_result = await asyncio.to_thread(
+                            _search_newacts_by_topic, query, metadata.act_name,
                         )
                         hits = [
                             {
@@ -506,8 +512,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
             log.info("Enriching with nearby sections",
                      center=center_sec, current_hits=len(hits))
             try:
-                nearby = _get_nearby_sections(
-                    center_sec, metadata.act_name, window=1, timeout=5,
+                nearby = await asyncio.to_thread(
+                    _get_nearby_sections, center_sec, metadata.act_name, 1, 5,
                 )
                 added = 0
                 existing_ids = {

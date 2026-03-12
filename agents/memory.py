@@ -113,9 +113,9 @@ def _rewrite_query(
             log.debug("Summary has context, proceeding with rewrite",
                       summary_len=len(summary_content))
 
-        # Format history as text
+        # Format history as text — cap at last 10 messages to stay within token budget
         history_lines = []
-        for msg in chat_history:
+        for msg in chat_history[-10:]:
             if isinstance(msg, HumanMessage):
                 history_lines.append(f"User: {msg.content}")
             elif isinstance(msg, AIMessage):

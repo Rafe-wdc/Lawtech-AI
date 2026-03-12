@@ -326,7 +326,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
         else:
             # Preliminary missed — do refined search with full GPT-4o metadata
             with log_time(log, "Refined ES search with metadata"):
-                search_result = smart_judgment_search(
+                search_result = await asyncio.to_thread(
+                    smart_judgment_search,
                     query=query,
                     petitioner=(metadata.petitioner_names or [""])[0],
                     respondent=(metadata.respondent_names or [""])[0],
@@ -349,7 +350,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
             if rewritten != query:
                 log.info("Retrying with rewritten query", rewritten=rewritten[:100])
                 try:
-                    retry_result = smart_judgment_search(
+                    retry_result = await asyncio.to_thread(
+                        smart_judgment_search,
                         query=rewritten,
                         petitioner=(metadata.petitioner_names or [""])[0],
                         respondent=(metadata.respondent_names or [""])[0],

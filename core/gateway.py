@@ -35,10 +35,11 @@ import uuid
 from typing import Optional, List
 
 from fastapi import Depends, FastAPI, HTTPException, Request, File, Form, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field, ConfigDict
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from werkzeug.utils import secure_filename
 
@@ -52,6 +53,31 @@ from .quality import score_response as _score_response
 from .auth import require_user_key, require_admin_key, get_key_identifier
 
 log = get_logger("Gateway")
+
+# --- Consistent error response helpers ---
+
+_HTTP_ERROR_CODES: dict[int, str] = {
+    400: "bad_request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    405: "method_not_allowed",
+    422: "validation_error",
+    429: "rate_limit_exceeded",
+    500: "internal_server_error",
+    502: "bad_gateway",
+    503: "service_unavailable",
+    504: "gateway_timeout",
+}
+
+
+def _error_response(status_code: int, error: str, message: str, request_id: str = "") -> JSONResponse:
+    """Return a uniform error JSON body across all error handlers."""
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": error, "message": message, "request_id": request_id},
+    )
+
 
 # --- Collection-level locks for concurrent upload protection ---
 _collection_locks: dict[str, threading.Lock] = {}
@@ -95,7 +121,34 @@ async def lifespan(app: FastAPI):
 # --- App ---
 app = FastAPI(title="Legal AI API v2", version="2.0.0", lifespan=lifespan)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    req_id = getattr(request.state, "request_id", "")
+    return _error_response(429, "rate_limit_exceeded", "Rate limit exceeded. Please slow down.", req_id)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    req_id = getattr(request.state, "request_id", "")
+    error_code = _HTTP_ERROR_CODES.get(exc.status_code, f"http_{exc.status_code}")
+    return _error_response(exc.status_code, error_code, str(exc.detail), req_id)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    req_id = getattr(request.state, "request_id", "")
+    errors = exc.errors()
+    message = errors[0]["msg"] if errors else "Request validation error"
+    return _error_response(422, "validation_error", message, req_id)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    req_id = getattr(request.state, "request_id", "")
+    log.error("Unhandled exception", exc_info=True, request_id=req_id, path=request.url.path)
+    return _error_response(500, "internal_server_error", "An unexpected error occurred.", req_id)
 
 # CORS: restrict to configured domain in production (set ALLOWED_ORIGINS in .env)
 # Example: ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
@@ -109,6 +162,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Request ID middleware (must run before metrics so errors include request_id) ─
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Assign a short request ID to every request so exception handlers can include it."""
+    rid = str(uuid.uuid4())[:8]
+    request.state.request_id = rid
+    set_request_id(rid)
+    return await call_next(request)
 
 
 # ── Prometheus metrics middleware ─────────────────────────────────────────────
@@ -525,6 +589,8 @@ async def search_stream(data: SearchRequest, request: Request):
                                 "total_sections": chunk["total_sections"],
                                 "completed_sections": chunk["completed_sections"],
                             }))
+                        elif chunk.get("type") == "queue_status":
+                            yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
                     continue
 
                 # --- Update events: node-level progress ---
@@ -830,6 +896,8 @@ async def chat_with_files(
                                 "total_sections": chunk["total_sections"],
                                 "completed_sections": chunk["completed_sections"],
                             }))
+                        elif chunk.get("type") == "queue_status":
+                            yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
                     continue
 
                 for node_name, update in chunk.items():
@@ -1021,6 +1089,8 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
                                 "total_sections": chunk["total_sections"],
                                 "completed_sections": chunk["completed_sections"],
                             }))
+                        elif chunk.get("type") == "queue_status":
+                            yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
                     continue
 
                 for node_name, update in chunk.items():
@@ -1450,7 +1520,7 @@ async def job_status(job_id: str):
 # ============================================================
 
 @app.api_route("/pyapi/health", methods=["GET", "HEAD"])
-async def health():
+async def health(request: Request):
     """Deep health check — verifies ES, API keys, memory, disk, SQLite.
 
     Returns HTTP 200 for healthy/degraded, HTTP 503 for unhealthy.

@@ -1,0 +1,141 @@
+name: Test & Deploy
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ── Job 1: Fast syntax + import check ─────────────────────────────────────
+  test:
+    name: Syntax & Import Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lightweight dependencies (syntax check only)
+        run: |
+          pip install --quiet \
+            fastapi pydantic python-dotenv structlog \
+            langgraph langchain langchain-core langchain-openai \
+            langchain-google-genai slowapi uvicorn gunicorn \
+            psycopg psutil prometheus-client
+
+      - name: Check Python syntax (all .py files)
+        run: |
+          echo "Checking syntax..."
+          find . -name "*.py" \
+            -not -path "./.git/*" \
+            -not -path "./venv/*" \
+            -not -path "./.venv/*" \
+            | xargs python -m py_compile
+          echo "Syntax OK"
+
+      - name: Check critical module imports
+        env:
+          # Dummy values so settings.py doesn't raise on missing keys
+          OPENAI_API_KEY: sk-dummy
+          GOOGLE_API_KEY: AIza-dummy
+          API_KEYS: test-key
+          ADMIN_API_KEY: test-admin-key
+        run: |
+          echo "Checking core imports..."
+          python -c "from core.settings import HOST, PORT; print('settings OK')"
+          python -c "from core.auth import require_user_key, require_admin_key; print('auth OK')"
+          python -c "from core.checkpointer import create_checkpointer; print('checkpointer OK')"
+          python -c "from core.logger import get_logger; print('logger OK')"
+          echo "All imports OK"
+
+  # ── Job 2: Deploy to production server (master only) ──────────────────────
+  deploy:
+    name: Deploy to Server
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package application (exclude heavy/secret dirs)
+        run: |
+          tar --exclude='.git' \
+              --exclude='venv' \
+              --exclude='.venv' \
+              --exclude='data' \
+              --exclude='logs' \
+              --exclude='models' \
+              --exclude='chroma_store' \
+              --exclude='uploads' \
+              --exclude='*.pyc' \
+              --exclude='__pycache__' \
+              --exclude='.env' \
+              -czf /tmp/lawtech_deploy.tar.gz .
+          echo "Package size: $(du -sh /tmp/lawtech_deploy.tar.gz | cut -f1)"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload package to server
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            /tmp/lawtech_deploy.tar.gz \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/lawtech_deploy.tar.gz"
+
+      - name: Deploy and restart on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" << 'ENDSSH'
+            set -e
+
+            echo "=== Deploying Lawtech-AI ==="
+            APP_DIR=/root/v2_multi_agent
+            cd $APP_DIR
+
+            # Extract new code (preserves .env, data/, logs/, models/, chroma_store/)
+            tar -xzf /tmp/lawtech_deploy.tar.gz -C $APP_DIR
+            rm /tmp/lawtech_deploy.tar.gz
+
+            # Update frontend
+            cp frontend.html /var/www/html/v2test.html
+            sed -i 's|value="http://localhost:5000"|value="https://tool.lawttorney.com"|g' /var/www/html/v2test.html
+            sed -i 's|/pyapi/|/pyapiv2/|g' /var/www/html/v2test.html
+
+            # Install any new Python dependencies
+            source venv/bin/activate
+            pip install -q -r requirements.txt
+
+            # Restart app
+            systemctl restart lawtech-v2
+            echo "Service restarted"
+
+            # Wait for app to come up (max 30s)
+            for i in $(seq 1 6); do
+              sleep 5
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/pyapi/health || echo "000")
+              if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
+                echo "Health check passed (HTTP $STATUS)"
+                exit 0
+              fi
+              echo "Waiting... attempt $i (HTTP $STATUS)"
+            done
+
+            echo "ERROR: Health check did not pass after 30s"
+            journalctl -u lawtech-v2 -n 30 --no-pager
+            exit 1
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

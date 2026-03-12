@@ -1068,6 +1068,10 @@
         <label>API Base URL</label>
         <input type="text" id="apiBase" value="http://localhost:5000" />
       </div>
+      <div class="field-group" style="margin-bottom: 8px;">
+        <label>API Key</label>
+        <input type="password" id="apiKey" value="" placeholder="Enter API key" />
+      </div>
       <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="checkHealth()">
         Test Connection
       </button>
@@ -1169,6 +1173,22 @@ let currentThreadId = sessionStorage.getItem('lawttorney_thread_id') || null;
 let currentTurnCount = parseInt(sessionStorage.getItem('lawttorney_turn_count') || '0');
 
 function getBase() { return document.getElementById('apiBase').value.replace(/\/+$/, ''); }
+function getApiKey() { return (document.getElementById('apiKey') || {}).value || ''; }
+function authHeaders(extra) {
+  var h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+  var k = getApiKey();
+  if (k) h['X-API-Key'] = k;
+  return h;
+}
+
+// API key — persisted in localStorage across sessions
+function initApiKey() {
+  var el = document.getElementById('apiKey');
+  if (!el) return;
+  var saved = localStorage.getItem('lawtech_api_key');
+  if (saved) el.value = saved;
+  el.addEventListener('change', function() { localStorage.setItem('lawtech_api_key', el.value); });
+}
 
 // Language preference — persisted in localStorage across sessions
 function getPreferredLang() {
@@ -1241,7 +1261,7 @@ async function checkHealth() {
   const dot = document.getElementById('healthDot');
   const txt = document.getElementById('healthText');
   try {
-    const r = await fetch(getBase() + '/pyapi/health');
+    const r = await fetch(getBase() + '/pyapi/health', { headers: authHeaders() });
     const d = await r.json();
     dot.classList.add('ok');
     txt.textContent = `v${d.version} — Connected`;
@@ -1259,7 +1279,7 @@ async function checkHealth() {
 async function loadSessionList() {
   const container = document.getElementById('sessionList');
   try {
-    const r = await fetch(getBase() + '/pyapi/threads?limit=30');
+    const r = await fetch(getBase() + '/pyapi/threads?limit=30', { headers: authHeaders() });
     if (!r.ok) throw new Error('Failed to fetch');
     const d = await r.json();
     const threads = d.threads || [];
@@ -1325,7 +1345,7 @@ async function restoreSession(threadId, totalTurns) {
   });
 
   try {
-    const r = await fetch(getBase() + `/pyapi/threads/${threadId}/messages`);
+    const r = await fetch(getBase() + `/pyapi/threads/${threadId}/messages`, { headers: authHeaders() });
     if (!r.ok) throw new Error('Failed to load messages');
     const d = await r.json();
     const messages = d.messages || [];
@@ -1611,8 +1631,12 @@ async function sendChatWithFiles(query, threadId) {
 
   addLog('info', `POST /pyapi/chat (files: ${pendingFiles.length}) \u2014 "${query.substring(0, 60)}..."`);
 
+  var chatHeaders = {};
+  var k = getApiKey();
+  if (k) chatHeaders['X-API-Key'] = k;
   const r = await fetch(getBase() + '/pyapi/chat', {
     method: 'POST',
+    headers: chatHeaders,
     body: formData,
   });
 
@@ -1737,7 +1761,7 @@ async function sendChatBatch(query, threadId) {
 
   const r = await fetch(getBase() + '/pyapi/search', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify(payload),
   });
 
@@ -1780,7 +1804,7 @@ async function sendChatStream(query, threadId) {
 
   const r = await fetch(getBase() + '/pyapi/search/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify(payload),
   });
 
@@ -2471,7 +2495,7 @@ async function sendFeedback(btn, rating) {
   try {
     await fetch(getBase() + '/pyapi/feedback', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ thread_id: currentThreadId, turn_number: turn, rating: rating }),
     });
     addLog('info', 'Feedback sent: ' + rating + ' for turn ' + turn);
@@ -2490,7 +2514,7 @@ async function submitFeedbackComment(input) {
   try {
     await fetch(getBase() + '/pyapi/feedback', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ thread_id: currentThreadId, turn_number: turn, rating: 'down', comment: comment }),
     });
     input.closest('.feedback-comment').classList.remove('visible');
@@ -2523,7 +2547,7 @@ async function continueDraft(btn) {
   try {
     var resp = await fetch(getBase() + '/pyapi/continue_draft', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ globalThreadId: currentThreadId }),
     });
 
@@ -2716,6 +2740,7 @@ function sendFollowup(chip) {
 // ============================================================
 // Init
 // ============================================================
+initApiKey();
 checkHealth();
 loadSessionList();
 initLangSelect();

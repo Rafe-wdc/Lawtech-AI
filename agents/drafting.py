@@ -47,6 +47,9 @@ _SECTION_CONCURRENCY = 3
 # Max sections the outline can contain (aligned with prompt: 10-15 for complex docs)
 _MAX_SECTIONS = 12
 
+# Limit concurrent Drafting/ContinueDraft executions per worker process
+_AGENT_SEMAPHORE = asyncio.Semaphore(3)
+
 
 # --- Input Sanitization ---
 
@@ -580,6 +583,19 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
              failed_sections=len(failed_indices),
              total_sections=len(outline.sections))
 
+    # Acquire concurrency slot; emit queue_status SSE event if at capacity
+    try:
+        from langgraph.config import get_stream_writer
+        _writer = get_stream_writer()
+    except (RuntimeError, ImportError):
+        _writer = None
+    if _AGENT_SEMAPHORE.locked():
+        log.warning("Concurrency limit reached, queuing ContinueDraft request")
+        if _writer:
+            _writer({"type": "queue_status", "status": "queued",
+                     "message": "Drafting agent is busy, queuing your request..."})
+    await _AGENT_SEMAPHORE.acquire()
+
     try:
         try:
             from langgraph.config import get_stream_writer
@@ -688,6 +704,8 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
             sources=[], tokens_consumed=0, error=str(e),
         )
         state_update = {"agent_results": {"Drafting": result}}
+    finally:
+        _AGENT_SEMAPHORE.release()
 
     return state_update
 
@@ -710,6 +728,19 @@ async def drafting_node(state: LegalAgentState) -> dict:
     user_language = state.get("user_language", "en")
     log.info("Agent started", query=query[:100],
              using_agent_query="Drafting" in agent_queries)
+
+    # Acquire concurrency slot; emit queue_status SSE event if at capacity
+    try:
+        from langgraph.config import get_stream_writer as _get_writer
+        _dwriter = _get_writer()
+    except (RuntimeError, ImportError):
+        _dwriter = None
+    if _AGENT_SEMAPHORE.locked():
+        log.warning("Concurrency limit reached, queuing Drafting request")
+        if _dwriter:
+            _dwriter({"type": "queue_status", "status": "queued",
+                      "message": "Drafting agent is busy, queuing your request..."})
+    await _AGENT_SEMAPHORE.acquire()
 
     try:
         es = get_es_client()
@@ -862,5 +893,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             error=str(e),
         )
         state_update = {"agent_results": {"Drafting": result}}
+    finally:
+        _AGENT_SEMAPHORE.release()
 
     return state_update

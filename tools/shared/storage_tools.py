@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from typing import Optional
 
@@ -22,6 +23,13 @@ from core.settings import S3_BUCKET, S3_REGION, CHROMA_STORE_ROOT
 from core.logger import get_logger
 
 log = get_logger("Storage")
+
+_SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
+
+
+def _validate_collection_name(unique_string: str) -> None:
+    if not unique_string or not _SAFE_COLLECTION_RE.match(unique_string):
+        raise ValueError(f"Invalid or unsafe collection name: {unique_string!r}")
 
 
 # --- S3 Existence Check (cached per server lifetime) ---
@@ -101,6 +109,7 @@ def load_pdf_chat_history(unique_string: str) -> dict:
     Returns:
         Dict with keys: recent (last 5 messages), all_chats (full history list)
     """
+    _validate_collection_name(unique_string)
     chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
     chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
 
@@ -136,6 +145,7 @@ def save_pdf_chat_history(
     Returns:
         Dict with keys: saved (bool), total_messages (int)
     """
+    _validate_collection_name(unique_string)
     chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
     os.makedirs(chat_dir, exist_ok=True)
     chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")

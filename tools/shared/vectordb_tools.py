@@ -10,6 +10,7 @@ Uses: ChromaDB, HuggingFace embeddings from core.clients
 from __future__ import annotations
 
 import os
+import re
 
 from langchain.tools import tool
 from langchain_core.documents import Document
@@ -23,6 +24,15 @@ from core.logger import get_logger
 import chromadb
 
 log = get_logger("VectorDB")
+
+# Only allow safe collection names: alphanumeric, hyphens, underscores, max 128 chars.
+# Prevents path traversal (../), null bytes, and filesystem-special names.
+_SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
+
+
+def _validate_collection_name(unique_string: str) -> None:
+    if not unique_string or not _SAFE_COLLECTION_RE.match(unique_string):
+        raise ValueError(f"Invalid or unsafe collection name: {unique_string!r}")
 
 
 # --- Text Splitter ---
@@ -51,6 +61,7 @@ def search_pdf_collection(unique_string: str, query: str) -> dict:
     Returns:
         Dict with keys: documents (list of {content, source, chunk_id}), total
     """
+    _validate_collection_name(unique_string)
     embeddings = get_qa_embeddings()
     persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
 
@@ -98,6 +109,7 @@ def store_pdf_chunks(unique_string: str, text: str, file_name: str) -> dict:
     Returns:
         Dict with keys: chunks_stored (int), collection (str)
     """
+    _validate_collection_name(unique_string)
     chunks = _text_splitter.split_text(text)
     if not chunks:
         return {"chunks_stored": 0, "collection": unique_string}

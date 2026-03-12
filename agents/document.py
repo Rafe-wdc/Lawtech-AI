@@ -15,8 +15,10 @@ Embedding: all-MiniLM-L6-v2
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import re
 from datetime import date
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -36,6 +38,13 @@ import threading
 _chroma_cache_lock = threading.Lock()
 log = get_logger("Document")
 
+_SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
+
+
+def _validate_collection_name(unique_string: str) -> None:
+    if not unique_string or not _SAFE_COLLECTION_RE.match(unique_string):
+        raise ValueError(f"Invalid or unsafe collection name: {unique_string!r}")
+
 
 # --- Text Chunking ---
 
@@ -52,6 +61,7 @@ def _load_pdf_chat_history(unique_string: str) -> tuple[list[dict], list[dict]]:
     """Load PDF-specific chat history from local JSON file.
     Returns (recent_messages, all_chats).
     """
+    _validate_collection_name(unique_string)
     chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
     chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
 
@@ -76,6 +86,7 @@ def _save_pdf_chat_history(
     unique_string: str, question: str, answer: str, all_chats: list[dict]
 ) -> None:
     """Save a Q&A pair to the PDF-specific chat history."""
+    _validate_collection_name(unique_string)
     chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
     os.makedirs(chat_dir, exist_ok=True)
     chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
@@ -96,6 +107,7 @@ def _save_pdf_chat_history(
 
 def _get_or_create_collection(unique_string: str) -> Chroma:
     """Get or create a ChromaDB collection for a user's uploaded documents."""
+    _validate_collection_name(unique_string)
     embeddings = get_qa_embeddings()
     persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
 
@@ -367,15 +379,19 @@ async def document_node(state: LegalAgentState) -> dict:
         }
 
     try:
-        # Load chat history
-        recent_history, all_chats = _load_pdf_chat_history(unique_string)
+        # Load chat history (sync file I/O → off-thread)
+        recent_history, all_chats = await asyncio.to_thread(
+            _load_pdf_chat_history, unique_string
+        )
 
-        # Retrieve and answer
+        # Retrieve from ChromaDB and generate answer (blocking I/O + LLM → off-thread)
         with log_time(log, "Full document QA pipeline"):
-            answer, tokens, retrieved_docs = _retrieve_and_answer(unique_string, query, recent_history)
+            answer, tokens, retrieved_docs = await asyncio.to_thread(
+                _retrieve_and_answer, unique_string, query, recent_history
+            )
 
-        # Save chat history
-        _save_pdf_chat_history(unique_string, query, answer, all_chats)
+        # Save chat history (sync file I/O → off-thread)
+        await asyncio.to_thread(_save_pdf_chat_history, unique_string, query, answer, all_chats)
 
         log.info("Agent completed",
                  collection=unique_string,

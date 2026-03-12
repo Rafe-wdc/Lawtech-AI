@@ -12,6 +12,7 @@ Ref: https://docs.langchain.com/oss/python/langchain/models
 
 from __future__ import annotations
 
+import threading
 import time
 from functools import lru_cache
 from elasticsearch import Elasticsearch
@@ -56,33 +57,35 @@ _es_failure_count: int = 0
 _es_open_until: float = 0.0   # epoch time when circuit opens until
 _ES_FAILURE_THRESHOLD: int = 3
 _ES_OPEN_DURATION_SEC: float = 60.0
+_es_lock = threading.Lock()   # guards _es_failure_count and _es_open_until
 
 
 def is_es_available() -> bool:
     """Return False if the ES circuit is open (fast-fail period active)."""
-    if time.time() < _es_open_until:
-        return False  # circuit open — skip ES entirely
-    return True
+    with _es_lock:
+        return time.time() >= _es_open_until
 
 
 def record_es_failure() -> None:
     """Record an ES failure. Opens the circuit after 3 consecutive failures."""
     global _es_failure_count, _es_open_until
-    _es_failure_count += 1
-    if _es_failure_count >= _ES_FAILURE_THRESHOLD:
-        _es_open_until = time.time() + _ES_OPEN_DURATION_SEC
-        _log.warning("ES circuit OPEN — fast-failing for 60s",
-                     failure_count=_es_failure_count)
+    with _es_lock:
+        _es_failure_count += 1
+        if _es_failure_count >= _ES_FAILURE_THRESHOLD:
+            _es_open_until = time.time() + _ES_OPEN_DURATION_SEC
+            _log.warning("ES circuit OPEN — fast-failing for 60s",
+                         failure_count=_es_failure_count)
 
 
 def record_es_success() -> None:
     """Reset the circuit breaker after a successful ES call."""
     global _es_failure_count, _es_open_until
-    if _es_failure_count > 0:
-        _log.info("ES circuit RESET after successful call",
-                  previous_failures=_es_failure_count)
-    _es_failure_count = 0
-    _es_open_until = 0.0
+    with _es_lock:
+        if _es_failure_count > 0:
+            _log.info("ES circuit RESET after successful call",
+                      previous_failures=_es_failure_count)
+        _es_failure_count = 0
+        _es_open_until = 0.0
 
 
 # --- LLM Clients via init_chat_model (provider-agnostic, LangChain 1.0+) ---

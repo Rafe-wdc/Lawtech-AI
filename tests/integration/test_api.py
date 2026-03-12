@@ -237,8 +237,9 @@ def test_stream_final_event_has_result(base_url, user_headers):
         f"No 'result'/'response' event found. Got: {[e.get('type') for e in events]}"
     )
     # Result must have non-empty response text
-    assert result_events[-1].get("response") or result_events[-1].get("answer") or result_events[-1].get("data"), (
-        "Result event has no response text"
+    evt = result_events[-1]
+    assert evt.get("content") or evt.get("response") or evt.get("answer") or evt.get("data"), (
+        f"Result event has no response text: {evt}"
     )
 
 

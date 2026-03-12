@@ -1317,6 +1317,48 @@ async def health():
     return {"status": "ok", "version": "2.0.0"}
 
 
+# ------------------------------------------------------------------
+# Admin: Fallback Log (ES backfill pipeline)
+# ------------------------------------------------------------------
+
+@app.get("/pyapi/admin/fallback_logs")
+async def admin_fallback_logs(
+    agent: Optional[str] = None,
+    backfilled: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List web-search fallback events for ES backfill review.
+
+    Query params:
+      agent      — filter by agent name (Judgment, SCI_Judgment, Legislation, ...)
+      backfilled — 0 = pending only, 1 = done only, omit = all
+      limit      — max rows (default 50, max 200)
+      offset     — pagination offset
+    """
+    try:
+        result = await chat_store.get_fallback_logs(
+            agent=agent,
+            backfilled=backfilled,
+            limit=min(limit, 200),
+            offset=offset,
+        )
+        return result
+    except Exception as e:
+        log.error("Failed to fetch fallback logs", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to fetch fallback logs")
+
+
+@app.get("/pyapi/admin/fallback_stats")
+async def admin_fallback_stats():
+    """Aggregate stats: totals by agent, date, top repeated queries."""
+    try:
+        return await chat_store.get_fallback_stats()
+    except Exception as e:
+        log.error("Failed to fetch fallback stats", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to fetch fallback stats")
+
+
 @app.get("/pyapi/threads")
 async def list_threads(limit: int = 50, offset: int = 0):
     """List recent chat sessions for the sidebar history."""

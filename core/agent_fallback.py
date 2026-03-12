@@ -16,6 +16,7 @@ import asyncio
 from core.state import AgentResult, SourceMetadata
 from core.clients import get_gpt4o_mini, get_genai_client
 from core.logger import get_logger, log_time
+from core.chat_store import chat_store
 
 log = get_logger("AgentFallback")
 
@@ -104,6 +105,7 @@ async def web_search_fallback(
     query: str,
     agent_name: str,
     system_prompt: str,
+    original_query: str = "",
 ) -> AgentResult:
     """Fall back to Gemini 2.5 Flash with Google Search grounding.
 
@@ -212,6 +214,20 @@ async def web_search_fallback(
         log.info("Web search fallback completed",
                  agent=agent_name, response_len=len(content),
                  tokens=tokens, web_sources=len(sources))
+
+        # Fire-and-forget: log to fallback_log for ES backfill tracking
+        web_urls = [s.web_url for s in sources if getattr(s, "web_url", None)]
+        asyncio.create_task(
+            chat_store.log_fallback(
+                agent=agent_name,
+                query=query,
+                original_query=original_query or query,
+                response_preview=content[:600],
+                web_sources=web_urls,
+                tokens=tokens,
+                fallback_tier="web",
+            )
+        )
 
         return AgentResult(
             agent_name=agent_name,

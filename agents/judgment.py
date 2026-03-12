@@ -269,6 +269,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
     agent_queries = state.get("agent_queries", {})
     # Prefer agent-specific query > normalized English query > original (for multilingual support)
     query = agent_queries.get("Judgment", state.get("query", state.get("original_query", "")))
+    original_query = state.get("original_query", query)
     chat_history = state.get("chat_history", [])
     _system_prompt = localize_prompt(JUDGMENT_SYSTEM_PROMPT, state.get("user_language", "en"))
     log.info("Agent started", query=query[:100],
@@ -337,7 +338,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 log.warning("All searches exhausted, using web fallback",
                             strategies_tried=strategies_tried)
                 fallback_result = await web_search_fallback(
-                    query, "Judgment", _system_prompt)
+                    query, "Judgment", _system_prompt, original_query=original_query)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Judgment": fallback_result}}
 

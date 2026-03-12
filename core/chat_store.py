@@ -134,6 +134,26 @@ class ChatHistoryStore:
                     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
                 );
 
+                CREATE TABLE IF NOT EXISTS fallback_log (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp       TEXT    NOT NULL DEFAULT (datetime('now')),
+                    agent           TEXT    NOT NULL,
+                    query           TEXT    NOT NULL,
+                    original_query  TEXT    NOT NULL DEFAULT '',
+                    fallback_tier   TEXT    NOT NULL DEFAULT 'web',
+                    response_preview TEXT   NOT NULL DEFAULT '',
+                    web_sources_json TEXT   NOT NULL DEFAULT '[]',
+                    tokens          INTEGER NOT NULL DEFAULT 0,
+                    backfilled      INTEGER NOT NULL DEFAULT 0,
+                    backfill_date   TEXT    DEFAULT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_fallback_agent_ts
+                    ON fallback_log(agent, timestamp DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_fallback_backfilled
+                    ON fallback_log(backfilled, agent);
+
             """)
             conn.commit()
 
@@ -847,6 +867,194 @@ class ChatHistoryStore:
         return await asyncio.to_thread(
             self._save_feedback_sync, thread_id, turn_number, rating, comment
         )
+
+
+    # ------------------------------------------------------------------
+    # Fallback Log (web search fallback tracking for ES backfill)
+    # ------------------------------------------------------------------
+
+    def _log_fallback_sync(
+        self,
+        agent: str,
+        query: str,
+        original_query: str,
+        response_preview: str,
+        web_sources: list[str],
+        tokens: int,
+        fallback_tier: str = "web",
+    ) -> int:
+        """Insert a fallback log entry. Returns the new row id."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("""
+                    INSERT INTO fallback_log
+                        (agent, query, original_query, fallback_tier,
+                         response_preview, web_sources_json, tokens)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    agent,
+                    query[:1000],
+                    original_query[:1000],
+                    fallback_tier,
+                    response_preview[:600],
+                    json.dumps(web_sources),
+                    tokens,
+                ))
+                conn.commit()
+                row_id = cur.lastrowid
+                log.debug("Fallback logged",
+                          agent=agent, tier=fallback_tier, row_id=row_id)
+                return row_id
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def log_fallback(
+        self,
+        agent: str,
+        query: str,
+        original_query: str,
+        response_preview: str,
+        web_sources: list[str],
+        tokens: int,
+        fallback_tier: str = "web",
+    ) -> int:
+        """Async wrapper — log a fallback event without blocking the response."""
+        return await asyncio.to_thread(
+            self._log_fallback_sync,
+            agent, query, original_query, response_preview,
+            web_sources, tokens, fallback_tier,
+        )
+
+    def _get_fallback_logs_sync(
+        self,
+        agent: str | None = None,
+        backfilled: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Query fallback_log with optional filters."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            conditions = []
+            params: list = []
+            if agent:
+                conditions.append("agent = ?")
+                params.append(agent)
+            if backfilled is not None:
+                conditions.append("backfilled = ?")
+                params.append(int(backfilled))
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            rows = conn.execute(f"""
+                SELECT id, timestamp, agent, query, original_query,
+                       fallback_tier, response_preview, web_sources_json,
+                       tokens, backfilled, backfill_date
+                FROM fallback_log
+                {where}
+                ORDER BY timestamp DESC
+                LIMIT ? OFFSET ?
+            """, params + [limit, offset]).fetchall()
+
+            total_row = conn.execute(
+                f"SELECT COUNT(*) as cnt FROM fallback_log {where}", params
+            ).fetchone()
+
+            return {
+                "total": total_row["cnt"],
+                "limit": limit,
+                "offset": offset,
+                "items": [
+                    {
+                        "id": r["id"],
+                        "timestamp": r["timestamp"],
+                        "agent": r["agent"],
+                        "query": r["query"],
+                        "original_query": r["original_query"],
+                        "fallback_tier": r["fallback_tier"],
+                        "response_preview": r["response_preview"],
+                        "web_sources": json.loads(r["web_sources_json"] or "[]"),
+                        "tokens": r["tokens"],
+                        "backfilled": bool(r["backfilled"]),
+                        "backfill_date": r["backfill_date"],
+                    }
+                    for r in rows
+                ],
+            }
+        finally:
+            conn.close()
+
+    async def get_fallback_logs(
+        self,
+        agent: str | None = None,
+        backfilled: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """Async wrapper for get_fallback_logs."""
+        return await asyncio.to_thread(
+            self._get_fallback_logs_sync, agent, backfilled, limit, offset
+        )
+
+    def _get_fallback_stats_sync(self) -> dict:
+        """Aggregate stats for the fallback log."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) as cnt FROM fallback_log"
+            ).fetchone()["cnt"]
+
+            pending = conn.execute(
+                "SELECT COUNT(*) as cnt FROM fallback_log WHERE backfilled = 0"
+            ).fetchone()["cnt"]
+
+            by_agent = {
+                r["agent"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT agent, COUNT(*) as cnt FROM fallback_log "
+                    "GROUP BY agent ORDER BY cnt DESC"
+                ).fetchall()
+            }
+
+            # Last 7 days by date
+            by_date = {
+                r["day"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT strftime('%Y-%m-%d', timestamp) as day, COUNT(*) as cnt "
+                    "FROM fallback_log "
+                    "WHERE timestamp >= datetime('now', '-7 days') "
+                    "GROUP BY day ORDER BY day DESC"
+                ).fetchall()
+            }
+
+            # Top 10 most repeated queries (by normalized query text)
+            top_queries = [
+                {"query": r["query"], "count": r["cnt"], "agent": r["agent"]}
+                for r in conn.execute(
+                    "SELECT query, agent, COUNT(*) as cnt FROM fallback_log "
+                    "GROUP BY query, agent ORDER BY cnt DESC LIMIT 10"
+                ).fetchall()
+            ]
+
+            return {
+                "total": total,
+                "pending_backfill": pending,
+                "backfilled": total - pending,
+                "by_agent": by_agent,
+                "by_date_last_7d": by_date,
+                "top_repeated_queries": top_queries,
+            }
+        finally:
+            conn.close()
+
+    async def get_fallback_stats(self) -> dict:
+        """Async wrapper for get_fallback_stats."""
+        return await asyncio.to_thread(self._get_fallback_stats_sync)
 
 
 # ------------------------------------------------------------------

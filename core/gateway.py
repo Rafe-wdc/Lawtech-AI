@@ -45,6 +45,7 @@ from .settings import HOST, PORT, RATE_LIMIT_PER_MINUTE, CHROMA_STORE_ROOT
 from .graph import compile_graph
 from .logger import get_logger, set_request_id, log_time
 from .chat_store import chat_store
+from .metrics import METRICS
 
 log = get_logger("Gateway")
 
@@ -75,6 +76,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Prometheus metrics middleware ─────────────────────────────────────────────
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Record HTTP request count, latency, and active request gauge."""
+    # Exclude the metrics endpoint itself to avoid noise
+    if request.url.path == "/pyapi/metrics":
+        return await call_next(request)
+
+    METRICS["active_requests"].inc()
+    t0 = time.time()
+    response = None
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        latency = time.time() - t0
+        endpoint = request.url.path
+        METRICS["active_requests"].dec()
+        METRICS["requests_total"].labels(
+            endpoint=endpoint,
+            method=request.method,
+            status_code=str(status_code),
+        ).inc()
+        METRICS["request_latency_seconds"].labels(endpoint=endpoint).observe(latency)
+
 
 # Compile the agent graph (done once at startup)
 log.info("Compiling agent graph at startup")
@@ -286,6 +317,16 @@ async def search(data: SearchRequest, request: Request):
     log.info("Search request completed",
              agents_used=agents_used, total_tokens=total_tokens,
              response_len=response_len, thread_id=thread_id)
+
+    # --- Record metrics ---
+    for agent in agents_used:
+        METRICS["agent_invocations_total"].labels(agent=agent).inc()
+    for task in final_state.get("tasks_planned", []):
+        METRICS["tasks_planned_total"].labels(task_type=task).inc()
+    if final_state.get("is_blocked"):
+        METRICS["guardrail_blocks_total"].labels(stage="input").inc()
+    if total_tokens > 0:
+        METRICS["llm_tokens_total"].labels(model="total", token_type="output").inc(total_tokens)
 
     # Memory context metadata
     effective_query = final_state.get("query", data.prompt_query)
@@ -1435,6 +1476,25 @@ async def health():
     status_code = 503 if overall == "unhealthy" else 200
     from fastapi.responses import JSONResponse
     return JSONResponse(content=body, status_code=status_code)
+
+
+# ============================================================
+# Prometheus Metrics Endpoint
+# ============================================================
+
+@app.get("/pyapi/metrics")
+async def prometheus_metrics():
+    """Expose Prometheus metrics in text format.
+
+    Scraped by Prometheus every 15 seconds.
+    URL: http://host:5000/pyapi/metrics
+    """
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from fastapi.responses import Response
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 # ------------------------------------------------------------------

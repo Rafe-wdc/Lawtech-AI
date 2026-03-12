@@ -17,6 +17,7 @@ from core.state import AgentResult, SourceMetadata
 from core.clients import get_gpt4o_mini, get_genai_client
 from core.logger import get_logger, log_time
 from core.chat_store import chat_store
+from core.metrics import METRICS
 
 log = get_logger("AgentFallback")
 
@@ -90,6 +91,7 @@ def rewrite_query_for_domain(query: str, agent_name: str) -> str:
                      agent=agent_name,
                      original=query[:80],
                      rewritten=rewritten[:80])
+            METRICS["fallback_total"].labels(agent=agent_name, tier="query_rewrite").inc()
             return rewritten
 
         log.debug("Rewrite produced no change", agent=agent_name)
@@ -115,6 +117,7 @@ async def web_search_fallback(
     Retries once with gemini-2.5-pro if Flash returns 503.
     """
     log.info("Web search fallback started", agent=agent_name, query=query[:100])
+    METRICS["fallback_total"].labels(agent=agent_name, tier="web_search").inc()
 
     try:
         # Override any "use only provided context" instructions since we're

@@ -70,17 +70,46 @@ Returns a full system health check with individual component status.
 
 ---
 
-## Level 2 — "Is It Healthy?" (Next)
+## Level 2 — "Is It Healthy?" ✅
 
 **Goal: Know when something is slow or breaking per endpoint/agent.**
 
-Planned:
-- Prometheus `/pyapi/metrics` endpoint (`prometheus-fastapi-instrumentator`)
-- Custom counters: agent invocations, fallback rates, guardrail blocks
-- Grafana Docker: request rate, error %, P95 latency dashboard
-- Slack alerts on high error rate or latency spike
+### What was implemented
 
-**Status: NOT YET BUILT**
+**`core/metrics.py`** — shared Prometheus metric definitions:
+| Metric | Type | Labels |
+|--------|------|--------|
+| `lawtech_requests_total` | Counter | endpoint, method, status_code |
+| `lawtech_request_latency_seconds` | Histogram | endpoint |
+| `lawtech_agent_invocations_total` | Counter | agent |
+| `lawtech_agent_latency_seconds` | Histogram | agent |
+| `lawtech_agent_errors_total` | Counter | agent |
+| `lawtech_fallback_total` | Counter | agent, tier (query_rewrite / web_search) |
+| `lawtech_guardrail_blocks_total` | Counter | stage (input / output) |
+| `lawtech_llm_tokens_total` | Counter | model, token_type |
+| `lawtech_tasks_planned_total` | Counter | task_type |
+| `lawtech_active_requests` | Gauge | — |
+
+**`GET /pyapi/metrics`** — Prometheus text-format endpoint (scraped every 15s)
+
+**HTTP middleware** in `gateway.py` — records every request's latency + status code automatically.
+
+**Fallback metrics** wired into `core/agent_fallback.py` — fires on query_rewrite and web_search tiers.
+
+**`monitoring/`** directory:
+- `docker-compose.yml` — Prometheus + Grafana (starts with one command)
+- `prometheus.yml` — scrape config pointing at `host.docker.internal:5000`
+- `grafana/dashboards/lawtech.json` — 8-panel dashboard (requests, errors, latency, agents, fallbacks, tasks)
+
+### How to start monitoring
+
+```bash
+docker compose -f monitoring/docker-compose.yml up -d
+```
+
+- Grafana: http://localhost:3000 (admin / admin)
+- Prometheus: http://localhost:9090
+- Metrics endpoint: http://localhost:5000/pyapi/metrics
 
 ---
 

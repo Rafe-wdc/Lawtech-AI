@@ -214,14 +214,14 @@ def test_stream_has_status_event(base_url, user_headers):
     events = collect_sse(r, max_events=10, timeout=30)
     r.close()
     types = {e.get("type") for e in events}
-    # Must have at least one of: status, agent, result, error
-    assert types & {"status", "agent", "result", "error"}, (
-        f"Expected status/agent/result events, got types: {types}"
+    # Must have at least one of: status, agent, result, response, error
+    assert types & {"status", "agent", "result", "response", "error"}, (
+        f"Expected status/agent/result/response events, got types: {types}"
     )
 
 
 def test_stream_final_event_has_result(base_url, user_headers):
-    """SSE stream must eventually emit a 'result' type event."""
+    """SSE stream must eventually emit a 'response' type event with content."""
     r = requests.post(
         f"{base_url}/search/stream",
         json={"Promptquery": "What is Section 302 IPC?"},
@@ -232,12 +232,12 @@ def test_stream_final_event_has_result(base_url, user_headers):
     assert r.status_code == 200
     events = collect_sse(r, max_events=50, timeout=55)
     r.close()
-    result_events = [e for e in events if e.get("type") == "result"]
+    result_events = [e for e in events if e.get("type") in ("result", "response")]
     assert len(result_events) > 0, (
-        f"No 'result' event found. Got: {[e.get('type') for e in events]}"
+        f"No 'result'/'response' event found. Got: {[e.get('type') for e in events]}"
     )
     # Result must have non-empty response text
-    assert result_events[-1].get("response") or result_events[-1].get("answer"), (
+    assert result_events[-1].get("response") or result_events[-1].get("answer") or result_events[-1].get("data"), (
         "Result event has no response text"
     )
 

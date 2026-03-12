@@ -15,18 +15,17 @@ If ADMIN_API_KEY is empty, admin endpoints return 501 Not Implemented.
 
 from __future__ import annotations
 
-import os
 from fastapi import Header, HTTPException, Request, Security
 from fastapi.security.api_key import APIKeyHeader
 
 from .logger import get_logger
+from .settings import API_KEYS as _RAW_API_KEYS, ADMIN_API_KEY as _ADMIN_API_KEY_RAW
 
 log = get_logger("Auth")
 
-# Load keys from env at import time (settings module not used to avoid circular imports)
-_raw_user_keys = os.getenv("API_KEYS", "")
-_USER_API_KEYS: set[str] = {k.strip() for k in _raw_user_keys.split(",") if k.strip()}
-_ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "").strip()
+# Parse user keys (comma-separated, whitespace-stripped)
+_USER_API_KEYS: set[str] = {k.strip() for k in _RAW_API_KEYS.split(",") if k.strip()}
+_ADMIN_API_KEY: str = _ADMIN_API_KEY_RAW.strip()
 
 _DEV_MODE = not bool(_USER_API_KEYS)
 if _DEV_MODE:
@@ -34,6 +33,8 @@ if _DEV_MODE:
         "AUTH: API_KEYS not set — running in open dev mode. "
         "Set API_KEYS in .env before exposing to the internet."
     )
+else:
+    log.info("AUTH: user key auth enabled", key_count=len(_USER_API_KEYS))
 
 # FastAPI header scheme (shows up correctly in /docs)
 _user_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)

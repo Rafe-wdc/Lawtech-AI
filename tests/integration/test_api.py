@@ -108,7 +108,7 @@ def test_search_requires_auth_when_keys_configured(base_url, api_key):
 
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "test"},
+        json={"Promptquery": "test"},
         headers={},          # deliberately no X-API-Key
         stream=True,
         timeout=10,
@@ -123,7 +123,7 @@ def test_search_rejects_wrong_key(base_url, api_key):
 
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "test"},
+        json={"Promptquery": "test"},
         headers={"X-API-Key": "definitely-wrong-key-xyz"},
         stream=True,
         timeout=10,
@@ -135,7 +135,7 @@ def test_valid_key_accepted(base_url, user_headers):
     """POST /pyapi/search/stream with valid key → not 401/403."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "What is Section 302 IPC?"},
+        json={"Promptquery": "What is Section 302 IPC?"},
         headers=user_headers,
         stream=True,
         timeout=15,
@@ -152,7 +152,7 @@ def test_empty_query_rejected(base_url, user_headers):
     """Empty query string → 422 validation error."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": ""},
+        json={"Promptquery": ""},
         headers=user_headers,
         timeout=10,
     )
@@ -174,7 +174,7 @@ def test_overlength_query_rejected(base_url, user_headers):
     """Query exceeding max length → 422."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "x" * 10001},
+        json={"Promptquery": "x" * 10001},
         headers=user_headers,
         timeout=10,
     )
@@ -187,7 +187,7 @@ def test_stream_returns_sse_events(base_url, user_headers):
     """A valid query must stream at least one SSE data event within 30s."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "What is bail?"},
+        json={"Promptquery": "What is bail?"},
         headers=user_headers,
         stream=True,
         timeout=35,
@@ -205,7 +205,7 @@ def test_stream_has_status_event(base_url, user_headers):
     """SSE stream must include at least one status/agent event."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "Define res judicata"},
+        json={"Promptquery": "Define res judicata"},
         headers=user_headers,
         stream=True,
         timeout=35,
@@ -224,7 +224,7 @@ def test_stream_final_event_has_result(base_url, user_headers):
     """SSE stream must eventually emit a 'result' type event."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "What is Section 302 IPC?"},
+        json={"Promptquery": "What is Section 302 IPC?"},
         headers=user_headers,
         stream=True,
         timeout=60,
@@ -248,7 +248,7 @@ def test_error_response_is_json(base_url, user_headers):
     """All error responses must be JSON with error/message fields."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": ""},
+        json={"Promptquery": ""},
         headers=user_headers,
         timeout=10,
     )
@@ -306,7 +306,7 @@ def test_non_legal_query_handled(base_url, user_headers):
     """Non-legal queries must be handled gracefully (not 500)."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "What is the capital of France?"},
+        json={"Promptquery": "What is the capital of France?"},
         headers=user_headers,
         stream=True,
         timeout=35,
@@ -327,7 +327,7 @@ def test_thread_id_accepted(base_url, user_headers):
     """Providing a globalThreadId must not cause errors."""
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"query": "What is bail?", "globalThreadId": "test-integration-thread-001"},
+        json={"Promptquery": "What is bail?", "globalThreadId": "test-integration-thread-001"},
         headers=user_headers,
         stream=True,
         timeout=35,

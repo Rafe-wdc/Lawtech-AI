@@ -24,6 +24,7 @@ try:
     from asyncio import timeout as _async_timeout
 except ImportError:
     from async_timeout import timeout as _async_timeout
+import psutil
 import shutil
 import tempfile
 import threading
@@ -62,6 +63,7 @@ def _get_collection_lock(unique_string: str) -> threading.Lock:
 limiter = Limiter(key_func=get_remote_address)
 
 # --- App ---
+_APP_START_TIME = time.time()
 app = FastAPI(title="Legal AI API v2", version="2.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -1311,10 +1313,128 @@ async def job_status(job_id: str):
 # Health Check
 # ============================================================
 
-@app.get("/pyapi/health")
+@app.api_route("/pyapi/health", methods=["GET", "HEAD"])
 async def health():
-    """Simple health check endpoint."""
-    return {"status": "ok", "version": "2.0.0"}
+    """Deep health check — verifies ES, API keys, memory, disk, SQLite.
+
+    Returns HTTP 200 for healthy/degraded, HTTP 503 for unhealthy.
+    Designed to work with UptimeRobot: a 503 triggers an alert.
+    """
+    from datetime import datetime, timezone
+    from .settings import ELASTICSEARCH_URL, CHAT_HISTORY_DB_PATH
+    from .clients import get_es_client
+
+    checks: dict[str, dict] = {}
+    overall = "healthy"  # healthy | degraded | unhealthy
+
+    # --- 1. Elasticsearch ---
+    try:
+        t0 = time.time()
+        es = get_es_client(max_retries=1, timeout=3)
+        reachable = await asyncio.wait_for(
+            asyncio.to_thread(es.ping), timeout=3.0
+        )
+        latency_ms = round((time.time() - t0) * 1000)
+        if reachable:
+            checks["elasticsearch"] = {"status": "ok", "latency_ms": latency_ms}
+        else:
+            checks["elasticsearch"] = {"status": "error", "detail": "ping returned False"}
+            overall = "unhealthy"
+    except Exception as e:
+        checks["elasticsearch"] = {"status": "error", "detail": str(e)[:120]}
+        overall = "unhealthy"
+
+    # --- 2. OpenAI API key ---
+    from .settings import OPENAI_API_KEY
+    if OPENAI_API_KEY:
+        checks["openai_key"] = {"status": "ok"}
+    else:
+        checks["openai_key"] = {"status": "error", "detail": "OPENAI_API_KEY not set"}
+        overall = "unhealthy"
+
+    # --- 3. Google API key ---
+    from .settings import GOOGLE_API_KEY
+    if GOOGLE_API_KEY:
+        checks["google_key"] = {"status": "ok"}
+    else:
+        checks["google_key"] = {"status": "error", "detail": "GOOGLE_API_KEY not set"}
+        overall = "unhealthy"
+
+    # --- 4. Memory (RAM) ---
+    try:
+        vm = psutil.virtual_memory()
+        used_pct = vm.percent
+        available_gb = round(vm.available / (1024 ** 3), 1)
+        if used_pct >= 95:
+            mem_status = "critical"
+            if overall == "healthy":
+                overall = "degraded"
+        elif used_pct >= 85:
+            mem_status = "warn"
+            if overall == "healthy":
+                overall = "degraded"
+        else:
+            mem_status = "ok"
+        checks["memory"] = {
+            "status": mem_status,
+            "used_pct": round(used_pct, 1),
+            "available_gb": available_gb,
+        }
+    except Exception as e:
+        checks["memory"] = {"status": "unknown", "detail": str(e)[:80]}
+
+    # --- 5. Disk space ---
+    try:
+        disk = shutil.disk_usage("/")
+        used_pct = round(disk.used / disk.total * 100, 1)
+        free_gb = round(disk.free / (1024 ** 3), 1)
+        if used_pct >= 95:
+            disk_status = "critical"
+            if overall == "healthy":
+                overall = "degraded"
+        elif used_pct >= 80:
+            disk_status = "warn"
+            if overall == "healthy":
+                overall = "degraded"
+        else:
+            disk_status = "ok"
+        checks["disk"] = {
+            "status": disk_status,
+            "used_pct": used_pct,
+            "free_gb": free_gb,
+        }
+    except Exception as e:
+        checks["disk"] = {"status": "unknown", "detail": str(e)[:80]}
+
+    # --- 6. SQLite ---
+    try:
+        import sqlite3
+        t0 = time.time()
+        db_path = CHAT_HISTORY_DB_PATH
+        def _sqlite_probe():
+            conn = sqlite3.connect(db_path, timeout=2.0)
+            conn.execute("SELECT 1")
+            conn.close()
+        await asyncio.wait_for(asyncio.to_thread(_sqlite_probe), timeout=3.0)
+        latency_ms = round((time.time() - t0) * 1000)
+        checks["sqlite"] = {"status": "ok", "latency_ms": latency_ms}
+    except Exception as e:
+        checks["sqlite"] = {"status": "error", "detail": str(e)[:120]}
+        if overall == "healthy":
+            overall = "degraded"
+
+    uptime_seconds = int(time.time() - _APP_START_TIME)
+    body = {
+        "status": overall,
+        "version": "2.0.0",
+        "uptime_seconds": uptime_seconds,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": checks,
+    }
+
+    status_code = 503 if overall == "unhealthy" else 200
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content=body, status_code=status_code)
 
 
 # ------------------------------------------------------------------

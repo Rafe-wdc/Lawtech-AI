@@ -79,7 +79,7 @@ jobs:
           cache: pip
 
       - name: Install test dependencies
-        run: pip install --quiet pytest requests
+        run: pip install --quiet pytest requests pytest-timeout
 
       - name: Run integration tests
         env:

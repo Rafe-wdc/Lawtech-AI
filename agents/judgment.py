@@ -276,33 +276,67 @@ async def judgment_node(state: LegalAgentState) -> dict:
              using_agent_query="Judgment" in agent_queries)
 
     try:
-        # Step 1: Extract metadata (GPT-4o in a thread, with timeout + regex fallback)
-        try:
-            metadata = await asyncio.wait_for(
-                asyncio.to_thread(_extract_case_metadata, query),
-                timeout=20,
+        # Steps 1 + 2: Run metadata extraction and preliminary ES search in parallel.
+        # Preliminary search uses regex-fallback metadata (fast) while GPT-4o extracts
+        # richer metadata. If preliminary hits are found, we skip the refined search.
+        def _preliminary_search():
+            prelim_meta = _judgment_regex_fallback(query)
+            return smart_judgment_search(
+                query=query,
+                petitioner=(prelim_meta.petitioner_names or [""])[0],
+                respondent=(prelim_meta.respondent_names or [""])[0],
+                year=prelim_meta.year,
+                court=prelim_meta.court_name,
+                topics=prelim_meta.topics,
+                acts_or_sections=prelim_meta.acts_or_sections,
+                lexical_query=prelim_meta.lexical_query or "",
+                size=min(prelim_meta.size or 10, 50),
             )
-        except asyncio.TimeoutError:
-            log.warning("Metadata extraction timed out, using regex fallback")
-            metadata = _judgment_regex_fallback(query)
+
+        with log_time(log, "Parallel metadata + ES search"):
+            metadata_task = asyncio.create_task(
+                asyncio.to_thread(_extract_case_metadata, query)
+            )
+            es_task = asyncio.create_task(asyncio.to_thread(_preliminary_search))
+
+            done, _ = await asyncio.wait(
+                [metadata_task, es_task],
+                timeout=22,
+                return_when=asyncio.ALL_COMPLETED,
+            )
+
+        # Resolve metadata (prefer GPT-4o result, fall back to regex)
+        try:
+            metadata = metadata_task.result() if metadata_task in done else _judgment_regex_fallback(query)
         except Exception as meta_err:
-            log.warning("Metadata extraction failed, using regex fallback",
-                        error=str(meta_err))
+            log.warning("Metadata extraction failed, using regex fallback", error=str(meta_err))
             metadata = _judgment_regex_fallback(query)
 
-        # Step 2: Smart multi-strategy search
-        with log_time(log, "ES search"):
-            search_result = smart_judgment_search(
-                query=query,
-                petitioner=(metadata.petitioner_names or [""])[0],
-                respondent=(metadata.respondent_names or [""])[0],
-                year=metadata.year,
-                court=metadata.court_name,
-                topics=metadata.topics,
-                acts_or_sections=metadata.acts_or_sections,
-                lexical_query=metadata.lexical_query or "",
-                size=min(metadata.size or 10, 50),
-            )
+        # Resolve preliminary ES result
+        try:
+            prelim_result = es_task.result() if es_task in done else {"hits": [], "strategy_used": "none", "strategies_tried": []}
+        except Exception:
+            prelim_result = {"hits": [], "strategy_used": "none", "strategies_tried": []}
+
+        # If preliminary search found hits, use them directly
+        if prelim_result["hits"]:
+            search_result = prelim_result
+            log.info("Preliminary ES search hit — skipping refined search",
+                     strategy=search_result["strategy_used"])
+        else:
+            # Preliminary missed — do refined search with full GPT-4o metadata
+            with log_time(log, "Refined ES search with metadata"):
+                search_result = smart_judgment_search(
+                    query=query,
+                    petitioner=(metadata.petitioner_names or [""])[0],
+                    respondent=(metadata.respondent_names or [""])[0],
+                    year=metadata.year,
+                    court=metadata.court_name,
+                    topics=metadata.topics,
+                    acts_or_sections=metadata.acts_or_sections,
+                    lexical_query=metadata.lexical_query or "",
+                    size=min(metadata.size or 10, 50),
+                )
 
         hits = search_result["hits"]
         strategy = search_result["strategy_used"]

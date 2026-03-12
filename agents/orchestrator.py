@@ -57,8 +57,10 @@ def _classify_task_regex_fallback(query: str) -> str:
     if any(k in q for k in ("judgment", "judgement", "case law", "citation", "held that",
                               "vs.", " v. ", "high court", "hc", "bench")):
         return "Judgment"
-    if any(k in q for k in ("supreme court", "sc judgment", "puttaswamy", "maneka gandhi",
-                              "kesavananda", "navtej", "vishaka")):
+    if any(k in q for k in ("supreme court", "sc judgment", "sc case", "sc ruling",
+                              "hon'ble sc", "apex court", "article 136",
+                              "puttaswamy", "maneka gandhi", "kesavananda",
+                              "navtej", "vishaka", "indra sawhney")):
         return "SCI_Judgment"
     if any(k in q for k in ("article ", "fundamental right", "directive principle",
                               "constitution", "constitutional")):
@@ -495,7 +497,25 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         classify_query = query + file_hint
         log.info("File context hint added for classification", file_names=fc.file_names)
 
-    if task is None:  # not already resolved by greeting pre-check
+    # Pre-check: strong SCI signals — override LLM classification.
+    # These patterns are unambiguously Supreme Court queries; the LLM occasionally
+    # mislabels them as Non_legal or Constitution when the query is normalized.
+    _SCI_STRONG_KEYWORDS = (
+        "supreme court judgment", "supreme court case", "supreme court ruling",
+        "supreme court ruled", "supreme court held", "supreme court order",
+        "sc judgment", "sc case", "sc ruling", "hon'ble sc",
+        "article 136", "supreme court of india", "apex court judgment",
+        "apex court ruling", "supreme court bench",
+    )
+    if task is None:
+        _q_lower = query.lower()
+        _orig_lower = _original_query.lower()
+        if any(k in _q_lower or k in _orig_lower for k in _SCI_STRONG_KEYWORDS):
+            task = "SCI_Judgment"
+            log.info("SCI pre-check triggered, skipping LLM classification",
+                     query=query[:80])
+
+    if task is None:  # not already resolved by greeting or SCI pre-check
         try:
             task = await asyncio.wait_for(
                 asyncio.to_thread(

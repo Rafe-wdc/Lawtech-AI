@@ -24,7 +24,10 @@ from typing import Optional
 
 from langchain.tools import tool
 
-from core.clients import get_es_client, get_retriever_embeddings
+from core.clients import (
+    get_es_client, get_retriever_embeddings,
+    is_es_available, record_es_failure, record_es_success,
+)
 from core.logger import get_logger
 from core.settings import ES_INDICES
 from tools.inline.section_parser import parse_section_info
@@ -87,6 +90,36 @@ def _sanitize_section_number(section: str) -> str:
 def _validate_index_name(index_name: str) -> bool:
     """Return True only if index_name is one of the known ES indices."""
     return index_name in _ALLOWED_ES_INDICES
+
+
+def _es_search(index: str, body: dict) -> dict:
+    """Execute an ES search with circuit breaker protection.
+
+    - If circuit is open (ES recently failed 3+ times), raises immediately
+      so agents skip to web fallback without waiting for a timeout.
+    - On success: resets failure counter.
+    - On failure: increments failure counter, may open circuit.
+
+    Raises:
+        RuntimeError: when circuit is open (fast-fail).
+        elasticsearch.exceptions.*: on actual ES errors.
+    """
+    if not is_es_available():
+        raise RuntimeError(
+            "Elasticsearch circuit open — skipping to fallback. "
+            "ES will be retried in up to 60 seconds."
+        )
+    try:
+        es = get_es_client()
+        _client = get_es_client()
+        result = _client.search(index=index, body=body)
+        record_es_success()
+        return result
+    except RuntimeError:
+        raise  # re-raise circuit-open error as-is
+    except Exception as exc:
+        record_es_failure()
+        raise
 
 
 # --- Search Variation Helpers ---
@@ -174,7 +207,7 @@ def search_legislation(query: str) -> dict:
         }
 
         try:
-            response = es.search(index=index, body=es_query)
+            response = _es_search(index=index, body=es_query)
             current_hits = response["hits"]["hits"]
 
             for hit in current_hits:
@@ -241,7 +274,7 @@ def search_legislation(query: str) -> dict:
             "size": 5,
         }
 
-    source_response = es.search(index=index, body=source_query)
+    source_response = _es_search(index=index, body=source_query)
     final_hits = source_response["hits"]["hits"]
 
     return {
@@ -296,7 +329,7 @@ def _search_legislation_by_topic(
         },
     }
 
-    response = es.search(index=index, body=discover_query)
+    response = _es_search(index=index, body=discover_query)
     discover_hits = response["hits"]["hits"]
 
     if not discover_hits:
@@ -321,7 +354,7 @@ def _search_legislation_by_topic(
         "sort": [{"_score": {"order": "desc"}}],
     }
 
-    targeted_response = es.search(index=index, body=targeted_query)
+    targeted_response = _es_search(index=index, body=targeted_query)
     final_hits = targeted_response["hits"]["hits"]
 
     return {
@@ -395,7 +428,7 @@ def _search_legislation_multi_section(
 
     if clean_act:
         try:
-            source_discovery = es.search(index=index, body={
+            source_discovery = _es_search(index=index, body={
                 "size": 0,
                 "query": {"match_phrase": {"source": clean_act}},
                 "aggs": {
@@ -426,7 +459,7 @@ def _search_legislation_multi_section(
             else f"section {section_numbers[0]}"
         )
         try:
-            fallback_resp = es.search(index=index, body={
+            fallback_resp = _es_search(index=index, body={
                 "size": 30,
                 "query": {"match": {"page_content": discovery_text}},
             })
@@ -476,7 +509,7 @@ def _search_legislation_multi_section(
         }
 
         try:
-            response = es.search(index=index, body=es_query)
+            response = _es_search(index=index, body=es_query)
             section_hits = []
             for h in response["hits"]["hits"]:
                 doc_id = h["_id"]
@@ -742,7 +775,7 @@ def search_newacts(
             "sort": [{"section_number": {"order": "asc"}}],
         }
 
-    response = es.search(index=ES_INDICES["newacts"], body=es_query)
+    response = _es_search(index=ES_INDICES["newacts"], body=es_query)
     hits = response["hits"]["hits"]
 
     return {
@@ -793,7 +826,7 @@ def _search_newacts_by_topic(
         ],
     }
 
-    response = es.search(index=ES_INDICES["newacts"], body=es_query)
+    response = _es_search(index=ES_INDICES["newacts"], body=es_query)
     hits = response["hits"]["hits"]
 
     return {
@@ -870,7 +903,7 @@ def _get_nearby_sections(
         "sort": [{"section_number": {"order": "asc"}}],
     }
 
-    response = es.search(
+    response = _es_search(
         index=ES_INDICES["newacts"], body=es_query, request_timeout=timeout,
     )
     hits = response["hits"]["hits"]
@@ -934,7 +967,7 @@ def search_drafts(query: str, size: int = 100) -> dict:
         "query": {"match": {"page_content": query}},
     }
 
-    response = es.search(index=index, body=es_query)
+    response = _es_search(index=index, body=es_query)
     hits = response["hits"]["hits"]
 
     file_paths = list(dict.fromkeys(h["_source"]["source"] for h in hits))
@@ -981,7 +1014,7 @@ def get_docs_by_source(index_name: str, source_path: str, size: int = 1) -> dict
         "query": {"term": {"source.keyword": source_path}},
     }
 
-    response = es.search(index=index_name, body=es_query)
+    response = _es_search(index=index_name, body=es_query)
     hits = response["hits"]["hits"]
 
     return {
@@ -1352,7 +1385,7 @@ def search_constitution(query: str, article_number: Optional[str] = None) -> dic
     }
 
     try:
-        result = es.search(index=index, body=body)
+        result = _es_search(index=index, body=body)
         hits = result["hits"]["hits"]
 
         documents = []
@@ -1410,7 +1443,7 @@ def search_constitution_by_part(query: str, part_name: str) -> dict:
     }
 
     try:
-        result = es.search(index=index, body=body)
+        result = _es_search(index=index, body=body)
         hits = result["hits"]["hits"]
 
         documents = []
@@ -1481,7 +1514,7 @@ def search_legal_maxims(query: str, maxim_name: Optional[str] = None) -> dict:
     }
 
     try:
-        result = es.search(index=index, body=body)
+        result = _es_search(index=index, body=body)
         hits = result["hits"]["hits"]
 
         documents = []

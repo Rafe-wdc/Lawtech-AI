@@ -9,7 +9,7 @@ contactPoints:
       - uid: email-oncall
         type: email
         settings:
-          addresses: "admin@lawttorney.com"
+          addresses: "rohitjakkam@gmail.com"
           subject: "[Lawtech-AI] {{ .GroupLabels.alertname }} — {{ .Status | title }}"
           message: |
             {{ range .Alerts }}

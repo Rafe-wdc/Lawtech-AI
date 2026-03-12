@@ -172,6 +172,58 @@
           { "matcher": { "id": "byName", "options": "web fallback %" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
         ]
       }
+    },
+    {
+      "id": 11,
+      "title": "Response Quality Scores (sampled 10%)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 40, "w": 16, "h": 8 },
+      "targets": [
+        {
+          "expr": "lawtech_quality_avg_score",
+          "legendFormat": "avg score"
+        },
+        {
+          "expr": "lawtech_quality_faithfulness",
+          "legendFormat": "faithfulness"
+        },
+        {
+          "expr": "lawtech_quality_relevance",
+          "legendFormat": "relevance"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": { "steps": [
+            { "color": "red", "value": 0 },
+            { "color": "yellow", "value": 0.6 },
+            { "color": "green", "value": 0.8 }
+          ]}
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Low Quality Alerts (score < 0.6)",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 40, "w": 8, "h": 4 },
+      "targets": [
+        {
+          "expr": "lawtech_quality_low_count",
+          "legendFormat": "low quality"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "steps": [
+          { "color": "green", "value": 0 },
+          { "color": "yellow", "value": 1 },
+          { "color": "red", "value": 5 }
+        ]}}
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
     }
   ]
 }

@@ -177,6 +177,26 @@ class ChatHistoryStore:
                 CREATE INDEX IF NOT EXISTS idx_request_log_thread
                     ON request_log(thread_id, timestamp DESC);
 
+                CREATE TABLE IF NOT EXISTS quality_log (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp        TEXT    NOT NULL DEFAULT (datetime('now')),
+                    request_log_id   INTEGER DEFAULT NULL,
+                    thread_id        TEXT    NOT NULL DEFAULT '',
+                    agent            TEXT    NOT NULL DEFAULT '',
+                    query_preview    TEXT    NOT NULL DEFAULT '',
+                    faithfulness     REAL    NOT NULL DEFAULT 0.0,
+                    relevance        REAL    NOT NULL DEFAULT 0.0,
+                    completeness     REAL    NOT NULL DEFAULT 0.0,
+                    avg_score        REAL    NOT NULL DEFAULT 0.0,
+                    model_used       TEXT    NOT NULL DEFAULT 'gemini-2.5-flash-lite'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_quality_log_ts
+                    ON quality_log(timestamp DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_quality_log_agent
+                    ON quality_log(agent, timestamp DESC);
+
             """)
             conn.commit()
 
@@ -1248,6 +1268,140 @@ class ChatHistoryStore:
     async def get_usage_stats(self, days: int = 7) -> dict:
         """Async wrapper for usage stats."""
         return await asyncio.to_thread(self._get_usage_stats_sync, days)
+
+    # ------------------------------------------------------------------
+    # Quality Log (L4 — LLM-as-judge response scoring)
+    # ------------------------------------------------------------------
+
+    def _log_quality_sync(
+        self,
+        request_log_id: int | None,
+        thread_id: str,
+        agent: str,
+        query_preview: str,
+        faithfulness: float,
+        relevance: float,
+        completeness: float,
+        avg_score: float,
+        model_used: str = "gemini-2.5-flash-lite",
+    ) -> int:
+        """Insert a quality score entry. Returns new row id."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("""
+                    INSERT INTO quality_log
+                        (request_log_id, thread_id, agent, query_preview,
+                         faithfulness, relevance, completeness, avg_score, model_used)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    request_log_id,
+                    thread_id,
+                    agent,
+                    query_preview[:300],
+                    faithfulness,
+                    relevance,
+                    completeness,
+                    avg_score,
+                    model_used,
+                ))
+                conn.commit()
+                return cur.lastrowid
+            finally:
+                conn.close()
+
+    async def log_quality(
+        self,
+        request_log_id: int | None,
+        thread_id: str,
+        agent: str,
+        query_preview: str,
+        faithfulness: float,
+        relevance: float,
+        completeness: float,
+        avg_score: float,
+        model_used: str = "gemini-2.5-flash-lite",
+    ) -> int:
+        """Async wrapper — log a quality score entry."""
+        return await asyncio.to_thread(
+            self._log_quality_sync,
+            request_log_id, thread_id, agent, query_preview,
+            faithfulness, relevance, completeness, avg_score, model_used,
+        )
+
+    def _get_quality_stats_sync(self, days: int = 7) -> dict:
+        """Aggregate quality stats from quality_log."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            # Overall averages
+            totals = conn.execute("""
+                SELECT
+                    COUNT(*)                          as total_scored,
+                    ROUND(AVG(avg_score), 4)          as avg_score,
+                    ROUND(AVG(faithfulness), 4)       as avg_faithfulness,
+                    ROUND(AVG(relevance), 4)          as avg_relevance,
+                    ROUND(AVG(completeness), 4)       as avg_completeness,
+                    SUM(CASE WHEN avg_score < 0.6 THEN 1 ELSE 0 END) as low_quality_count
+                FROM quality_log
+                WHERE timestamp >= datetime('now', ? || ' days')
+            """, (f"-{days}",)).fetchone()
+
+            # Per-agent averages
+            by_agent = [
+                dict(r) for r in conn.execute("""
+                    SELECT
+                        agent,
+                        COUNT(*)                    as scored,
+                        ROUND(AVG(avg_score), 4)    as avg_score,
+                        ROUND(AVG(faithfulness), 4) as avg_faithfulness,
+                        ROUND(AVG(relevance), 4)    as avg_relevance
+                    FROM quality_log
+                    WHERE timestamp >= datetime('now', ? || ' days')
+                    GROUP BY agent ORDER BY avg_score ASC
+                """, (f"-{days}",)).fetchall()
+            ]
+
+            # Daily trend
+            by_day = [
+                dict(r) for r in conn.execute("""
+                    SELECT
+                        strftime('%Y-%m-%d', timestamp)  as date,
+                        COUNT(*)                          as scored,
+                        ROUND(AVG(avg_score), 4)          as avg_score,
+                        ROUND(AVG(faithfulness), 4)       as avg_faithfulness
+                    FROM quality_log
+                    WHERE timestamp >= datetime('now', ? || ' days')
+                    GROUP BY date ORDER BY date DESC
+                """, (f"-{days}",)).fetchall()
+            ]
+
+            # Lowest scoring recent responses (for review queue)
+            low_quality = [
+                dict(r) for r in conn.execute("""
+                    SELECT timestamp, agent, query_preview, avg_score,
+                           faithfulness, relevance, completeness
+                    FROM quality_log
+                    WHERE avg_score < 0.6
+                      AND timestamp >= datetime('now', ? || ' days')
+                    ORDER BY avg_score ASC LIMIT 10
+                """, (f"-{days}",)).fetchall()
+            ]
+
+            return {
+                "period_days": days,
+                "totals": dict(totals) if totals else {},
+                "by_agent": by_agent,
+                "by_day": by_day,
+                "low_quality_responses": low_quality,
+            }
+        finally:
+            conn.close()
+
+    async def get_quality_stats(self, days: int = 7) -> dict:
+        """Async wrapper for quality stats."""
+        return await asyncio.to_thread(self._get_quality_stats_sync, days)
 
 
 # ------------------------------------------------------------------

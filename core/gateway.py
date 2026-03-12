@@ -18,6 +18,7 @@ All intelligence lives in the agents.
 import asyncio
 import json
 import os
+import random
 
 # asyncio.timeout() is Python 3.11+; fall back to async_timeout on 3.10
 try:
@@ -46,6 +47,7 @@ from .graph import compile_graph
 from .logger import get_logger, set_request_id, log_time
 from .chat_store import chat_store
 from .metrics import METRICS
+from .quality import score_response as _score_response
 
 log = get_logger("Gateway")
 
@@ -352,6 +354,16 @@ async def search(data: SearchRequest, request: Request):
         error=_graph_error,
     ))
 
+    # --- L4: Quality scoring (10% sample, fire-and-forget) ---
+    _final_response = final_state.get("final_response", "")
+    if _final_response and not final_state.get("is_blocked") and random.random() < 0.10:
+        asyncio.create_task(_score_response(
+            query=data.prompt_query,
+            response=_final_response,
+            agents_used=agents_used,
+            thread_id=thread_id,
+        ))
+
     # Memory context metadata
     effective_query = final_state.get("query", data.prompt_query)
     query_rewritten = effective_query != data.prompt_query
@@ -595,6 +607,15 @@ async def search_stream(data: SearchRequest, request: Request):
             fallback_used=False,
             is_blocked=False,
         ))
+
+        # --- L4: Quality scoring (10% sample, fire-and-forget) ---
+        if final_response and random.random() < 0.10:
+            asyncio.create_task(_score_response(
+                query=data.prompt_query,
+                response=final_response,
+                agents_used=agents_used,
+                thread_id=thread_id,
+            ))
 
         # Save chat history to SQLite after stream completes
         conversation_turn = 0
@@ -1596,6 +1617,20 @@ async def admin_usage_stats(days: int = 7):
     except Exception as e:
         log.error("Failed to fetch usage stats", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch usage stats")
+
+
+@app.get("/pyapi/admin/quality_stats")
+async def admin_quality_stats(days: int = 7):
+    """L4 quality scores: faithfulness, relevance, completeness per agent.
+
+    Args:
+        days: Number of days to look back (default: 7)
+    """
+    try:
+        return await chat_store.get_quality_stats(days=days)
+    except Exception as e:
+        log.error("Failed to fetch quality stats", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to fetch quality stats")
 
 
 @app.get("/pyapi/threads")

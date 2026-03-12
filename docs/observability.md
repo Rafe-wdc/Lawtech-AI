@@ -136,13 +136,35 @@ docker compose -f monitoring/docker-compose.yml up -d
 
 ---
 
-## Level 4 — "Why Is It Hurting?" (Future)
+## Level 4 — "Why Is It Hurting?" ✅
 
 **Goal: Improve answer quality, not just fix outages.**
 
-Planned:
-- Automated LLM-as-judge quality scoring (faithfulness, relevance)
-- Data gap analysis: cluster web fallback queries → weekly backfill report
-- User satisfaction correlation with agent/model
+### What was implemented
 
-**Status: NOT YET BUILT**
+**`core/quality.py`** — LLM-as-judge scorer (Gemini Flash Lite):
+- Samples 10% of responses (fire-and-forget, never blocks response)
+- Skips: greetings, blocked queries, Drafting, Document agents
+- Scores 3 dimensions: `faithfulness`, `relevance`, `completeness` (0.0–1.0)
+- Persists to `quality_log` SQLite table
+
+**`quality_log` SQLite table** — per-scored-response record:
+- `agent`, `query_preview`, `faithfulness`, `relevance`, `completeness`, `avg_score`
+
+**`GET /pyapi/admin/quality_stats?days=7`** — quality analytics:
+- Overall averages, per-agent breakdown, daily trend, low-quality response queue
+
+**Prometheus metrics** (4 new gauges/counters):
+- `lawtech_quality_avg_score`, `lawtech_quality_faithfulness`, `lawtech_quality_relevance`
+- `lawtech_quality_low_count` — alert fires when score < 0.6
+
+**Grafana** — 2 new panels: Quality scores timeseries + Low quality alert stat
+
+**`scripts/gap_report.py`** — ES backfill intelligence:
+```bash
+python scripts/gap_report.py           # last 7 days
+python scripts/gap_report.py --days 30 --agent Judgment
+```
+- Reads `fallback_log`, clusters queries by topic (word-overlap)
+- Surfaces top ES gaps to backfill (e.g. "3 queries for NDPS bail hit web fallback")
+- Auto-saves to `docs/gap_report.md`

@@ -95,4 +95,31 @@ METRICS: dict = {
         "lawtech_active_requests",
         "Number of requests currently being processed",
     ),
+
+    # --- L4: Quality Scores (updated after each scored response) ---
+
+    "quality_avg_score": Gauge(
+        "lawtech_quality_avg_score",
+        "Rolling average quality score (last 100 scored responses)",
+    ),
+
+    "quality_faithfulness": Gauge(
+        "lawtech_quality_faithfulness",
+        "Rolling average faithfulness score",
+    ),
+
+    "quality_relevance": Gauge(
+        "lawtech_quality_relevance",
+        "Rolling average relevance score",
+    ),
+
+    "quality_low_count": Counter(
+        "lawtech_quality_low_count",
+        "Total responses with quality score below 0.6",
+    ),
+
+    "quality_scored_total": Counter(
+        "lawtech_quality_scored_total",
+        "Total responses that have been quality scored",
+    ),
 }

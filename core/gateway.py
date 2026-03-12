@@ -77,9 +77,14 @@ app = FastAPI(title="Legal AI API v2", version="2.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# CORS: restrict to configured domain in production (set ALLOWED_ORIGINS in .env)
+# Example: ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+_cors_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

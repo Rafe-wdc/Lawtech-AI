@@ -1,0 +1,28 @@
+# Lawtech-AI — Local Development Caddy Config
+#
+# Serves over HTTP only (no TLS, no domain needed).
+# Use this to test the Caddy proxy layer locally before deploying.
+#
+# Run: caddy run --config Caddyfile.dev
+#
+# The app must be running on localhost:5000 first.
+
+:8080 {
+    reverse_proxy localhost:5000 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto "https"  # tell app it's behind https proxy
+
+        transport http {
+            response_header_timeout 310s
+            read_timeout 310s
+        }
+    }
+
+    encode gzip
+
+    log {
+        output stdout
+        format console
+    }
+}

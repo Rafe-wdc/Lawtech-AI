@@ -1,0 +1,58 @@
+# Lawtech-AI — Production Caddy Reverse Proxy
+#
+# Caddy automatically obtains and renews Let's Encrypt TLS certificates.
+# No manual cert management needed.
+#
+# SETUP:
+#   1. Replace "your-domain.com" with your actual domain
+#   2. Ensure port 80 and 443 are open (for ACME HTTP-01 challenge)
+#   3. Install Caddy: https://caddyserver.com/docs/install
+#   4. Run: caddy run --config Caddyfile
+#      or:  caddy start --config Caddyfile  (background)
+#
+# The app must be running on localhost:5000 before starting Caddy.
+
+your-domain.com {
+    # Reverse proxy all traffic to the FastAPI app.
+    # When running via deploy/docker-compose.prod.yml, use "app:5000" (Docker service name).
+    # When running Caddy standalone on the host, use "localhost:5000".
+    reverse_proxy localhost:5000 {
+        # Forward real client IP (needed for rate limiting and logs)
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Match the app's 300s timeout for long Judgment/Scenario requests
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 310s
+            read_timeout 310s
+        }
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Gzip compression for API responses
+    encode gzip
+
+    # Access logs
+    log {
+        output file logs/caddy_access.log {
+            roll_size 100MB
+            roll_keep 5
+        }
+        format json
+    }
+}
+
+# Redirect bare HTTP → HTTPS (Caddy does this automatically, but explicit is clearer)
+http://your-domain.com {
+    redir https://your-domain.com{uri} permanent
+}

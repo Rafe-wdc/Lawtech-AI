@@ -102,6 +102,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 API_KEYS = os.getenv("API_KEYS", "")
 # Single admin key for /pyapi/admin/* and /pyapi/metrics
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+# CORS allowed origins. "*" = open (dev). Set to domain(s) in production.
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
 
 # --- Server ---
 HOST = os.getenv("HOST", "0.0.0.0")

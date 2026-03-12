@@ -3,8 +3,9 @@ version: "3.8"
 # Lawtech-AI — Production Deploy Stack
 #
 # Runs the full production stack:
-#   - caddy:   HTTPS reverse proxy (ports 80/443) with automatic Let's Encrypt
-#   - app:     FastAPI app via gunicorn (2 uvicorn workers)
+#   - postgres: PostgreSQL for LangGraph conversation checkpointing
+#   - app:      FastAPI app via gunicorn (2 uvicorn workers)
+#   - caddy:    HTTPS reverse proxy (ports 80/443) with automatic Let's Encrypt
 #
 # SETUP:
 #   1. Copy .env.example to .env and fill in all required values
@@ -17,6 +18,26 @@ version: "3.8"
 
 services:
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: lawtech-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lawtech
+      POSTGRES_USER: lawtech
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lawtech -d lawtech"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lawtech-net
+
   app:
     build:
       context: ..
@@ -24,6 +45,9 @@ services:
     container_name: lawtech-app
     restart: unless-stopped
     env_file: ../.env
+    environment:
+      # Override POSTGRES_URL to use Docker service name
+      - POSTGRES_URL=postgresql://lawtech:${POSTGRES_PASSWORD:-changeme}@postgres:5432/lawtech
     volumes:
       - ../data:/app/data
       - ../logs:/app/logs
@@ -31,6 +55,9 @@ services:
       - ../models:/app/models
     expose:
       - "5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/pyapi/health"]
       interval: 30s
@@ -65,5 +92,6 @@ networks:
     driver: bridge
 
 volumes:
+  postgres_data:
   caddy_data:
   caddy_config:

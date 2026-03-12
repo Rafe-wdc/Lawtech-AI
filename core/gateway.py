@@ -16,6 +16,7 @@ All intelligence lives in the agents.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import random
@@ -43,6 +44,7 @@ from werkzeug.utils import secure_filename
 
 from .settings import HOST, PORT, RATE_LIMIT_PER_MINUTE, CHROMA_STORE_ROOT
 from .graph import compile_graph
+from .checkpointer import create_checkpointer
 from .logger import get_logger, set_request_id, log_time
 from .chat_store import chat_store
 from .metrics import METRICS
@@ -71,9 +73,27 @@ def _rate_limit_key(request: Request) -> str:
 
 limiter = Limiter(key_func=_rate_limit_key)
 
-# --- App ---
+# --- Lifespan: init checkpointer + graph on startup, close pool on shutdown ---
 _APP_START_TIME = time.time()
-app = FastAPI(title="Legal AI API v2", version="2.0.0")
+_pg_pool = None  # kept for graceful shutdown
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _pg_pool
+    log.info("Startup: initializing checkpointer and compiling agent graph")
+    checkpointer, _pg_pool = await create_checkpointer()
+    app.state.agent_graph = compile_graph(checkpointer=checkpointer)
+    log.info("Startup complete")
+    yield
+    # Shutdown
+    if _pg_pool is not None:
+        log.info("Shutdown: closing PostgreSQL connection pool")
+        await _pg_pool.close()
+
+
+# --- App ---
+app = FastAPI(title="Legal AI API v2", version="2.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -119,11 +139,6 @@ async def metrics_middleware(request: Request, call_next):
         ).inc()
         METRICS["request_latency_seconds"].labels(endpoint=endpoint).observe(latency)
 
-
-# Compile the agent graph (done once at startup)
-log.info("Compiling agent graph at startup")
-agent_graph = compile_graph()
-log.info("Agent graph compiled successfully")
 
 # --- Frontend UI ---
 _FRONTEND_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend.html")
@@ -285,6 +300,7 @@ async def search(data: SearchRequest, request: Request):
     Invokes the full multi-agent graph and returns the complete response:
     guardrail → memory → orchestrator → [domain agents] → synthesize → guardrail
     """
+    agent_graph = request.app.state.agent_graph
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
     initial_state = _build_initial_state(
@@ -452,6 +468,7 @@ async def search_stream(data: SearchRequest, request: Request):
     - Node-level updates (status messages, state captures)
     - Token-by-token streaming from domain agents via get_stream_writer()
     """
+    agent_graph = request.app.state.agent_graph
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
     initial_state = _build_initial_state(
@@ -695,6 +712,7 @@ async def chat_with_files(
     from .file_processor import process_files, validate_upload
     from .settings import MAX_FILES_PER_REQUEST as MAX_FILES
 
+    agent_graph = request.app.state.agent_graph
     thread_id = globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
 
@@ -1540,6 +1558,26 @@ async def health():
         checks["sqlite"] = {"status": "error", "detail": str(e)[:120]}
         if overall == "healthy":
             overall = "degraded"
+
+    # --- 7. Checkpointer (PostgreSQL or in-memory) ---
+    try:
+        graph = request.app.state.agent_graph
+        cp = graph.checkpointer
+        cp_type = type(cp).__name__
+        if "Postgres" in cp_type:
+            # Quick pool probe
+            t0 = time.time()
+            async with _pg_pool.connection() as conn:
+                await conn.execute("SELECT 1")
+            latency_ms = round((time.time() - t0) * 1000)
+            checks["checkpointer"] = {"status": "ok", "type": "postgresql", "latency_ms": latency_ms}
+        else:
+            checks["checkpointer"] = {"status": "warn", "type": "in_memory",
+                                       "detail": "state lost on restart — set POSTGRES_URL"}
+            if overall == "healthy":
+                overall = "degraded"
+    except Exception as e:
+        checks["checkpointer"] = {"status": "unknown", "detail": str(e)[:80]}
 
     uptime_seconds = int(time.time() - _APP_START_TIME)
     body = {

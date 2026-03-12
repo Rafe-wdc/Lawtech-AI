@@ -97,6 +97,11 @@ S3_REGION = os.getenv("S3_REGION", "ap-south-1")
 # --- Redis ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
+# --- PostgreSQL (LangGraph checkpointer) ---
+# Format: postgresql://user:password@host:port/dbname
+# Leave empty to use in-memory MemorySaver (state lost on restart).
+POSTGRES_URL = os.getenv("POSTGRES_URL", "")
+
 # --- Auth ---
 # Comma-separated user API keys. Leave empty for open dev mode.
 API_KEYS = os.getenv("API_KEYS", "")

@@ -57,3 +57,7 @@ requests>=2.28.0
 
 # Production server (P0-3: gunicorn multi-worker)
 gunicorn>=22.0.0
+
+# PostgreSQL checkpointer (P0-4: persistent LangGraph conversation state)
+langgraph-checkpoint-postgres>=3.0.4
+psycopg[binary,pool]>=3.3.0

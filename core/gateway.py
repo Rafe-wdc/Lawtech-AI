@@ -278,11 +278,13 @@ async def search(data: SearchRequest, request: Request):
         data.prompt_query, thread_id, preferred_language=data.preferred_language
     )
     config = {"configurable": {"thread_id": thread_id}}
+    _req_start = time.perf_counter()
 
     log.info("Search request received",
              query=data.prompt_query[:100], thread_id=thread_id,
              query_len=len(data.prompt_query))
 
+    _graph_error: str | None = None
     try:
         with log_time(log, "Full graph execution"):
             final_state = await asyncio.wait_for(
@@ -290,9 +292,11 @@ async def search(data: SearchRequest, request: Request):
                 timeout=300,  # 5 minute hard timeout
             )
     except asyncio.TimeoutError:
+        _graph_error = "timeout"
         log.error("Agent graph execution timed out after 300s", query=data.prompt_query[:100])
         raise HTTPException(status_code=504, detail="Request timed out. Please try a simpler query.")
     except Exception as e:
+        _graph_error = str(e)[:200]
         log.error("Agent graph execution failed", exc_info=True, error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -319,6 +323,7 @@ async def search(data: SearchRequest, request: Request):
              response_len=response_len, thread_id=thread_id)
 
     # --- Record metrics ---
+    _latency_ms = int((time.perf_counter() - _req_start) * 1000)
     for agent in agents_used:
         METRICS["agent_invocations_total"].labels(agent=agent).inc()
     for task in final_state.get("tasks_planned", []):
@@ -327,6 +332,25 @@ async def search(data: SearchRequest, request: Request):
         METRICS["guardrail_blocks_total"].labels(stage="input").inc()
     if total_tokens > 0:
         METRICS["llm_tokens_total"].labels(model="total", token_type="output").inc(total_tokens)
+
+    # --- Log request to SQLite (fire-and-forget) ---
+    _fallback_used = any(
+        r.get("fallback_used") for r in final_state.get("agent_results", {}).values()
+        if isinstance(r, dict)
+    )
+    asyncio.create_task(chat_store.log_request(
+        thread_id=thread_id,
+        endpoint="/pyapi/search",
+        query_preview=data.prompt_query[:300],
+        user_language=final_state.get("user_language", "en"),
+        tasks_planned=final_state.get("tasks_planned", []),
+        agents_used=agents_used,
+        total_latency_ms=_latency_ms,
+        total_tokens=total_tokens,
+        fallback_used=_fallback_used,
+        is_blocked=bool(final_state.get("is_blocked")),
+        error=_graph_error,
+    ))
 
     # Memory context metadata
     effective_query = final_state.get("query", data.prompt_query)
@@ -423,6 +447,8 @@ async def search_stream(data: SearchRequest, request: Request):
         step_count = 0
         final_response = ""
         agents_used = []
+        tasks_planned_stream: list[str] = []
+        user_language_stream: str = "en"
         total_tokens = 0
         all_source_metadata = []
         effective_query = data.prompt_query
@@ -496,8 +522,13 @@ async def search_stream(data: SearchRequest, request: Request):
 
                     # Track task info from orchestrator + emit early agent badges
                     if "tasks_planned" in update and update["tasks_planned"]:
+                        tasks_planned_stream = update["tasks_planned"]
                         agents_used = update["tasks_planned"]
                         yield f"data: {json.dumps({'type': 'agents_planned', 'agents': agents_used})}\n\n"
+
+                    # Capture user_language from memory node
+                    if node_name == "memory" and "user_language" in update:
+                        user_language_stream = update.get("user_language", "en") or "en"
 
                     # Track tokens from agent results
                     if "agent_results" in update:
@@ -550,6 +581,20 @@ async def search_stream(data: SearchRequest, request: Request):
         elapsed_ms = (time.perf_counter() - start) * 1000
         log.info("Stream completed",
                  steps=step_count, duration_ms=f"{elapsed_ms:.0f}")
+
+        # --- Log request to SQLite (fire-and-forget) ---
+        asyncio.create_task(chat_store.log_request(
+            thread_id=thread_id,
+            endpoint="/pyapi/search/stream",
+            query_preview=data.prompt_query[:300],
+            user_language=user_language_stream,
+            tasks_planned=tasks_planned_stream,
+            agents_used=agents_used,
+            total_latency_ms=int(elapsed_ms),
+            total_tokens=total_tokens,
+            fallback_used=False,
+            is_blocked=False,
+        ))
 
         # Save chat history to SQLite after stream completes
         conversation_turn = 0
@@ -1537,6 +1582,20 @@ async def admin_fallback_stats():
     except Exception as e:
         log.error("Failed to fetch fallback stats", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch fallback stats")
+
+
+@app.get("/pyapi/admin/usage_stats")
+async def admin_usage_stats(days: int = 7):
+    """Per-request usage stats: tokens, cost, latency, agent distribution.
+
+    Args:
+        days: Number of days to look back (default: 7)
+    """
+    try:
+        return await chat_store.get_usage_stats(days=days)
+    except Exception as e:
+        log.error("Failed to fetch usage stats", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to fetch usage stats")
 
 
 @app.get("/pyapi/threads")

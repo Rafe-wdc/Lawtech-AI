@@ -1,5 +1,5 @@
 {
-  "title": "Lawtech-AI — Application Health",
+  "title": "Lawtech-AI — Application Health & Usage",
   "uid": "lawtech-main",
   "timezone": "browser",
   "refresh": "30s",
@@ -135,6 +135,43 @@
         ]}}
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 9,
+      "title": "Total Tokens / hour",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(increase(lawtech_llm_tokens_total[1h]))",
+          "legendFormat": "tokens/hour"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "fixedColor": "purple", "mode": "fixed" } }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Fallback Rate % (web search)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(lawtech_fallback_total{tier='web_search'}[5m])) / sum(rate(lawtech_requests_total[5m])) * 100",
+          "legendFormat": "web fallback %"
+        },
+        {
+          "expr": "sum(rate(lawtech_fallback_total{tier='query_rewrite'}[5m])) / sum(rate(lawtech_requests_total[5m])) * 100",
+          "legendFormat": "query rewrite %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0 },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "web fallback %" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      }
     }
   ]
 }

@@ -154,6 +154,29 @@ class ChatHistoryStore:
                 CREATE INDEX IF NOT EXISTS idx_fallback_backfilled
                     ON fallback_log(backfilled, agent);
 
+                CREATE TABLE IF NOT EXISTS request_log (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp           TEXT    NOT NULL DEFAULT (datetime('now')),
+                    thread_id           TEXT    NOT NULL DEFAULT '',
+                    endpoint            TEXT    NOT NULL DEFAULT '',
+                    query_preview       TEXT    NOT NULL DEFAULT '',
+                    user_language       TEXT    NOT NULL DEFAULT 'en',
+                    tasks_planned_json  TEXT    NOT NULL DEFAULT '[]',
+                    agents_used_json    TEXT    NOT NULL DEFAULT '[]',
+                    total_latency_ms    INTEGER NOT NULL DEFAULT 0,
+                    total_tokens        INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost_usd  REAL    NOT NULL DEFAULT 0.0,
+                    fallback_used       INTEGER NOT NULL DEFAULT 0,
+                    is_blocked          INTEGER NOT NULL DEFAULT 0,
+                    error               TEXT    DEFAULT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_request_log_ts
+                    ON request_log(timestamp DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_request_log_thread
+                    ON request_log(thread_id, timestamp DESC);
+
             """)
             conn.commit()
 
@@ -1055,6 +1078,176 @@ class ChatHistoryStore:
     async def get_fallback_stats(self) -> dict:
         """Async wrapper for get_fallback_stats."""
         return await asyncio.to_thread(self._get_fallback_stats_sync)
+
+
+    # ------------------------------------------------------------------
+    # Request Log (per-request usage tracking for L3 observability)
+    # ------------------------------------------------------------------
+
+    # LLM cost estimates (blended $/1K tokens per agent group, conservative estimates)
+    _AGENT_COST_PER_1K: dict[str, float] = {
+        "Non_legal":    0.00015,   # Gemini Flash (cheap)
+        "legislation":  0.00150,   # GPT-4o-mini + Gemini Flash
+        "judgment":     0.00250,   # GPT-4o metadata + Gemini Flash
+        "sci_judgment": 0.00250,   # GPT-4o metadata + Gemini Flash
+        "newacts":      0.00150,   # GPT-4o-mini + Gemini Flash
+        "constitution": 0.00015,   # Gemini Flash
+        "maxim":        0.00015,   # Gemini Flash
+        "legal_concepts": 0.00015, # Gemini Flash Lite
+        "drafting":     0.00030,   # Gemini Flash
+        "scenario":     0.01000,   # Gemini Pro (expensive — web grounded)
+        "document":     0.01000,   # Gemini Pro PDF chat
+    }
+    _DEFAULT_COST_PER_1K = 0.00250  # fallback blended rate
+
+    def _estimate_cost(self, agents_used: list[str], total_tokens: int) -> float:
+        """Estimate USD cost based on which agents ran and total token count."""
+        if not total_tokens:
+            return 0.0
+        if not agents_used:
+            return round(total_tokens / 1000 * self._DEFAULT_COST_PER_1K, 6)
+        # Use highest-cost agent as the dominant rate
+        rates = [self._AGENT_COST_PER_1K.get(a, self._DEFAULT_COST_PER_1K) for a in agents_used]
+        dominant_rate = max(rates)
+        return round(total_tokens / 1000 * dominant_rate, 6)
+
+    def _log_request_sync(
+        self,
+        thread_id: str,
+        endpoint: str,
+        query_preview: str,
+        user_language: str,
+        tasks_planned: list[str],
+        agents_used: list[str],
+        total_latency_ms: int,
+        total_tokens: int,
+        fallback_used: bool,
+        is_blocked: bool,
+        error: str | None = None,
+    ) -> int:
+        """Insert a request log entry. Returns the new row id."""
+        self._ensure_schema()
+        estimated_cost = self._estimate_cost(agents_used, total_tokens)
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("""
+                    INSERT INTO request_log
+                        (thread_id, endpoint, query_preview, user_language,
+                         tasks_planned_json, agents_used_json, total_latency_ms,
+                         total_tokens, estimated_cost_usd, fallback_used,
+                         is_blocked, error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    thread_id,
+                    endpoint,
+                    query_preview[:300],
+                    user_language or "en",
+                    json.dumps(tasks_planned),
+                    json.dumps(agents_used),
+                    total_latency_ms,
+                    total_tokens,
+                    estimated_cost,
+                    int(fallback_used),
+                    int(is_blocked),
+                    error,
+                ))
+                conn.commit()
+                return cur.lastrowid
+            finally:
+                conn.close()
+
+    async def log_request(
+        self,
+        thread_id: str,
+        endpoint: str,
+        query_preview: str,
+        user_language: str,
+        tasks_planned: list[str],
+        agents_used: list[str],
+        total_latency_ms: int,
+        total_tokens: int,
+        fallback_used: bool = False,
+        is_blocked: bool = False,
+        error: str | None = None,
+    ) -> int:
+        """Async wrapper — log a request without blocking the response."""
+        return await asyncio.to_thread(
+            self._log_request_sync,
+            thread_id, endpoint, query_preview, user_language,
+            tasks_planned, agents_used, total_latency_ms,
+            total_tokens, fallback_used, is_blocked, error,
+        )
+
+    def _get_usage_stats_sync(self, days: int = 7) -> dict:
+        """Daily and aggregate usage stats from request_log."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            # Totals
+            totals = conn.execute("""
+                SELECT
+                    COUNT(*)                        as total_requests,
+                    SUM(total_tokens)               as total_tokens,
+                    ROUND(SUM(estimated_cost_usd), 4) as total_cost_usd,
+                    ROUND(AVG(total_latency_ms))    as avg_latency_ms,
+                    SUM(fallback_used)              as fallback_count,
+                    SUM(is_blocked)                 as blocked_count
+                FROM request_log
+                WHERE timestamp >= datetime('now', ? || ' days')
+            """, (f"-{days}",)).fetchone()
+
+            # Per-day breakdown
+            by_day = [
+                dict(r) for r in conn.execute("""
+                    SELECT
+                        strftime('%Y-%m-%d', timestamp)  as date,
+                        COUNT(*)                          as requests,
+                        SUM(total_tokens)                 as tokens,
+                        ROUND(SUM(estimated_cost_usd), 4) as cost_usd,
+                        ROUND(AVG(total_latency_ms))      as avg_latency_ms,
+                        SUM(fallback_used)                as fallbacks
+                    FROM request_log
+                    WHERE timestamp >= datetime('now', ? || ' days')
+                    GROUP BY date ORDER BY date DESC
+                """, (f"-{days}",)).fetchall()
+            ]
+
+            # Top agents by invocation count
+            top_agents = [
+                {"agent": r["agent"], "count": r["cnt"]}
+                for r in conn.execute("""
+                    SELECT value as agent, COUNT(*) as cnt
+                    FROM request_log, json_each(agents_used_json)
+                    WHERE timestamp >= datetime('now', ? || ' days')
+                    GROUP BY agent ORDER BY cnt DESC LIMIT 10
+                """, (f"-{days}",)).fetchall()
+            ]
+
+            # Task type distribution
+            task_dist = [
+                {"task": r["task"], "count": r["cnt"]}
+                for r in conn.execute("""
+                    SELECT value as task, COUNT(*) as cnt
+                    FROM request_log, json_each(tasks_planned_json)
+                    WHERE timestamp >= datetime('now', ? || ' days')
+                    GROUP BY task ORDER BY cnt DESC
+                """, (f"-{days}",)).fetchall()
+            ]
+
+            return {
+                "period_days": days,
+                "totals": dict(totals) if totals else {},
+                "by_day": by_day,
+                "top_agents": top_agents,
+                "task_distribution": task_dist,
+            }
+        finally:
+            conn.close()
+
+    async def get_usage_stats(self, days: int = 7) -> dict:
+        """Async wrapper for usage stats."""
+        return await asyncio.to_thread(self._get_usage_stats_sync, days)
 
 
 # ------------------------------------------------------------------

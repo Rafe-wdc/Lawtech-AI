@@ -113,16 +113,26 @@ docker compose -f monitoring/docker-compose.yml up -d
 
 ---
 
-## Level 3 — "Where Is It Hurting?" (Future)
+## Level 3 — "Where Is It Hurting?" ✅
 
 **Goal: Per-agent visibility — token usage, cost, slow nodes.**
 
-Planned:
-- `request_log` SQLite table (user → agents → cost in one row)
-- Langfuse OSS traces (LangGraph node-level latency + tokens)
-- Daily cost report (GPT-4o + Gemini breakdown)
+### What was implemented
 
-**Status: NOT YET BUILT**
+**`request_log` SQLite table** — every request logged (fire-and-forget):
+- `thread_id`, `endpoint`, `query_preview`, `user_language`
+- `tasks_planned_json`, `agents_used_json`, `total_latency_ms`
+- `total_tokens`, `estimated_cost_usd`, `fallback_used`, `is_blocked`
+
+**Cost estimation** per-agent blended rates ($/1K tokens):
+- Scenario / Document: $0.01 (Gemini Pro)
+- Judgment / SCI: $0.0025 (GPT-4o + Gemini Flash)
+- Legislation / Newacts: $0.0015 (GPT-4o-mini + Gemini Flash)
+- Others: $0.00015 (Gemini Flash Lite)
+
+**`GET /pyapi/admin/usage_stats?days=7`** — totals, per-day breakdown, top agents, task distribution
+
+**Grafana** — 2 new panels: Tokens/hour + Fallback rate % (web vs rewrite)
 
 ---
 

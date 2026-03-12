@@ -28,7 +28,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
 from core.clients import get_gemini_pro, get_qa_embeddings
-from core.settings import CHROMA_STORE_ROOT
+from core.settings import CHROMA_STORE_ROOT, TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 
@@ -390,7 +390,7 @@ async def document_node(state: LegalAgentState) -> dict:
         with log_time(log, "Full document QA pipeline"):
             answer, tokens, retrieved_docs = await asyncio.wait_for(
                 asyncio.to_thread(_retrieve_and_answer, unique_string, query, recent_history),
-                timeout=90.0,
+                timeout=TIMEOUT_CHROMADB_SEC,
             )
 
         # Save chat history (sync file I/O → off-thread)

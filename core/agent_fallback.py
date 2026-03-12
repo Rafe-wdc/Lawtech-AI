@@ -18,6 +18,7 @@ from core.clients import get_gpt4o_mini, get_genai_client
 from core.logger import get_logger, log_time
 from core.chat_store import chat_store
 from core.metrics import METRICS
+from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
 
 log = get_logger("AgentFallback")
 
@@ -130,9 +131,10 @@ async def web_search_fallback(
         full_prompt = f"{system_prompt}{fallback_instruction}\n\nUser Query: {query}"
         client = get_genai_client()
 
-        # Try gemini-2.5-flash first, fall back to gemini-2.5-pro on 503
+        # Try scenario_web_grounded model first, fall back to gemini-2.5-pro on 503
+        _primary = MODELS["scenario_web_grounded"]
         response = None
-        for model in ["gemini-2.5-flash", "gemini-2.5-pro"]:
+        for model in [_primary, "gemini-2.5-pro"]:
             try:
                 with log_time(log, f"{model} + Google Search", agent=agent_name):
                     response = await asyncio.wait_for(
@@ -147,11 +149,11 @@ async def web_search_fallback(
                                 "top_p": 0.95,
                             },
                         ),
-                        timeout=120.0,
+                        timeout=TIMEOUT_WEB_SEARCH_SEC,
                     )
                 break  # success
             except Exception as model_err:
-                if "503" in str(model_err) and model == "gemini-2.5-flash":
+                if "503" in str(model_err) and model == _primary:
                     log.warning("Flash 503, retrying with Pro",
                                 agent=agent_name, error=str(model_err)[:100])
                     await asyncio.sleep(1)
@@ -164,9 +166,9 @@ async def web_search_fallback(
         if not response.candidates or not response.candidates[0].content.parts:
             log.warning("Gemini web fallback returned empty candidates/parts",
                         agent=agent_name)
-            content = ""
+            content = "I was unable to retrieve information on this topic at the moment. Please try rephrasing your question."
         else:
-            content = response.candidates[0].content.parts[0].text
+            content = getattr(response.candidates[0].content.parts[0], "text", None) or "I was unable to retrieve information on this topic at the moment. Please try rephrasing your question."
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
         # Stream the fallback content as tokens to the frontend
@@ -245,7 +247,7 @@ async def web_search_fallback(
                   agent=agent_name, error=str(e), exc_info=True)
         return AgentResult(
             agent_name=agent_name,
-            content="",
+            content="I was unable to retrieve information on this topic at the moment. Please try rephrasing your question.",
             sources=[],
             tokens_consumed=0,
             error=f"Web search fallback failed: {e}",
@@ -271,8 +273,9 @@ async def get_web_context(query: str, agent_name: str) -> str:
             "historical context, exceptions, and how it is used in Indian courts."
         )
 
+        _primary = MODELS["scenario_web_grounded"]
         response = None
-        for model in ["gemini-2.5-flash", "gemini-2.5-pro"]:
+        for model in [_primary, "gemini-2.5-pro"]:
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -289,7 +292,7 @@ async def get_web_context(query: str, agent_name: str) -> str:
                 )
                 break
             except Exception as model_err:
-                if "503" in str(model_err) and model == "gemini-2.5-flash":
+                if "503" in str(model_err) and model == _primary:
                     log.debug("Flash 503 during enrichment, retrying with Pro",
                               agent=agent_name)
                     await asyncio.sleep(1)

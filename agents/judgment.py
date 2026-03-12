@@ -24,15 +24,13 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import date
-from typing import Optional, List
-
-from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gpt4o, get_gemini_flash
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.settings import TIMEOUT_ES_PARALLEL_SEC, TIMEOUT_METADATA_SEC
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
 from tools.shared.judgment_search import (
     smart_judgment_search,
@@ -40,43 +38,12 @@ from tools.shared.judgment_search import (
     detect_citation,
     detect_case_type,
 )
+from tools.shared.llm_tools import CaseMetadata
 
 log = get_logger("Judgment")
 
 
 # --- Case Metadata Extraction ---
-
-class CaseMetadata(BaseModel):
-    court_name: Optional[str] = Field(
-        default=None,
-        description="Name of the court (supreme court, [location] high court, tribunal, etc.)",
-    )
-    petitioner_names: Optional[List[str]] = Field(
-        default_factory=list,
-        description="List of petitioner names",
-    )
-    respondent_names: Optional[List[str]] = Field(
-        default_factory=list,
-        description="List of respondent names",
-    )
-    year: Optional[int] = Field(None, description="4-digit year if mentioned")
-    topics: Optional[List[str]] = Field(
-        default_factory=list,
-        description="Legal topics (e.g., 'murder', 'bail', 'negligence')",
-    )
-    acts_or_sections: Optional[List[str]] = Field(
-        default_factory=list,
-        description="Legal provisions (e.g., 'section 138 ni act')",
-    )
-    lexical_query: Optional[str] = Field(
-        None,
-        description="Normalized lexical search string for ES BM25",
-    )
-    size: Optional[int] = Field(
-        3,
-        description="Number of results to retrieve (1-50)",
-    )
-
 
 METADATA_EXTRACTION_PROMPT = """You are an expert in legal text parsing and Elasticsearch query formulation.
 
@@ -301,7 +268,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
 
             done, _ = await asyncio.wait(
                 [metadata_task, es_task],
-                timeout=22,
+                timeout=TIMEOUT_ES_PARALLEL_SEC,
                 return_when=asyncio.ALL_COMPLETED,
             )
 

@@ -22,6 +22,7 @@ from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_genai_client
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
 from config.prompts import SCENARIO_SYSTEM_PROMPT
 
 log = get_logger("Scenario")
@@ -85,7 +86,7 @@ async def scenario_node(state: LegalAgentState) -> dict:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
                         client.models.generate_content,
-                        model="gemini-2.5-flash",
+                        model=MODELS["scenario_web_grounded"],
                         contents=[full_prompt],
                         config={
                             "tools": [{"google_search": {}}],
@@ -94,7 +95,7 @@ async def scenario_node(state: LegalAgentState) -> dict:
                             "top_p": 0.95,
                         },
                     ),
-                    timeout=120.0,
+                    timeout=TIMEOUT_WEB_SEARCH_SEC,
                 )
 
             # Extract response text (guard against empty candidates/parts/null text)

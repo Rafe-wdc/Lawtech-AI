@@ -36,6 +36,13 @@ if _missing:
 OPENAI_API_KEY = _MaskedStr(_openai_key)
 GOOGLE_API_KEY = _MaskedStr(_google_key)
 
+# --- Agent Timeouts (seconds) ---
+TIMEOUT_WEB_SEARCH_SEC: float = 120.0      # Gemini + Google Search grounding
+TIMEOUT_METADATA_SEC: float = 20.0         # GPT-4o metadata extraction
+TIMEOUT_ES_PARALLEL_SEC: float = 22.0      # Parallel ES search (per-agent)
+TIMEOUT_CHROMADB_SEC: float = 90.0         # ChromaDB retrieval + PDF Q&A
+TIMEOUT_NEARBY_SECTIONS_SEC: float = 5.0   # Newacts nearby-section lookup
+
 # --- Model IDs ---
 MODELS = {
     "orchestrator": "gpt-4o",
@@ -46,6 +53,7 @@ MODELS = {
     "draft_selector": "gpt-4o-mini",
     "legislation_match": "gpt-4o-mini",
     "scenario": "gemini-2.5-pro",
+    "scenario_web_grounded": "gemini-2.5-flash",
     "legal_concepts": "gemini-2.5-flash-lite",
     "query_rewrite": "gemini-2.5-flash-lite",
     "guardrail_injection": "gemini-2.5-flash-lite",

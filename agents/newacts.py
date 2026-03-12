@@ -30,7 +30,7 @@ from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import (
     get_es_client, get_gpt4o, get_gemini_flash, get_retriever_embeddings,
 )
-from core.settings import ES_INDICES
+from core.settings import ES_INDICES, TIMEOUT_METADATA_SEC
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import NEWACTS_SYSTEM_PROMPT
@@ -293,7 +293,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
         try:
             metadata = await asyncio.wait_for(
                 asyncio.to_thread(_extract_act_metadata, query),
-                timeout=20,
+                timeout=TIMEOUT_METADATA_SEC,
             )
         except asyncio.TimeoutError:
             log.warning("GPT-4o metadata extraction timed out, using regex fallback")

@@ -14,10 +14,18 @@ def pytest_addoption(parser):
 
 @pytest.fixture(scope="session")
 def base_url(request):
-    return (
+    """Base URL including the route prefix.
+
+    Locally the app serves on /pyapi, but behind nginx the public prefix
+    is /pyapiv2 (rewritten to /pyapi).  Set API_PREFIX to override.
+    Default: /pyapi  (matches local dev).
+    """
+    origin = (
         request.config.getoption("--api-url")
         or os.getenv("API_URL", "http://localhost:5000")
     ).rstrip("/")
+    prefix = os.getenv("API_PREFIX", "/pyapi").strip("/")
+    return f"{origin}/{prefix}" if prefix else origin
 
 
 @pytest.fixture(scope="session")

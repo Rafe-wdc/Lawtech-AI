@@ -84,6 +84,7 @@ jobs:
       - name: Run integration tests
         env:
           API_URL:   ${{ vars.INTEGRATION_TEST_URL }}
+          API_PREFIX: /pyapiv2
           API_KEY:   ${{ secrets.INTEGRATION_API_KEY }}
           ADMIN_KEY: ${{ secrets.INTEGRATION_ADMIN_KEY }}
         run: |

@@ -67,7 +67,7 @@ def collect_sse(response, max_events: int = 20, timeout: float = 30.0) -> list[d
 
 def test_health_returns_200(base_url):
     """GET /pyapi/health must return 200 with a JSON body."""
-    r = requests.get(f"{base_url}/pyapi/health", timeout=10)
+    r = requests.get(f"{base_url}/health", timeout=10)
     assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text[:200]}"
     body = r.json()
     assert "status" in body
@@ -76,7 +76,7 @@ def test_health_returns_200(base_url):
 
 def test_health_has_required_keys(base_url):
     """Health response must include checks and uptime_seconds."""
-    r = requests.get(f"{base_url}/pyapi/health", timeout=10)
+    r = requests.get(f"{base_url}/health", timeout=10)
     body = r.json()
     assert "checks" in body
     assert "uptime_seconds" in body
@@ -84,14 +84,16 @@ def test_health_has_required_keys(base_url):
 
 def test_health_head_method(base_url):
     """HEAD /pyapi/health must work (used by load balancers)."""
-    r = requests.head(f"{base_url}/pyapi/health", timeout=10)
+    r = requests.head(f"{base_url}/health", timeout=10)
     assert r.status_code == 200
 
 
 # ── Test 2: Frontend ──────────────────────────────────────────────────────────
 
 def test_frontend_served(base_url):
-    """GET / must serve the frontend HTML."""
+    """GET / must serve the frontend HTML (local dev only)."""
+    if "/pyapiv2" in base_url or "/pyapi" in base_url:
+        pytest.skip("Frontend served by nginx, not through API prefix")
     r = requests.get(f"{base_url}/", timeout=10)
     assert r.status_code == 200
     assert "text/html" in r.headers.get("content-type", "")
@@ -105,7 +107,7 @@ def test_search_requires_auth_when_keys_configured(base_url, api_key):
         pytest.skip("API_KEY not set — server running in open dev mode")
 
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "test"},
         headers={},          # deliberately no X-API-Key
         stream=True,
@@ -120,7 +122,7 @@ def test_search_rejects_wrong_key(base_url, api_key):
         pytest.skip("API_KEY not set — server running in open dev mode")
 
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "test"},
         headers={"X-API-Key": "definitely-wrong-key-xyz"},
         stream=True,
@@ -132,7 +134,7 @@ def test_search_rejects_wrong_key(base_url, api_key):
 def test_valid_key_accepted(base_url, user_headers):
     """POST /pyapi/search/stream with valid key → not 401/403."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "What is Section 302 IPC?"},
         headers=user_headers,
         stream=True,
@@ -149,7 +151,7 @@ def test_valid_key_accepted(base_url, user_headers):
 def test_empty_query_rejected(base_url, user_headers):
     """Empty query string → 422 validation error."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": ""},
         headers=user_headers,
         timeout=10,
@@ -160,7 +162,7 @@ def test_empty_query_rejected(base_url, user_headers):
 def test_missing_query_rejected(base_url, user_headers):
     """Missing query field → 422 validation error."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={},
         headers=user_headers,
         timeout=10,
@@ -171,7 +173,7 @@ def test_missing_query_rejected(base_url, user_headers):
 def test_overlength_query_rejected(base_url, user_headers):
     """Query exceeding max length → 422."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "x" * 10001},
         headers=user_headers,
         timeout=10,
@@ -184,7 +186,7 @@ def test_overlength_query_rejected(base_url, user_headers):
 def test_stream_returns_sse_events(base_url, user_headers):
     """A valid query must stream at least one SSE data event within 30s."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "What is bail?"},
         headers=user_headers,
         stream=True,
@@ -202,7 +204,7 @@ def test_stream_returns_sse_events(base_url, user_headers):
 def test_stream_has_status_event(base_url, user_headers):
     """SSE stream must include at least one status/agent event."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "Define res judicata"},
         headers=user_headers,
         stream=True,
@@ -221,7 +223,7 @@ def test_stream_has_status_event(base_url, user_headers):
 def test_stream_final_event_has_result(base_url, user_headers):
     """SSE stream must eventually emit a 'result' type event."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "What is Section 302 IPC?"},
         headers=user_headers,
         stream=True,
@@ -245,7 +247,7 @@ def test_stream_final_event_has_result(base_url, user_headers):
 def test_error_response_is_json(base_url, user_headers):
     """All error responses must be JSON with error/message fields."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": ""},
         headers=user_headers,
         timeout=10,
@@ -263,7 +265,7 @@ def test_admin_requires_key(base_url, admin_key):
     """Admin endpoints reject requests with no key."""
     if not admin_key:
         pytest.skip("ADMIN_KEY not set")
-    r = requests.get(f"{base_url}/pyapi/admin/usage", timeout=10)
+    r = requests.get(f"{base_url}/admin/usage", timeout=10)
     assert r.status_code in (401, 501), (
         f"Admin endpoint without key should return 401 or 501, got {r.status_code}"
     )
@@ -274,7 +276,7 @@ def test_admin_usage_with_key(base_url, admin_headers, admin_key):
     if not admin_key:
         pytest.skip("ADMIN_KEY not set")
     r = requests.get(
-        f"{base_url}/pyapi/admin/usage",
+        f"{base_url}/admin/usage",
         headers=admin_headers,
         timeout=10,
     )
@@ -290,7 +292,7 @@ def test_admin_usage_with_key(base_url, admin_headers, admin_key):
 def test_feedback_validation(base_url, user_headers):
     """POST /pyapi/feedback with invalid rating → 422."""
     r = requests.post(
-        f"{base_url}/pyapi/feedback",
+        f"{base_url}/feedback",
         json={"thread_id": "test-thread", "turn_number": 1, "rating": "meh"},
         headers=user_headers,
         timeout=10,
@@ -303,7 +305,7 @@ def test_feedback_validation(base_url, user_headers):
 def test_non_legal_query_handled(base_url, user_headers):
     """Non-legal queries must be handled gracefully (not 500)."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "What is the capital of France?"},
         headers=user_headers,
         stream=True,
@@ -324,7 +326,7 @@ def test_non_legal_query_handled(base_url, user_headers):
 def test_thread_id_accepted(base_url, user_headers):
     """Providing a globalThreadId must not cause errors."""
     r = requests.post(
-        f"{base_url}/pyapi/search/stream",
+        f"{base_url}/search/stream",
         json={"query": "What is bail?", "globalThreadId": "test-integration-thread-001"},
         headers=user_headers,
         stream=True,

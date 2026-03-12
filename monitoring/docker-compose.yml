@@ -35,6 +35,17 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/lawtech.json
+      # Alerting — unified alerting (Grafana 9+), legacy alerting disabled
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_ALERTING_ENABLED=false
+      # SMTP — fill these in to enable email alerts (or set via .env on the server)
+      # Use an app-password, not your main account password.
+      - GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${GF_SMTP_HOST:-smtp.gmail.com:587}
+      - GF_SMTP_USER=${GF_SMTP_USER:-}
+      - GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD:-}
+      - GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-admin@lawttorney.com}
+      - GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME:-Lawtech Alerts}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

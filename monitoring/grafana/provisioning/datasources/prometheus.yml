@@ -2,6 +2,7 @@ apiVersion: 1
 
 datasources:
   - name: Prometheus
+    uid: lawtech-prometheus        # pinned UID — referenced by alert rules
     type: prometheus
     access: proxy
     url: http://prometheus:9090

@@ -27,7 +27,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: lawtech-prometheus
             model:
               expr: sum(rate(lawtech_requests_total{status_code=~"5.."}[5m]))
               intervalMs: 1000
@@ -36,7 +36,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: lawtech-prometheus
             model:
               expr: >
                 sum(rate(lawtech_requests_total{status_code=~"5.."}[5m])) /
@@ -77,7 +77,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: lawtech-prometheus
             model:
               expr: sum(rate(lawtech_requests_total[1m]))
               intervalMs: 1000
@@ -98,8 +98,9 @@ groups:
                     type: last
 
       # ── 3. High Memory Usage ─────────────────────────────────────────────────
-      # Fires when the process uses > 85% of total system memory for 5 minutes.
-      # Uses process_resident_memory_bytes from prometheus_client default collector.
+      # Fires when the process RSS exceeds 2 GB for 5 minutes.
+      # Uses process_resident_memory_bytes from prometheus_client (no node_exporter needed).
+      # Raise the threshold if your server has >8 GB RAM and queries are large.
       - uid: alert-memory-high
         title: High Memory Usage
         condition: C
@@ -107,29 +108,18 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Memory usage is {{ $values.B.Value | printf \"%.0f\" }}%"
+          summary: "Memory usage is {{ $values.A.Value | humanize1024 }}B RSS"
           description: >
-            Application memory exceeds 85% of system memory for 5+ minutes.
-            Consider restarting: kill -HUP $(systemctl show -p MainPID --value lawtech-v2)
+            Application process memory (RSS) exceeds 2 GB for 5+ minutes.
+            Consider graceful reload: kill -HUP $(systemctl show -p MainPID --value lawtech-v2)
         data:
           - refId: A
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: lawtech-prometheus
             model:
               expr: process_resident_memory_bytes{job="lawtech"}
-              intervalMs: 1000
-              maxDataPoints: 43200
-          - refId: B
-            relativeTimeRange:
-              from: 300
-              to: 0
-            datasourceUid: prometheus
-            model:
-              expr: >
-                process_resident_memory_bytes{job="lawtech"} /
-                node_memory_MemTotal_bytes * 100
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: C
@@ -139,11 +129,11 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [85]
+                    params: [2147483648]   # 2 GB in bytes
                   operator:
                     type: and
                   query:
-                    params: [B]
+                    params: [A]
                   reducer:
                     type: last
 
@@ -167,7 +157,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: lawtech-prometheus
             model:
               expr: sum(rate(lawtech_fallback_total[1m])) * 60
               intervalMs: 1000
@@ -205,7 +195,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: prometheus
+            datasourceUid: lawtech-prometheus
             model:
               expr: >
                 histogram_quantile(0.95,

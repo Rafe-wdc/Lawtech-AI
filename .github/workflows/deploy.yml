@@ -54,7 +54,45 @@ jobs:
           python -c "from core.logger import get_logger; print('logger OK')"
           echo "All imports OK"
 
-  # ── Job 2: Deploy to production server (master only) ──────────────────────
+  # ── Job 2: Integration tests against live server (optional) ──────────────
+  # Runs only when INTEGRATION_TEST_URL secret is set.
+  # Add these secrets in GitHub → Settings → Secrets:
+  #   INTEGRATION_TEST_URL  https://tool.lawttorney.com
+  #   INTEGRATION_API_KEY   a valid user API key
+  #   INTEGRATION_ADMIN_KEY a valid admin API key
+  integration:
+    name: Integration Tests
+    needs: test
+    runs-on: ubuntu-latest
+    # Gate: set INTEGRATION_TEST_URL as a repository variable (not secret)
+    # GitHub → Settings → Variables → Actions → New repository variable
+    if: vars.INTEGRATION_TEST_URL != ''
+    continue-on-error: true   # don't block deploy if integration tests fail
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install --quiet pytest requests
+
+      - name: Run integration tests
+        env:
+          API_URL:   ${{ vars.INTEGRATION_TEST_URL }}
+          API_KEY:   ${{ secrets.INTEGRATION_API_KEY }}
+          ADMIN_KEY: ${{ secrets.INTEGRATION_ADMIN_KEY }}
+        run: |
+          pytest tests/integration/test_api.py -v \
+            --tb=short \
+            --timeout=60 \
+            -x
+
+  # ── Job 3: Deploy to production server (master only) ──────────────────────
   deploy:
     name: Deploy to Server
     needs: test
@@ -116,23 +154,31 @@ jobs:
             source venv/bin/activate
             pip install -q -r requirements.txt
 
-            # Restart app
-            systemctl restart lawtech-v2
-            echo "Service restarted"
+            # Reload app — graceful: gunicorn master spawns new workers before old
+            # ones exit, so in-flight requests are never dropped.
+            # Falls back to start if the service was not running.
+            MAIN_PID=$(systemctl show -p MainPID --value lawtech-v2 2>/dev/null || echo "0")
+            if [ -n "$MAIN_PID" ] && [ "$MAIN_PID" -gt "0" ] 2>/dev/null; then
+              kill -HUP "$MAIN_PID"
+              echo "Graceful reload sent to gunicorn master (PID $MAIN_PID)"
+            else
+              systemctl start lawtech-v2
+              echo "Service was not running — started"
+            fi
 
-            # Wait for app to come up (max 30s)
-            for i in $(seq 1 6); do
+            # Wait for workers to cycle (max 40s — graceful reload is usually <5s)
+            for i in $(seq 1 8); do
               sleep 5
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/pyapi/health || echo "000")
               if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
                 echo "Health check passed (HTTP $STATUS)"
                 exit 0
               fi
-              echo "Waiting... attempt $i (HTTP $STATUS)"
+              echo "Waiting... attempt $i/8 (HTTP $STATUS)"
             done
 
-            echo "ERROR: Health check did not pass after 30s"
-            journalctl -u lawtech-v2 -n 30 --no-pager
+            echo "ERROR: Health check did not pass after 40s"
+            journalctl -u lawtech-v2 -n 50 --no-pager
             exit 1
           ENDSSH
 

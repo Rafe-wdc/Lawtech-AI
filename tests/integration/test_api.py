@@ -266,7 +266,7 @@ def test_admin_requires_key(base_url, admin_key):
     """Admin endpoints reject requests with no key."""
     if not admin_key:
         pytest.skip("ADMIN_KEY not set")
-    r = requests.get(f"{base_url}/admin/usage", timeout=10)
+    r = requests.get(f"{base_url}/admin/usage_stats", timeout=10)
     assert r.status_code in (401, 501), (
         f"Admin endpoint without key should return 401 or 501, got {r.status_code}"
     )
@@ -277,7 +277,7 @@ def test_admin_usage_with_key(base_url, admin_headers, admin_key):
     if not admin_key:
         pytest.skip("ADMIN_KEY not set")
     r = requests.get(
-        f"{base_url}/admin/usage",
+        f"{base_url}/admin/usage_stats",
         headers=admin_headers,
         timeout=10,
     )

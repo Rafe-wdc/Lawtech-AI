@@ -22,7 +22,7 @@ from typing import Optional
 from langchain.messages import HumanMessage, AIMessage
 from langchain_core.messages import BaseMessage
 
-from core.settings import CHAT_HISTORY_DB_PATH
+from core.settings import CHAT_HISTORY_DB_PATH, POSTGRES_URL
 from core.logger import get_logger
 
 log = get_logger("ChatStore")
@@ -60,7 +60,7 @@ Updated Summary (concise, structured, preserve every legal detail):"""
 
 # --- Store class ---
 
-class ChatHistoryStore:
+class _SqliteChatHistoryStore:
     """Thread-safe SQLite chat history store.
 
     SQLite in WAL mode supports concurrent reads + single writer.
@@ -1408,4 +1408,1167 @@ class ChatHistoryStore:
 # Module-level singleton
 # ------------------------------------------------------------------
 
-chat_store = ChatHistoryStore(CHAT_HISTORY_DB_PATH)
+
+# ------------------------------------------------------------------
+# PostgreSQL-backed store (multi-worker safe)
+# ------------------------------------------------------------------
+
+class _PostgresChatHistoryStore:
+    """PostgreSQL-backed chat history store.
+
+    Uses psycopg3 (sync) with a ConnectionPool.  Safe for multiple
+    gunicorn/uvicorn workers because PostgreSQL handles concurrent writes
+    natively — no threading.Lock required.
+
+    Public API is identical to _SqliteChatHistoryStore.
+    """
+
+    _DRAFT_SCHEMA_VERSION = 1
+
+    # LLM cost estimates shared with SQLite class
+    _AGENT_COST_PER_1K: dict[str, float] = {
+        "Non_legal":      0.00015,
+        "legislation":    0.00150,
+        "judgment":       0.00250,
+        "sci_judgment":   0.00250,
+        "newacts":        0.00150,
+        "constitution":   0.00015,
+        "maxim":          0.00015,
+        "legal_concepts": 0.00015,
+        "drafting":       0.00030,
+        "scenario":       0.01000,
+        "document":       0.01000,
+    }
+    _DEFAULT_COST_PER_1K = 0.00250
+
+    def __init__(self, postgres_url: str):
+        self._postgres_url = postgres_url
+        self._pool = None
+        self._pool_init_lock = threading.Lock()
+        self._schema_ok = False
+        self._schema_lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_pool(self):
+        if self._pool is None:
+            with self._pool_init_lock:
+                if self._pool is None:
+                    from psycopg_pool import ConnectionPool
+                    p = ConnectionPool(
+                        conninfo=self._postgres_url,
+                        min_size=2,
+                        max_size=10,
+                        open=True,
+                        timeout=10.0,
+                    )
+                    self._pool = p
+                    log.info("PostgreSQL chat-store pool initialised")
+        return self._pool
+
+    def _ensure_schema(self) -> None:
+        if self._schema_ok:
+            return
+        with self._schema_lock:
+            if self._schema_ok:
+                return
+            from psycopg.rows import dict_row
+            with self._get_pool().connection() as conn:
+                conn.row_factory = dict_row
+                stmts = [
+                    """CREATE TABLE IF NOT EXISTS threads (
+                        thread_id          TEXT PRIMARY KEY,
+                        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        summary_text       TEXT NOT NULL DEFAULT '',
+                        summary_turn_count INTEGER NOT NULL DEFAULT 0,
+                        total_turns        INTEGER NOT NULL DEFAULT 0,
+                        file_context_json  TEXT NOT NULL DEFAULT ''
+                    )""",
+                    """CREATE TABLE IF NOT EXISTS messages (
+                        id          BIGSERIAL PRIMARY KEY,
+                        thread_id   TEXT NOT NULL REFERENCES threads(thread_id),
+                        turn_number INTEGER NOT NULL,
+                        user_query  TEXT NOT NULL,
+                        ai_response TEXT NOT NULL,
+                        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )""",
+                    "CREATE INDEX IF NOT EXISTS idx_messages_thread_turn ON messages(thread_id, turn_number)",
+                    """CREATE TABLE IF NOT EXISTS feedback (
+                        id          BIGSERIAL PRIMARY KEY,
+                        thread_id   TEXT NOT NULL,
+                        turn_number INTEGER NOT NULL,
+                        rating      TEXT NOT NULL CHECK(rating IN ('up', 'down')),
+                        comment     TEXT DEFAULT '',
+                        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE(thread_id, turn_number)
+                    )""",
+                    "CREATE INDEX IF NOT EXISTS idx_feedback_thread ON feedback(thread_id, turn_number)",
+                    """CREATE TABLE IF NOT EXISTS draft_continuations (
+                        thread_id  TEXT PRIMARY KEY,
+                        data_json  TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )""",
+                    """CREATE TABLE IF NOT EXISTS fallback_log (
+                        id               BIGSERIAL PRIMARY KEY,
+                        timestamp        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        agent            TEXT NOT NULL,
+                        query            TEXT NOT NULL,
+                        original_query   TEXT NOT NULL DEFAULT '',
+                        fallback_tier    TEXT NOT NULL DEFAULT 'web',
+                        response_preview TEXT NOT NULL DEFAULT '',
+                        web_sources_json TEXT NOT NULL DEFAULT '[]',
+                        tokens           INTEGER NOT NULL DEFAULT 0,
+                        backfilled       INTEGER NOT NULL DEFAULT 0,
+                        backfill_date    TIMESTAMPTZ DEFAULT NULL
+                    )""",
+                    "CREATE INDEX IF NOT EXISTS idx_fallback_agent_ts ON fallback_log(agent, timestamp DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_fallback_backfilled ON fallback_log(backfilled, agent)",
+                    """CREATE TABLE IF NOT EXISTS request_log (
+                        id                 BIGSERIAL PRIMARY KEY,
+                        timestamp          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        thread_id          TEXT NOT NULL DEFAULT '',
+                        endpoint           TEXT NOT NULL DEFAULT '',
+                        query_preview      TEXT NOT NULL DEFAULT '',
+                        user_language      TEXT NOT NULL DEFAULT 'en',
+                        tasks_planned_json TEXT NOT NULL DEFAULT '[]',
+                        agents_used_json   TEXT NOT NULL DEFAULT '[]',
+                        total_latency_ms   INTEGER NOT NULL DEFAULT 0,
+                        total_tokens       INTEGER NOT NULL DEFAULT 0,
+                        estimated_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                        fallback_used      INTEGER NOT NULL DEFAULT 0,
+                        is_blocked         INTEGER NOT NULL DEFAULT 0,
+                        error              TEXT DEFAULT NULL
+                    )""",
+                    "CREATE INDEX IF NOT EXISTS idx_request_log_ts ON request_log(timestamp DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_request_log_thread ON request_log(thread_id, timestamp DESC)",
+                    """CREATE TABLE IF NOT EXISTS quality_log (
+                        id             BIGSERIAL PRIMARY KEY,
+                        timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        request_log_id BIGINT DEFAULT NULL,
+                        thread_id      TEXT NOT NULL DEFAULT '',
+                        agent          TEXT NOT NULL DEFAULT '',
+                        query_preview  TEXT NOT NULL DEFAULT '',
+                        faithfulness   DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                        relevance      DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                        completeness   DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                        avg_score      DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                        model_used     TEXT NOT NULL DEFAULT 'gemini-2.5-flash-lite'
+                    )""",
+                    "CREATE INDEX IF NOT EXISTS idx_quality_log_ts ON quality_log(timestamp DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_quality_log_agent ON quality_log(agent, timestamp DESC)",
+                    """CREATE TABLE IF NOT EXISTS thread_files (
+                        id                  BIGSERIAL PRIMARY KEY,
+                        thread_id           TEXT NOT NULL REFERENCES threads(thread_id),
+                        file_id             TEXT NOT NULL,
+                        filename            TEXT NOT NULL,
+                        file_type           TEXT NOT NULL DEFAULT '',
+                        mime_type           TEXT NOT NULL DEFAULT '',
+                        size_bytes          INTEGER NOT NULL DEFAULT 0,
+                        local_path          TEXT NOT NULL DEFAULT '',
+                        extracted_text      TEXT NOT NULL DEFAULT '',
+                        chromadb_collection TEXT NOT NULL DEFAULT '',
+                        gemini_uri          TEXT NOT NULL DEFAULT '',
+                        gemini_name         TEXT NOT NULL DEFAULT '',
+                        gemini_expiry       TEXT NOT NULL DEFAULT '',
+                        gemini_supported    INTEGER NOT NULL DEFAULT 0,
+                        page_count          INTEGER NOT NULL DEFAULT 0,
+                        upload_error        TEXT NOT NULL DEFAULT '',
+                        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE(thread_id, file_id)
+                    )""",
+                    "CREATE INDEX IF NOT EXISTS idx_thread_files_thread ON thread_files(thread_id, created_at DESC)",
+                ]
+                for stmt in stmts:
+                    conn.execute(stmt)
+                conn.commit()
+            self._schema_ok = True
+            log.info("PostgreSQL chat-store schema ensured")
+
+    # ------------------------------------------------------------------
+    # Read operations
+    # ------------------------------------------------------------------
+
+    def _load_history_sync(
+        self,
+        thread_id: str,
+        max_recent_turns: int = 5,
+    ) -> "ChatHistoryResult":
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            thread_row = conn.execute(
+                "SELECT summary_text, total_turns FROM threads WHERE thread_id = %s",
+                (thread_id,),
+            ).fetchone()
+
+            if not thread_row:
+                return ChatHistoryResult()
+
+            rows = conn.execute("""
+                SELECT user_query, ai_response, turn_number
+                FROM messages
+                WHERE thread_id = %s
+                ORDER BY turn_number DESC
+                LIMIT %s
+            """, (thread_id, max_recent_turns)).fetchall()
+
+        rows = list(reversed(rows))
+        chat_history: list[BaseMessage] = []
+        raw_turns = []
+        for row in rows:
+            chat_history.append(HumanMessage(content=row["user_query"]))
+            chat_history.append(AIMessage(content=row["ai_response"]))
+            raw_turns.append({
+                "user_query": row["user_query"],
+                "ai_response": row["ai_response"],
+                "turn_number": row["turn_number"],
+            })
+
+        return ChatHistoryResult(
+            chat_history=chat_history,
+            summary_text=thread_row["summary_text"],
+            total_turns=thread_row["total_turns"],
+            raw_turns=raw_turns,
+        )
+
+    async def load_history(
+        self,
+        thread_id: str,
+        max_recent_turns: int = 5,
+    ) -> "ChatHistoryResult":
+        return await asyncio.to_thread(
+            self._load_history_sync, thread_id, max_recent_turns
+        )
+
+    # ------------------------------------------------------------------
+    # Write operations
+    # ------------------------------------------------------------------
+
+    def _save_turn_sync(
+        self,
+        thread_id: str,
+        user_query: str,
+        ai_response: str,
+    ) -> int:
+        """Save a Q&A turn atomically. Returns the new turn_number."""
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            # Atomic upsert: increment total_turns, get new value in one statement
+            row = conn.execute("""
+                INSERT INTO threads (thread_id, total_turns)
+                VALUES (%s, 1)
+                ON CONFLICT(thread_id) DO UPDATE SET
+                    total_turns = threads.total_turns + 1,
+                    updated_at  = NOW()
+                RETURNING total_turns
+            """, (thread_id,)).fetchone()
+            new_turn = row["total_turns"]
+
+            conn.execute("""
+                INSERT INTO messages (thread_id, turn_number, user_query, ai_response)
+                VALUES (%s, %s, %s, %s)
+            """, (thread_id, new_turn, user_query, ai_response))
+            conn.commit()
+            log.debug("Turn saved", thread_id=thread_id[:12], turn=new_turn)
+
+        # Summary regeneration outside the write transaction (LLM call ~1-3s)
+        try:
+            self._maybe_regenerate_summary_sync(thread_id)
+        except Exception as e:
+            log.error("Post-save summary regeneration failed",
+                      thread_id=thread_id[:12], error=str(e))
+
+        return new_turn
+
+    async def save_turn(
+        self,
+        thread_id: str,
+        user_query: str,
+        ai_response: str,
+    ) -> int:
+        return await asyncio.to_thread(
+            self._save_turn_sync, thread_id, user_query, ai_response
+        )
+
+    # ------------------------------------------------------------------
+    # Summary management
+    # ------------------------------------------------------------------
+
+    def _maybe_regenerate_summary_sync(self, thread_id: str) -> None:
+        """Regenerate rolling summary if enough new turns accumulated (gap >= 3)."""
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT total_turns, summary_turn_count, summary_text "
+                "FROM threads WHERE thread_id = %s",
+                (thread_id,),
+            ).fetchone()
+
+            if not row:
+                return
+
+            gap = row["total_turns"] - row["summary_turn_count"]
+            if gap < 3:
+                return
+
+            log.debug("Summary regeneration triggered",
+                      thread_id=thread_id[:12], gap=gap, total=row["total_turns"])
+
+            unsummarized = conn.execute("""
+                SELECT user_query, ai_response, turn_number
+                FROM messages
+                WHERE thread_id = %s AND turn_number > %s
+                ORDER BY turn_number ASC
+            """, (thread_id, row["summary_turn_count"])).fetchall()
+
+        new_turns_text = "\n".join(
+            f"Turn {r['turn_number']}:\n  User: {r['user_query']}\n  AI: {r['ai_response'][:300]}"
+            for r in unsummarized
+        )
+        existing = row["summary_text"] or "No previous summary."
+
+        try:
+            from core.clients import get_gemini_flash as get_gemini_flash_lite
+            from langchain_core.prompts import ChatPromptTemplate
+
+            llm = get_gemini_flash_lite(temperature=0.1)
+            prompt = ChatPromptTemplate.from_template(_SUMMARY_PROMPT)
+            chain = prompt | llm
+            result = chain.invoke({
+                "existing_summary": existing,
+                "new_turns": new_turns_text,
+            })
+            new_summary = result.content.strip()
+        except Exception as e:
+            log.error("Summary LLM call failed", thread_id=thread_id[:12], error=str(e))
+            return
+
+        if new_summary and len(new_summary) > 10:
+            from psycopg.rows import dict_row
+            with self._get_pool().connection() as conn:
+                conn.row_factory = dict_row
+                conn.execute("""
+                    UPDATE threads
+                    SET summary_text = %s, summary_turn_count = %s
+                    WHERE thread_id = %s
+                """, (new_summary, row["total_turns"], thread_id))
+                conn.commit()
+            log.info("Summary regenerated",
+                     thread_id=thread_id[:12],
+                     summary_len=len(new_summary),
+                     turns_covered=row["total_turns"])
+        else:
+            log.warning("Summary generation returned empty result")
+
+    # ------------------------------------------------------------------
+    # Draft continuation
+    # ------------------------------------------------------------------
+
+    def _save_draft_continuation_sync(self, thread_id: str, data: dict) -> None:
+        self._ensure_schema()
+        versioned = {**data, "_schema_version": self._DRAFT_SCHEMA_VERSION}
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            conn.execute("""
+                INSERT INTO draft_continuations (thread_id, data_json)
+                VALUES (%s, %s)
+                ON CONFLICT(thread_id) DO UPDATE SET
+                    data_json  = EXCLUDED.data_json,
+                    created_at = NOW()
+            """, (thread_id, json.dumps(versioned)))
+            conn.commit()
+
+    async def save_draft_continuation(self, thread_id: str, data: dict) -> None:
+        return await asyncio.to_thread(
+            self._save_draft_continuation_sync, thread_id, data
+        )
+
+    def _load_draft_continuation_sync(self, thread_id: str) -> "dict | None":
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT data_json FROM draft_continuations WHERE thread_id = %s",
+                (thread_id,),
+            ).fetchone()
+        if row:
+            try:
+                data = json.loads(row["data_json"])
+                version = data.get("_schema_version", 0)
+                if version != self._DRAFT_SCHEMA_VERSION:
+                    log.warning("Draft continuation schema version mismatch, discarding",
+                                thread_id=thread_id,
+                                stored_version=version,
+                                expected=self._DRAFT_SCHEMA_VERSION)
+                    return None
+                return data
+            except (json.JSONDecodeError, TypeError) as e:
+                log.error("Corrupted draft continuation JSON",
+                          thread_id=thread_id, error=str(e))
+        return None
+
+    async def load_draft_continuation(self, thread_id: str) -> "dict | None":
+        return await asyncio.to_thread(
+            self._load_draft_continuation_sync, thread_id
+        )
+
+    def _clear_draft_continuation_sync(self, thread_id: str) -> None:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            conn.execute(
+                "DELETE FROM draft_continuations WHERE thread_id = %s",
+                (thread_id,),
+            )
+            conn.commit()
+
+    async def clear_draft_continuation(self, thread_id: str) -> None:
+        return await asyncio.to_thread(
+            self._clear_draft_continuation_sync, thread_id
+        )
+
+    # ------------------------------------------------------------------
+    # Thread Files Registry
+    # ------------------------------------------------------------------
+
+    def _save_thread_file_sync(self, thread_id: str, pf) -> None:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            # Ensure thread row exists
+            conn.execute("""
+                INSERT INTO threads (thread_id, total_turns)
+                VALUES (%s, 0)
+                ON CONFLICT(thread_id) DO NOTHING
+            """, (thread_id,))
+            conn.execute("""
+                INSERT INTO thread_files (
+                    thread_id, file_id, filename, file_type, mime_type,
+                    size_bytes, local_path, extracted_text,
+                    chromadb_collection, gemini_uri, gemini_name,
+                    gemini_expiry, gemini_supported, page_count, upload_error
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT(thread_id, file_id) DO UPDATE SET
+                    gemini_uri    = EXCLUDED.gemini_uri,
+                    gemini_name   = EXCLUDED.gemini_name,
+                    gemini_expiry = EXCLUDED.gemini_expiry,
+                    upload_error  = EXCLUDED.upload_error
+            """, (
+                thread_id,
+                getattr(pf, "file_id", ""),
+                getattr(pf, "original_name", ""),
+                getattr(pf, "file_type", ""),
+                getattr(pf, "mime_type", ""),
+                getattr(pf, "size_bytes", 0),
+                getattr(pf, "local_path", ""),
+                getattr(pf, "extracted_text", ""),
+                getattr(pf, "chromadb_collection", ""),
+                getattr(pf, "gemini_uri", ""),
+                getattr(pf, "gemini_name", ""),
+                getattr(pf, "gemini_expiry", ""),
+                int(getattr(pf, "gemini_supported", False)),
+                getattr(pf, "page_count", 0),
+                getattr(pf, "error", "") or "",
+            ))
+            conn.commit()
+            log.debug("Thread file saved",
+                      thread_id=thread_id[:12],
+                      file=getattr(pf, "original_name", ""),
+                      gemini=bool(getattr(pf, "gemini_uri", "")))
+
+    async def save_thread_file(self, thread_id: str, pf) -> None:
+        return await asyncio.to_thread(self._save_thread_file_sync, thread_id, pf)
+
+    def _load_thread_files_sync(self, thread_id: str) -> list:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            rows = conn.execute("""
+                SELECT file_id, filename, file_type, mime_type, size_bytes,
+                       local_path, extracted_text, chromadb_collection,
+                       gemini_uri, gemini_name, gemini_expiry,
+                       gemini_supported, page_count, upload_error
+                FROM thread_files
+                WHERE thread_id = %s
+                ORDER BY created_at ASC
+            """, (thread_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    async def load_thread_files(self, thread_id: str) -> list:
+        return await asyncio.to_thread(self._load_thread_files_sync, thread_id)
+
+    def _update_gemini_uri_sync(
+        self,
+        thread_id: str,
+        file_id: str,
+        new_uri: str,
+        new_name: str,
+        new_expiry: str,
+    ) -> None:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            conn.execute("""
+                UPDATE thread_files
+                SET gemini_uri = %s, gemini_name = %s, gemini_expiry = %s
+                WHERE thread_id = %s AND file_id = %s
+            """, (new_uri, new_name, new_expiry, thread_id, file_id))
+            conn.commit()
+
+    async def update_gemini_uri(
+        self,
+        thread_id: str,
+        file_id: str,
+        new_uri: str,
+        new_name: str,
+        new_expiry: str,
+    ) -> None:
+        return await asyncio.to_thread(
+            self._update_gemini_uri_sync, thread_id, file_id, new_uri, new_name, new_expiry
+        )
+
+    def _get_thread_storage_bytes_sync(self, thread_id: str) -> tuple:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("""
+                SELECT COUNT(*) as cnt, COALESCE(SUM(size_bytes), 0) as total
+                FROM thread_files WHERE thread_id = %s
+            """, (thread_id,)).fetchone()
+        return row["cnt"], row["total"]
+
+    async def get_thread_storage(self, thread_id: str) -> tuple:
+        return await asyncio.to_thread(self._get_thread_storage_bytes_sync, thread_id)
+
+    # ------------------------------------------------------------------
+    # File Context Persistence
+    # ------------------------------------------------------------------
+
+    def _save_file_context_sync(self, thread_id: str, file_context: dict) -> None:
+        self._ensure_schema()
+        safe_ctx = {
+            "inline_text":          file_context.get("inline_text", ""),
+            "chromadb_collections": file_context.get("chromadb_collections", []),
+            "file_names":           file_context.get("file_names", []),
+            "image_data":           [],
+        }
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            conn.execute("""
+                INSERT INTO threads (thread_id, file_context_json)
+                VALUES (%s, %s)
+                ON CONFLICT(thread_id) DO UPDATE SET
+                    file_context_json = EXCLUDED.file_context_json,
+                    updated_at        = NOW()
+            """, (thread_id, json.dumps(safe_ctx)))
+            conn.commit()
+            log.debug("File context saved",
+                      thread_id=thread_id[:12],
+                      files=safe_ctx["file_names"],
+                      chromadb=len(safe_ctx["chromadb_collections"]),
+                      inline_chars=len(safe_ctx["inline_text"]))
+
+    async def save_file_context(self, thread_id: str, file_context: dict) -> None:
+        return await asyncio.to_thread(
+            self._save_file_context_sync, thread_id, file_context
+        )
+
+    def _load_file_context_sync(self, thread_id: str) -> "dict | None":
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT file_context_json FROM threads WHERE thread_id = %s",
+                (thread_id,),
+            ).fetchone()
+        if row and row["file_context_json"]:
+            try:
+                ctx = json.loads(row["file_context_json"])
+                if ctx.get("inline_text") or ctx.get("chromadb_collections") or ctx.get("file_names"):
+                    return ctx
+            except (json.JSONDecodeError, TypeError) as e:
+                log.error("Corrupted file_context_json",
+                          thread_id=thread_id, error=str(e))
+        return None
+
+    async def load_file_context(self, thread_id: str) -> "dict | None":
+        return await asyncio.to_thread(
+            self._load_file_context_sync, thread_id
+        )
+
+    # ------------------------------------------------------------------
+    # List Threads
+    # ------------------------------------------------------------------
+
+    def _list_threads_sync(self, limit: int = 50, offset: int = 0) -> list:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            rows = conn.execute("""
+                SELECT
+                    t.thread_id,
+                    TO_CHAR(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                    TO_CHAR(t.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
+                    t.total_turns,
+                    t.summary_text,
+                    (SELECT m.user_query FROM messages m
+                     WHERE m.thread_id = t.thread_id
+                     ORDER BY m.turn_number ASC LIMIT 1
+                    ) AS first_query
+                FROM threads t
+                WHERE t.total_turns > 0
+                ORDER BY t.updated_at DESC
+                LIMIT %s OFFSET %s
+            """, (limit, offset)).fetchall()
+        return [
+            {
+                "thread_id":    r["thread_id"],
+                "created_at":   r["created_at"],
+                "updated_at":   r["updated_at"],
+                "total_turns":  r["total_turns"],
+                "preview":      (r["first_query"] or "")[:120],
+                "summary_text": (r["summary_text"] or "")[:300],
+            }
+            for r in rows
+        ]
+
+    async def list_threads(self, limit: int = 50, offset: int = 0) -> list:
+        return await asyncio.to_thread(self._list_threads_sync, limit, offset)
+
+    def _load_thread_messages_sync(self, thread_id: str, limit: int = 50) -> list:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            rows = conn.execute("""
+                SELECT turn_number, user_query, ai_response,
+                       TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at
+                FROM messages
+                WHERE thread_id = %s
+                ORDER BY turn_number ASC
+                LIMIT %s
+            """, (thread_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    async def load_thread_messages(self, thread_id: str, limit: int = 50) -> list:
+        return await asyncio.to_thread(self._load_thread_messages_sync, thread_id, limit)
+
+    # ------------------------------------------------------------------
+    # Feedback
+    # ------------------------------------------------------------------
+
+    def _save_feedback_sync(
+        self,
+        thread_id: str,
+        turn_number: int,
+        rating: str,
+        comment: str = "",
+    ) -> bool:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            conn.execute("""
+                INSERT INTO feedback (thread_id, turn_number, rating, comment)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT(thread_id, turn_number) DO UPDATE SET
+                    rating     = EXCLUDED.rating,
+                    comment    = EXCLUDED.comment,
+                    created_at = NOW()
+            """, (thread_id, turn_number, rating, comment))
+            conn.commit()
+            log.info("Feedback saved",
+                     thread_id=thread_id[:12], turn=turn_number, rating=rating)
+        return True
+
+    async def save_feedback(
+        self,
+        thread_id: str,
+        turn_number: int,
+        rating: str,
+        comment: str = "",
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._save_feedback_sync, thread_id, turn_number, rating, comment
+        )
+
+    # ------------------------------------------------------------------
+    # Fallback Log
+    # ------------------------------------------------------------------
+
+    def _log_fallback_sync(
+        self,
+        agent: str,
+        query: str,
+        original_query: str,
+        response_preview: str,
+        web_sources: list,
+        tokens: int,
+        fallback_tier: str = "web",
+    ) -> int:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("""
+                INSERT INTO fallback_log
+                    (agent, query, original_query, fallback_tier,
+                     response_preview, web_sources_json, tokens)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (
+                agent,
+                query[:1000],
+                original_query[:1000],
+                fallback_tier,
+                response_preview[:600],
+                json.dumps(web_sources),
+                tokens,
+            )).fetchone()
+            conn.commit()
+            row_id = row["id"]
+            log.debug("Fallback logged", agent=agent, tier=fallback_tier, row_id=row_id)
+        return row_id
+
+    async def log_fallback(
+        self,
+        agent: str,
+        query: str,
+        original_query: str,
+        response_preview: str,
+        web_sources: list,
+        tokens: int,
+        fallback_tier: str = "web",
+    ) -> int:
+        return await asyncio.to_thread(
+            self._log_fallback_sync,
+            agent, query, original_query, response_preview,
+            web_sources, tokens, fallback_tier,
+        )
+
+    def _get_fallback_logs_sync(
+        self,
+        agent: "str | None" = None,
+        backfilled: "int | None" = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        conditions: list = []
+        params: list = []
+        if agent:
+            conditions.append("agent = %s")
+            params.append(agent)
+        if backfilled is not None:
+            conditions.append("backfilled = %s")
+            params.append(int(backfilled))
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            rows = conn.execute(
+                f"""SELECT id, TO_CHAR(timestamp AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS') AS timestamp,
+                           agent, query, original_query, fallback_tier,
+                           response_preview, web_sources_json, tokens, backfilled, backfill_date
+                    FROM fallback_log {where}
+                    ORDER BY timestamp DESC
+                    LIMIT %s OFFSET %s""",
+                params + [limit, offset],
+            ).fetchall()
+            total_row = conn.execute(
+                f"SELECT COUNT(*) as cnt FROM fallback_log {where}", params
+            ).fetchone()
+        return {
+            "total":  total_row["cnt"],
+            "limit":  limit,
+            "offset": offset,
+            "items": [
+                {
+                    "id":               r["id"],
+                    "timestamp":        r["timestamp"],
+                    "agent":            r["agent"],
+                    "query":            r["query"],
+                    "original_query":   r["original_query"],
+                    "fallback_tier":    r["fallback_tier"],
+                    "response_preview": r["response_preview"],
+                    "web_sources":      json.loads(r["web_sources_json"] or "[]"),
+                    "tokens":           r["tokens"],
+                    "backfilled":       bool(r["backfilled"]),
+                    "backfill_date":    str(r["backfill_date"]) if r["backfill_date"] else None,
+                }
+                for r in rows
+            ],
+        }
+
+    async def get_fallback_logs(
+        self,
+        agent: "str | None" = None,
+        backfilled: "int | None" = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        return await asyncio.to_thread(
+            self._get_fallback_logs_sync, agent, backfilled, limit, offset
+        )
+
+    def _get_fallback_stats_sync(self) -> dict:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            total = conn.execute(
+                "SELECT COUNT(*) as cnt FROM fallback_log"
+            ).fetchone()["cnt"]
+            pending = conn.execute(
+                "SELECT COUNT(*) as cnt FROM fallback_log WHERE backfilled = 0"
+            ).fetchone()["cnt"]
+            by_agent = {
+                r["agent"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT agent, COUNT(*) as cnt FROM fallback_log "
+                    "GROUP BY agent ORDER BY cnt DESC"
+                ).fetchall()
+            }
+            by_date = {
+                r["day"]: r["cnt"]
+                for r in conn.execute("""
+                    SELECT TO_CHAR(timestamp, 'YYYY-MM-DD') as day, COUNT(*) as cnt
+                    FROM fallback_log
+                    WHERE timestamp >= NOW() - INTERVAL '7 days'
+                    GROUP BY day ORDER BY day DESC
+                """).fetchall()
+            }
+            top_queries = [
+                {"query": r["query"], "count": r["cnt"], "agent": r["agent"]}
+                for r in conn.execute(
+                    "SELECT query, agent, COUNT(*) as cnt FROM fallback_log "
+                    "GROUP BY query, agent ORDER BY cnt DESC LIMIT 10"
+                ).fetchall()
+            ]
+        return {
+            "total":                total,
+            "pending_backfill":     pending,
+            "backfilled":           total - pending,
+            "by_agent":             by_agent,
+            "by_date_last_7d":      by_date,
+            "top_repeated_queries": top_queries,
+        }
+
+    async def get_fallback_stats(self) -> dict:
+        return await asyncio.to_thread(self._get_fallback_stats_sync)
+
+    # ------------------------------------------------------------------
+    # Request Log
+    # ------------------------------------------------------------------
+
+    def _estimate_cost(self, agents_used: list, total_tokens: int) -> float:
+        if not total_tokens:
+            return 0.0
+        if not agents_used:
+            return round(total_tokens / 1000 * self._DEFAULT_COST_PER_1K, 6)
+        rates = [self._AGENT_COST_PER_1K.get(a, self._DEFAULT_COST_PER_1K) for a in agents_used]
+        return round(total_tokens / 1000 * max(rates), 6)
+
+    def _log_request_sync(
+        self,
+        thread_id: str,
+        endpoint: str,
+        query_preview: str,
+        user_language: str,
+        tasks_planned: list,
+        agents_used: list,
+        total_latency_ms: int,
+        total_tokens: int,
+        fallback_used: bool,
+        is_blocked: bool,
+        error: "str | None" = None,
+    ) -> int:
+        self._ensure_schema()
+        estimated_cost = self._estimate_cost(agents_used, total_tokens)
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("""
+                INSERT INTO request_log
+                    (thread_id, endpoint, query_preview, user_language,
+                     tasks_planned_json, agents_used_json, total_latency_ms,
+                     total_tokens, estimated_cost_usd, fallback_used,
+                     is_blocked, error)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (
+                thread_id,
+                endpoint,
+                query_preview[:300],
+                user_language or "en",
+                json.dumps(tasks_planned),
+                json.dumps(agents_used),
+                total_latency_ms,
+                total_tokens,
+                estimated_cost,
+                int(fallback_used),
+                int(is_blocked),
+                error,
+            )).fetchone()
+            conn.commit()
+        return row["id"]
+
+    async def log_request(
+        self,
+        thread_id: str,
+        endpoint: str,
+        query_preview: str,
+        user_language: str,
+        tasks_planned: list,
+        agents_used: list,
+        total_latency_ms: int,
+        total_tokens: int,
+        fallback_used: bool = False,
+        is_blocked: bool = False,
+        error: "str | None" = None,
+    ) -> int:
+        return await asyncio.to_thread(
+            self._log_request_sync,
+            thread_id, endpoint, query_preview, user_language,
+            tasks_planned, agents_used, total_latency_ms,
+            total_tokens, fallback_used, is_blocked, error,
+        )
+
+    def _get_usage_stats_sync(self, days: int = 7) -> dict:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            totals = conn.execute("""
+                SELECT
+                    COUNT(*)                              AS total_requests,
+                    SUM(total_tokens)                     AS total_tokens,
+                    ROUND(SUM(estimated_cost_usd)::numeric, 4) AS total_cost_usd,
+                    ROUND(AVG(total_latency_ms)::numeric) AS avg_latency_ms,
+                    SUM(fallback_used)                    AS fallback_count,
+                    SUM(is_blocked)                       AS blocked_count
+                FROM request_log
+                WHERE timestamp >= NOW() - (%s * INTERVAL '1 day')
+            """, (days,)).fetchone()
+
+            by_day = [
+                dict(r) for r in conn.execute("""
+                    SELECT
+                        TO_CHAR(timestamp, 'YYYY-MM-DD')               AS date,
+                        COUNT(*)                                        AS requests,
+                        SUM(total_tokens)                               AS tokens,
+                        ROUND(SUM(estimated_cost_usd)::numeric, 4)     AS cost_usd,
+                        ROUND(AVG(total_latency_ms)::numeric)           AS avg_latency_ms,
+                        SUM(fallback_used)                              AS fallbacks
+                    FROM request_log
+                    WHERE timestamp >= NOW() - (%s * INTERVAL '1 day')
+                    GROUP BY date ORDER BY date DESC
+                """, (days,)).fetchall()
+            ]
+
+            top_agents = [
+                {"agent": r["agent"], "count": r["cnt"]}
+                for r in conn.execute("""
+                    SELECT t.agent AS agent, COUNT(*) AS cnt
+                    FROM request_log rl,
+                         LATERAL jsonb_array_elements_text(
+                             COALESCE(NULLIF(rl.agents_used_json, ''), '[]')::jsonb
+                         ) AS t(agent)
+                    WHERE rl.timestamp >= NOW() - (%s * INTERVAL '1 day')
+                    GROUP BY t.agent ORDER BY cnt DESC LIMIT 10
+                """, (days,)).fetchall()
+            ]
+
+            task_dist = [
+                {"task": r["task"], "count": r["cnt"]}
+                for r in conn.execute("""
+                    SELECT t.task AS task, COUNT(*) AS cnt
+                    FROM request_log rl,
+                         LATERAL jsonb_array_elements_text(
+                             COALESCE(NULLIF(rl.tasks_planned_json, ''), '[]')::jsonb
+                         ) AS t(task)
+                    WHERE rl.timestamp >= NOW() - (%s * INTERVAL '1 day')
+                    GROUP BY t.task ORDER BY cnt DESC
+                """, (days,)).fetchall()
+            ]
+
+        def _to_float(v):
+            return float(v) if v is not None else None
+
+        totals_clean = {}
+        if totals:
+            for k, v in totals.items():
+                totals_clean[k] = _to_float(v) if hasattr(v, '__float__') else v
+
+        return {
+            "period_days":       days,
+            "totals":            totals_clean,
+            "by_day":            by_day,
+            "top_agents":        top_agents,
+            "task_distribution": task_dist,
+        }
+
+    async def get_usage_stats(self, days: int = 7) -> dict:
+        return await asyncio.to_thread(self._get_usage_stats_sync, days)
+
+    # ------------------------------------------------------------------
+    # Quality Log
+    # ------------------------------------------------------------------
+
+    def _log_quality_sync(
+        self,
+        request_log_id: "int | None",
+        thread_id: str,
+        agent: str,
+        query_preview: str,
+        faithfulness: float,
+        relevance: float,
+        completeness: float,
+        avg_score: float,
+        model_used: str = "gemini-2.5-flash-lite",
+    ) -> int:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("""
+                INSERT INTO quality_log
+                    (request_log_id, thread_id, agent, query_preview,
+                     faithfulness, relevance, completeness, avg_score, model_used)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (
+                request_log_id,
+                thread_id,
+                agent,
+                query_preview[:300],
+                faithfulness,
+                relevance,
+                completeness,
+                avg_score,
+                model_used,
+            )).fetchone()
+            conn.commit()
+        return row["id"]
+
+    async def log_quality(
+        self,
+        request_log_id: "int | None",
+        thread_id: str,
+        agent: str,
+        query_preview: str,
+        faithfulness: float,
+        relevance: float,
+        completeness: float,
+        avg_score: float,
+        model_used: str = "gemini-2.5-flash-lite",
+    ) -> int:
+        return await asyncio.to_thread(
+            self._log_quality_sync,
+            request_log_id, thread_id, agent, query_preview,
+            faithfulness, relevance, completeness, avg_score, model_used,
+        )
+
+    def _get_quality_stats_sync(self, days: int = 7) -> dict:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            totals = conn.execute("""
+                SELECT
+                    COUNT(*)                              AS total_scored,
+                    ROUND(AVG(avg_score)::numeric, 4)     AS avg_score,
+                    ROUND(AVG(faithfulness)::numeric, 4)  AS avg_faithfulness,
+                    ROUND(AVG(relevance)::numeric, 4)     AS avg_relevance,
+                    ROUND(AVG(completeness)::numeric, 4)  AS avg_completeness,
+                    SUM(CASE WHEN avg_score < 0.6 THEN 1 ELSE 0 END) AS low_quality_count
+                FROM quality_log
+                WHERE timestamp >= NOW() - (%s * INTERVAL '1 day')
+            """, (days,)).fetchone()
+
+            by_agent = [
+                dict(r) for r in conn.execute("""
+                    SELECT
+                        agent,
+                        COUNT(*) AS scored,
+                        ROUND(AVG(avg_score)::numeric, 4)    AS avg_score,
+                        ROUND(AVG(faithfulness)::numeric, 4) AS avg_faithfulness,
+                        ROUND(AVG(relevance)::numeric, 4)    AS avg_relevance
+                    FROM quality_log
+                    WHERE timestamp >= NOW() - (%s * INTERVAL '1 day')
+                    GROUP BY agent ORDER BY avg_score ASC
+                """, (days,)).fetchall()
+            ]
+
+            by_day = [
+                dict(r) for r in conn.execute("""
+                    SELECT
+                        TO_CHAR(timestamp, 'YYYY-MM-DD')              AS date,
+                        COUNT(*) AS scored,
+                        ROUND(AVG(avg_score)::numeric, 4)             AS avg_score,
+                        ROUND(AVG(faithfulness)::numeric, 4)          AS avg_faithfulness
+                    FROM quality_log
+                    WHERE timestamp >= NOW() - (%s * INTERVAL '1 day')
+                    GROUP BY date ORDER BY date DESC
+                """, (days,)).fetchall()
+            ]
+
+            low_quality = [
+                dict(r) for r in conn.execute("""
+                    SELECT TO_CHAR(timestamp, 'YYYY-MM-DD HH24:MI:SS') AS timestamp,
+                           agent, query_preview, avg_score,
+                           faithfulness, relevance, completeness
+                    FROM quality_log
+                    WHERE avg_score < 0.6
+                      AND timestamp >= NOW() - (%s * INTERVAL '1 day')
+                    ORDER BY avg_score ASC LIMIT 10
+                """, (days,)).fetchall()
+            ]
+
+        totals_clean = {}
+        if totals:
+            for k, v in totals.items():
+                totals_clean[k] = float(v) if hasattr(v, '__float__') else v
+
+        return {
+            "period_days":           days,
+            "totals":                totals_clean,
+            "by_agent":              by_agent,
+            "by_day":                by_day,
+            "low_quality_responses": low_quality,
+        }
+
+    async def get_quality_stats(self, days: int = 7) -> dict:
+        return await asyncio.to_thread(self._get_quality_stats_sync, days)
+
+
+# ------------------------------------------------------------------
+# Module-level singleton
+# ------------------------------------------------------------------
+
+if POSTGRES_URL:
+    chat_store: "_PostgresChatHistoryStore | _SqliteChatHistoryStore" = _PostgresChatHistoryStore(POSTGRES_URL)
+    log.info("Chat store: PostgreSQL backend", url=POSTGRES_URL[:30] + "...")
+else:
+    chat_store = _SqliteChatHistoryStore(CHAT_HISTORY_DB_PATH)
+    log.warning(
+        "Chat store: SQLite backend (multi-worker write contention possible). "
+        "Set POSTGRES_URL in .env for production."
+    )

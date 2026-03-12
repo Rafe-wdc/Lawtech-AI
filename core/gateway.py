@@ -114,8 +114,13 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     if _pg_pool is not None:
-        log.info("Shutdown: closing PostgreSQL connection pool")
+        log.info("Shutdown: closing PostgreSQL checkpointer pool")
         await _pg_pool.close()
+    # Close sync chat-store pool if PostgreSQL backend
+    from .chat_store import chat_store as _cs
+    if hasattr(_cs, "_pool") and _cs._pool is not None:
+        await asyncio.to_thread(_cs._pool.close)
+        log.info("Shutdown: closed chat-store pool")
 
 
 # --- App ---
@@ -1612,20 +1617,32 @@ async def health(request: Request):
     except Exception as e:
         checks["disk"] = {"status": "unknown", "detail": str(e)[:80]}
 
-    # --- 6. SQLite ---
+    # --- 6. Chat store (PostgreSQL or SQLite) ---
     try:
-        import sqlite3
+        from .settings import POSTGRES_URL as _pg_url
         t0 = time.time()
-        db_path = CHAT_HISTORY_DB_PATH
-        def _sqlite_probe():
-            conn = sqlite3.connect(db_path, timeout=2.0)
-            conn.execute("SELECT 1")
-            conn.close()
-        await asyncio.wait_for(asyncio.to_thread(_sqlite_probe), timeout=3.0)
-        latency_ms = round((time.time() - t0) * 1000)
-        checks["sqlite"] = {"status": "ok", "latency_ms": latency_ms}
+        if _pg_url:
+            # Probe via the same sync pool used by _PostgresChatHistoryStore
+            def _pg_probe():
+                from .chat_store import chat_store as _cs
+                pool = _cs._get_pool()
+                with pool.connection() as conn:
+                    conn.execute("SELECT 1")
+            await asyncio.wait_for(asyncio.to_thread(_pg_probe), timeout=3.0)
+            latency_ms = round((time.time() - t0) * 1000)
+            checks["chat_store"] = {"status": "ok", "backend": "postgresql", "latency_ms": latency_ms}
+        else:
+            import sqlite3
+            db_path = CHAT_HISTORY_DB_PATH
+            def _sqlite_probe():
+                conn = sqlite3.connect(db_path, timeout=2.0)
+                conn.execute("SELECT 1")
+                conn.close()
+            await asyncio.wait_for(asyncio.to_thread(_sqlite_probe), timeout=3.0)
+            latency_ms = round((time.time() - t0) * 1000)
+            checks["chat_store"] = {"status": "ok", "backend": "sqlite", "latency_ms": latency_ms}
     except Exception as e:
-        checks["sqlite"] = {"status": "error", "detail": str(e)[:120]}
+        checks["chat_store"] = {"status": "error", "detail": str(e)[:120]}
         if overall == "healthy":
             overall = "degraded"
 

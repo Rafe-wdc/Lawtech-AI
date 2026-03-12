@@ -56,6 +56,13 @@ logs/
 tests/test_results_*.json
 tests/test_eval_results.json
 
+# Runtime directories
+temp_uploads/
+data/
+
+# Local notes
+tasks.txt
+
 # Temporary files
 tmp/
 temp/

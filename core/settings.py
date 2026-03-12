@@ -97,6 +97,12 @@ S3_REGION = os.getenv("S3_REGION", "ap-south-1")
 # --- Redis ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
+# --- Auth ---
+# Comma-separated user API keys. Leave empty for open dev mode.
+API_KEYS = os.getenv("API_KEYS", "")
+# Single admin key for /pyapi/admin/* and /pyapi/metrics
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+
 # --- Server ---
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "5000"))

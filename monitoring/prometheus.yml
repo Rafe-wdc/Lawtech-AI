@@ -7,3 +7,9 @@ scrape_configs:
     static_configs:
       - targets: ["host.docker.internal:5000"]
     metrics_path: "/pyapi/metrics"
+    # Prometheus sends this as: Authorization: Bearer <token>
+    # core/auth.py accepts both X-API-Key and Bearer token for admin endpoints.
+    # Replace "your-admin-key-here" with your actual ADMIN_API_KEY value.
+    authorization:
+      type: "Bearer"
+      credentials: "your-admin-key-here"

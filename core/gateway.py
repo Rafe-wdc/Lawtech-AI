@@ -33,12 +33,11 @@ import time
 import uuid
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Request, File, Form, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field, ConfigDict
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from werkzeug.utils import secure_filename
 
@@ -48,6 +47,7 @@ from .logger import get_logger, set_request_id, log_time
 from .chat_store import chat_store
 from .metrics import METRICS
 from .quality import score_response as _score_response
+from .auth import require_user_key, require_admin_key, get_key_identifier
 
 log = get_logger("Gateway")
 
@@ -62,8 +62,14 @@ def _get_collection_lock(unique_string: str) -> threading.Lock:
             _collection_locks[unique_string] = threading.Lock()
         return _collection_locks[unique_string]
 
-# --- Rate Limiter ---
-limiter = Limiter(key_func=get_remote_address)
+# --- Rate Limiter (key by API key when present, fall back to IP) ---
+def _rate_limit_key(request: Request) -> str:
+    key = request.headers.get("X-API-Key", "")
+    if key:
+        return get_key_identifier(key)
+    return request.client.host if request.client else "unknown"
+
+limiter = Limiter(key_func=_rate_limit_key)
 
 # --- App ---
 _APP_START_TIME = time.time()
@@ -266,7 +272,7 @@ def _safe_persist_dir(unique_string: str) -> str:
 # Legal Q&A Routes (LangGraph agent flow)
 # ============================================================
 
-@app.post("/pyapi/search", response_model=SearchResponse)
+@app.post("/pyapi/search", response_model=SearchResponse, dependencies=[Depends(require_user_key)])
 @limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
 async def search(data: SearchRequest, request: Request):
     """Main legal Q&A endpoint (batch mode).
@@ -427,7 +433,7 @@ _NODE_STATUS = {
 }
 
 
-@app.post("/pyapi/search/stream")
+@app.post("/pyapi/search/stream", dependencies=[Depends(require_user_key)])
 @limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
 async def search_stream(data: SearchRequest, request: Request):
     """Streaming legal Q&A endpoint (SSE).
@@ -666,7 +672,7 @@ async def search_stream(data: SearchRequest, request: Request):
 # Chat with Files (inline file attachments)
 # ============================================================
 
-@app.post("/pyapi/chat")
+@app.post("/pyapi/chat", dependencies=[Depends(require_user_key)])
 @limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
 async def chat_with_files(
     request: Request,
@@ -903,7 +909,7 @@ class ContinueDraftRequest(BaseModel):
     globalThreadId: str = Field(..., min_length=1)
 
 
-@app.post("/pyapi/continue_draft")
+@app.post("/pyapi/continue_draft", dependencies=[Depends(require_user_key)])
 @limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
 async def continue_draft(data: ContinueDraftRequest, request: Request):
     """Continue an incomplete draft by regenerating failed sections.
@@ -1069,7 +1075,7 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
 # PDF Upload / Process / Chat Routes (direct, outside LangGraph)
 # ============================================================
 
-@app.post("/pyapi/mainqa")
+@app.post("/pyapi/mainqa", dependencies=[Depends(require_user_key)])
 @limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
 async def mainqa(
     request: Request,
@@ -1339,7 +1345,7 @@ async def mainqa(
 # Delete VectorDB Route
 # ============================================================
 
-@app.delete("/pyapi/delete_vectordb/{unique_string}")
+@app.delete("/pyapi/delete_vectordb/{unique_string}", dependencies=[Depends(require_user_key)])
 @limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
 async def delete_vectordb(unique_string: str, request: Request):
     """Delete a user's PDF document collection from ChromaDB."""
@@ -1368,7 +1374,7 @@ async def delete_vectordb(unique_string: str, request: Request):
 # Async PDF Upload (background worker)
 # ============================================================
 
-@app.post("/pyapi/upload_async")
+@app.post("/pyapi/upload_async", dependencies=[Depends(require_user_key)])
 @limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
 async def upload_async(
     request: Request,
@@ -1405,7 +1411,7 @@ async def upload_async(
         raise
 
 
-@app.get("/pyapi/job_status/{job_id}")
+@app.get("/pyapi/job_status/{job_id}", dependencies=[Depends(require_user_key)])
 async def job_status(job_id: str):
     """Check the status of a background PDF processing job."""
     from workers.pdf_processor import get_job_status
@@ -1548,7 +1554,7 @@ async def health():
 # Prometheus Metrics Endpoint
 # ============================================================
 
-@app.get("/pyapi/metrics")
+@app.get("/pyapi/metrics", dependencies=[Depends(require_admin_key)])
 async def prometheus_metrics():
     """Expose Prometheus metrics in text format.
 
@@ -1567,7 +1573,7 @@ async def prometheus_metrics():
 # Admin: Fallback Log (ES backfill pipeline)
 # ------------------------------------------------------------------
 
-@app.get("/pyapi/admin/fallback_logs")
+@app.get("/pyapi/admin/fallback_logs", dependencies=[Depends(require_admin_key)])
 async def admin_fallback_logs(
     agent: Optional[str] = None,
     backfilled: Optional[int] = None,
@@ -1595,7 +1601,7 @@ async def admin_fallback_logs(
         raise HTTPException(status_code=500, detail="Failed to fetch fallback logs")
 
 
-@app.get("/pyapi/admin/fallback_stats")
+@app.get("/pyapi/admin/fallback_stats", dependencies=[Depends(require_admin_key)])
 async def admin_fallback_stats():
     """Aggregate stats: totals by agent, date, top repeated queries."""
     try:
@@ -1605,7 +1611,7 @@ async def admin_fallback_stats():
         raise HTTPException(status_code=500, detail="Failed to fetch fallback stats")
 
 
-@app.get("/pyapi/admin/usage_stats")
+@app.get("/pyapi/admin/usage_stats", dependencies=[Depends(require_admin_key)])
 async def admin_usage_stats(days: int = 7):
     """Per-request usage stats: tokens, cost, latency, agent distribution.
 
@@ -1619,7 +1625,7 @@ async def admin_usage_stats(days: int = 7):
         raise HTTPException(status_code=500, detail="Failed to fetch usage stats")
 
 
-@app.get("/pyapi/admin/quality_stats")
+@app.get("/pyapi/admin/quality_stats", dependencies=[Depends(require_admin_key)])
 async def admin_quality_stats(days: int = 7):
     """L4 quality scores: faithfulness, relevance, completeness per agent.
 
@@ -1633,7 +1639,7 @@ async def admin_quality_stats(days: int = 7):
         raise HTTPException(status_code=500, detail="Failed to fetch quality stats")
 
 
-@app.get("/pyapi/threads")
+@app.get("/pyapi/threads", dependencies=[Depends(require_user_key)])
 async def list_threads(limit: int = 50, offset: int = 0):
     """List recent chat sessions for the sidebar history."""
     try:
@@ -1644,7 +1650,7 @@ async def list_threads(limit: int = 50, offset: int = 0):
         raise HTTPException(status_code=500, detail="Failed to list threads")
 
 
-@app.get("/pyapi/threads/{thread_id}/messages")
+@app.get("/pyapi/threads/{thread_id}/messages", dependencies=[Depends(require_user_key)])
 async def get_thread_messages(thread_id: str, limit: int = 50):
     """Load all messages for a specific thread (for session restore)."""
     try:
@@ -1659,7 +1665,7 @@ async def get_thread_messages(thread_id: str, limit: int = 50):
         raise HTTPException(status_code=500, detail="Failed to load thread messages")
 
 
-@app.post("/pyapi/feedback")
+@app.post("/pyapi/feedback", dependencies=[Depends(require_user_key)])
 async def submit_feedback(data: FeedbackRequest, request: Request):
     """Submit thumbs-up/down feedback for a specific response."""
     try:

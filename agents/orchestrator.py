@@ -26,6 +26,33 @@ from config.prompts import (
 
 log = get_logger("Orchestrator")
 
+import re
+
+# --- Response Instructions Sanitization ---
+
+_INJECTION_PATTERNS = re.compile(
+    r"(?i)(ignore\s+(all\s+)?(previous|above|prior)\s+(instructions?|rules?|prompts?)"
+    r"|disregard\s+(everything|all|the)\b"
+    r"|you\s+are\s+now\b"
+    r"|system\s*:\s*"
+    r"|new\s+instructions?\s*:"
+    r"|override\s+(all|previous|the)\b"
+    r"|do\s+not\s+follow\b"
+    r"|forget\s+(all|your|previous)\b)",
+)
+
+_MAX_INSTRUCTIONS_LEN = 500
+
+
+def _sanitize_response_instructions(instructions: str) -> str:
+    """Strip prompt-injection patterns and cap length of LLM-extracted instructions."""
+    if not instructions:
+        return ""
+    cleaned = _INJECTION_PATTERNS.sub("", instructions).strip()
+    if len(cleaned) > _MAX_INSTRUCTIONS_LEN:
+        cleaned = cleaned[:_MAX_INSTRUCTIONS_LEN]
+    return cleaned
+
 
 # --- Task Classification (migrated from v1 task_identifer.py) ---
 
@@ -378,7 +405,7 @@ def _analyze_and_normalize_query(query: str) -> tuple[str, str]:
                  original_len=len(query),
                  normalized_len=len(result.normalized_query),
                  instructions_len=len(result.response_instructions))
-        return result.normalized_query, result.response_instructions
+        return result.normalized_query, _sanitize_response_instructions(result.response_instructions)
 
     except Exception as e:
         log.warning("Query normalization failed, using original",

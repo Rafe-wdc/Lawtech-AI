@@ -54,6 +54,25 @@ from .auth import require_user_key, require_admin_key, get_key_identifier
 
 log = get_logger("Gateway")
 
+
+def _fire_and_forget(coro) -> asyncio.Task:
+    """Schedule a coroutine as a background task with error logging.
+
+    Unlike bare asyncio.create_task(), exceptions are logged instead of
+    silently discarded, so audit trail failures become visible.
+    """
+    task = asyncio.create_task(coro)
+
+    def _on_done(t: asyncio.Task):
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc:
+            log.error("Background task failed", error=str(exc), exc_type=type(exc).__name__)
+
+    task.add_done_callback(_on_done)
+    return task
+
 # --- Consistent error response helpers ---
 
 _HTTP_ERROR_CODES: dict[int, str] = {
@@ -436,7 +455,7 @@ async def search(data: SearchRequest, request: Request):
         r.get("fallback_used") for r in final_state.get("agent_results", {}).values()
         if isinstance(r, dict)
     )
-    asyncio.create_task(chat_store.log_request(
+    _fire_and_forget(chat_store.log_request(
         thread_id=thread_id,
         endpoint="/pyapi/search",
         query_preview=data.prompt_query[:300],
@@ -453,7 +472,7 @@ async def search(data: SearchRequest, request: Request):
     # --- L4: Quality scoring (10% sample, fire-and-forget) ---
     _final_response = final_state.get("final_response", "")
     if _final_response and not final_state.get("is_blocked") and random.random() < 0.10:
-        asyncio.create_task(_score_response(
+        _fire_and_forget(_score_response(
             query=data.prompt_query,
             response=_final_response,
             agents_used=agents_used,
@@ -694,7 +713,7 @@ async def search_stream(data: SearchRequest, request: Request):
                  steps=step_count, duration_ms=f"{elapsed_ms:.0f}")
 
         # --- Log request to SQLite (fire-and-forget) ---
-        asyncio.create_task(chat_store.log_request(
+        _fire_and_forget(chat_store.log_request(
             thread_id=thread_id,
             endpoint="/pyapi/search/stream",
             query_preview=data.prompt_query[:300],
@@ -709,7 +728,7 @@ async def search_stream(data: SearchRequest, request: Request):
 
         # --- L4: Quality scoring (10% sample, fire-and-forget) ---
         if final_response and random.random() < 0.10:
-            asyncio.create_task(_score_response(
+            _fire_and_forget(_score_response(
                 query=data.prompt_query,
                 response=final_response,
                 agents_used=agents_used,

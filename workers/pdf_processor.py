@@ -53,6 +53,17 @@ class PdfJob:
 _jobs: dict[str, PdfJob] = {}
 _lock = threading.Lock()
 
+# Per-collection lock to prevent concurrent metadata read-modify-write corruption
+_collection_locks: dict[str, threading.Lock] = {}
+_collection_locks_guard = threading.Lock()
+
+
+def _get_collection_lock(collection_name: str) -> threading.Lock:
+    with _collection_locks_guard:
+        if collection_name not in _collection_locks:
+            _collection_locks[collection_name] = threading.Lock()
+        return _collection_locks[collection_name]
+
 
 def get_job_status(job_id: str) -> dict[str, Any] | None:
     """Get the current status of a PDF processing job."""
@@ -145,37 +156,39 @@ def _process_pdf(job: PdfJob, file_path: str) -> None:
         embeddings = get_qa_embeddings()
         collection_exists = os.path.exists(os.path.join(persist_dir, "chroma.sqlite3"))
 
-        existing_filenames = []
-        if collection_exists:
-            vectordb = Chroma(
-                embedding_function=embeddings,
-                collection_name=collection_name,
-                persist_directory=persist_dir,
-            )
-            try:
-                meta = vectordb._collection.metadata
-                if meta:
-                    fstr = meta.get("filenames", "")
-                    existing_filenames = [f for f in fstr.split(",") if f]
-            except Exception:
-                pass
-            vectordb.add_documents(texts)
-        else:
-            vectordb = Chroma.from_documents(
-                documents=texts,
-                embedding=embeddings,
-                collection_name=collection_name,
-                persist_directory=persist_dir,
-            )
+        # Lock per collection to prevent concurrent metadata corruption
+        with _get_collection_lock(collection_name):
+            existing_filenames = []
+            if collection_exists:
+                vectordb = Chroma(
+                    embedding_function=embeddings,
+                    collection_name=collection_name,
+                    persist_directory=persist_dir,
+                )
+                try:
+                    meta = vectordb._collection.metadata
+                    if meta:
+                        fstr = meta.get("filenames", "")
+                        existing_filenames = [f for f in fstr.split(",") if f]
+                except Exception:
+                    pass
+                vectordb.add_documents(texts)
+            else:
+                vectordb = Chroma.from_documents(
+                    documents=texts,
+                    embedding=embeddings,
+                    collection_name=collection_name,
+                    persist_directory=persist_dir,
+                )
 
-        all_filenames = list(set(existing_filenames + [job.filename]))
-        vectordb._collection.modify(
-            metadata={
-                "filenames": ",".join(all_filenames),
-                "upload_date": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "file_count": str(len(all_filenames)),
-            }
-        )
+            all_filenames = list(set(existing_filenames + [job.filename]))
+            vectordb._collection.modify(
+                metadata={
+                    "filenames": ",".join(all_filenames),
+                    "upload_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "file_count": str(len(all_filenames)),
+                }
+            )
 
         with _lock:
             job.status = JobStatus.COMPLETED

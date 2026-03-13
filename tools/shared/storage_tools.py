@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from functools import lru_cache
 from typing import Optional
 
@@ -23,6 +24,17 @@ from core.settings import S3_BUCKET, S3_REGION, CHROMA_STORE_ROOT
 from core.logger import get_logger
 
 log = get_logger("Storage")
+
+# Per-collection lock to prevent concurrent read-modify-write on chat history files
+_chat_history_locks: dict[str, threading.Lock] = {}
+_chat_history_locks_guard = threading.Lock()
+
+
+def _get_chat_lock(unique_string: str) -> threading.Lock:
+    with _chat_history_locks_guard:
+        if unique_string not in _chat_history_locks:
+            _chat_history_locks[unique_string] = threading.Lock()
+        return _chat_history_locks[unique_string]
 
 _SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
 
@@ -150,24 +162,25 @@ def save_pdf_chat_history(
     os.makedirs(chat_dir, exist_ok=True)
     chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
 
-    # Load existing history
-    all_chats = []
-    if os.path.exists(chat_file):
+    # Lock per collection to prevent concurrent read-modify-write data loss
+    with _get_chat_lock(unique_string):
+        all_chats = []
+        if os.path.exists(chat_file):
+            try:
+                with open(chat_file, "r", encoding="utf-8") as f:
+                    all_chats = json.load(f)
+            except Exception:
+                all_chats = []
+
+        all_chats.append({"question": question, "answer": answer})
+
         try:
-            with open(chat_file, "r", encoding="utf-8") as f:
-                all_chats = json.load(f)
-        except Exception:
-            all_chats = []
-
-    all_chats.append({"question": question, "answer": answer})
-
-    try:
-        with open(chat_file, "w", encoding="utf-8") as f:
-            json.dump(all_chats, f, ensure_ascii=False, indent=2)
-        return {"saved": True, "total_messages": len(all_chats)}
-    except Exception as e:
-        log.error(f"Failed to save chat history for {unique_string}: {e}")
-        return {"saved": False, "total_messages": len(all_chats)}
+            with open(chat_file, "w", encoding="utf-8") as f:
+                json.dump(all_chats, f, ensure_ascii=False, indent=2)
+            return {"saved": True, "total_messages": len(all_chats)}
+        except Exception as e:
+            log.error(f"Failed to save chat history for {unique_string}: {e}")
+            return {"saved": False, "total_messages": len(all_chats)}
 
 
 # --- Chat History (SQLite-first with legacy API fallback) ---

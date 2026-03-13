@@ -163,8 +163,8 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     task = state.get("task", "Other")
 
     if not response:
-        log.debug("Empty response, skipping output guardrail")
-        return {"final_response": response}
+        log.warning("Empty response detected in output guardrail, returning fallback message")
+        return {"final_response": "I wasn't able to generate a response for your query. Please try rephrasing your question or try again shortly."}
 
     log.info("Output sanitization started",
              response_len=len(response), task=task)

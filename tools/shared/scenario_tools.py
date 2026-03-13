@@ -15,10 +15,20 @@ from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.clients import get_genai_client, get_gpt4o, get_gemini_pro
+from core.settings import TIMEOUT_WEB_SEARCH_SEC
 from core.logger import get_logger
 from config.prompts import SCENARIO_SYSTEM_PROMPT
 
 log = get_logger("Scenario")
+
+_GENAI_TIMEOUT = int(TIMEOUT_WEB_SEARCH_SEC)  # seconds for Gemini API calls
+
+
+def _safe_text(response) -> str:
+    """Null-safe text extraction from Gemini response."""
+    if not response.candidates or not response.candidates[0].content.parts:
+        return ""
+    return getattr(response.candidates[0].content.parts[0], "text", None) or ""
 
 
 # --- Structured Output Schemas ---
@@ -87,13 +97,13 @@ def web_search_grounded(query: str, chat_history_text: str = "") -> dict:
                 "max_output_tokens": 8000,
                 "temperature": 0.5,
                 "top_p": 0.95,
+                "http_options": {"timeout": _GENAI_TIMEOUT * 1000},
             },
         )
 
-        if not response.candidates or not response.candidates[0].content.parts:
+        content = _safe_text(response)
+        if not content:
             log.warning("Web search grounded returned empty response")
-            return {"content": "", "tokens_consumed": 0}
-        content = response.candidates[0].content.parts[0].text
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
         return {"content": content, "tokens_consumed": tokens}
@@ -142,13 +152,13 @@ Scenario: {query}"""
                 "max_output_tokens": 8000,
                 "temperature": 0.5,
                 "top_p": 0.95,
+                "http_options": {"timeout": _GENAI_TIMEOUT * 1000},
             },
         )
 
-        if not response.candidates or not response.candidates[0].content.parts:
+        content = _safe_text(response)
+        if not content:
             log.warning("Scenario analysis returned empty response")
-            return {"analysis": "", "tokens_consumed": 0}
-        content = response.candidates[0].content.parts[0].text
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
         return {"analysis": content, "tokens_consumed": tokens}
@@ -230,13 +240,14 @@ def find_similar_cases(scenario: str) -> dict:
                 "tools": [{"google_search": {}}],
                 "max_output_tokens": 4000,
                 "temperature": 0.3,
+                "http_options": {"timeout": _GENAI_TIMEOUT * 1000},
             },
         )
 
-        if not response.candidates or not response.candidates[0].content.parts:
+        content = _safe_text(response)
+        if not content:
             log.warning("Find similar cases returned empty response")
             return {"cases": [], "raw_response": "", "tokens_consumed": 0}
-        content = response.candidates[0].content.parts[0].text
 
         # Try to parse structured cases from the response
         try:
@@ -331,10 +342,11 @@ def get_legal_news(topic: str) -> dict:
                 "tools": [{"google_search": {}}],
                 "max_output_tokens": 4000,
                 "temperature": 0.3,
+                "http_options": {"timeout": _GENAI_TIMEOUT * 1000},
             },
         )
 
-        content = response.candidates[0].content.parts[0].text
+        content = _safe_text(response)
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
 
         return {"news": content, "tokens_consumed": tokens}

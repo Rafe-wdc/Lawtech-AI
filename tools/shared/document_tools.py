@@ -187,6 +187,7 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
     if not _is_safe_pdf_path(file_path):
         return {"text": "", "pages_processed": 0, "error": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'"}
 
+    doc = None
     try:
         doc = fitz.open(file_path)
         total_pages = doc.page_count
@@ -241,8 +242,6 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
         if batch_images:
             results.append(process_batch(batch_images, end_page - len(batch_images) + 1))
 
-        doc.close()
-
         return {
             "text": "\n\n".join(results),
             "pages_processed": end_page - start_page + 1,
@@ -251,6 +250,9 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
     except Exception as e:
         log.error(f"[Document] Vision extraction failed: {e}")
         return {"text": "", "pages_processed": 0, "error": str(e)}
+    finally:
+        if doc:
+            doc.close()
 
 
 @tool

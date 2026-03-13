@@ -110,9 +110,8 @@ def _es_search(index: str, body: dict) -> dict:
             "ES will be retried in up to 60 seconds."
         )
     try:
-        es = get_es_client()
         _client = get_es_client()
-        result = _client.search(index=index, body=body)
+        result = _client.options(request_timeout=30).search(index=index, body=body)
         record_es_success()
         return result
     except RuntimeError:

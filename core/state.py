@@ -6,7 +6,6 @@ Agents return partial dicts — LangGraph merges them into the full state.
 
 from __future__ import annotations
 
-import operator
 from dataclasses import dataclass, field
 from typing import Any, Literal, Annotated
 from langchain_core.messages import BaseMessage
@@ -81,6 +80,16 @@ def _merge_agent_results(existing: dict, new: dict) -> dict:
     return {**existing, **new}
 
 
+def _cap_source_metadata(existing: list, new: list) -> list:
+    """Custom reducer: append new sources but cap total to last 100 entries.
+
+    Prevents unbounded state growth in multi-turn threads where each turn
+    adds sources from multiple agents (typically 20-50 per turn).
+    """
+    combined = existing + new
+    return combined[-100:] if len(combined) > 100 else combined
+
+
 def _sum_tokens(existing: int, new: int) -> int:
     """Custom reducer: accumulate token counts across agents."""
     return existing + new
@@ -127,7 +136,7 @@ class LegalAgentState(MessagesState):
 
     # Final output
     final_response: str
-    source_metadata: Annotated[list[dict[str, Any]], operator.add]
+    source_metadata: Annotated[list[dict[str, Any]], _cap_source_metadata]
     tokens_consumed: Annotated[int, _sum_tokens]
 
 

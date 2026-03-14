@@ -365,10 +365,20 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Legislation": fallback_result}}
 
-        # Step 4: Convert hits to documents
-        docs_text = "\n\n".join(
-            h.get("_source", {}).get("page_content", "") for h in hits
-        )
+        # Step 4: Convert hits to documents (cap each hit to 3000 chars, total to 30KB)
+        _MAX_DOC_CHARS = 3000
+        _MAX_TOTAL_CHARS = 30_000
+        doc_parts = []
+        total_len = 0
+        for h in hits:
+            chunk = h.get("_source", {}).get("page_content", "")
+            if len(chunk) > _MAX_DOC_CHARS:
+                chunk = chunk[:_MAX_DOC_CHARS] + "..."
+            if total_len + len(chunk) > _MAX_TOTAL_CHARS:
+                break
+            doc_parts.append(chunk)
+            total_len += len(chunk)
+        docs_text = "\n\n".join(doc_parts)
         source_file = hits[0].get("_source", {}).get("source", "unknown") if hits else "unknown"
         source_display = os.path.splitext(os.path.basename(source_file))[0]
 

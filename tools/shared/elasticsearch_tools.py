@@ -448,8 +448,8 @@ def _search_legislation_multi_section(
             )
             if buckets:
                 best_source = buckets[0]["key"]
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Source aggregation discovery failed", error=str(e))
 
     # Fallback: content-based discovery if source matching failed
     if not best_source:
@@ -467,8 +467,8 @@ def _search_legislation_multi_section(
                 sources_counter[h["_source"]["source"]] += h["_score"]
             if sources_counter:
                 best_source = sources_counter.most_common(1)[0][0]
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Content-based source discovery failed", error=str(e))
 
     # --- Phase 2: Per-section retrieval within best source ---
     all_hits = []
@@ -523,7 +523,8 @@ def _search_legislation_multi_section(
                     all_hits.append(hit_dict)
                     section_hits.append(hit_dict)
             hits_by_section[sec_num] = section_hits
-        except Exception:
+        except Exception as e:
+            log.warning("Per-section ES retrieval failed", section=sec_num, error=str(e))
             hits_by_section[sec_num] = []
             continue
 

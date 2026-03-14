@@ -19,7 +19,7 @@ import re
 from typing import Optional
 
 from core.clients import get_es_client
-from core.settings import ES_INDICES, S3_BUCKET, S3_REGION
+from core.settings import ES_INDICES
 from core.logger import get_logger
 
 log = get_logger("JudgmentSearch")
@@ -73,21 +73,6 @@ def _es_search(body: dict, timeout: int = 30) -> list[dict]:
         index=INDEX, body=body,
     )
     return resp["hits"]["hits"]
-
-
-def generate_s3_link(court: str, file_name: str, title: str) -> str:
-    """Generate an S3 public URL for a judgment PDF."""
-    import os
-
-    s3_root = (court or "").strip().lower()
-    file_base = os.path.basename(file_name.replace("\\", "/"))
-
-    if s3_root == "supreme":
-        s3_key = f"{s3_root}/{title}.pdf"
-    else:
-        s3_key = f"{s3_root}/{file_base}"
-
-    return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
 
 
 # ================================================================

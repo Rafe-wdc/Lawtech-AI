@@ -62,7 +62,14 @@ MODELS = {
 }
 
 # --- Elasticsearch ---
-ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://139.84.219.174:9200")
+_ES_DEFAULT = "http://139.84.219.174:9200"
+ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", _ES_DEFAULT)
+if ELASTICSEARCH_URL == _ES_DEFAULT and not os.getenv("ELASTICSEARCH_URL"):
+    import logging as _logging
+    _logging.getLogger("Settings").warning(
+        "ELASTICSEARCH_URL not set — using hardcoded default %s. "
+        "Set ELASTICSEARCH_URL env var for production.", _ES_DEFAULT
+    )
 ES_INDICES = {
     "legislation": "legislation",
     "judgments": "judgements",

@@ -793,8 +793,12 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     total_tokens = 0
     all_serialized_sources = []
 
+    _MAX_AGENT_CONTENT = 8000  # per-agent cap to prevent token explosion
     for name, result in valid_results.items():
-        agent_results_text += f"\n\n### {name.upper()} AGENT RESULTS:\n{result.content}"
+        content = result.content
+        if len(content) > _MAX_AGENT_CONTENT:
+            content = content[:_MAX_AGENT_CONTENT] + "\n\n[... truncated for synthesis]"
+        agent_results_text += f"\n\n### {name.upper()} AGENT RESULTS:\n{content}"
         total_tokens += result.tokens_consumed
         all_serialized_sources.extend(_serialize_sources(result))
 

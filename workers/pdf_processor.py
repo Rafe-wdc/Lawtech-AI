@@ -170,8 +170,8 @@ def _process_pdf(job: PdfJob, file_path: str) -> None:
                     if meta:
                         fstr = meta.get("filenames", "")
                         existing_filenames = [f for f in fstr.split(",") if f]
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("Failed to read collection metadata", error=str(e))
                 vectordb.add_documents(texts)
             else:
                 vectordb = Chroma.from_documents(
@@ -210,8 +210,8 @@ def _process_pdf(job: PdfJob, file_path: str) -> None:
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Failed to clean up temp file", path=file_path, error=str(e))
 
 
 def submit_pdf_job(file_path: str, unique_string: str, filename: str) -> str:

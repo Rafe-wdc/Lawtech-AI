@@ -42,7 +42,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from werkzeug.utils import secure_filename
 
-from .settings import HOST, PORT, RATE_LIMIT_PER_MINUTE, CHROMA_STORE_ROOT
+from .settings import HOST, PORT, RATE_LIMIT_PER_MINUTE, CHROMA_STORE_ROOT, UPLOADS_ROOT
 from .graph import compile_graph
 from .checkpointer import create_checkpointer
 from .logger import get_logger, set_request_id, log_time
@@ -1209,6 +1209,75 @@ async def delete_vectordb(unique_string: str, request: Request):
 
 
 # Legacy /pyapi/upload_async + /pyapi/job_status removed — file uploads handled inline by /pyapi/chat
+
+
+# ============================================================
+# Thread File Management
+# ============================================================
+
+@app.get("/pyapi/thread/{thread_id}/files", dependencies=[Depends(require_user_key)])
+@limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
+async def list_thread_files(thread_id: str, request: Request):
+    """List all files for a thread with their current status (including OCR status).
+
+    Clients can poll this endpoint to check background OCR completion.
+    """
+    safe_tid = secure_filename(thread_id)
+    if not safe_tid:
+        raise HTTPException(status_code=400, detail="Invalid thread_id")
+    records = await chat_store.load_thread_files(safe_tid)
+    return {"thread_id": safe_tid, "file_count": len(records), "files": records}
+
+
+@app.delete("/pyapi/thread/{thread_id}/files", dependencies=[Depends(require_user_key)])
+@limiter.limit(f"{RATE_LIMIT_PER_MINUTE}/minute")
+async def delete_thread_files(thread_id: str, request: Request):
+    """Delete all files for a thread: local storage, Gemini URIs, ChromaDB, SQLite records."""
+    from core.gemini_files import delete_gemini_file
+
+    safe_tid = secure_filename(thread_id)
+    if not safe_tid:
+        raise HTTPException(status_code=400, detail="Invalid thread_id")
+
+    records = await chat_store.delete_thread_files(safe_tid)
+    if not records:
+        raise HTTPException(status_code=404, detail=f"No files found for thread {safe_tid}")
+
+    deleted = {"gemini_files": 0, "chromadb_collections": 0, "local_dir_removed": False, "db_records": len(records)}
+
+    # Delete Gemini files
+    for rec in records:
+        gname = rec.get("gemini_name", "")
+        if gname:
+            try:
+                await asyncio.to_thread(delete_gemini_file, gname)
+                deleted["gemini_files"] += 1
+            except Exception as e:
+                log.warning("Gemini file deletion failed", name=gname, error=str(e))
+
+    # Delete ChromaDB collections
+    for rec in records:
+        coll = rec.get("chromadb_collection", "")
+        if coll:
+            persist_dir = os.path.join(CHROMA_STORE_ROOT, coll)
+            if os.path.exists(persist_dir):
+                try:
+                    shutil.rmtree(persist_dir)
+                    deleted["chromadb_collections"] += 1
+                except Exception as e:
+                    log.warning("ChromaDB deletion failed", collection=coll, error=str(e))
+
+    # Delete local upload directory
+    upload_dir = os.path.join(UPLOADS_ROOT, safe_tid)
+    if os.path.exists(upload_dir):
+        try:
+            shutil.rmtree(upload_dir)
+            deleted["local_dir_removed"] = True
+        except Exception as e:
+            log.warning("Upload dir deletion failed", dir=upload_dir, error=str(e))
+
+    log.info("Thread files deleted", thread_id=safe_tid[:12], **deleted)
+    return {"message": f"Deleted files for thread {safe_tid}", "details": deleted}
 
 
 # ============================================================

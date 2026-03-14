@@ -346,18 +346,32 @@ async def _background_ocr_and_store(
 
     Runs after the initial response is already sent (using Gemini URI).
     Populates ChromaDB so follow-up questions can use chunk retrieval.
+    Updates ocr_status in SQLite so clients can poll for completion.
     """
+    from core.chat_store import chat_store
+
     try:
+        await chat_store.update_ocr_status(thread_id, file_id, "pending")
         log.info("Background OCR started", file=filename, pages=page_count,
                  collection=collection_id)
         text = await asyncio.to_thread(_vision_ocr_pdf, local_path, page_count)
         if text.strip():
             await asyncio.to_thread(_store_in_chromadb, text, collection_id, filename)
+            await chat_store.update_ocr_status(thread_id, file_id, "complete")
             log.info("Background OCR+ChromaDB complete",
                      file=filename, chars=len(text), collection=collection_id)
         else:
+            await chat_store.update_ocr_status(
+                thread_id, file_id, "failed", "OCR produced no text",
+            )
             log.warning("Background OCR produced no text", file=filename)
     except Exception as e:
+        try:
+            await chat_store.update_ocr_status(
+                thread_id, file_id, "failed", str(e)[:500],
+            )
+        except Exception:
+            pass  # don't mask the original error
         log.error("Background OCR failed", file=filename, error=str(e))
 
 
@@ -428,14 +442,12 @@ def _extract_xlsx_text(file_path: str) -> str:
 async def process_files(
     files: list[tuple[str, str, int]],
     thread_id: str,
-    status_callback=None,
 ) -> FileContext:
     """Process uploaded files with local storage + Gemini Files API persistence.
 
     Args:
         files: List of (temp_file_path, original_filename, size_bytes) tuples.
         thread_id: Used for upload dir, ChromaDB collection naming, and DB record.
-        status_callback: Optional async callable(message: str) for SSE status.
 
     Returns:
         FileContext with gemini_file_parts, inline_text, and chromadb_collections.
@@ -540,8 +552,6 @@ async def process_files(
             gemini_indices.append(idx)
 
     if gemini_tasks:
-        if status_callback:
-            await status_callback(f"Uploading {len(gemini_tasks)} files to Gemini...")
         with log_time(log, "Parallel Gemini uploads", count=len(gemini_tasks)):
             gemini_results = await asyncio.gather(*gemini_tasks, return_exceptions=True)
 
@@ -565,9 +575,6 @@ async def process_files(
 
     # --- Phase 3: Process each file (text extraction, OCR, ChromaDB) ---
     for pf, local_path, ext, mime, gemini_ok in prepared:
-        if status_callback:
-            await status_callback(f"Processing {pf.original_name}...")
-
         # --- PDF-specific handling ---
         if ext == ".pdf":
             try:
@@ -585,11 +592,15 @@ async def process_files(
                     log.info("Large scanned PDF: scheduling background OCR for ChromaDB",
                              file=pf.original_name, pages=page_count,
                              collection=collection_id)
-                    asyncio.create_task(
+                    _task = asyncio.create_task(
                         _background_ocr_and_store(
                             local_path, page_count, collection_id,
                             pf.original_name, thread_id, pf.file_id,
                         )
+                    )
+                    _task.add_done_callback(
+                        lambda t: t.exception() and log.error(
+                            "Background OCR task exception", error=str(t.exception()))
                     )
 
                 elif is_scanned and pf.gemini_uri:
@@ -633,16 +644,50 @@ async def process_files(
         elif ext == ".docx":
             try:
                 text = await asyncio.to_thread(_extract_docx_text, local_path)
-                pf.extracted_text = text
-                inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+                log.debug("DOCX text-only analysis (Gemini Files API does not support .docx)",
+                          file=pf.original_name, chars=len(text))
+                if len(text) > MAX_INLINE_TEXT_CHARS:
+                    collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                    try:
+                        await asyncio.to_thread(
+                            _store_in_chromadb, text, collection_id, pf.original_name)
+                        pf.chromadb_collection = collection_id
+                        ctx.chromadb_collections.append(collection_id)
+                        log.info("Large DOCX stored in ChromaDB",
+                                 file=pf.original_name, chars=len(text),
+                                 collection=collection_id)
+                    except Exception as e:
+                        log.error("ChromaDB storage failed for DOCX", error=str(e))
+                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
+                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
+                else:
+                    pf.extracted_text = text
+                    inline_parts.append(f"[File: {pf.original_name}]\n{text}")
             except Exception as e:
                 pf.error = f"Failed to read DOCX: {e}"
 
         elif ext == ".xlsx":
             try:
                 text = await asyncio.to_thread(_extract_xlsx_text, local_path)
-                pf.extracted_text = text
-                inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+                log.debug("XLSX text-only analysis (Gemini Files API does not support .xlsx)",
+                          file=pf.original_name, chars=len(text))
+                if len(text) > MAX_INLINE_TEXT_CHARS:
+                    collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                    try:
+                        await asyncio.to_thread(
+                            _store_in_chromadb, text, collection_id, pf.original_name)
+                        pf.chromadb_collection = collection_id
+                        ctx.chromadb_collections.append(collection_id)
+                        log.info("Large XLSX stored in ChromaDB",
+                                 file=pf.original_name, chars=len(text),
+                                 collection=collection_id)
+                    except Exception as e:
+                        log.error("ChromaDB storage failed for XLSX", error=str(e))
+                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
+                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
+                else:
+                    pf.extracted_text = text
+                    inline_parts.append(f"[File: {pf.original_name}]\n{text}")
             except Exception as e:
                 pf.error = f"Failed to read XLSX: {e}"
 

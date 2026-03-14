@@ -233,6 +233,7 @@ class _SqliteChatHistoryStore:
                         gemini_supported     INTEGER NOT NULL DEFAULT 0,
                         page_count           INTEGER NOT NULL DEFAULT 0,
                         upload_error         TEXT    NOT NULL DEFAULT '',
+                        ocr_status           TEXT    NOT NULL DEFAULT '',
                         created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
                         UNIQUE(thread_id, file_id)
                     )
@@ -242,6 +243,16 @@ class _SqliteChatHistoryStore:
                 )
                 conn.commit()
                 log.info("Migrated: created thread_files table")
+
+            # Migration: add ocr_status to thread_files for background OCR tracking
+            if "thread_files" in existing_tables:
+                tf_cols = [r[1] for r in conn.execute("PRAGMA table_info(thread_files)").fetchall()]
+                if "ocr_status" not in tf_cols:
+                    conn.execute(
+                        "ALTER TABLE thread_files ADD COLUMN ocr_status TEXT NOT NULL DEFAULT ''"
+                    )
+                    conn.commit()
+                    log.info("Migrated thread_files: added ocr_status column")
 
             self._initialized = True
             log.info("Schema initialized", db_path=self._db_path)
@@ -621,7 +632,7 @@ class _SqliteChatHistoryStore:
                 SELECT file_id, filename, file_type, mime_type, size_bytes,
                        local_path, extracted_text, chromadb_collection,
                        gemini_uri, gemini_name, gemini_expiry,
-                       gemini_supported, page_count, upload_error
+                       gemini_supported, page_count, upload_error, ocr_status
                 FROM thread_files
                 WHERE thread_id = ?
                 ORDER BY created_at ASC
@@ -688,6 +699,62 @@ class _SqliteChatHistoryStore:
     async def get_thread_storage(self, thread_id: str) -> tuple[int, int]:
         """Async wrapper — returns (file_count, total_bytes) for a thread."""
         return await asyncio.to_thread(self._get_thread_storage_bytes_sync, thread_id)
+
+    def _update_ocr_status_sync(
+        self, thread_id: str, file_id: str, status: str, error: str = "",
+    ) -> None:
+        """Update ocr_status (and optionally upload_error) for a thread file."""
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                if error:
+                    conn.execute("""
+                        UPDATE thread_files
+                        SET ocr_status = ?, upload_error = ?
+                        WHERE thread_id = ? AND file_id = ?
+                    """, (status, error, thread_id, file_id))
+                else:
+                    conn.execute("""
+                        UPDATE thread_files SET ocr_status = ?
+                        WHERE thread_id = ? AND file_id = ?
+                    """, (status, thread_id, file_id))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def update_ocr_status(
+        self, thread_id: str, file_id: str, status: str, error: str = "",
+    ) -> None:
+        """Async wrapper for updating background OCR status."""
+        return await asyncio.to_thread(
+            self._update_ocr_status_sync, thread_id, file_id, status, error
+        )
+
+    def _delete_thread_files_sync(self, thread_id: str) -> list[dict]:
+        """Delete all file records for a thread. Returns deleted records for cleanup."""
+        self._ensure_schema()
+        records = self._load_thread_files_sync(thread_id)
+        if not records:
+            return []
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("DELETE FROM thread_files WHERE thread_id = ?", (thread_id,))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+        return records
+
+    async def delete_thread_files(self, thread_id: str) -> list[dict]:
+        """Async wrapper — deletes all file records, returns them for external cleanup."""
+        return await asyncio.to_thread(self._delete_thread_files_sync, thread_id)
 
     # ------------------------------------------------------------------
     # File Context Persistence (for multi-turn file memory)
@@ -1576,6 +1643,7 @@ class _PostgresChatHistoryStore:
                         gemini_supported    INTEGER NOT NULL DEFAULT 0,
                         page_count          INTEGER NOT NULL DEFAULT 0,
                         upload_error        TEXT NOT NULL DEFAULT '',
+                        ocr_status          TEXT NOT NULL DEFAULT '',
                         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         UNIQUE(thread_id, file_id)
                     )""",
@@ -1584,6 +1652,16 @@ class _PostgresChatHistoryStore:
                 for stmt in stmts:
                     conn.execute(stmt)
                 conn.commit()
+            # Migration: add ocr_status to thread_files if missing
+            try:
+                conn.execute(
+                    "ALTER TABLE thread_files ADD COLUMN ocr_status TEXT NOT NULL DEFAULT ''"
+                )
+                conn.commit()
+                log.info("PG migration: added ocr_status to thread_files")
+            except Exception:
+                conn.rollback()  # column already exists
+
             self._schema_ok = True
             log.info("PostgreSQL chat-store schema ensured")
 
@@ -1899,7 +1977,7 @@ class _PostgresChatHistoryStore:
                 SELECT file_id, filename, file_type, mime_type, size_bytes,
                        local_path, extracted_text, chromadb_collection,
                        gemini_uri, gemini_name, gemini_expiry,
-                       gemini_supported, page_count, upload_error
+                       gemini_supported, page_count, upload_error, ocr_status
                 FROM thread_files
                 WHERE thread_id = %s
                 ORDER BY created_at ASC
@@ -1953,6 +2031,47 @@ class _PostgresChatHistoryStore:
 
     async def get_thread_storage(self, thread_id: str) -> tuple:
         return await asyncio.to_thread(self._get_thread_storage_bytes_sync, thread_id)
+
+    def _update_ocr_status_sync(
+        self, thread_id: str, file_id: str, status: str, error: str = "",
+    ) -> None:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            if error:
+                conn.execute("""
+                    UPDATE thread_files SET ocr_status = %s, upload_error = %s
+                    WHERE thread_id = %s AND file_id = %s
+                """, (status, error, thread_id, file_id))
+            else:
+                conn.execute("""
+                    UPDATE thread_files SET ocr_status = %s
+                    WHERE thread_id = %s AND file_id = %s
+                """, (status, thread_id, file_id))
+            conn.commit()
+
+    async def update_ocr_status(
+        self, thread_id: str, file_id: str, status: str, error: str = "",
+    ) -> None:
+        return await asyncio.to_thread(
+            self._update_ocr_status_sync, thread_id, file_id, status, error
+        )
+
+    def _delete_thread_files_sync(self, thread_id: str) -> list:
+        self._ensure_schema()
+        records = self._load_thread_files_sync(thread_id)
+        if not records:
+            return []
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            conn.execute("DELETE FROM thread_files WHERE thread_id = %s", (thread_id,))
+            conn.commit()
+        return records
+
+    async def delete_thread_files(self, thread_id: str) -> list:
+        return await asyncio.to_thread(self._delete_thread_files_sync, thread_id)
 
     # ------------------------------------------------------------------
     # File Context Persistence

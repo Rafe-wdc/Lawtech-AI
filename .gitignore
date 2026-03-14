@@ -58,10 +58,18 @@ tests/test_eval_results.json
 
 # Runtime directories
 temp_uploads/
+uploads/
 data/
+
+# Test PDFs (user-specific, large binaries)
+test_pdfs/
+
+# Agentic workflow notes
+agentic-workflow/
 
 # Local notes
 tasks.txt
+HANDOFF.md
 
 # Temporary files
 tmp/

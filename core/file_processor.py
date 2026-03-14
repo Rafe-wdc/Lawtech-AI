@@ -338,6 +338,29 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     log.info("Stored in ChromaDB", collection=collection_id, chunks=len(chunks))
 
 
+async def _background_ocr_and_store(
+    local_path: str, page_count: int, collection_id: str,
+    filename: str, thread_id: str, file_id: str,
+) -> None:
+    """Background task: OCR a scanned PDF and store in ChromaDB.
+
+    Runs after the initial response is already sent (using Gemini URI).
+    Populates ChromaDB so follow-up questions can use chunk retrieval.
+    """
+    try:
+        log.info("Background OCR started", file=filename, pages=page_count,
+                 collection=collection_id)
+        text = await asyncio.to_thread(_vision_ocr_pdf, local_path, page_count)
+        if text.strip():
+            await asyncio.to_thread(_store_in_chromadb, text, collection_id, filename)
+            log.info("Background OCR+ChromaDB complete",
+                     file=filename, chars=len(text), collection=collection_id)
+        else:
+            log.warning("Background OCR produced no text", file=filename)
+    except Exception as e:
+        log.error("Background OCR failed", file=filename, error=str(e))
+
+
 # --- Text-only extractors (for DOCX / XLSX that Gemini Files API can't handle) ---
 
 def _extract_docx_text(file_path: str) -> str:
@@ -552,11 +575,28 @@ async def process_files(
                 pf.page_count = page_count
                 is_scanned = not text.strip()
 
-                if is_scanned and pf.gemini_uri:
-                    # Scanned PDF but Gemini Files API has it — skip expensive OCR.
-                    # Gemini Pro can read the PDF directly via its file URI.
-                    # Only run OCR if we need ChromaDB (for retrieval on follow-ups).
-                    log.info("Scanned PDF: Gemini URI available, skipping Vision OCR",
+                if is_scanned and pf.gemini_uri and page_count > MAX_INLINE_PDF_PAGES:
+                    # Large scanned PDF with Gemini URI — schedule background OCR
+                    # for ChromaDB. First answer uses Gemini URI (fast), follow-up
+                    # questions will use ChromaDB once OCR completes.
+                    collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                    pf.chromadb_collection = collection_id
+                    ctx.chromadb_collections.append(collection_id)
+                    log.info("Large scanned PDF: scheduling background OCR for ChromaDB",
+                             file=pf.original_name, pages=page_count,
+                             collection=collection_id)
+                    asyncio.create_task(
+                        _background_ocr_and_store(
+                            local_path, page_count, collection_id,
+                            pf.original_name, thread_id, pf.file_id,
+                        )
+                    )
+
+                elif is_scanned and pf.gemini_uri:
+                    # Small scanned PDF with Gemini URI — skip OCR.
+                    # Gemini Pro reads it natively, and it's small enough
+                    # that follow-ups can also use the Gemini URI directly.
+                    log.info("Small scanned PDF: Gemini URI available, skipping Vision OCR",
                              file=pf.original_name, pages=page_count)
 
                 elif is_scanned:

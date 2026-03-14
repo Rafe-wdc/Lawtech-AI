@@ -219,10 +219,14 @@ async def document_node(state: LegalAgentState) -> dict:
     unique_string = state.get("unique_string")
     user_language = state.get("user_language", "en")
 
-    # Check file_context for inline-uploaded collections
+    # Check file_context — prefer Gemini file parts (native PDF reading)
+    # over ChromaDB (OCR'd text chunks) when both are available
     if not unique_string:
         fc = FileContextData.from_state(state)
-        if fc and fc.chromadb_collections:
+        if fc and fc.all_gemini_parts:
+            # Gemini URIs available — use multimodal path (better quality)
+            pass  # handled below
+        elif fc and fc.chromadb_collections:
             unique_string = fc.chromadb_collections[0]
             log.info("Using inline file collection", collection=unique_string)
 

@@ -435,6 +435,9 @@ async def process_files(
 
     inline_parts: list[str] = []
 
+    # --- Phase 1: Validate, copy, and prepare all files ---
+    prepared: list[tuple[ProcessedFile, str, str, str, bool]] = []  # (pf, local_path, ext, mime, gemini_ok)
+
     for file_path, filename, size_bytes in files:
         ext = Path(filename).suffix.lower()
         ctx.file_names.append(filename)
@@ -471,14 +474,11 @@ async def process_files(
             log.warning("File rejected", file=filename, reason=err)
             continue
 
-        if status_callback:
-            await status_callback(f"Processing {filename}...")
-
         mime = get_mime_type(ext)
         gemini_ok = is_gemini_supported(ext)
         file_id = uuid.uuid4().hex
 
-        # --- Step 1: Copy to permanent local storage ---
+        # Copy to permanent local storage
         safe_name = Path(filename).name.replace(" ", "_")
         local_filename = f"{file_id}_{safe_name}"
         local_path = os.path.join(thread_upload_dir, local_filename)
@@ -503,27 +503,49 @@ async def process_files(
             gemini_supported=gemini_ok,
         )
 
-        # --- Step 2: Upload to Gemini Files API (images, PDF, TXT, CSV, MD) ---
+        prepared.append((pf, local_path, ext, mime, gemini_ok))
+        existing_count += 1
+        existing_bytes += size_bytes
+
+    # --- Phase 2: Parallel Gemini Files API uploads ---
+    # Upload all Gemini-supported files concurrently instead of one-by-one
+    gemini_tasks = []
+    gemini_indices = []  # track which prepared[] index each task maps to
+    for idx, (pf, local_path, ext, mime, gemini_ok) in enumerate(prepared):
         if gemini_ok:
-            try:
-                uri, gname, expiry = await asyncio.to_thread(
-                    upload_to_gemini, local_path, mime, filename
-                )
+            gemini_tasks.append(asyncio.to_thread(upload_to_gemini, local_path, mime, pf.original_name))
+            gemini_indices.append(idx)
+
+    if gemini_tasks:
+        if status_callback:
+            await status_callback(f"Uploading {len(gemini_tasks)} files to Gemini...")
+        with log_time(log, "Parallel Gemini uploads", count=len(gemini_tasks)):
+            gemini_results = await asyncio.gather(*gemini_tasks, return_exceptions=True)
+
+        for i, result in enumerate(gemini_results):
+            idx = gemini_indices[i]
+            pf = prepared[idx][0]
+            if isinstance(result, Exception):
+                log.error("Gemini Files upload failed, falling back to extraction",
+                          file=pf.original_name, error=str(result))
+                pf.error = f"Gemini upload failed: {result}"
+            else:
+                uri, gname, expiry = result
                 pf.gemini_uri = uri
                 pf.gemini_name = gname
                 pf.gemini_expiry = expiry
                 ctx.gemini_file_parts.append({
-                    "file_data": {"file_uri": uri, "mime_type": mime},
-                    "name": filename,
+                    "file_data": {"file_uri": uri, "mime_type": pf.mime_type},
+                    "name": pf.original_name,
                 })
-                log.info("Gemini Files upload OK", file=filename, mime=mime)
-            except Exception as e:
-                log.error("Gemini Files upload failed, falling back to extraction",
-                          file=filename, error=str(e))
-                pf.error = f"Gemini upload failed: {e}"
-                # Fall through to text extraction below
+                log.info("Gemini Files upload OK", file=pf.original_name, mime=pf.mime_type)
 
-        # --- Step 3: PDF-specific handling ---
+    # --- Phase 3: Process each file (text extraction, OCR, ChromaDB) ---
+    for pf, local_path, ext, mime, gemini_ok in prepared:
+        if status_callback:
+            await status_callback(f"Processing {pf.original_name}...")
+
+        # --- PDF-specific handling ---
         if ext == ".pdf":
             try:
                 text, page_count = await asyncio.to_thread(_extract_pdf_text, local_path)
@@ -535,33 +557,33 @@ async def process_files(
                     # Gemini Pro can read the PDF directly via its file URI.
                     # Only run OCR if we need ChromaDB (for retrieval on follow-ups).
                     log.info("Scanned PDF: Gemini URI available, skipping Vision OCR",
-                             file=filename, pages=page_count)
+                             file=pf.original_name, pages=page_count)
 
                 elif is_scanned:
                     # Scanned PDF and no Gemini URI — must run Vision OCR
                     log.info("Scanned PDF: no Gemini URI, running Vision OCR",
-                             file=filename, pages=page_count)
+                             file=pf.original_name, pages=page_count)
                     text = await asyncio.to_thread(_vision_ocr_pdf, local_path, page_count)
 
                 # Store large PDFs in ChromaDB for retrieval (even if Gemini has it,
                 # ChromaDB enables targeted chunk retrieval for follow-up questions)
                 if text.strip() and (page_count > MAX_INLINE_PDF_PAGES or len(text) > MAX_INLINE_TEXT_CHARS):
-                    collection_id = f"inline_{thread_id}_{file_id[:8]}"
+                    collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     try:
-                        await asyncio.to_thread(_store_in_chromadb, text, collection_id, filename)
+                        await asyncio.to_thread(_store_in_chromadb, text, collection_id, pf.original_name)
                         pf.chromadb_collection = collection_id
                         ctx.chromadb_collections.append(collection_id)
                         log.info("Large PDF stored in ChromaDB",
-                                 file=filename, pages=page_count, collection=collection_id)
+                                 file=pf.original_name, pages=page_count, collection=collection_id)
                     except Exception as e:
                         log.error("ChromaDB storage failed", error=str(e))
                         pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                        inline_parts.append(f"[File: {filename}]\n{pf.extracted_text}")
+                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
                 elif text.strip():
                     # Small PDF with text — use inline
                     if not pf.gemini_uri:
                         pf.extracted_text = text
-                        inline_parts.append(f"[File: {filename}]\n{text}")
+                        inline_parts.append(f"[File: {pf.original_name}]\n{text}")
 
             except Exception as e:
                 if not pf.gemini_uri:
@@ -572,7 +594,7 @@ async def process_files(
             try:
                 text = await asyncio.to_thread(_extract_docx_text, local_path)
                 pf.extracted_text = text
-                inline_parts.append(f"[File: {filename}]\n{text}")
+                inline_parts.append(f"[File: {pf.original_name}]\n{text}")
             except Exception as e:
                 pf.error = f"Failed to read DOCX: {e}"
 
@@ -580,7 +602,7 @@ async def process_files(
             try:
                 text = await asyncio.to_thread(_extract_xlsx_text, local_path)
                 pf.extracted_text = text
-                inline_parts.append(f"[File: {filename}]\n{text}")
+                inline_parts.append(f"[File: {pf.original_name}]\n{text}")
             except Exception as e:
                 pf.error = f"Failed to read XLSX: {e}"
 
@@ -606,17 +628,14 @@ async def process_files(
 
         ctx.files.append(pf)
 
-        # --- Step 5: Persist to SQLite thread_files ---
+        # --- Persist to SQLite thread_files ---
         try:
             await chat_store.save_thread_file(thread_id, pf)
         except Exception as e:
-            log.error("Failed to save thread_file record", file=filename, error=str(e))
-
-        existing_count += 1
-        existing_bytes += size_bytes
+            log.error("Failed to save thread_file record", file=pf.original_name, error=str(e))
 
         log.info("File processed",
-                 file=filename, type=pf.file_type,
+                 file=pf.original_name, type=pf.file_type,
                  gemini=bool(pf.gemini_uri), chromadb=bool(pf.chromadb_collection),
                  text_len=len(pf.extracted_text))
 

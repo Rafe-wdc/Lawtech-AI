@@ -19,6 +19,9 @@ Usage:
 
     # Sequential (no concurrency):
     python tests/test_pdf_chat.py --pdf-dir ./test_pdfs --concurrency 1
+
+    # Batch mode: upload ALL PDFs in one request + ask a question:
+    python tests/test_pdf_chat.py --pdf-dir ./test_pdfs --batch --batch-query "summarize all the pdfs"
 """
 
 import argparse
@@ -276,6 +279,142 @@ async def test_one_pdf(
     return result
 
 
+async def test_batch_upload(
+    client: httpx.AsyncClient, base_url: str,
+    filepaths: list[str], query: str, headers: dict,
+    followup_questions: list[str] | None = None,
+) -> PdfTestResult:
+    """Upload ALL files in a single /pyapi/chat request and ask one question.
+
+    Then optionally ask follow-up questions on the same thread.
+    """
+    filenames = [os.path.basename(f) for f in filepaths]
+    total_size = sum(os.path.getsize(f) for f in filepaths) / (1024 * 1024)
+    result = PdfTestResult(
+        filename=f"BATCH ({len(filepaths)} files)",
+        file_size_mb=round(total_size, 2),
+    )
+    total_start = time.perf_counter()
+
+    print(f"\n  [BATCH] Uploading {len(filepaths)} files ({total_size:.1f} MB total)...")
+    print(f"  [BATCH] Files: {', '.join(filenames)}")
+    print(f"  [BATCH] Query: {query[:80]}")
+
+    start = time.perf_counter()
+    try:
+        data = {"query": query}
+        file_handles = []
+        files_list = []
+        for fp in filepaths:
+            fh = open(fp, "rb")
+            file_handles.append(fh)
+            files_list.append(("files", (os.path.basename(fp), fh, "application/pdf")))
+
+        try:
+            async with client.stream(
+                "POST",
+                f"{base_url}/pyapi/chat",
+                data=data,
+                files=files_list,
+                headers=headers,
+                timeout=900.0,  # longer timeout for batch
+            ) as resp:
+                if resp.status_code != 200:
+                    body = await resp.aread()
+                    elapsed = time.perf_counter() - start
+                    result.upload_ok = False
+                    result.upload_error = f"HTTP {resp.status_code}: {body.decode()[:300]}"
+                    result.upload_time_sec = round(elapsed, 2)
+                    result.total_time_sec = round(time.perf_counter() - total_start, 2)
+                    print(f"  [BATCH] FAILED: {result.upload_error[:120]}")
+                    return result
+                sse_result = await _read_sse_response(resp)
+        finally:
+            for fh in file_handles:
+                fh.close()
+
+        elapsed = time.perf_counter() - start
+        answer = sse_result["answer"]
+        thread_id = sse_result["thread_id"]
+        result.thread_id = thread_id
+        result.upload_time_sec = round(elapsed, 2)
+        result.file_processing_summary = "; ".join(sse_result["file_processing_msgs"])
+
+        if sse_result["error"]:
+            result.upload_ok = False
+            result.upload_error = sse_result["error"]
+            print(f"  [BATCH] ERROR: {sse_result['error'][:120]}")
+        else:
+            result.upload_ok = True
+            has_content = len(answer) > 50
+            status = "OK" if has_content else "EMPTY"
+            print(f"  [BATCH] {status}: {len(answer)} chars, {elapsed:.1f}s")
+            if result.file_processing_summary:
+                print(f"  [BATCH] Files: {result.file_processing_summary}")
+            print(f"  [BATCH] Answer preview: {answer[:300]}...")
+
+        result.qa_results.append(asdict(QAResult(
+            question=query,
+            answer_preview=answer[:200],
+            answer_length=len(answer),
+            time_sec=round(elapsed, 2),
+            has_content=len(answer) > 50,
+            file_processing_msg=result.file_processing_summary,
+        )))
+
+        # Follow-up questions on the same thread
+        if followup_questions and thread_id and result.upload_ok:
+            for i, fq in enumerate(followup_questions, 2):
+                print(f"  [BATCH] Follow-up Q{i}: {fq[:60]}...")
+                # No file re-upload — just query on the existing thread
+                fq_start = time.perf_counter()
+                async with client.stream(
+                    "POST",
+                    f"{base_url}/pyapi/chat",
+                    data={"query": fq, "globalThreadId": thread_id},
+                    headers=headers,
+                    timeout=300.0,
+                ) as resp:
+                    if resp.status_code != 200:
+                        body = await resp.aread()
+                        fq_elapsed = time.perf_counter() - fq_start
+                        print(f"  [BATCH] Q{i} ERROR: HTTP {resp.status_code}")
+                        result.qa_results.append(asdict(QAResult(
+                            question=fq,
+                            time_sec=round(fq_elapsed, 2),
+                            error=f"HTTP {resp.status_code}: {body.decode()[:200]}",
+                        )))
+                        continue
+                    fq_result = await _read_sse_response(resp)
+
+                fq_elapsed = time.perf_counter() - fq_start
+                fq_answer = fq_result["answer"]
+                fq_ok = len(fq_answer) > 50
+                status = "OK" if fq_ok else ("ERROR" if fq_result["error"] else "EMPTY")
+                print(f"  [BATCH] Q{i} {status}: {len(fq_answer)} chars, {fq_elapsed:.1f}s")
+                result.qa_results.append(asdict(QAResult(
+                    question=fq,
+                    answer_preview=fq_answer[:200],
+                    answer_length=len(fq_answer),
+                    time_sec=round(fq_elapsed, 2),
+                    has_content=fq_ok,
+                    error=fq_result.get("error", ""),
+                )))
+
+    except Exception as e:
+        elapsed = time.perf_counter() - start
+        result.upload_ok = False
+        result.upload_error = str(e)
+        result.upload_time_sec = round(elapsed, 2)
+        print(f"  [BATCH] EXCEPTION: {e}")
+
+    # Aggregates
+    qa_times = [q["time_sec"] for q in result.qa_results if not q.get("error")]
+    result.avg_qa_time_sec = round(sum(qa_times) / len(qa_times), 2) if qa_times else 0
+    result.total_time_sec = round(time.perf_counter() - total_start, 2)
+    return result
+
+
 async def run_tests(
     pdf_files: list[str], base_url: str, api_key: str,
     questions: list[str], concurrency: int = 1,
@@ -397,6 +536,14 @@ def main():
                         help="Number of parallel PDF tests (default: 1)")
     parser.add_argument("--output", default="tests/test_results_pdf.json",
                         help="Path to save JSON results")
+    parser.add_argument("--batch", action="store_true",
+                        help="Batch mode: upload ALL PDFs in a single request")
+    parser.add_argument("--batch-query", default="Summarize all the uploaded documents. "
+                        "For each document, provide: document type, parties involved, "
+                        "key dates, and main outcome.",
+                        help="Question to ask in batch mode")
+    parser.add_argument("--batch-followups", nargs="*", default=None,
+                        help="Follow-up questions after batch upload (on same thread)")
 
     args = parser.parse_args()
 
@@ -425,6 +572,32 @@ def main():
     questions = args.questions or DEFAULT_QUESTIONS
     if args.max_questions:
         questions = questions[:args.max_questions]
+
+    if args.batch:
+        # Batch mode: upload all PDFs in a single request
+        headers = {}
+        if args.api_key:
+            headers["X-API-Key"] = args.api_key
+
+        print(f"\n{'=' * 70}")
+        print(f"BATCH MODE: uploading {len(pdf_files)} files in one request")
+        print(f"Query: {args.batch_query[:80]}")
+        if args.batch_followups:
+            print(f"Follow-ups: {len(args.batch_followups)}")
+        print(f"{'=' * 70}")
+
+        async def _run_batch():
+            async with httpx.AsyncClient() as client:
+                return await test_batch_upload(
+                    client, args.url, pdf_files, args.batch_query, headers,
+                    followup_questions=args.batch_followups,
+                )
+
+        result = asyncio.run(_run_batch())
+        results = [result]
+        print_report(results)
+        save_results(results, args.output)
+        return
 
     results = asyncio.run(run_tests(
         pdf_files=pdf_files,

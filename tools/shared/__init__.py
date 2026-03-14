@@ -53,8 +53,6 @@ from .llm_tools import (
 # --- Storage Tools ---
 from .storage_tools import (
     generate_s3_link,
-    load_pdf_chat_history,
-    save_pdf_chat_history,
     load_chat_history_from_api,
 )
 
@@ -167,10 +165,8 @@ ALL_TOOLS = [
     extract_match_phrase,
     select_best_template,
     generate_legal_response,
-    # Storage (4)
+    # Storage (2)
     generate_s3_link,
-    load_pdf_chat_history,
-    save_pdf_chat_history,
     load_chat_history_from_api,
     # Guardrail (6)
     validate_input,
@@ -249,9 +245,7 @@ AGENT_TOOLS = {
     ],
     "memory": [
         load_chat_history_from_api,
-        load_pdf_chat_history,
         save_chat_history,
-        save_pdf_chat_history,
         rewrite_query,
         summarize_conversation,
         is_followup_query,
@@ -327,8 +321,6 @@ AGENT_TOOLS = {
         store_pdf_chunks,
         delete_pdf_vectorstore,
         get_collection_metadata,
-        load_pdf_chat_history,
-        save_pdf_chat_history,
     ],
     "sci_judgment": [
         search_by_topic,

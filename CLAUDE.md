@@ -61,7 +61,6 @@ This is a **Legal AI API** that provides intelligent legal assistance including:
 │   └── prompts.py           # All system prompts
 ├── tests/                   # Test suites and evaluation scripts
 ├── services/                # Embedding service for remote deployment
-├── workers/                 # Background PDF processing worker
 ├── frontend.html            # Built-in test UI
 └── requirements.txt         # Python dependencies
 ```
@@ -99,10 +98,8 @@ python tests/evaluate_agents.py
 All routes are prefixed with `/pyapi`:
 - `POST /pyapi/search` - Batch mode legal Q&A
 - `POST /pyapi/search/stream` - Streaming legal Q&A (Server-Sent Events)
+- `POST /pyapi/chat` - Unified chat endpoint (SSE streaming + inline file uploads, 30 files, 1GB/file)
 - `POST /pyapi/continue_draft` - Continue incomplete drafts
-- `POST /pyapi/mainqa` - PDF upload & Q&A
-- `POST /pyapi/upload_async` - Background PDF upload
-- `GET /pyapi/job_status/{job_id}` - Check async job status
 - `DELETE /pyapi/delete_vectordb/{unique_string}` - Delete PDF collections
 - `POST /pyapi/feedback` - Submit feedback
 - `GET /pyapi/health` - Health check

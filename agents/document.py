@@ -121,30 +121,6 @@ def _get_or_create_collection(unique_string: str) -> Chroma:
     )
 
 
-def process_and_store_text(
-    unique_string: str, text: str, file_name: str
-) -> int:
-    """Chunk text and store in ChromaDB. Returns number of chunks stored.
-
-    This is called from the gateway API route during PDF upload,
-    not from the LangGraph agent flow.
-    """
-    chunks = _text_splitter.split_text(text)
-    if not chunks:
-        return 0
-
-    documents = [
-        Document(page_content=chunk, metadata={"source": file_name, "chunk_id": i})
-        for i, chunk in enumerate(chunks)
-    ]
-
-    vectordb = _get_or_create_collection(unique_string)
-    vectordb.add_documents(documents)
-    log.info("Chunks stored",
-             collection=unique_string, chunks=len(documents),
-             file=file_name)
-    return len(documents)
-
 
 def _retrieve_and_answer(
     unique_string: str, query: str, chat_history_messages: list[dict]

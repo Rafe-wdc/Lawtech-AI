@@ -2,18 +2,14 @@
 
 Reusable @tool functions for:
 - AWS S3 link generation for judgment PDFs
-- PDF chat history persistence (local JSON)
-- Chat history loading from external lawttorney.ai API
+- Chat history loading (SQLite-backed)
 
-Uses: core.settings for S3 config and API base URL
+Uses: core.settings for S3 config
 """
 
 from __future__ import annotations
 
-import json
 import os
-import re
-import threading
 from functools import lru_cache
 from typing import Optional
 
@@ -24,24 +20,6 @@ from core.settings import S3_BUCKET, S3_REGION, CHROMA_STORE_ROOT
 from core.logger import get_logger
 
 log = get_logger("Storage")
-
-# Per-collection lock to prevent concurrent read-modify-write on chat history files
-_chat_history_locks: dict[str, threading.Lock] = {}
-_chat_history_locks_guard = threading.Lock()
-
-
-def _get_chat_lock(unique_string: str) -> threading.Lock:
-    with _chat_history_locks_guard:
-        if unique_string not in _chat_history_locks:
-            _chat_history_locks[unique_string] = threading.Lock()
-        return _chat_history_locks[unique_string]
-
-_SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
-
-
-def _validate_collection_name(unique_string: str) -> None:
-    if not unique_string or not _SAFE_COLLECTION_RE.match(unique_string):
-        raise ValueError(f"Invalid or unsafe collection name: {unique_string!r}")
 
 
 # --- S3 Existence Check (cached per server lifetime) ---
@@ -108,82 +86,7 @@ def generate_s3_link(court: str, file_name: str, title: str) -> Optional[str]:
 
 # --- PDF Chat History ---
 
-@tool
-def load_pdf_chat_history(unique_string: str) -> dict:
-    """Load PDF-specific chat history from local JSON file.
-
-    Each uploaded PDF collection has its own chat history stored
-    at chroma_store/chat_histories/{unique_string}_chat.json.
-
-    Args:
-        unique_string: The unique identifier for the user's document collection
-
-    Returns:
-        Dict with keys: recent (last 5 messages), all_chats (full history list)
-    """
-    _validate_collection_name(unique_string)
-    chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
-    chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
-
-    if not os.path.exists(chat_file):
-        return {"recent": [], "all_chats": []}
-
-    try:
-        with open(chat_file, "r", encoding="utf-8") as f:
-            all_chats = json.load(f)
-        recent = all_chats[-5:] if len(all_chats) > 5 else all_chats
-        return {"recent": recent, "all_chats": all_chats}
-    except Exception as e:
-        log.error(f"Failed to load chat history for {unique_string}: {e}")
-        return {"recent": [], "all_chats": []}
-
-
-@tool
-def save_pdf_chat_history(
-    unique_string: str,
-    question: str,
-    answer: str,
-) -> dict:
-    """Save a Q&A pair to the PDF-specific chat history file.
-
-    Appends the new Q&A pair to the existing chat history JSON file.
-    Creates the file and directory if they don't exist.
-
-    Args:
-        unique_string: The unique identifier for the user's document collection
-        question: The user's question
-        answer: The generated answer
-
-    Returns:
-        Dict with keys: saved (bool), total_messages (int)
-    """
-    _validate_collection_name(unique_string)
-    chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
-    os.makedirs(chat_dir, exist_ok=True)
-    chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
-
-    # Lock per collection to prevent concurrent read-modify-write data loss
-    with _get_chat_lock(unique_string):
-        all_chats = []
-        if os.path.exists(chat_file):
-            try:
-                with open(chat_file, "r", encoding="utf-8") as f:
-                    all_chats = json.load(f)
-            except Exception:
-                all_chats = []
-
-        all_chats.append({"question": question, "answer": answer})
-
-        try:
-            with open(chat_file, "w", encoding="utf-8") as f:
-                json.dump(all_chats, f, ensure_ascii=False, indent=2)
-            return {"saved": True, "total_messages": len(all_chats)}
-        except Exception as e:
-            log.error(f"Failed to save chat history for {unique_string}: {e}")
-            return {"saved": False, "total_messages": len(all_chats)}
-
-
-# --- Chat History (SQLite-first with legacy API fallback) ---
+# --- Chat History (SQLite-backed) ---
 
 @tool
 def load_chat_history_from_api(thread_id: str) -> dict:

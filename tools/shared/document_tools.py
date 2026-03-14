@@ -34,7 +34,7 @@ import chromadb
 
 MAX_PDF_SIZE_MB = 50
 MAX_PDF_PAGES = 500
-GEMINI_VISION_BATCH_SIZE = 5
+GEMINI_VISION_BATCH_SIZE = 10
 
 # Allowed base directories for PDF file operations.
 # Files must resolve to one of these paths to prevent path traversal.
@@ -209,15 +209,17 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
                         {
                             "type": "text",
                             "text": (
-                                f"Extract all visible text and markdown tables from these document images "
+                                f"Extract all visible text and markdown tables from these scanned legal document images "
                                 f"(Pages {batch_start + 1} to {batch_start + len(batch_b64)}). "
+                                "Pay attention to: party names, case numbers, dates, section numbers, "
+                                "court names, and legal provisions. "
                                 "If anything is missing, blurred or illegible, replace it with most similar text or possible context."
                             ),
                         },
                         *[
                             {
                                 "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{b64_img}"},
+                                "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"},
                             }
                             for b64_img in batch_b64
                         ],
@@ -229,10 +231,9 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
 
         for i in range(start_page, end_page + 1):
             page = doc[i]
-            pix = page.get_pixmap(dpi=120)
-            buf = io.BytesIO()
-            buf.write(pix.tobytes("png"))
-            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            pix = page.get_pixmap(dpi=200)
+            img_bytes = pix.tobytes("jpeg", jpg_quality=85)
+            b64 = base64.b64encode(img_bytes).decode("utf-8")
             batch_images.append(b64)
 
             if len(batch_images) == GEMINI_VISION_BATCH_SIZE:

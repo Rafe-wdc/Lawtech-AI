@@ -14,15 +14,18 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import io
+import json
 import os
 import shutil
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.logger import get_logger
+from core.logger import get_logger, log_time
 from core.settings import (
     CHROMA_STORE_ROOT,
     UPLOADS_ROOT,
@@ -45,7 +48,10 @@ log = get_logger("FileProcessor")
 
 MAX_INLINE_TEXT_CHARS = 100_000
 MAX_INLINE_PDF_PAGES = 20
-VISION_BATCH_SIZE = 5
+VISION_BATCH_SIZE = 10          # pages per Gemini Vision call (was 5)
+VISION_DPI = 200                # render DPI for scanned PDFs (was 120)
+VISION_MAX_CONCURRENT = 4       # max parallel OCR batch calls
+OCR_CACHE_DIR = os.path.join(CHROMA_STORE_ROOT, ".ocr_cache")
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".jpg", ".jpeg", ".png", ".webp",
@@ -139,42 +145,79 @@ def _extract_pdf_text(file_path: str) -> tuple[str, int]:
     return "\n\n".join(all_text), page_count
 
 
-def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
-    """Run Gemini Vision OCR on PDF pages. Returns extracted text."""
+def _file_hash(file_path: str) -> str:
+    """SHA256 hash of a file for OCR cache keying."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _load_ocr_cache(file_hash: str) -> str | None:
+    """Return cached OCR text if available, else None."""
+    cache_file = os.path.join(OCR_CACHE_DIR, f"{file_hash}.txt")
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                text = f.read()
+            if text.strip():
+                log.info("OCR cache hit", hash=file_hash[:12])
+                return text
+        except Exception:
+            pass
+    return None
+
+
+def _save_ocr_cache(file_hash: str, text: str) -> None:
+    """Persist OCR text to disk cache."""
+    try:
+        os.makedirs(OCR_CACHE_DIR, exist_ok=True)
+        cache_file = os.path.join(OCR_CACHE_DIR, f"{file_hash}.txt")
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write(text)
+        log.info("OCR result cached", hash=file_hash[:12], chars=len(text))
+    except Exception as e:
+        log.warning("Failed to cache OCR result", error=str(e))
+
+
+def _render_pdf_pages(file_path: str, page_count: int) -> list[tuple[int, str]]:
+    """Render all PDF pages to base64 JPEG images. Returns [(page_start, b64), ...]
+
+    Uses JPEG (not PNG) for ~2x smaller payloads on scanned documents.
+    Uses higher DPI (200) for better OCR accuracy on legal documents.
+    Groups pages into batches of VISION_BATCH_SIZE.
+    """
     import base64
     import fitz
-    from core.clients import get_gemini_flash
 
-    try:
-        doc = fitz.open(file_path)
-        llm = get_gemini_flash(temperature=0.0)
-        results = []
-        batch_images: list[str] = []
+    doc = fitz.open(file_path)
+    batches: list[tuple[int, list[str]]] = []
+    current_batch: list[str] = []
+    batch_start = 0
 
-        for i in range(page_count):
-            page = doc[i]
-            pix = page.get_pixmap(dpi=120)
-            buf = io.BytesIO()
-            buf.write(pix.tobytes("png"))
-            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            batch_images.append(b64)
+    for i in range(page_count):
+        page = doc[i]
+        pix = page.get_pixmap(dpi=VISION_DPI)
+        # JPEG at quality 85 — ~2x smaller than PNG for scanned docs
+        img_bytes = pix.tobytes("jpeg", jpg_quality=85)
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        current_batch.append(b64)
 
-            if len(batch_images) == VISION_BATCH_SIZE:
-                results.append(_ocr_batch(llm, batch_images, i - len(batch_images) + 1))
-                batch_images = []
+        if len(current_batch) == VISION_BATCH_SIZE:
+            batches.append((batch_start, current_batch))
+            batch_start = i + 1
+            current_batch = []
 
-        if batch_images:
-            results.append(_ocr_batch(llm, batch_images, page_count - len(batch_images)))
+    if current_batch:
+        batches.append((batch_start, current_batch))
 
-        doc.close()
-        return "\n\n".join(results)
-
-    except Exception as e:
-        log.error("Vision OCR failed", error=str(e))
-        return ""
+    doc.close()
+    return batches
 
 
 def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
+    """Send a batch of page images to Gemini for OCR. Returns extracted text."""
     content = [
         {
             "role": "user",
@@ -182,16 +225,18 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
                 {
                     "type": "text",
                     "text": (
-                        f"Extract all visible text from these document images "
+                        f"Extract all visible text from these scanned legal document images "
                         f"(Pages {batch_start + 1} to {batch_start + len(batch_b64)}). "
-                        "Preserve formatting. If text is blurred or illegible, "
-                        "replace with most likely text based on context."
+                        "Preserve formatting, paragraph breaks, and structure. "
+                        "Pay attention to: party names, case numbers, dates, section numbers, "
+                        "court names, and legal provisions. If text is blurred or illegible, "
+                        "replace with most likely text based on legal context."
                     ),
                 },
                 *[
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
                     }
                     for b64 in batch_b64
                 ],
@@ -200,6 +245,62 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
     ]
     resp = llm.invoke(content)
     return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.content.strip()}"
+
+
+def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
+    """Run Gemini Vision OCR on PDF pages with parallel batch processing.
+
+    Improvements over original:
+    1. Hash-based cache — skip OCR if same PDF was processed before
+    2. JPEG @ quality 85 — ~2x smaller payloads vs PNG
+    3. 200 DPI — better accuracy for faded/handwritten legal text (was 120)
+    4. Batch size 10 — fewer API calls (was 5)
+    5. Parallel batch calls — up to 4 concurrent Gemini calls (was sequential)
+    6. Legal-aware OCR prompt — better extraction of names, dates, sections
+    """
+    from core.clients import get_gemini_flash
+
+    # Check cache first
+    pdf_hash = _file_hash(file_path)
+    cached = _load_ocr_cache(pdf_hash)
+    if cached:
+        return cached
+
+    try:
+        with log_time(log, "PDF page rendering", pages=page_count, dpi=VISION_DPI):
+            batches = _render_pdf_pages(file_path, page_count)
+
+        llm = get_gemini_flash(temperature=0.0)
+        log.info("Starting parallel OCR",
+                 batches=len(batches), pages=page_count,
+                 batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT)
+
+        # Run batches in parallel using ThreadPoolExecutor
+        with log_time(log, "Parallel Vision OCR", batches=len(batches)):
+            with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
+                futures = [
+                    executor.submit(_ocr_batch, llm, batch_images, batch_start)
+                    for batch_start, batch_images in batches
+                ]
+                results = []
+                for future in futures:
+                    try:
+                        results.append(future.result(timeout=120))
+                    except Exception as e:
+                        log.warning("OCR batch failed", error=str(e))
+                        results.append("")
+
+        text = "\n\n".join(r for r in results if r)
+
+        # Cache the result
+        if text.strip():
+            _save_ocr_cache(pdf_hash, text)
+
+        return text
+
+    except Exception as e:
+        log.error("Vision OCR failed", error=str(e))
+        return ""
 
 
 def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
@@ -427,13 +528,24 @@ async def process_files(
             try:
                 text, page_count = await asyncio.to_thread(_extract_pdf_text, local_path)
                 pf.page_count = page_count
+                is_scanned = not text.strip()
 
-                if not text.strip():
-                    # Scanned PDF — Vision OCR fallback
+                if is_scanned and pf.gemini_uri:
+                    # Scanned PDF but Gemini Files API has it — skip expensive OCR.
+                    # Gemini Pro can read the PDF directly via its file URI.
+                    # Only run OCR if we need ChromaDB (for retrieval on follow-ups).
+                    log.info("Scanned PDF: Gemini URI available, skipping Vision OCR",
+                             file=filename, pages=page_count)
+
+                elif is_scanned:
+                    # Scanned PDF and no Gemini URI — must run Vision OCR
+                    log.info("Scanned PDF: no Gemini URI, running Vision OCR",
+                             file=filename, pages=page_count)
                     text = await asyncio.to_thread(_vision_ocr_pdf, local_path, page_count)
 
-                if page_count > MAX_INLINE_PDF_PAGES or len(text) > MAX_INLINE_TEXT_CHARS:
-                    # Store in ChromaDB for retrieval
+                # Store large PDFs in ChromaDB for retrieval (even if Gemini has it,
+                # ChromaDB enables targeted chunk retrieval for follow-up questions)
+                if text.strip() and (page_count > MAX_INLINE_PDF_PAGES or len(text) > MAX_INLINE_TEXT_CHARS):
                     collection_id = f"inline_{thread_id}_{file_id[:8]}"
                     try:
                         await asyncio.to_thread(_store_in_chromadb, text, collection_id, filename)
@@ -443,12 +555,10 @@ async def process_files(
                                  file=filename, pages=page_count, collection=collection_id)
                     except Exception as e:
                         log.error("ChromaDB storage failed", error=str(e))
-                        # Fall back to truncated inline
                         pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
                         inline_parts.append(f"[File: {filename}]\n{pf.extracted_text}")
-                else:
-                    # Small PDF — use extracted text as fallback context
-                    # (Gemini URI already registered above for direct PDF access)
+                elif text.strip():
+                    # Small PDF with text — use inline
                     if not pf.gemini_uri:
                         pf.extracted_text = text
                         inline_parts.append(f"[File: {filename}]\n{text}")

@@ -457,6 +457,64 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
         return {}
 
 
+# --- Signal-Based Plan Validation ---
+# Instead of scattered keyword pre-checks, this single function validates
+# the LLM's plan against keyword signals in the query and adds missing agents.
+# Each rule maps keyword patterns → required agent(s) that should be in the plan.
+
+_PLAN_SIGNALS: list[tuple[tuple[str, ...], str, int]] = [
+    # (keywords, required_agent, max_plan_size_to_add)
+    # — max_plan_size_to_add: only add if plan has ≤ N agents (prevents 4+ agent bloat)
+
+    # Judgment signals: "cases", "case law", "precedent", "ruling" → need Judgment
+    ((" cases", "case law", "case laws", "precedent", "court decision",
+      "judgments on ", "judgement on ", "rulings on "), "Judgment", 2),
+
+    # SCI signals (backup for pre-check): "supreme court", "SC" → need SCI_Judgment
+    (("supreme court", "apex court"), "SCI_Judgment", 2),
+
+    # Old act names → need Newacts for new equivalents
+    (("ipc", "crpc", "cr.p.c", "cr pc", "iea",
+      "indian penal code", "code of criminal procedure",
+      "indian evidence act", "criminal procedure code"), "Newacts", 3),
+
+    # Freshness signals → need Scenario for web-grounded info
+    (("latest", "recent changes", "recent amendments", "recent court",
+      "recent ruling", "current status", "new changes", "updated",
+      "is it legal", "is cryptocurrency", "is crypto"), "Scenario", 3),
+]
+
+
+def _validate_and_enrich_plan(
+    tasks_planned: list[str],
+    original_query: str,
+    normalized_query: str,
+    log,
+) -> list[str]:
+    """Validate plan against keyword signals and add missing agents.
+
+    Scans both the original and normalized query for keyword patterns
+    that indicate a specific agent should be in the plan. If the agent
+    is missing and the plan isn't already too large, adds it.
+
+    Returns the (possibly enriched) plan.
+    """
+    combined = (original_query.lower() + " " + normalized_query.lower())
+
+    for keywords, required_agent, max_size in _PLAN_SIGNALS:
+        if required_agent in tasks_planned:
+            continue
+        if len(tasks_planned) > max_size:
+            continue
+        if any(k in combined for k in keywords):
+            tasks_planned.append(required_agent)
+            log.info("Plan enriched by signal validator",
+                     added=required_agent, signal_match=True,
+                     plan=tasks_planned)
+
+    return tasks_planned
+
+
 # --- Agent Nodes ---
 
 async def orchestrator_plan_node(state: LegalAgentState) -> dict:
@@ -496,19 +554,28 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # Check BOTH the (possibly normalized) query AND the original raw query,
     # because the normalizer may rewrite "what's up?" → "What is the user asking for?"
     _original_query = state.get("original_query", query)
+    # Greetings that are safe as prefix matches (won't collide with legal terms)
     _GREETING_PREFIXES = (
-        "hello", "hi", "hey", "hii", "helo", "hola", "namaste", "namaskar",
+        "hello", "hey", "hii", "helo", "hola", "namaste", "namaskar",
         "good morning", "good afternoon", "good evening", "good night",
-        "how are you", "how r u", "what's up", "whats up", "sup",
+        "how are you", "how r u", "what's up", "whats up",
         "who are you", "what are you", "how's it going", "hows it going",
     )
+    # Greetings that must match exactly (would false-positive as prefix)
+    # "hi" matches "high court", "sup" matches "supreme court"
+    _GREETING_EXACT = ("hi", "sup")
     _q_stripped = query.lower().strip().rstrip("!?,.")
     _orig_stripped = _original_query.lower().strip().rstrip("!?,.")
     if (
         _q_stripped in _GREETING_PREFIXES
         or _orig_stripped in _GREETING_PREFIXES
-        or any(_q_stripped.startswith(g) for g in _GREETING_PREFIXES)
-        or any(_orig_stripped.startswith(g) for g in _GREETING_PREFIXES)
+        or _q_stripped in _GREETING_EXACT
+        or _orig_stripped in _GREETING_EXACT
+        or any(_q_stripped.startswith(g + " ") for g in _GREETING_PREFIXES)
+        or any(_orig_stripped.startswith(g + " ") for g in _GREETING_PREFIXES)
+        # "hi X" / "sup X" — only if followed by casual words, not legal terms
+        or any(_q_stripped.startswith(g + " ") and len(_q_stripped) < 30 for g in _GREETING_EXACT)
+        or any(_orig_stripped.startswith(g + " ") and len(_orig_stripped) < 30 for g in _GREETING_EXACT)
     ):
         log.info("Greeting detected, short-circuiting classification",
                  original=_original_query[:60])
@@ -587,6 +654,13 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             tasks_planned.append("Document")
             log.info("Document agent added for file context (multi-intent support)",
                      file_names=fc.file_names)
+
+    # Step 3c: Signal-based plan validation
+    # Detects keyword signals that indicate missing agents in the plan.
+    # Catches LLM misclassifications systematically instead of ad-hoc pre-checks.
+    tasks_planned = _validate_and_enrich_plan(
+        tasks_planned, _original_query, query, log,
+    )
 
     # Step 4: Per-agent query rewriting (only for multi-agent plans)
     agent_queries = {}
@@ -821,6 +895,14 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         synth_tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             synth_tokens = response.usage_metadata.get("total_tokens", 0)
+
+        # Cap synthesis output to prevent oversized responses from blocking
+        # the event loop in sanitize_markdown (349K response observed in prod)
+        _MAX_SYNTHESIS_LEN = 50000
+        if len(synthesized) > _MAX_SYNTHESIS_LEN:
+            log.warning("Synthesis output too large, truncating",
+                        original_len=len(synthesized), cap=_MAX_SYNTHESIS_LEN)
+            synthesized = synthesized[:_MAX_SYNTHESIS_LEN] + "\n\n*[Response truncated for length]*"
 
         total_tokens += synth_tokens
         log.info("Synthesis completed",

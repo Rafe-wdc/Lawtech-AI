@@ -201,7 +201,7 @@ def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
 
         # Generate S3 link
         file_str = str(source_file) if isinstance(source_file, dict) else source_file
-        s3_link = generate_s3_link(court, file_str, title) if court and file_str else None
+        s3_link = generate_s3_link.invoke({"court": court, "file_name": file_str, "title": title}) if court and file_str else None
 
         sources.append(SourceMetadata(
             source_type="judgment",

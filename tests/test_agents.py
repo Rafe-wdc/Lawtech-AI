@@ -320,14 +320,16 @@ def classify_result(resp_json: dict, expected_agents) -> str:
     return "PASS"
 
 
-def send_request(prompt_tuple, api_url, timeout):
+def send_request(prompt_tuple, api_url, timeout, api_key=None):
     """Send a single request and return the result dict."""
     idx, prompt, category, expected_agents = prompt_tuple
+    headers = {"X-API-Key": api_key} if api_key else {}
     start = time.time()
     try:
         resp = requests.post(
             api_url,
             json={"Promptquery": prompt},
+            headers=headers,
             timeout=timeout,
         )
         elapsed = time.time() - start
@@ -398,10 +400,11 @@ MULTI_TURN_SEQUENCES = [
 ]
 
 
-def run_multi_turn(sequence: dict, api_url: str, timeout: int) -> dict:
+def run_multi_turn(sequence: dict, api_url: str, timeout: int, api_key: str = None) -> dict:
     """Run a multi-turn conversation sequence and return results."""
     thread_id = None
     turn_results = []
+    headers = {"X-API-Key": api_key} if api_key else {}
 
     for i, prompt in enumerate(sequence["turns"]):
         start = time.time()
@@ -410,7 +413,7 @@ def run_multi_turn(sequence: dict, api_url: str, timeout: int) -> dict:
             if thread_id:
                 payload["globalThreadId"] = thread_id
 
-            resp = requests.post(api_url, json=payload, timeout=timeout)
+            resp = requests.post(api_url, json=payload, headers=headers, timeout=timeout)
             elapsed = time.time() - start
 
             if resp.status_code != 200:
@@ -598,7 +601,8 @@ def generate_markdown(details, summary, total_elapsed, concurrency, multi_turn_r
 def main():
     parser = argparse.ArgumentParser(description="Comprehensive agent test (all except Drafting)")
     parser.add_argument("--concurrency", type=int, default=5, help="Max parallel requests")
-    parser.add_argument("--api-url", default="http://localhost:5050/pyapi/search", help="API endpoint")
+    parser.add_argument("--api-url", default="http://localhost:5000/pyapi/search", help="API endpoint")
+    parser.add_argument("--api-key", default=None, help="X-API-Key header value")
     parser.add_argument("--timeout", type=int, default=180, help="Per-request timeout (seconds)")
     parser.add_argument("--skip-multi-turn", action="store_true", help="Skip multi-turn sequences")
     args = parser.parse_args()
@@ -621,7 +625,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         future_to_prompt = {
-            pool.submit(send_request, p, args.api_url, args.timeout): p
+            pool.submit(send_request, p, args.api_url, args.timeout, args.api_key): p
             for p in PROMPTS
         }
 
@@ -652,7 +656,7 @@ def main():
         for seq in MULTI_TURN_SEQUENCES:
             print(f"    Running: {seq['name']} ({len(seq['turns'])} turns)...", end=" ")
             sys.stdout.flush()
-            mt_result = run_multi_turn(seq, args.api_url, args.timeout)
+            mt_result = run_multi_turn(seq, args.api_url, args.timeout, args.api_key)
             multi_turn_results.append(mt_result)
             color = "\033[92m" if mt_result["status"] == "PASS" else "\033[91m"
             reset = "\033[0m"

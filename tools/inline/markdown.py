@@ -24,6 +24,11 @@ def sanitize_markdown(content: str) -> str:
     if not content:
         return content
 
+    # Skip expensive line-by-line processing for very large responses
+    # (observed: 349K response blocked event loop for 14 minutes)
+    if len(content) > 100000:
+        return content.rstrip() + '\n'
+
     text = content
 
     # 1. Fix unclosed fenced code blocks

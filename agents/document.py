@@ -16,7 +16,6 @@ Embedding: all-MiniLM-L6-v2
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 from datetime import date
@@ -24,8 +23,6 @@ from datetime import date
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
 from core.clients import get_gemini_pro, get_qa_embeddings
 from core.settings import CHROMA_STORE_ROOT, TIMEOUT_CHROMADB_SEC
@@ -41,66 +38,31 @@ log = get_logger("Document")
 _SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
 
 
+def _format_chat_history(chat_history: list) -> str:
+    """Format LangGraph chat history messages into a text block for prompts.
+
+    Takes the last 3 turns (6 messages) to keep context concise.
+    """
+    if not chat_history:
+        return ""
+    # Take last 6 messages (3 turns of Q+A)
+    recent = chat_history[-6:]
+    parts = []
+    for msg in recent:
+        role = getattr(msg, "type", "unknown")
+        content = getattr(msg, "content", "")
+        if role == "human":
+            parts.append(f"User: {content[:500]}")
+        elif role == "ai":
+            parts.append(f"Assistant: {content[:500]}")
+    return "\n".join(parts)
+
+
 def _validate_collection_name(unique_string: str) -> None:
     if not unique_string or not _SAFE_COLLECTION_RE.match(unique_string):
         raise ValueError(f"Invalid or unsafe collection name: {unique_string!r}")
 
 
-# --- Text Chunking ---
-
-_text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=800,
-    chunk_overlap=200,
-    length_function=len,
-)
-
-
-# --- Chat History for PDF Sessions ---
-
-def _load_pdf_chat_history(unique_string: str) -> tuple[list[dict], list[dict]]:
-    """Load PDF-specific chat history from local JSON file.
-    Returns (recent_messages, all_chats).
-    """
-    _validate_collection_name(unique_string)
-    chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
-    chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
-
-    if not os.path.exists(chat_file):
-        return [], []
-
-    try:
-        with open(chat_file, "r", encoding="utf-8") as f:
-            all_chats = json.load(f)
-        recent = all_chats[-5:] if len(all_chats) > 5 else all_chats
-        log.debug("PDF chat history loaded",
-                  collection=unique_string, total=len(all_chats),
-                  recent=len(recent))
-        return recent, all_chats
-    except Exception as e:
-        log.error("Failed to load chat history",
-                  collection=unique_string, error=str(e))
-        return [], []
-
-
-def _save_pdf_chat_history(
-    unique_string: str, question: str, answer: str, all_chats: list[dict]
-) -> None:
-    """Save a Q&A pair to the PDF-specific chat history."""
-    _validate_collection_name(unique_string)
-    chat_dir = os.path.join(CHROMA_STORE_ROOT, "chat_histories")
-    os.makedirs(chat_dir, exist_ok=True)
-    chat_file = os.path.join(chat_dir, f"{unique_string}_chat.json")
-
-    all_chats.append({"question": question, "answer": answer})
-
-    try:
-        with open(chat_file, "w", encoding="utf-8") as f:
-            json.dump(all_chats, f, ensure_ascii=False, indent=2)
-        log.debug("Chat history saved",
-                  collection=unique_string, total_entries=len(all_chats))
-    except Exception as e:
-        log.error("Failed to save chat history",
-                  collection=unique_string, error=str(e))
 
 
 # --- ChromaDB Collection Management ---
@@ -122,21 +84,80 @@ def _get_or_create_collection(unique_string: str) -> Chroma:
 
 
 
+def _collection_has_data(unique_string: str) -> bool:
+    """Check if a ChromaDB collection exists and has documents.
+
+    Used to verify background OCR has completed before attempting retrieval.
+    Returns False if collection is empty or doesn't exist yet.
+    """
+    try:
+        vectordb = _get_or_create_collection(unique_string)
+        count = vectordb._collection.count()
+        return count > 0
+    except Exception:
+        return False
+
+
+def _retrieve_from_collections(
+    collections: list[str], query: str, k_per_collection: int = 15,
+) -> list[Document]:
+    """Retrieve from multiple ChromaDB collections and merge results.
+
+    When only one collection exists, retrieves k=30 from it.
+    When multiple exist, retrieves k_per_collection from each and merges.
+    Skips empty collections (background OCR may not have completed yet).
+    """
+    all_docs: list[Document] = []
+    ready_collections = [c for c in collections if _collection_has_data(c)]
+
+    if not ready_collections:
+        log.warning("No ChromaDB collections have data yet",
+                    total=len(collections))
+        return []
+
+    if len(ready_collections) != len(collections):
+        log.info("Some collections not ready (background OCR pending)",
+                 ready=len(ready_collections), total=len(collections))
+
+    if len(ready_collections) == 1:
+        # Single collection — use full k budget
+        vectordb = _get_or_create_collection(ready_collections[0])
+        with log_time(log, "MMR retrieval", collection=ready_collections[0]):
+            retriever = vectordb.as_retriever(
+                search_type="mmr",
+                search_kwargs={"k": 30, "fetch_k": 50},
+            )
+            all_docs = retriever.invoke(query)
+    else:
+        # Multiple collections — retrieve from each, merge
+        for coll_id in ready_collections:
+            try:
+                vectordb = _get_or_create_collection(coll_id)
+                with log_time(log, "MMR retrieval", collection=coll_id):
+                    retriever = vectordb.as_retriever(
+                        search_type="mmr",
+                        search_kwargs={"k": k_per_collection, "fetch_k": k_per_collection * 2},
+                    )
+                    docs = retriever.invoke(query)
+                    all_docs.extend(docs)
+            except Exception as e:
+                log.warning("Collection retrieval failed",
+                            collection=coll_id, error=str(e))
+        log.info("Multi-collection retrieval",
+                 collections=len(ready_collections), total_docs=len(all_docs))
+
+    return all_docs
+
+
 def _retrieve_and_answer(
-    unique_string: str, query: str, chat_history_messages: list[dict]
+    unique_string: str, query: str, history_text: str = "",
+    collections: list[str] | None = None,
 ) -> tuple[str, int, list[Document]]:
-    """Retrieve from user's collection and generate answer.
+    """Retrieve from user's collection(s) and generate answer.
     Returns (answer_text, tokens_consumed, retrieved_docs).
     """
-    vectordb = _get_or_create_collection(unique_string)
-
-    # MMR retrieval for diversity
-    with log_time(log, "MMR retrieval", collection=unique_string):
-        retriever = vectordb.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": 30, "fetch_k": 50},
-        )
-        docs = retriever.invoke(query)
+    coll_list = collections or [unique_string]
+    docs = _retrieve_from_collections(coll_list, query)
 
     if not docs:
         log.warning("No relevant docs found", collection=unique_string)
@@ -147,28 +168,29 @@ def _retrieve_and_answer(
 
     docs_text = "\n\n".join(d.page_content for d in docs)
 
-    # Format chat history for prompt
-    history_text = ""
-    for msg in chat_history_messages[-5:]:
-        history_text += f"Q: {msg.get('question', '')}\nA: {msg.get('answer', '')[:500]}\n\n"
-
     with log_time(log, "LLM generation"):
         llm = get_gemini_pro(temperature=0.3)
-        prompt = ChatPromptTemplate.from_messages([
+        prompt_messages = [
             ("system", "You are Lawttorney, a legal AI assistant. Answer questions about the uploaded document(s) using only the provided context. Be thorough and cite specific sections when possible."),
-            ("user", "Previous conversation:\n{history}"),
+        ]
+        if history_text:
+            prompt_messages.append(("user", "Previous conversation:\n{history}"))
+        prompt_messages.extend([
             ("user", "Document content:\n{docs}"),
             ("user", "Current Date: {date}"),
             ("user", "Question: {query}"),
         ])
+        prompt = ChatPromptTemplate.from_messages(prompt_messages)
         chain = prompt | llm
 
-        response = chain.invoke({
+        invoke_args = {
             "query": query,
             "docs": docs_text,
-            "history": history_text,
             "date": str(date.today()),
-        })
+        }
+        if history_text:
+            invoke_args["history"] = history_text
+        response = chain.invoke(invoke_args)
 
     tokens = 0
     if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -194,17 +216,21 @@ async def document_node(state: LegalAgentState) -> dict:
     query = state.get("query") or state.get("original_query", "")
     unique_string = state.get("unique_string")
     user_language = state.get("user_language", "en")
+    chat_history = state.get("chat_history", [])
 
     # Check file_context — prefer Gemini file parts (native PDF reading)
     # over ChromaDB (OCR'd text chunks) when both are available
+    all_collections: list[str] = []
     if not unique_string:
         fc = FileContextData.from_state(state)
         if fc and fc.all_gemini_parts:
             # Gemini URIs available — use multimodal path (better quality)
             pass  # handled below
         elif fc and fc.chromadb_collections:
-            unique_string = fc.chromadb_collections[0]
-            log.info("Using inline file collection", collection=unique_string)
+            all_collections = fc.chromadb_collections
+            unique_string = all_collections[0]
+            log.info("Using inline file collections",
+                     collections=all_collections, primary=unique_string)
 
     log.info("Agent started",
              collection=unique_string, query=query[:100])
@@ -251,6 +277,9 @@ async def document_node(state: LegalAgentState) -> dict:
                         user_language,
                     )
                     messages = [("system", _doc_system)]
+                    history_text = _format_chat_history(chat_history)
+                    if history_text:
+                        messages.append(("user", f"Previous conversation:\n{history_text}"))
                     if fc.inline_text:
                         messages.append(("user", f"Additional document text:\n{fc.inline_text[:40000]}"))
                     messages.append(("user", user_content))
@@ -296,7 +325,8 @@ async def document_node(state: LegalAgentState) -> dict:
             try:
                 with log_time(log, "Inline document QA"):
                     llm = get_gemini_pro(temperature=0.3)
-                    prompt = ChatPromptTemplate.from_messages([
+                    history_text = _format_chat_history(chat_history)
+                    prompt_messages = [
                         ("system", localize_prompt(
                             "You are Lawttorney, a legal AI assistant. Answer questions about "
                             "the uploaded document(s) using only the provided content. Be "
@@ -304,16 +334,24 @@ async def document_node(state: LegalAgentState) -> dict:
                             "dates, and legal provisions when possible.",
                             user_language,
                         )),
+                    ]
+                    if history_text:
+                        prompt_messages.append(("user", "Previous conversation:\n{history}"))
+                    prompt_messages.extend([
                         ("user", "Document content:\n{docs}"),
                         ("user", "Current Date: {date}"),
                         ("user", "Question: {query}"),
                     ])
+                    prompt = ChatPromptTemplate.from_messages(prompt_messages)
                     chain = prompt | llm
-                    response = chain.invoke({
+                    invoke_args = {
                         "query": query,
                         "docs": fc.inline_text[:80000],
                         "date": str(date.today()),
-                    })
+                    }
+                    if history_text:
+                        invoke_args["history"] = history_text
+                    response = chain.invoke(invoke_args)
 
                 tokens = 0
                 if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -359,22 +397,22 @@ async def document_node(state: LegalAgentState) -> dict:
         }
 
     try:
-        # Load chat history (sync file I/O → off-thread)
-        recent_history, all_chats = await asyncio.to_thread(
-            _load_pdf_chat_history, unique_string
-        )
+        # Use chat history from state (loaded by memory node from SQLite)
+        history_text = _format_chat_history(chat_history)
 
         # Retrieve from ChromaDB and generate answer (blocking I/O + LLM → off-thread)
         # 90s timeout: ChromaDB MMR (k=30) + Gemini Pro generation can be slow,
         # but if ChromaDB hangs on a locked/stalled disk this prevents infinite hang.
         with log_time(log, "Full document QA pipeline"):
             answer, tokens, retrieved_docs = await asyncio.wait_for(
-                asyncio.to_thread(_retrieve_and_answer, unique_string, query, recent_history),
+                asyncio.to_thread(
+                    _retrieve_and_answer, unique_string, query, history_text,
+                    collections=all_collections or None,
+                ),
                 timeout=TIMEOUT_CHROMADB_SEC,
             )
-
-        # Save chat history (sync file I/O → off-thread)
-        await asyncio.to_thread(_save_pdf_chat_history, unique_string, query, answer, all_chats)
+        # Note: chat history is saved by the gateway after the full graph run,
+        # not by the document agent. No duplicate save needed here.
 
         log.info("Agent completed",
                  collection=unique_string,

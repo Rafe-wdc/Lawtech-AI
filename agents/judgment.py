@@ -34,10 +34,10 @@ from core.settings import TIMEOUT_ES_PARALLEL_SEC, TIMEOUT_METADATA_SEC
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
 from tools.shared.judgment_search import (
     smart_judgment_search,
-    generate_s3_link,
     detect_citation,
     detect_case_type,
 )
+from tools.shared.storage_tools import generate_s3_link
 from tools.shared.llm_tools import CaseMetadata
 
 log = get_logger("Judgment")

@@ -141,6 +141,7 @@ You will be given:
 2. The query category
 3. The AI system's response
 4. Which agents were used (for context)
+5. Keyword coverage data (expected vs found keywords)
 
 Score the response on three dimensions (0-10 each):
 
@@ -155,15 +156,19 @@ Score the response on three dimensions (0-10 each):
 - 7-8: Covers main points, minor gaps
 - 4-6: Covers some aspects, notable gaps
 - 0-3: Superficial or missing major parts
+- Consider keyword coverage when scoring: missing expected keywords may indicate gaps
 
 **Accuracy** (0-10): Is the legal information correct and well-cited?
 - 9-10: Accurate with proper citations and references
 - 7-8: Mostly accurate, minor imprecisions
 - 4-6: Some inaccuracies or unsupported claims
 - 0-3: Significant errors or fabricated information
+- Missing expected keywords may indicate inaccurate or irrelevant content
 
 Category-specific criteria:
 {criteria}
+
+{keyword_section}
 
 Verdict rules:
 - PASS: All three scores >= 7
@@ -194,10 +199,30 @@ Verdict: PASS if both >= 7, PARTIAL if any 4-6, FAIL if any < 4."""
 # ── LLM Setup ───────────────────────────────────────────────────────────────
 
 def _get_evaluator_llm():
-    """Get GPT-4o-mini with structured output for evaluation."""
+    """Get Gemini Flash with structured output for evaluation."""
     from langchain.chat_models import init_chat_model
-    llm = init_chat_model("openai:gpt-4o-mini", temperature=0.1)
+    llm = init_chat_model("google_genai:gemini-2.5-flash", temperature=0.1)
     return llm
+
+
+def _build_keyword_section(item: dict, response_text: str) -> tuple:
+    """Build keyword coverage section for eval prompt. Returns (section_text, coverage_pct)."""
+    expected_keywords = item.get("expected_keywords", [])
+    if not expected_keywords:
+        return "", 1.0
+    response_lower = response_text.lower()
+    found = [kw for kw in expected_keywords if kw.lower() in response_lower]
+    missing = [kw for kw in expected_keywords if kw.lower() not in response_lower]
+    coverage = len(found) / len(expected_keywords) if expected_keywords else 1.0
+    section = (
+        f"## Keyword Coverage\n"
+        f"Expected keywords: {', '.join(expected_keywords)}\n"
+        f"Found keywords: {', '.join(found) if found else 'NONE'}\n"
+        f"Missing keywords: {', '.join(missing) if missing else 'NONE'}\n"
+        f"Coverage: {coverage:.0%}\n\n"
+        f"Consider keyword coverage when scoring Completeness and Accuracy."
+    )
+    return section, coverage
 
 
 def evaluate_single(item: dict, llm) -> dict:
@@ -217,12 +242,14 @@ def evaluate_single(item: dict, llm) -> dict:
             "eval_accuracy": 0,
             "eval_verdict": "FAIL",
             "eval_reasoning": f"No response to evaluate (status: {status})",
+            "eval_keyword_coverage": 0.0,
         }
 
     criteria = _get_criteria(category)
+    keyword_section, kw_coverage = _build_keyword_section(item, response_text)
     eval_llm = llm.with_structured_output(EvaluationScore)
     messages = [
-        ("system", EVAL_PROMPT.format(criteria=criteria)),
+        ("system", EVAL_PROMPT.format(criteria=criteria, keyword_section=keyword_section)),
         ("user",
          f"**User Query:** {prompt_text}\n\n"
          f"**Category:** {category}\n\n"
@@ -239,6 +266,7 @@ def evaluate_single(item: dict, llm) -> dict:
             "eval_accuracy": score.accuracy,
             "eval_verdict": score.verdict,
             "eval_reasoning": score.reasoning,
+            "eval_keyword_coverage": round(kw_coverage, 2),
         }
     except Exception as e:
         return {
@@ -248,6 +276,7 @@ def evaluate_single(item: dict, llm) -> dict:
             "eval_accuracy": -1,
             "eval_verdict": "ERROR",
             "eval_reasoning": f"Evaluation failed: {str(e)[:200]}",
+            "eval_keyword_coverage": round(kw_coverage, 2),
         }
 
 
@@ -321,7 +350,7 @@ def generate_eval_report(
         f"**Total Single-Turn:** {total}  ",
         f"**Total Multi-Turn:** {len(mt_evaluated)}  ",
         f"**Evaluation Time:** {total_elapsed:.1f}s  ",
-        f"**Model:** GPT-4o-mini (temperature=0.1)  ",
+        f"**Model:** Gemini 2.5 Flash (temperature=0.1)  ",
         "",
         "## Overall Verdicts (Single-Turn)",
         "",
@@ -390,18 +419,34 @@ def generate_eval_report(
                 f"| {reasoning_short} |"
             )
 
+    # Keyword coverage summary
+    kw_items = [e for e in evaluated if e.get("expected_keywords")]
+    if kw_items:
+        kw_coverages = [e.get("eval_keyword_coverage", 0) for e in kw_items]
+        avg_kw = sum(kw_coverages) / len(kw_coverages)
+        full_kw = sum(1 for c in kw_coverages if c >= 1.0)
+        lines.extend([
+            "", "## Keyword Coverage Summary", "",
+            "| Metric | Value |",
+            "|--------|-------|",
+            f"| Tests with keywords | {len(kw_items)} |",
+            f"| Avg keyword coverage | {avg_kw:.0%} |",
+            f"| Full coverage (100%) | {full_kw}/{len(kw_items)} |",
+        ])
+
     # Per-prompt results table
     lines.extend([
         "", "## Per-Prompt Results", "",
-        "| # | Verdict | Rel | Comp | Acc | Category | Agent(s) | Prompt |",
-        "|---|---------|-----|------|-----|----------|----------|--------|",
+        "| # | Verdict | Rel | Comp | Acc | KW% | Category | Agent(s) | Prompt |",
+        "|---|---------|-----|------|-----|-----|----------|----------|--------|",
     ])
     for e in sorted(evaluated, key=lambda x: x["id"]):
         prompt_short = e["prompt"][:40] + ("..." if len(e["prompt"]) > 40 else "")
         agents_str = ", ".join(e.get("agents_used", []))[:25] or "—"
+        kw_pct = f"{e.get('eval_keyword_coverage', 0):.0%}" if e.get("expected_keywords") else "—"
         lines.append(
             f"| {e['id']} | {e['eval_verdict']} | {e['eval_relevance']} "
-            f"| {e['eval_completeness']} | {e['eval_accuracy']} "
+            f"| {e['eval_completeness']} | {e['eval_accuracy']} | {kw_pct} "
             f"| {e['category']} | {agents_str} | {prompt_short} |"
         )
 
@@ -584,6 +629,7 @@ def main():
             "prompt": e["prompt"],
             "category": e["category"],
             "expected_agents": e.get("expected_agents"),
+            "expected_keywords": e.get("expected_keywords", []),
             "agents_used": e.get("agents_used", []),
             "test_status": e.get("status", ""),
             "response_len": e.get("response_len", 0),
@@ -592,6 +638,7 @@ def main():
             "eval_accuracy": e["eval_accuracy"],
             "eval_verdict": e["eval_verdict"],
             "eval_reasoning": e["eval_reasoning"],
+            "eval_keyword_coverage": e.get("eval_keyword_coverage", 0.0),
         })
 
     json_path = os.path.join(script_dir, "test_eval_agents_results.json")

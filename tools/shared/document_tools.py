@@ -21,7 +21,7 @@ import tempfile
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.clients import get_gemini_flash, get_qa_embeddings
+from core.clients import get_gemini_flash_full, get_qa_embeddings
 from core.logger import get_logger
 from core.settings import CHROMA_STORE_ROOT
 
@@ -199,7 +199,7 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
         results = []
         batch_images = []
 
-        llm = get_gemini_flash(temperature=0.0)
+        llm = get_gemini_flash_full(temperature=0.0)
 
         def process_batch(batch_b64: list[str], batch_start: int) -> str:
             content = [

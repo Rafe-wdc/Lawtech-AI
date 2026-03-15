@@ -13,7 +13,7 @@ from __future__ import annotations
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.state import LegalAgentState, AgentResult
-from core.clients import get_gemini_flash
+from core.clients import get_gemini_flash_full
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 
@@ -50,7 +50,7 @@ async def non_legal_node(state: LegalAgentState) -> dict:
     log.info("Non-legal agent started", query=query[:80], lang=user_language)
 
     try:
-        llm = get_gemini_flash(temperature=0.4)
+        llm = get_gemini_flash_full(temperature=0.4)
         prompt = ChatPromptTemplate.from_template(
             localize_prompt(_NON_LEGAL_PROMPT, user_language)
         )

@@ -28,7 +28,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import (
-    get_es_client, get_gpt4o, get_gemini_flash, get_retriever_embeddings,
+    get_es_client, get_gemini_flash, get_gemini_flash_full, get_retriever_embeddings,
 )
 from core.settings import ES_INDICES, TIMEOUT_METADATA_SEC
 from core.language import localize_prompt
@@ -154,9 +154,9 @@ Return only valid JSON:
 
 
 def _extract_act_metadata(query: str) -> ActQueryMetadata:
-    """Use GPT-4o to extract act metadata from a newacts query."""
+    """Use Gemini Flash Lite to extract act metadata from a newacts query."""
     with log_time(log, "Act metadata extraction"):
-        llm = get_gpt4o().with_structured_output(ActQueryMetadata)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(ActQueryMetadata)
         prompt = ChatPromptTemplate.from_template(METADATA_PROMPT)
         chain = prompt | llm
         result = chain.invoke({"query": query})
@@ -588,7 +588,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
         # Step 6: Generate response (with 1 retry on disconnect)
         with log_time(log, "LLM generation"):
-            llm = get_gemini_flash(temperature=0.1)
+            llm = get_gemini_flash_full(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([
                 ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),

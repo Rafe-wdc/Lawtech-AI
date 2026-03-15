@@ -4,7 +4,7 @@ The brain of the system. Two phases:
 1. PLAN: Analyze query → classify task → decide which agents to invoke
 2. SYNTHESIZE: Merge results from domain agents into final response
 
-Uses: GPT-4o for task classification, planning, and synthesis.
+Uses: Gemini 2.5 Flash Lite for task classification, planning, and synthesis.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from core.state import LegalAgentState, AgentResult, FileContextData
-from core.clients import get_gpt4o, get_gemini_flash, get_gemini_pro, get_drafting_llm
+from core.clients import get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import (
@@ -116,7 +116,7 @@ def _classify_task(query: str, chat_summary: str | None = None) -> str:
     try:
         with log_time(log, "Task classification"):
             prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-            llm = get_gpt4o().with_structured_output(IdentifyTaskSchema)
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(IdentifyTaskSchema)
             formatted = prompt.format(query=query, chat_summary=chat_summary or "")
             result = llm.invoke(formatted)
         log.info("Task classified", task=result.task, query=query[:80])
@@ -282,7 +282,7 @@ def _plan_agents(query: str, task: str) -> list[str]:
     # Try multi-agent planning with LLM
     try:
         with log_time(log, "Multi-agent planning"):
-            llm = get_gpt4o().with_structured_output(AgentPlan)
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(AgentPlan)
             prompt = ChatPromptTemplate.from_template(PLAN_PROMPT)
             chain = prompt | llm
             plan = chain.invoke({"query": query, "task": task})
@@ -878,7 +878,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 
     try:
         with log_time(log, "LLM synthesis"):
-            llm = get_gemini_flash(temperature=0.2)
+            llm = get_gemini_flash_full(temperature=0.2)
             prompt = ChatPromptTemplate.from_template(
                 localize_prompt(SYNTHESIS_PROMPT, user_language)
             )

@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
-from core.clients import get_es_client, get_gpt4o_mini, get_gemini_flash
+from core.clients import get_es_client, get_gemini_flash, get_gemini_flash_full
 from core.settings import ES_INDICES
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
@@ -71,8 +71,8 @@ Return JSON only:
 
 
 def _extract_match_phrase(query: str, text: str, title: str) -> QueryMetadata:
-    """Use GPT-4o-mini to extract a match phrase for targeted ES search."""
-    llm = get_gpt4o_mini().with_structured_output(QueryMetadata)
+    """Use Gemini Flash Lite to extract a match phrase for targeted ES search."""
+    llm = get_gemini_flash(temperature=0.1).with_structured_output(QueryMetadata)
     prompt = ChatPromptTemplate.from_template(MATCH_PHRASE_PROMPT)
     chain = prompt | llm
     return chain.invoke({'query': query, 'text': text, 'title': title})
@@ -388,7 +388,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
 
         # Step 5: Generate response (with 1 retry on disconnect)
         with log_time(log, "LLM generation"):
-            llm = get_gemini_flash(temperature=0.1)
+            llm = get_gemini_flash_full(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([
                 ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),

@@ -21,7 +21,7 @@ from langchain_core.messages import SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
-from core.clients import get_gpt4o
+from core.clients import get_gemini_flash_full
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
@@ -48,7 +48,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
 
     try:
         # Build ReAct agent with SCI tools
-        llm = get_gpt4o(temperature=0)
+        llm = get_gemini_flash_full(temperature=0)
         tools = AGENT_TOOLS["sci_judgment"]
         log.debug("Building ReAct agent", tools_count=len(tools))
 
@@ -81,12 +81,27 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
 
             # Get the last AI message with content as the answer
             if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                answer = msg.content
+                raw = msg.content
+                # Gemini may return content as list of parts; normalize to string
+                if isinstance(raw, list):
+                    answer = "\n".join(
+                        p.get("text", str(p)) if isinstance(p, dict) else str(p)
+                        for p in raw
+                    )
+                else:
+                    answer = raw
 
         if not answer and messages:
             last_msg = messages[-1]
             if hasattr(last_msg, "content") and last_msg.content:
-                answer = last_msg.content
+                raw = last_msg.content
+                if isinstance(raw, list):
+                    answer = "\n".join(
+                        p.get("text", str(p)) if isinstance(p, dict) else str(p)
+                        for p in raw
+                    )
+                else:
+                    answer = raw
 
         log.info("ReAct agent completed",
                  tools_used=tools_used, tool_calls=len(tools_used),

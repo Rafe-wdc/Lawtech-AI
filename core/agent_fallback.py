@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 
 from core.state import AgentResult, SourceMetadata
-from core.clients import get_gpt4o_mini, get_genai_client
+from core.clients import get_gemini_flash, get_genai_client
 from core.logger import get_logger, log_time
 from core.chat_store import chat_store
 from core.metrics import METRICS
@@ -80,7 +80,7 @@ def rewrite_query_for_domain(query: str, agent_name: str) -> str:
 
     try:
         with log_time(log, "Query rewrite", agent=agent_name):
-            llm = get_gpt4o_mini(temperature=0.1)
+            llm = get_gemini_flash(temperature=0.1)
             response = llm.invoke([
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Original query: {query}"},

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 
-from core.clients import get_gpt4o, get_gemini_flash
+from core.clients import get_gemini_flash
 from core.logger import get_logger
 from config.prompts import TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT
 
@@ -105,7 +105,7 @@ def get_execution_plan(query: str, chat_summary: str = "") -> dict:
     # Step 1: Classify task
     try:
         prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-        llm = get_gpt4o().with_structured_output(IdentifyTaskSchema)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(IdentifyTaskSchema)
         formatted = prompt.format(query=query, chat_summary=chat_summary)
         result = llm.invoke(formatted)
         task = result.task
@@ -131,7 +131,7 @@ def get_execution_plan(query: str, chat_summary: str = "") -> dict:
         }
 
     try:
-        llm = get_gpt4o().with_structured_output(AgentPlan)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(AgentPlan)
         prompt = ChatPromptTemplate.from_template(_PLAN_PROMPT)
         chain = prompt | llm
         plan = chain.invoke({"query": query, "task": task})
@@ -323,7 +323,7 @@ def request_clarification(query: str, ambiguity: str = "") -> dict:
         ambiguity = "The query could be interpreted in multiple ways"
 
     try:
-        llm = get_gpt4o(temperature=0.3).with_structured_output(ClarificationRequest)
+        llm = get_gemini_flash(temperature=0.3).with_structured_output(ClarificationRequest)
         prompt = ChatPromptTemplate.from_template(_CLARIFICATION_PROMPT)
         chain = prompt | llm
         result = chain.invoke({"query": query, "ambiguity": ambiguity})

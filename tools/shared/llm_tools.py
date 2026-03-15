@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from core.clients import get_gpt4o, get_gpt4o_mini, get_gemini_flash, get_drafting_llm
+from core.clients import get_gemini_flash, get_gemini_flash_full, get_drafting_llm
 
 
 # ============================================================
@@ -190,7 +190,7 @@ def extract_case_metadata(query: str) -> dict:
         Dict with keys: court_name, petitioner_names, respondent_names, year,
         topics, acts_or_sections, lexical_query, size
     """
-    llm = get_gpt4o().with_structured_output(CaseMetadata)
+    llm = get_gemini_flash(temperature=0.1).with_structured_output(CaseMetadata)
     prompt = ChatPromptTemplate.from_template(_CASE_METADATA_PROMPT)
     chain = prompt | llm
     result = chain.invoke({"query": query})
@@ -220,7 +220,7 @@ def extract_act_metadata(query: str) -> dict:
     Returns:
         Dict with keys: section_number (list), act_name, hybrid_search (bool)
     """
-    llm = get_gpt4o().with_structured_output(ActQueryMetadata)
+    llm = get_gemini_flash(temperature=0.1).with_structured_output(ActQueryMetadata)
     prompt = ChatPromptTemplate.from_template(_ACT_METADATA_PROMPT)
     chain = prompt | llm
     result = chain.invoke({"query": query})
@@ -247,7 +247,7 @@ def extract_match_phrase(query: str, text: str, title: str) -> dict:
     Returns:
         Dict with keys: match_phrase, sub_part
     """
-    llm = get_gpt4o_mini().with_structured_output(QueryMatchPhrase)
+    llm = get_gemini_flash(temperature=0.1).with_structured_output(QueryMatchPhrase)
     prompt = ChatPromptTemplate.from_template(_MATCH_PHRASE_PROMPT)
     chain = prompt | llm
     result = chain.invoke({"query": query, "text": text, "title": title})
@@ -272,7 +272,7 @@ def select_best_template(query: str, file_paths: list[str]) -> str:
     Returns:
         The selected template source file path
     """
-    llm = get_gpt4o_mini().with_structured_output(TemplateSource)
+    llm = get_gemini_flash(temperature=0.1).with_structured_output(TemplateSource)
     prompt = ChatPromptTemplate.from_template(_TEMPLATE_SELECTION_PROMPT)
     chain = prompt | llm
     result = chain.invoke({"query": query, "files_path": "\n".join(file_paths)})
@@ -317,7 +317,7 @@ def generate_legal_response(
     if model == "drafting":
         llm = get_drafting_llm()
     elif model == "gpt4o":
-        llm = get_gpt4o(temperature=temperature)
+        llm = get_gemini_flash_full(temperature=temperature)
     else:
         llm = get_gemini_flash(temperature=temperature)
 

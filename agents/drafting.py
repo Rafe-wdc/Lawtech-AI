@@ -31,7 +31,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import (
-    get_es_client, get_gpt4o_mini, get_drafting_llm,
+    get_es_client, get_gemini_flash, get_drafting_llm,
     get_retriever_embeddings,
 )
 from core.settings import ES_INDICES
@@ -218,7 +218,7 @@ def _select_best_template(query: str, candidates: list[dict]) -> tuple[str, list
             preview = c["_source"]["page_content"][:200].replace("\n", " ")
             candidate_lines.append(f"{i}. {path}\n   Preview: {preview}...")
 
-        llm = get_gpt4o_mini().with_structured_output(TemplateSource)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(TemplateSource)
         prompt = ChatPromptTemplate.from_template(TEMPLATE_SELECTION_PROMPT)
         chain = prompt | llm
         result = chain.invoke({

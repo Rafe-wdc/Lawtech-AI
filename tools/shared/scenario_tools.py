@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.clients import get_genai_client, get_gpt4o, get_gemini_pro
+from core.clients import get_genai_client, get_gemini_flash_full, get_gemini_pro
 from core.settings import TIMEOUT_WEB_SEARCH_SEC
 from core.logger import get_logger
 from config.prompts import SCENARIO_SYSTEM_PROMPT
@@ -182,7 +182,7 @@ def cite_provisions(scenario: str) -> dict:
         Dict with keys: provisions (list of {act_name, section, relevance})
     """
     try:
-        llm = get_gpt4o(temperature=0.2).with_structured_output(ProvisionsResult)
+        llm = get_gemini_flash_full(temperature=0.2).with_structured_output(ProvisionsResult)
         prompt = ChatPromptTemplate.from_template(
             "You are an Indian legal expert. Identify ALL relevant legal provisions "
             "(acts, sections, articles) applicable to this scenario.\n\n"
@@ -251,7 +251,7 @@ def find_similar_cases(scenario: str) -> dict:
 
         # Try to parse structured cases from the response
         try:
-            llm = get_gpt4o(temperature=0.0).with_structured_output(CasesResult)
+            llm = get_gemini_flash_full(temperature=0.0).with_structured_output(CasesResult)
             result = llm.invoke(
                 f"Extract the case citations from this text into structured format:\n\n{content}"
             )
@@ -283,7 +283,7 @@ def suggest_remedies(scenario: str) -> dict:
         Dict with keys: remedies (list of {remedy, steps, timeline})
     """
     try:
-        llm = get_gpt4o(temperature=0.3).with_structured_output(RemediesResult)
+        llm = get_gemini_flash_full(temperature=0.3).with_structured_output(RemediesResult)
         prompt = ChatPromptTemplate.from_template(
             "You are an Indian legal advisor. Suggest all available legal remedies "
             "for this scenario. For each remedy, provide:\n"

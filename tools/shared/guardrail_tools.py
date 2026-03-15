@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.clients import get_gemini_flash, get_gemini_pro
+from core.clients import get_gemini_flash, get_gemini_flash_full
 from core.logger import get_logger
 
 log = get_logger("GuardrailTools")
@@ -264,7 +264,7 @@ def flag_hallucination(content: str, sources: list[str]) -> dict:
     sources_text = "\n\n---\n\n".join(s[:500] for s in sources[:5])
 
     try:
-        llm = get_gemini_pro(temperature=0.0).with_structured_output(HallucinationResult)
+        llm = get_gemini_flash_full(temperature=0.0).with_structured_output(HallucinationResult)
         prompt = (
             "You are a legal accuracy checker. Compare the AI response against the source documents.\n"
             "Flag any claims, case citations, section numbers, or legal provisions in the response "

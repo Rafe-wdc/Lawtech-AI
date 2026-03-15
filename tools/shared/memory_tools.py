@@ -17,7 +17,7 @@ from typing import Union
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.clients import get_gemini_flash, get_gpt4o
+from core.clients import get_gemini_flash
 from core.logger import get_logger
 
 log = get_logger("MemoryTools")
@@ -144,7 +144,7 @@ def summarize_conversation(conversation_text: str, task: str = "General") -> str
         return conversation_text
 
     try:
-        llm = get_gpt4o(temperature=0.2)
+        llm = get_gemini_flash(temperature=0.2)
         prompt = ChatPromptTemplate.from_template(_SUMMARIZE_PROMPT)
         chain = prompt | llm
 

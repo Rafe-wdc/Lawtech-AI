@@ -26,7 +26,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
-from core.clients import get_gemini_flash, get_es_client
+from core.clients import get_gemini_flash, get_gemini_flash_full, get_es_client
 from core.settings import ES_INDICES
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
@@ -167,7 +167,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
               source=source_name, context_len=len(combined_context))
 
     with log_time(log, "LLM generation", task=task):
-        llm = get_gemini_flash(temperature=0.3)
+        llm = get_gemini_flash_full(temperature=0.3)
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             MessagesPlaceholder(variable_name="chat_history", optional=True),

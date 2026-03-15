@@ -27,7 +27,7 @@ from datetime import date
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
-from core.clients import get_gpt4o, get_gemini_flash
+from core.clients import get_gemini_flash, get_gemini_flash_full
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.settings import TIMEOUT_ES_PARALLEL_SEC, TIMEOUT_METADATA_SEC
@@ -73,9 +73,9 @@ Output only valid JSON."""
 
 
 def _extract_case_metadata(query: str) -> CaseMetadata:
-    """Use GPT-4o to extract structured metadata from a judgment query."""
+    """Use Gemini Flash Lite to extract structured metadata from a judgment query."""
     with log_time(log, "Case metadata extraction"):
-        llm = get_gpt4o().with_structured_output(CaseMetadata)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(CaseMetadata)
         prompt = ChatPromptTemplate.from_template(METADATA_EXTRACTION_PROMPT)
         chain = prompt | llm
         result = chain.invoke({"query": query})
@@ -359,7 +359,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
         docs_text = "\n\n".join(docs_text_parts)
 
         with log_time(log, "LLM generation"):
-            llm = get_gemini_flash(temperature=0.1)
+            llm = get_gemini_flash_full(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([
                 ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),

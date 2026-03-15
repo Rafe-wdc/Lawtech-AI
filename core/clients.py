@@ -94,26 +94,41 @@ def record_es_success() -> None:
 
 @lru_cache(maxsize=1)
 def get_gpt4o(temperature: float = 0.3):
-    """GPT-4o for orchestrator, judgment metadata, task classification."""
+    """GPT-4o — kept for backward compat, prefer Gemini models."""
     return init_chat_model("openai:gpt-4o", temperature=temperature, max_retries=2)
 
 
 @lru_cache(maxsize=1)
 def get_gpt4o_mini(temperature: float = 0.3):
-    """GPT-4o-mini for draft selection, match phrase extraction."""
+    """GPT-4o-mini — kept for backward compat, prefer Gemini models."""
     return init_chat_model("openai:gpt-4o-mini", temperature=temperature, max_retries=2)
+
+
+# --- Gemini Model Tier ---
+# Flash Lite: classification, metadata extraction, query rewrite (fastest, cheapest)
+# Flash:      response generation, synthesis, ReAct agents (balanced quality + speed)
+# Pro:        scenario analysis, complex reasoning (highest quality)
+
+@lru_cache(maxsize=1)
+def get_gemini_flash_lite(temperature: float = 0.3):
+    """Gemini 2.5 Flash Lite — fastest. For classification, metadata, query rewrite."""
+    return init_chat_model("google_genai:gemini-2.5-flash-lite", temperature=temperature)
+
+
+# Alias: existing callers use get_gemini_flash() — keep pointing to Flash Lite
+get_gemini_flash = get_gemini_flash_lite
+
+
+@lru_cache(maxsize=1)
+def get_gemini_flash_full(temperature: float = 0.3):
+    """Gemini 2.5 Flash — balanced. For response generation, synthesis, ReAct agents."""
+    return init_chat_model("google_genai:gemini-2.5-flash", temperature=temperature)
 
 
 @lru_cache(maxsize=1)
 def get_gemini_pro(temperature: float = 0.5):
-    """Gemini 2.5 Pro for scenario analysis, PDF chat, relevance checking."""
+    """Gemini 2.5 Pro — strongest. For scenario analysis, PDF chat, complex reasoning."""
     return init_chat_model("google_genai:gemini-2.5-pro", temperature=temperature)
-
-
-@lru_cache(maxsize=1)
-def get_gemini_flash(temperature: float = 0.3):
-    """Gemini 2.5 Flash Lite for legal concepts, query rewriting, guardrails."""
-    return init_chat_model("google_genai:gemini-2.5-flash-lite", temperature=temperature)
 
 
 @lru_cache(maxsize=1)

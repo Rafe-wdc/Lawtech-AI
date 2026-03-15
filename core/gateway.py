@@ -49,6 +49,7 @@ from .logger import get_logger, set_request_id, log_time
 from .chat_store import chat_store
 from .metrics import METRICS
 from .quality import score_response as _score_response
+from .response_cache import response_cache, CacheEntry
 from .auth import require_user_key, require_admin_key, get_key_identifier
 
 log = get_logger("Gateway")
@@ -379,15 +380,32 @@ async def search(data: SearchRequest, request: Request):
     agent_graph = request.app.state.agent_graph
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
-    initial_state = _build_initial_state(
-        data.prompt_query, thread_id, preferred_language=data.preferred_language
-    )
-    config = {"configurable": {"thread_id": thread_id}}
     _req_start = time.perf_counter()
 
     log.info("Search request received",
              query=data.prompt_query[:100], thread_id=thread_id,
              query_len=len(data.prompt_query))
+
+    # --- Cache check: skip graph for repeated first-turn queries ---
+    _is_first_turn = not data.globalThreadId  # no thread = first turn
+    if _is_first_turn:
+        cached = response_cache.get(data.prompt_query)
+        if cached:
+            _latency_ms = int((time.perf_counter() - _req_start) * 1000)
+            log.info("Cache hit, returning cached response",
+                     latency_ms=_latency_ms, agents=cached.agents_used)
+            return SearchResponse(
+                globalThreadId=thread_id,
+                result=cached.response,
+                total_tokens_consumed=cached.tokens_consumed,
+                source=cached.source_metadata,
+                agents_used=cached.agents_used,
+            )
+
+    initial_state = _build_initial_state(
+        data.prompt_query, thread_id, preferred_language=data.preferred_language
+    )
+    config = {"configurable": {"thread_id": thread_id}}
 
     _graph_error: str | None = None
     try:
@@ -495,6 +513,15 @@ async def search(data: SearchRequest, request: Request):
         except Exception as e:
             log.warning("Followup suggestions failed", error=str(e))
 
+    # --- Cache store: save first-turn responses for future hits ---
+    if _is_first_turn and final_response and not final_state.get("is_blocked"):
+        response_cache.set(data.prompt_query, CacheEntry(
+            response=final_response,
+            source_metadata=final_state.get("source_metadata", []),
+            agents_used=agents_used,
+            tokens_consumed=total_tokens,
+        ))
+
     return SearchResponse(
         globalThreadId=thread_id,
         result=final_response,
@@ -547,13 +574,31 @@ async def search_stream(data: SearchRequest, request: Request):
     agent_graph = request.app.state.agent_graph
     thread_id = data.globalThreadId or str(uuid.uuid4())
     req_id = set_request_id(thread_id[:8])
+
+    log.info("Stream request received",
+             query=data.prompt_query[:100], thread_id=thread_id)
+
+    # --- Cache check for streaming endpoint ---
+    _is_first_turn = not data.globalThreadId
+    if _is_first_turn:
+        cached = response_cache.get(data.prompt_query)
+        if cached:
+            async def _cached_stream():
+                yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Returning cached response...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'response', 'content': cached.response})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'agents_used': cached.agents_used, 'total_tokens': cached.tokens_consumed, 'source_metadata': cached.source_metadata})}\n\n"
+            log.info("Stream cache hit", agents=cached.agents_used)
+            return StreamingResponse(
+                _cached_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
     initial_state = _build_initial_state(
         data.prompt_query, thread_id, preferred_language=data.preferred_language
     )
     config = {"configurable": {"thread_id": thread_id}}
-
-    log.info("Stream request received",
-             query=data.prompt_query[:100], thread_id=thread_id)
 
     async def event_generator():
         """Generate SSE events from the agent graph stream."""
@@ -743,6 +788,15 @@ async def search_stream(data: SearchRequest, request: Request):
                 log.debug("Draft continuation saved", thread_id=thread_id[:12])
             except Exception as e:
                 log.error("Failed to save draft continuation", error=str(e))
+
+        # Cache store for first-turn streaming responses
+        if _is_first_turn and final_response and not draft_continuation_data:
+            response_cache.set(data.prompt_query, CacheEntry(
+                response=final_response,
+                source_metadata=all_source_metadata,
+                agents_used=agents_used,
+                tokens_consumed=total_tokens,
+            ))
 
         # Send completion event with metadata
         done_event = {
@@ -1425,6 +1479,9 @@ async def health(request: Request):
                 overall = "degraded"
     except Exception as e:
         checks["checkpointer"] = {"status": "unknown", "detail": str(e)[:80]}
+
+    # --- 8. Response cache ---
+    checks["response_cache"] = response_cache.stats
 
     uptime_seconds = int(time.time() - _APP_START_TIME)
     body = {

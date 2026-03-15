@@ -65,6 +65,21 @@ class IdentifyTaskSchema(BaseModel):
     ] = Field(..., description="The primary legal task type")
 
 
+class ClassifyAndPlan(BaseModel):
+    """Merged classification + planning result — single LLM call."""
+    task: Literal[
+        "Drafting", "Judgment", "Legislation", "Constitution",
+        "Scenario", "Maxim", "Newacts", "Legal_Concepts",
+        "SCI_Judgment", "Document",
+        "Non_legal", "Other",
+    ] = Field(..., description="The primary legal task type")
+    agents: list[str] = Field(
+        ...,
+        description="List of agent names to invoke (1-3): Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, Document",
+    )
+    reasoning: str = Field(..., description="Brief reasoning for task type and agent selection")
+
+
 def _classify_task_regex_fallback(query: str) -> str:
     """Keyword-based task classification fallback when LLM is unavailable."""
     q = query.lower().strip()
@@ -173,6 +188,83 @@ Query: {query}
 Primary Task: {task}
 
 Return the list of agents and brief reasoning."""
+
+
+CLASSIFY_AND_PLAN_PROMPT = """You are an expert AI assistant specialized in Indian legal domain analysis.
+
+Perform TWO tasks in one step:
+
+## Task 1: Classify the query
+Identify the PRIMARY legal task type. Choose EXACTLY ONE:
+
+- **Newacts** → ONLY for these 6 acts: BNS/IPC, BNSS/CrPC, BSA/IEA (and their old/new equivalents). NOT for any other acts.
+- **Legislation** → ALL other central/state acts and statutes NOT listed under Newacts.
+- **Drafting** → Legal document creation, templates, agreements, contracts, petitions.
+- **Constitution** → Constitutional provisions, fundamental rights/duties, Articles of Constitution.
+- **Scenario** → Situational legal query, real-life legal situation analysis, legal advice.
+- **Judgment** → Case law, court decisions, precedents (general / High Court / unspecified courts).
+- **SCI_Judgment** → Supreme Court of India cases. Use when user explicitly mentions "Supreme Court" or "SC", or names a landmark SC case.
+- **Maxim** → Legal maxims, Latin phrases, legal doctrines (res judicata, estoppel, etc.).
+- **Legal_Concepts** → General legal explanations that don't fit above categories.
+- **Document** → Questions about uploaded files/documents.
+- **Non_legal** → Non-legal queries: greetings, casual chat, non-legal topics, bot identity questions.
+- **Other** → Legal-adjacent queries that don't fit other categories.
+
+## Task 2: Plan which agents to invoke
+Available agents: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, Document
+
+Rules:
+1. Most queries need only the PRIMARY agent matching the task type.
+2. Use MULTIPLE agents when the query explicitly asks for different types of information:
+   - "Draft bail application with relevant case laws" → [Drafting, Judgment]
+   - "Section 438 BNSS with SC precedents" → [Newacts, SCI_Judgment]
+   - "Explain Article 21 and related case laws" → [Constitution, Judgment]
+3. COMPLEX SCENARIO QUERIES: When a query describes a factual situation AND asks for arguments, defences, provisions, or citations, use MULTIPLE agents:
+   - Scenario + Judgment + Legislation/Newacts as appropriate
+4. When a query mentions BOTH constitutional concept AND legal maxim → [Constitution, Maxim]
+5. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
+6. For drafting requests: ONLY include Drafting when user explicitly asks to draft/write/prepare a document.
+7. Never use more than 3 agents.
+8. "Other" task always maps to Scenario agent.
+9. For Non_legal: agents should be ["Non_legal"].
+
+User Query: {query}
+Chat Summary (Optional): {chat_summary}
+
+Return the task type, list of agents, and brief reasoning."""
+
+
+def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str, list[str]]:
+    """Classify query AND plan agents in a single LLM call.
+
+    Returns (task, agents_list).
+    Falls back to regex classification + single-agent plan on failure.
+    """
+    try:
+        with log_time(log, "Classify + plan (merged)"):
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(ClassifyAndPlan)
+            prompt = ChatPromptTemplate.from_template(CLASSIFY_AND_PLAN_PROMPT)
+            chain = prompt | llm
+            result = chain.invoke({
+                "query": query,
+                "chat_summary": chat_summary or "",
+            })
+
+        task = result.task
+        agents = result.agents[:3]  # cap at 3
+        if not agents:
+            agents = [task]
+
+        log.info("Classify+plan completed",
+                 task=task, agents=agents,
+                 reasoning=result.reasoning[:120])
+        return task, agents
+
+    except Exception as e:
+        fallback_task = _classify_task_regex_fallback(query)
+        log.warning("Classify+plan LLM failed, using regex fallback",
+                    error=str(e), fallback=fallback_task)
+        return fallback_task, [fallback_task]
 
 
 def _select_citation_agents(query: str) -> list[str]:
@@ -529,71 +621,28 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     5. Return task + tasks_planned + agent_queries + response_instructions
     """
     query = state.get("query", state["original_query"])
+    _original_query = state.get("original_query", query)
     summary = state.get("summary_text", "")
+    user_language = state.get("user_language", "en")
     log.info("Plan phase started", query=query[:100],
              has_summary=bool(summary))
 
-    # Step 0: Normalize query + extract user expectations
-    response_instructions = ""
-    try:
-        normalized_query, response_instructions = await asyncio.wait_for(
-            asyncio.to_thread(_analyze_and_normalize_query, query),
-            timeout=10,
-        )
-        if normalized_query and normalized_query != query:
-            log.info("Query normalized",
-                     original=query[:80], normalized=normalized_query[:80])
-            query = normalized_query
-            # Note: state["original_query"] is preserved unmodified for agents
-            # that need verbatim ES search terms (section numbers, case citations).
-    except asyncio.TimeoutError:
-        log.warning("Query normalization timed out, using original", exc_info=True)
-
-    # Step 1: Classify task (LLM with regex fallback on timeout)
-    # Fast pre-check: detect greetings before calling LLM
-    # Check BOTH the (possibly normalized) query AND the original raw query,
-    # because the normalizer may rewrite "what's up?" → "What is the user asking for?"
-    _original_query = state.get("original_query", query)
-    # Greetings that are safe as prefix matches (won't collide with legal terms)
+    # --- Fast pre-checks (no LLM calls, uses original query) ---
     _GREETING_PREFIXES = (
         "hello", "hey", "hii", "helo", "hola", "namaste", "namaskar",
         "good morning", "good afternoon", "good evening", "good night",
         "how are you", "how r u", "what's up", "whats up",
         "who are you", "what are you", "how's it going", "hows it going",
     )
-    # Greetings that must match exactly (would false-positive as prefix)
-    # "hi" matches "high court", "sup" matches "supreme court"
     _GREETING_EXACT = ("hi", "sup")
-    _q_stripped = query.lower().strip().rstrip("!?,.")
     _orig_stripped = _original_query.lower().strip().rstrip("!?,.")
-    if (
-        _q_stripped in _GREETING_PREFIXES
-        or _orig_stripped in _GREETING_PREFIXES
-        or _q_stripped in _GREETING_EXACT
+    is_greeting = (
+        _orig_stripped in _GREETING_PREFIXES
         or _orig_stripped in _GREETING_EXACT
-        or any(_q_stripped.startswith(g + " ") for g in _GREETING_PREFIXES)
         or any(_orig_stripped.startswith(g + " ") for g in _GREETING_PREFIXES)
-        # "hi X" / "sup X" — only if followed by casual words, not legal terms
-        or any(_q_stripped.startswith(g + " ") and len(_q_stripped) < 30 for g in _GREETING_EXACT)
         or any(_orig_stripped.startswith(g + " ") and len(_orig_stripped) < 30 for g in _GREETING_EXACT)
-    ):
-        log.info("Greeting detected, short-circuiting classification",
-                 original=_original_query[:60])
-        task = "Non_legal"
-    else:
-        task = None  # will be set below
+    )
 
-    # If files are attached, hint the classifier about them
-    fc = FileContextData.from_state(state)
-    classify_query = query
-    if fc and fc.has_content:
-        file_hint = f" [User has uploaded files: {', '.join(fc.file_names)}. This query is about the uploaded document(s).]"
-        classify_query = query + file_hint
-        log.info("File context hint added for classification", file_names=fc.file_names)
-
-    # Pre-check: strong SCI signals — override LLM classification.
-    # These patterns are unambiguously Supreme Court queries; the LLM occasionally
-    # mislabels them as Non_legal or Constitution when the query is normalized.
     _SCI_STRONG_KEYWORDS = (
         "supreme court judgment", "supreme court case", "supreme court ruling",
         "supreme court ruled", "supreme court held", "supreme court order",
@@ -601,63 +650,156 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         "article 136", "supreme court of india", "apex court judgment",
         "apex court ruling", "supreme court bench",
     )
-    if task is None:
-        _q_lower = query.lower()
-        _orig_lower = _original_query.lower()
-        if any(k in _q_lower or k in _orig_lower for k in _SCI_STRONG_KEYWORDS):
-            task = "SCI_Judgment"
-            log.info("SCI pre-check triggered, skipping LLM classification",
-                     query=query[:80])
+    _orig_lower = _original_query.lower()
+    is_sci = any(k in _orig_lower for k in _SCI_STRONG_KEYWORDS)
 
-    if task is None:  # not already resolved by greeting or SCI pre-check
-        try:
-            task = await asyncio.wait_for(
+    fc = FileContextData.from_state(state)
+
+    # --- Short-circuit: greeting or SCI pre-check resolved ---
+    if is_greeting:
+        log.info("Greeting detected, short-circuiting classification",
+                 original=_original_query[:60])
+        task = "Non_legal"
+        tasks_planned = ["Non_legal"]
+        response_instructions = ""
+
+        # Override to Document if files attached
+        if fc and fc.has_content:
+            log.info("Non-legal overridden to Document due to file context")
+            task = "Document"
+            tasks_planned = ["Document"]
+
+    elif is_sci:
+        log.info("SCI pre-check triggered, skipping LLM classification",
+                 query=query[:80])
+        task = "SCI_Judgment"
+        tasks_planned = ["SCI_Judgment"]
+        response_instructions = ""
+
+    else:
+        # --- Change 3: Skip normalization for English queries ---
+        _FORMAT_KEYWORDS = (
+            "table format", "bullet", "in hindi", "in marathi", "in tamil",
+            "in telugu", "in bengali", "in kannada", "in malayalam",
+            "in gujarati", "in punjabi", "in urdu", "in odia",
+            "hindi mein", "hindi me", "batao", "samjhao", "kaise",
+        )
+        skip_normalize = (
+            user_language == "en"
+            and len(query) < 500
+            and not any(k in _orig_lower for k in _FORMAT_KEYWORDS)
+        )
+
+        if skip_normalize:
+            log.info("Skipping normalization (English, short query)")
+            response_instructions = ""
+            normalized_query = query
+        else:
+            normalized_query = None  # will be set by parallel normalization
+
+        # --- Change 2: Parallelize normalization + classify-plan ---
+        # Build classify query with file hint
+        classify_query = query
+        if fc and fc.has_content:
+            file_hint = f" [User has uploaded files: {', '.join(fc.file_names)}. This query is about the uploaded document(s).]"
+            classify_query = query + file_hint
+            log.info("File context hint added for classification", file_names=fc.file_names)
+
+        if skip_normalize:
+            # Only need classify+plan (normalization skipped)
+            try:
+                task, tasks_planned = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _classify_and_plan, classify_query,
+                        chat_summary=summary if summary else None,
+                    ),
+                    timeout=30,
+                )
+            except asyncio.TimeoutError:
+                task = _classify_task_regex_fallback(classify_query)
+                tasks_planned = [task]
+                log.warning("Classify+plan timed out, using regex fallback",
+                            task=task, query=query[:80])
+        else:
+            # Run normalization + classify-plan in parallel
+            normalize_coro = asyncio.wait_for(
+                asyncio.to_thread(_analyze_and_normalize_query, query),
+                timeout=10,
+            )
+            classify_coro = asyncio.wait_for(
                 asyncio.to_thread(
-                    _classify_task, classify_query, chat_summary=summary if summary else None
+                    _classify_and_plan, classify_query,
+                    chat_summary=summary if summary else None,
                 ),
                 timeout=30,
             )
-        except asyncio.TimeoutError:
-            task = _classify_task_regex_fallback(classify_query)
-            log.warning("Task classification timed out, using regex fallback",
-                        task=task, query=query[:80])
+            results = await asyncio.gather(
+                normalize_coro, classify_coro, return_exceptions=True,
+            )
 
-    # Note: if files are attached and task isn't Document, we'll add Document
-    # to the plan alongside the classified task (see Step 3 below) instead of
-    # overriding, to support multi-intent queries (e.g., "find judgments related
-    # to this uploaded contract").
+            # Process normalization result
+            if isinstance(results[0], Exception):
+                log.warning("Query normalization failed/timed out, using original",
+                            error=str(results[0]))
+                response_instructions = ""
+            else:
+                normalized_query, response_instructions = results[0]
+                if normalized_query and normalized_query != query:
+                    log.info("Query normalized",
+                             original=query[:80], normalized=normalized_query[:80])
+                    query = normalized_query
 
-    # Step 2: Handle non-legal queries
-    # If files are attached, a "non-legal" greeting may really be about the document
-    if task == "Non_legal" and fc and fc.has_content:
-        log.info("Non-legal overridden to Document due to file context")
-        task = "Document"
+            # Process classify+plan result
+            if isinstance(results[1], Exception):
+                task = _classify_task_regex_fallback(classify_query)
+                tasks_planned = [task]
+                log.warning("Classify+plan failed/timed out, using regex fallback",
+                            error=str(results[1]), task=task)
+            else:
+                task, tasks_planned = results[1]
 
-    # Step 3: Plan agents
-    # For Document task with file context, skip LLM planner — go directly to Document agent
-    if task == "Document" and fc and fc.has_content:
+        # Handle non-legal with file context
+        if task == "Non_legal" and fc and fc.has_content:
+            log.info("Non-legal overridden to Document due to file context")
+            task = "Document"
+            tasks_planned = ["Document"]
+
+    # For Document task with file context, ensure Document agent is primary
+    if task == "Document" and fc and fc.has_content and tasks_planned != ["Document"]:
         tasks_planned = ["Document"]
         log.info("Document task with file context — using Document agent directly",
                  file_names=fc.file_names)
+
+    # File context: ensure Document agent is in plan if files attached
+    if fc and fc.has_content and "Document" not in tasks_planned:
+        tasks_planned.append("Document")
+        log.info("Document agent added for file context (multi-intent support)",
+                 file_names=fc.file_names)
+
+    # Post-processing: multi-intent detection safety net
+    if task not in ("Non_legal", "Document"):
+        extra = _detect_multi_intent(query, task)
+        for agent in extra:
+            if agent not in tasks_planned:
+                tasks_planned.append(agent)
+        if extra:
+            log.info("Multi-intent detection added agents",
+                     extra=extra, all_agents=tasks_planned)
+
+    # Drafting citation agents
+    has_drafting = task == "Drafting" or "Drafting" in tasks_planned
+    if has_drafting:
+        if "Drafting" not in tasks_planned:
+            tasks_planned.insert(0, "Drafting")
+        citation_agents = _select_citation_agents(query)
+        for ca in citation_agents:
+            if ca not in tasks_planned:
+                tasks_planned.append(ca)
+        tasks_planned = tasks_planned[:4]
     else:
-        try:
-            tasks_planned = await asyncio.wait_for(
-                asyncio.to_thread(_plan_agents, query, task),
-                timeout=25,
-            )
-        except asyncio.TimeoutError:
-            log.warning("Agent planning timed out, falling back to single agent", task=task)
-            tasks_planned = [task] if task else []
+        tasks_planned = tasks_planned[:3]
 
-        # Step 3b: File context — ensure Document agent is planned if files attached
-        if fc and fc.has_content and "Document" not in tasks_planned:
-            tasks_planned.append("Document")
-            log.info("Document agent added for file context (multi-intent support)",
-                     file_names=fc.file_names)
-
-    # Step 3c: Signal-based plan validation
-    # Detects keyword signals that indicate missing agents in the plan.
-    # Catches LLM misclassifications systematically instead of ad-hoc pre-checks.
+    # Signal-based plan validation
     tasks_planned = _validate_and_enrich_plan(
         tasks_planned, _original_query, query, log,
     )

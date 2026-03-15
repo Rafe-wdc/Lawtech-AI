@@ -19,6 +19,18 @@
     --orange: #ea580c;
     --blue: #2563eb;
     --radius: 10px;
+    --code-bg: #f3f4f6;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1a1a;
+    --surface: #242424;
+    --surface2: #2e2e2e;
+    --border: #444;
+    --text: #e4e0d8;
+    --text2: #9a9080;
+    --accent: #e8a820;
+    --accent2: #c8920c;
+    --code-bg: #2a2a2a;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -211,7 +223,7 @@
     border: 1px solid rgba(220,38,38,0.2);
   }
   .msg pre {
-    background: #f3f4f6;
+    background: var(--code-bg);
     padding: 10px;
     border-radius: 6px;
     overflow-x: auto;
@@ -1037,6 +1049,105 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* --- Dark Mode Toggle --- */
+  .theme-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    padding: 4px 10px;
+    font-size: 16px;
+    color: var(--text2);
+    transition: all 0.2s;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--text); }
+
+  /* --- Retry Button --- */
+  .msg.error { position: relative; }
+  .retry-btn {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 14px;
+    font-size: 12px;
+    background: var(--red);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .retry-btn:hover { opacity: 0.85; }
+
+  /* --- Keyboard Shortcut Hint --- */
+  .shortcut-hint {
+    font-size: 10px;
+    color: var(--text2);
+    padding: 4px 0 0;
+    text-align: right;
+  }
+  .shortcut-hint kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: monospace;
+  }
+
+  /* --- Links in messages --- */
+  .msg a {
+    color: var(--blue);
+    text-decoration: underline;
+    text-decoration-color: rgba(37,99,235,0.3);
+    transition: text-decoration-color 0.15s;
+  }
+  .msg a:hover { text-decoration-color: var(--blue); }
+  [data-theme="dark"] .msg a { color: #60a5fa; }
+
+  /* --- Mobile Responsive --- */
+  @media (max-width: 768px) {
+    .app { flex-direction: column; }
+    .sidebar {
+      width: 100%;
+      height: auto;
+      max-height: 50vh;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sidebar.collapsed {
+      max-height: 56px;
+      overflow: hidden;
+    }
+    .sidebar.collapsed .nav,
+    .sidebar.collapsed .session-divider,
+    .sidebar.collapsed .session-list,
+    .sidebar.collapsed > div:last-child { display: none; }
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .mobile-toggle {
+      display: block;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 4px 10px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--text2);
+    }
+    .chat-messages { padding: 12px; }
+    .chat-input-area { padding: 10px 12px; }
+    .msg { max-width: 95% !important; }
+    .toggle-row { flex-wrap: wrap; }
+  }
+  @media (min-width: 769px) {
+    .mobile-toggle { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -1044,10 +1155,16 @@
   <!-- Sidebar -->
   <div class="sidebar">
     <div class="sidebar-header">
-      <h1>Lawttorney AI</h1>
-      <div class="version">
-        <span class="health-dot" id="healthDot"></span>
-        <span id="healthText">Connecting...</span>
+      <div>
+        <h1>Lawttorney AI</h1>
+        <div class="version">
+          <span class="health-dot" id="healthDot"></span>
+          <span id="healthText">Connecting...</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark mode (Ctrl+D)">&#9789;</button>
+        <button class="mobile-toggle" onclick="toggleSidebar()">&#9776;</button>
       </div>
     </div>
     <div class="nav">
@@ -1129,13 +1246,13 @@
         </div>
 
         <div class="toggle-row" style="margin-top:8px;">
-          <label><input type="checkbox" id="streamToggle" /> Streaming (SSE)</label>
+          <label><input type="checkbox" id="streamToggle" checked /> Streaming (SSE)</label>
           <label>Thread:
             <input type="text" id="threadId" placeholder="auto" style="width: 180px;" />
           </label>
           <label title="Response language (overrides auto-detection)">
             <select id="langSelect" class="lang-select">
-              <option value="auto">🌐 Auto-detect</option>
+              <option value="auto">&#127760; Auto-detect</option>
               <option value="en">English</option>
               <option value="hi">हिन्दी</option>
               <option value="bn">বাংলা</option>
@@ -1149,6 +1266,10 @@
               <option value="ur">اردو</option>
             </select>
           </label>
+        </div>
+        <div class="shortcut-hint">
+          <kbd>Enter</kbd> send &middot; <kbd>Shift+Enter</kbd> newline &middot;
+          <kbd>Ctrl+D</kbd> dark mode &middot; <kbd>Ctrl+N</kbd> new chat
         </div>
       </div>
     </div>
@@ -1171,6 +1292,7 @@
 // ============================================================
 let currentThreadId = sessionStorage.getItem('lawttorney_thread_id') || null;
 let currentTurnCount = parseInt(sessionStorage.getItem('lawttorney_turn_count') || '0');
+let lastQuery = ''; // For retry on error
 
 function getBase() { return document.getElementById('apiBase').value.replace(/\/+$/, ''); }
 function getApiKey() { return (document.getElementById('apiKey') || {}).value || ''; }
@@ -1579,6 +1701,7 @@ async function sendChat() {
   const input = document.getElementById('chatInput');
   const query = input.value.trim();
   if (!query) return;
+  lastQuery = query;
 
   const streaming = document.getElementById('streamToggle').checked;
   const threadInput = document.getElementById('threadId').value.trim();
@@ -2210,6 +2333,8 @@ function addChatMsg(type, text, agents, tokens, elapsed, sources, turnNumber, fo
     }
     html += renderResponseActions(turnNumber);
     div.innerHTML = html;
+  } else if (type === 'error') {
+    div.innerHTML = escapeHtml(text) + '<br><button class="retry-btn" onclick="retryLastQuery(this)">Retry</button>';
   } else {
     div.textContent = text;
   }
@@ -2246,20 +2371,37 @@ function renderMarkdown(text) {
   // Escape HTML entities FIRST to prevent XSS
   let html = escapeHtml(text);
 
-  // Code blocks (must come first to protect content inside)
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  // Protect code blocks — extract, replace with placeholders, restore at end
+  const codeBlocks = [];
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+    codeBlocks.push('<pre><code' + (lang ? ' class="lang-' + lang + '"' : '') + '>' + code + '</code></pre>');
+    return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+  });
 
   // Tables — parse markdown tables into HTML tables
   html = html.replace(/^(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(match, headerRow, sepRow, bodyRows) {
     var headers = headerRow.split('|').filter(function(c) { return c.trim(); });
+    // Parse alignment from separator row
+    var aligns = sepRow.split('|').filter(function(c) { return c.trim(); }).map(function(c) {
+      c = c.trim();
+      if (c.startsWith(':') && c.endsWith(':')) return 'center';
+      if (c.endsWith(':')) return 'right';
+      return 'left';
+    });
     var rows = bodyRows.trim().split('\n');
     var table = '<table><thead><tr>';
-    headers.forEach(function(h) { table += '<th>' + h.trim() + '</th>'; });
+    headers.forEach(function(h, i) {
+      var a = aligns[i] || 'left';
+      table += '<th style="text-align:' + a + '">' + h.trim() + '</th>';
+    });
     table += '</tr></thead><tbody>';
     rows.forEach(function(row) {
       var cells = row.split('|').filter(function(c) { return c.trim(); });
       table += '<tr>';
-      cells.forEach(function(c) { table += '<td>' + c.trim() + '</td>'; });
+      cells.forEach(function(c, i) {
+        var a = aligns[i] || 'left';
+        table += '<td style="text-align:' + a + '">' + c.trim() + '</td>';
+      });
       table += '</tr>';
     });
     table += '</tbody></table>';
@@ -2271,8 +2413,10 @@ function renderMarkdown(text) {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     // Bold
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    // Italic
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Italic (but not inside URLs or already-processed tags)
+    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, '<em>$1</em>')
+    // Links — [text](url)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     // Headers
     .replace(/^##### (.+)$/gm, '<h5>$1</h5>')
     .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
@@ -2282,22 +2426,49 @@ function renderMarkdown(text) {
     // Horizontal rule
     .replace(/^---+$/gm, '<hr>')
     // Blockquotes
-    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
-    // Bullet lists
-    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
-    // Numbered lists
-    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-    // Line breaks
+    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // Lists — process line by line for proper nesting and ordered/unordered
+  html = html.replace(/(^[\t ]*(?:[-*]|\d+\.) .+(?:\n[\t ]*(?:[-*]|\d+\.) .+)*)/gm, function(block) {
+    var lines = block.split('\n');
+    var result = '';
+    var stack = []; // track open list tags
+
+    lines.forEach(function(line) {
+      var m = line.match(/^([\t ]*)([-*]|\d+\.)\s+(.+)$/);
+      if (!m) return;
+      var indent = m[1].length;
+      var marker = m[2];
+      var content = m[3];
+      var tag = /^\d+\./.test(marker) ? 'ol' : 'ul';
+      var level = Math.floor(indent / 2);
+
+      while (stack.length > level + 1) {
+        result += '</' + stack.pop() + '>';
+      }
+      if (stack.length <= level) {
+        result += '<' + tag + '>';
+        stack.push(tag);
+      }
+      result += '<li>' + content + '</li>';
+    });
+
+    while (stack.length) {
+      result += '</' + stack.pop() + '>';
+    }
+    return result;
+  });
+
+  // Paragraphs and line breaks
+  html = html
     .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br>');
 
-  // Wrap consecutive <li> in <ul>
-  html = html.replace(/(<li>.*?<\/li>(\s*<br>)?)+/g, function(match) {
-    return '<ul>' + match.replace(/<br>/g, '') + '</ul>';
-  });
-
   // Merge consecutive blockquotes
   html = html.replace(/<\/blockquote>(\s*<br>)*\s*<blockquote>/g, '<br>');
+
+  // Restore code blocks
+  html = html.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[i]; });
 
   return '<p>' + html + '</p>';
 }
@@ -2738,8 +2909,69 @@ function sendFollowup(chip) {
 
 
 // ============================================================
+// Retry on Error
+// ============================================================
+function retryLastQuery(btn) {
+  if (!lastQuery) return;
+  // Remove the error message containing this button
+  var errorDiv = btn.closest('.msg.error');
+  if (errorDiv) errorDiv.remove();
+  document.getElementById('chatInput').value = lastQuery;
+  sendChat();
+}
+
+// ============================================================
+// Dark Mode
+// ============================================================
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  document.getElementById('themeToggle').textContent = next === 'dark' ? '\u2600' : '\u263D';
+}
+function initTheme() {
+  const saved = localStorage.getItem('theme') || 'light';
+  if (saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    document.getElementById('themeToggle').textContent = '\u2600';
+  }
+}
+
+// ============================================================
+// Mobile Sidebar Toggle
+// ============================================================
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('collapsed');
+}
+
+// ============================================================
+// Keyboard Shortcuts
+// ============================================================
+document.addEventListener('keydown', function(e) {
+  // Ctrl+D — toggle dark mode
+  if (e.ctrlKey && e.key === 'd') {
+    e.preventDefault();
+    toggleTheme();
+  }
+  // Ctrl+N — new chat
+  if (e.ctrlKey && e.key === 'n') {
+    e.preventDefault();
+    newChat();
+    document.getElementById('chatInput').focus();
+  }
+  // Ctrl+/ — focus input
+  if (e.ctrlKey && e.key === '/') {
+    e.preventDefault();
+    document.getElementById('chatInput').focus();
+  }
+});
+
+// ============================================================
 // Init
 // ============================================================
+initTheme();
 initApiKey();
 checkHealth();
 loadSessionList();

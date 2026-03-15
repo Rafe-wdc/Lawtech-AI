@@ -1,0 +1,10 @@
+workers = 16
+worker_class = "uvicorn.workers.UvicornWorker"
+bind = "0.0.0.0:5001"
+timeout = 300
+graceful_timeout = 30
+keepalive = 5
+accesslog = "/root/v2_multi_agent/logs/access.log"
+errorlog = "/root/v2_multi_agent/logs/error.log"
+daemon = True
+preload_app = True

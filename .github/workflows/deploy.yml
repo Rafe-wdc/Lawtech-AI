@@ -155,31 +155,32 @@ jobs:
             source venv/bin/activate
             pip install -q -r requirements.txt
 
-            # Reload app — graceful: gunicorn master spawns new workers before old
-            # ones exit, so in-flight requests are never dropped.
-            # Falls back to start if the service was not running.
-            MAIN_PID=$(systemctl show -p MainPID --value lawtech-v2 2>/dev/null || echo "0")
-            if [ -n "$MAIN_PID" ] && [ "$MAIN_PID" -gt "0" ] 2>/dev/null; then
-              kill -HUP "$MAIN_PID"
-              echo "Graceful reload sent to gunicorn master (PID $MAIN_PID)"
+            # Reload app — graceful: gunicorn master re-reads config and spawns
+            # new workers before old ones exit, so in-flight requests are never dropped.
+            # Falls back to full restart if gunicorn is not running.
+            MASTER_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "0")
+            if [ "$MASTER_PID" -gt "0" ] 2>/dev/null; then
+              kill -HUP "$MASTER_PID"
+              echo "Graceful reload sent to gunicorn master (PID $MASTER_PID)"
             else
-              systemctl start lawtech-v2
-              echo "Service was not running — started"
+              echo "Gunicorn not running — starting fresh"
+              /root/v2_multi_agent/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app
+              echo "Gunicorn started with gunicorn.conf.py"
             fi
 
-            # Wait for workers to cycle (max 40s — graceful reload is usually <5s)
-            for i in $(seq 1 8); do
+            # Wait for workers to cycle (max 60s — preload workers take longer)
+            for i in $(seq 1 12); do
               sleep 5
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/pyapi/health || echo "000")
               if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
                 echo "Health check passed (HTTP $STATUS)"
                 exit 0
               fi
-              echo "Waiting... attempt $i/8 (HTTP $STATUS)"
+              echo "Waiting... attempt $i/12 (HTTP $STATUS)"
             done
 
-            echo "ERROR: Health check did not pass after 40s"
-            journalctl -u lawtech-v2 -n 50 --no-pager
+            echo "ERROR: Health check did not pass after 60s"
+            tail -50 /root/v2_multi_agent/logs/error.log
             exit 1
           ENDSSH
 

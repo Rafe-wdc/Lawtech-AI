@@ -130,7 +130,7 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "5000"))
 
 # --- Rate Limits ---
-RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "200"))
 RATE_LIMIT_ADMIN_PER_MINUTE = int(os.getenv("RATE_LIMIT_ADMIN_PER_MINUTE", "200"))
 
 # --- Logging ---

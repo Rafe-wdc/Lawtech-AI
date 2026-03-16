@@ -2,14 +2,24 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# NOTE: Replace "your-admin-key-here" with your actual ADMIN_API_KEY value.
+# Prometheus does not support env var substitution — edit this file directly.
+
 scrape_configs:
-  - job_name: "lawtech-ai"
+  # Local dev (uvicorn on port 5000)
+  - job_name: "lawtech-dev"
     static_configs:
       - targets: ["host.docker.internal:5000"]
     metrics_path: "/pyapi/metrics"
-    # Prometheus sends this as: Authorization: Bearer <token>
-    # core/auth.py accepts both X-API-Key and Bearer token for admin endpoints.
-    # Replace "your-admin-key-here" with your actual ADMIN_API_KEY value.
     authorization:
       type: "Bearer"
-      credentials: "your-admin-key-here"
+      credentials: "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+
+  # Production (gunicorn on port 5001)
+  - job_name: "lawtech-prod"
+    static_configs:
+      - targets: ["host.docker.internal:5001"]
+    metrics_path: "/pyapi/metrics"
+    authorization:
+      type: "Bearer"
+      credentials: "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"

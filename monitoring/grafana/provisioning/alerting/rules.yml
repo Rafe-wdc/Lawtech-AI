@@ -60,8 +60,8 @@ groups:
                     type: last
 
       # ── 2. App Completely Down ───────────────────────────────────────────────
-      # Fires when Prometheus gets no request metrics for 3 minutes.
-      # Means the app stopped scraping (crashed / OOM-killed / port not listening).
+      # Fires when Prometheus cannot scrape the app (up == 0) for 3 minutes.
+      # Means the app crashed, OOM-killed, or port not listening.
       - uid: alert-app-down
         title: App Not Responding
         condition: C
@@ -71,8 +71,8 @@ groups:
         annotations:
           summary: "Lawtech-AI is not responding"
           description: >
-            No request metrics received for 3+ minutes.
-            Check: systemctl status lawtech-v2 && journalctl -u lawtech-v2 -n 50
+            Prometheus cannot reach the app for 3+ minutes.
+            Check: pgrep -f 'gunicorn.*core.gateway' && curl http://localhost:5001/pyapi/health
         data:
           - refId: A
             relativeTimeRange:
@@ -80,7 +80,7 @@ groups:
               to: 0
             datasourceUid: lawtech-prometheus
             model:
-              expr: sum(rate(lawtech_requests_total[1m]))
+              expr: up{job="lawtech-ai"}
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: C
@@ -91,7 +91,7 @@ groups:
               conditions:
                 - evaluator:
                     type: lt
-                    params: [0.001]
+                    params: [1]
                   operator:
                     type: and
                   query:
@@ -121,7 +121,7 @@ groups:
               to: 0
             datasourceUid: lawtech-prometheus
             model:
-              expr: process_resident_memory_bytes{job="lawtech"}
+              expr: process_resident_memory_bytes{job="lawtech-ai"}
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: C

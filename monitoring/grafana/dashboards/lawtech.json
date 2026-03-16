@@ -4,6 +4,21 @@
   "timezone": "browser",
   "refresh": "30s",
   "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": { "uid": "lawtech-prometheus" },
+        "query": "label_values(up, job)",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 1
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
@@ -12,8 +27,8 @@
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum(rate(lawtech_requests_total[1m])) * 60",
-          "legendFormat": "req/min"
+          "expr": "sum by(job) (rate(lawtech_requests_total{job=~\"$job\"}[1m])) * 60",
+          "legendFormat": "{{job}}"
         }
       ],
       "fieldConfig": {
@@ -27,18 +42,18 @@
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum(rate(lawtech_requests_total{status_code=~\"5..\"}[5m])) / sum(rate(lawtech_requests_total[5m])) * 100",
-          "legendFormat": "5xx error %"
+          "expr": "sum by(job) (rate(lawtech_requests_total{job=~\"$job\", status_code=~\"5..\"}[5m])) / sum by(job) (rate(lawtech_requests_total{job=~\"$job\"}[5m])) * 100",
+          "legendFormat": "{{job}} 5xx"
         },
         {
-          "expr": "sum(rate(lawtech_requests_total{status_code=~\"4..\"}[5m])) / sum(rate(lawtech_requests_total[5m])) * 100",
-          "legendFormat": "4xx error %"
+          "expr": "sum by(job) (rate(lawtech_requests_total{job=~\"$job\", status_code=~\"4..\"}[5m])) / sum by(job) (rate(lawtech_requests_total{job=~\"$job\"}[5m])) * 100",
+          "legendFormat": "{{job}} 4xx"
         }
       ],
       "fieldConfig": {
         "defaults": { "unit": "percent", "min": 0, "max": 100 },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "5xx error %" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+          { "matcher": { "id": "byRegexp", "options": ".*5xx" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
         ]
       }
     },
@@ -49,8 +64,8 @@
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by(le, endpoint) (rate(lawtech_request_latency_seconds_bucket[5m])))",
-          "legendFormat": "{{ endpoint }}"
+          "expr": "histogram_quantile(0.95, sum by(le, endpoint, job) (rate(lawtech_request_latency_seconds_bucket{job=~\"$job\"}[5m])))",
+          "legendFormat": "{{job}} — {{endpoint}}"
         }
       ],
       "fieldConfig": {
@@ -63,7 +78,7 @@
       "type": "stat",
       "gridPos": { "x": 12, "y": 8, "w": 6, "h": 4 },
       "targets": [
-        { "expr": "lawtech_active_requests", "legendFormat": "active" }
+        { "expr": "sum by(job) (lawtech_active_requests{job=~\"$job\"})", "legendFormat": "{{job}}" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "short", "thresholds": { "steps": [
@@ -75,14 +90,29 @@
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
     },
     {
+      "id": 13,
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "up{job=~\"$job\"}", "legendFormat": "{{job}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "mappings": [
+          { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+        ]}
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
       "id": 5,
       "title": "Agent Invocations / min",
       "type": "timeseries",
       "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum by(agent) (rate(lawtech_agent_invocations_total[5m])) * 60",
-          "legendFormat": "{{ agent }}"
+          "expr": "sum by(agent, job) (rate(lawtech_agent_invocations_total{job=~\"$job\"}[5m])) * 60",
+          "legendFormat": "{{job}} — {{agent}}"
         }
       ],
       "fieldConfig": {
@@ -96,8 +126,8 @@
       "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum by(agent, tier) (rate(lawtech_fallback_total[5m])) * 60",
-          "legendFormat": "{{ agent }} / {{ tier }}"
+          "expr": "sum by(agent, tier, job) (rate(lawtech_fallback_total{job=~\"$job\"}[5m])) * 60",
+          "legendFormat": "{{job}} — {{agent}} / {{tier}}"
         }
       ],
       "fieldConfig": {
@@ -111,7 +141,7 @@
       "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum by(task_type) (increase(lawtech_tasks_planned_total[1h]))",
+          "expr": "sum by(task_type) (increase(lawtech_tasks_planned_total{job=~\"$job\"}[1h]))",
           "legendFormat": "{{ task_type }}"
         }
       ]
@@ -123,8 +153,8 @@
       "gridPos": { "x": 12, "y": 24, "w": 6, "h": 4 },
       "targets": [
         {
-          "expr": "sum(increase(lawtech_guardrail_blocks_total[1h]))",
-          "legendFormat": "blocks"
+          "expr": "sum by(job) (increase(lawtech_guardrail_blocks_total{job=~\"$job\"}[1h]))",
+          "legendFormat": "{{job}}"
         }
       ],
       "fieldConfig": {
@@ -143,8 +173,8 @@
       "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum(increase(lawtech_llm_tokens_total[1h]))",
-          "legendFormat": "tokens/hour"
+          "expr": "sum by(job) (increase(lawtech_llm_tokens_total{job=~\"$job\"}[1h]))",
+          "legendFormat": "{{job}}"
         }
       ],
       "fieldConfig": {
@@ -158,18 +188,18 @@
       "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum(rate(lawtech_fallback_total{tier='web_search'}[5m])) / sum(rate(lawtech_requests_total[5m])) * 100",
-          "legendFormat": "web fallback %"
+          "expr": "sum by(job) (rate(lawtech_fallback_total{job=~\"$job\", tier='web_search'}[5m])) / sum by(job) (rate(lawtech_requests_total{job=~\"$job\"}[5m])) * 100",
+          "legendFormat": "{{job}} web fallback %"
         },
         {
-          "expr": "sum(rate(lawtech_fallback_total{tier='query_rewrite'}[5m])) / sum(rate(lawtech_requests_total[5m])) * 100",
-          "legendFormat": "query rewrite %"
+          "expr": "sum by(job) (rate(lawtech_fallback_total{job=~\"$job\", tier='query_rewrite'}[5m])) / sum by(job) (rate(lawtech_requests_total{job=~\"$job\"}[5m])) * 100",
+          "legendFormat": "{{job}} query rewrite %"
         }
       ],
       "fieldConfig": {
         "defaults": { "unit": "percent", "min": 0 },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "web fallback %" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+          { "matcher": { "id": "byRegexp", "options": ".*web fallback.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
         ]
       }
     },
@@ -180,16 +210,16 @@
       "gridPos": { "x": 0, "y": 40, "w": 16, "h": 8 },
       "targets": [
         {
-          "expr": "lawtech_quality_avg_score",
-          "legendFormat": "avg score"
+          "expr": "lawtech_quality_avg_score{job=~\"$job\"}",
+          "legendFormat": "{{job}} avg score"
         },
         {
-          "expr": "lawtech_quality_faithfulness",
-          "legendFormat": "faithfulness"
+          "expr": "lawtech_quality_faithfulness{job=~\"$job\"}",
+          "legendFormat": "{{job}} faithfulness"
         },
         {
-          "expr": "lawtech_quality_relevance",
-          "legendFormat": "relevance"
+          "expr": "lawtech_quality_relevance{job=~\"$job\"}",
+          "legendFormat": "{{job}} relevance"
         }
       ],
       "fieldConfig": {
@@ -212,8 +242,8 @@
       "gridPos": { "x": 16, "y": 40, "w": 8, "h": 4 },
       "targets": [
         {
-          "expr": "lawtech_quality_low_count",
-          "legendFormat": "low quality"
+          "expr": "lawtech_quality_low_count{job=~\"$job\"}",
+          "legendFormat": "{{job}}"
         }
       ],
       "fieldConfig": {

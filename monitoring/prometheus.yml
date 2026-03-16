@@ -13,7 +13,7 @@ scrape_configs:
     metrics_path: "/pyapi/metrics"
     authorization:
       type: "Bearer"
-      credentials: "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+      credentials: "your-admin-key-here"
 
   # Production (gunicorn on port 5001)
   - job_name: "lawtech-prod"
@@ -22,4 +22,4 @@ scrape_configs:
     metrics_path: "/pyapi/metrics"
     authorization:
       type: "Bearer"
-      credentials: "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+      credentials: "your-admin-key-here"

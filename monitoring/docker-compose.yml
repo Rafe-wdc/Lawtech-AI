@@ -4,6 +4,8 @@ version: "3.8"
 # Prometheus scrapes metrics from the app, Grafana visualises them.
 #
 # Start:  docker compose -f monitoring/docker-compose.yml up -d
+# NOTE:  Copy prometheus.yml → prometheus.local.yml and set your real ADMIN_API_KEY.
+#        The local file is gitignored and takes priority if you mount it.
 # Stop:   docker compose -f monitoring/docker-compose.yml down
 # Grafana: http://localhost:3000  (admin / admin — change on first login)
 
@@ -13,7 +15,7 @@ services:
     container_name: lawtech-prometheus
     restart: unless-stopped
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

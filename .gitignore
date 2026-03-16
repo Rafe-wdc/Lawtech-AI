@@ -71,6 +71,9 @@ agentic-workflow/
 tasks.txt
 HANDOFF.md
 
+# Monitoring local overrides (contain secrets)
+monitoring/prometheus.local.yml
+
 # Temporary files
 tmp/
 temp/

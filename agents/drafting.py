@@ -37,6 +37,7 @@ from core.clients import (
 from core.settings import ES_INDICES
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 from config.prompts import DRAFTING_SYSTEM_PROMPT, DRAFT_OUTLINE_PROMPT
 
 log = get_logger("Drafting")
@@ -747,6 +748,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
         index = ES_INDICES["drafting"]
 
         # Step 1: Hybrid search for templates (BM25 + kNN, top 15)
+        progress("drafting", "Searching for document templates...", step="search")
         hits = await _search_templates(query)
 
         if not hits:
@@ -761,12 +763,16 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 )},
             }
 
+        progress("drafting", f"Found {len(hits)} matching templates", found=len(hits), substep=True, step="search")
         log.info("Template candidates found", count=len(hits))
 
         # Step 2: Select best template (with content previews + validation)
+        progress("drafting", "Selecting best template...", step="select")
         selected_source, all_paths = await asyncio.to_thread(
             _select_best_template, query, hits
         )
+        template_display_name = os.path.splitext(os.path.basename(selected_source))[0]
+        progress("drafting", f"Selected: {template_display_name[:60]}", substep=True, step="select")
         log.info("Template selected", template=selected_source)
 
         # Step 3: Fetch the full template document
@@ -810,7 +816,9 @@ async def drafting_node(state: LegalAgentState) -> dict:
                   template=selected_source, template_len=len(template_text))
 
         # Step 4: Generate document outline (max 12 sections)
+        progress("drafting", "Generating document outline...", step="outline")
         outline = await _generate_outline(query, template_text, user_language)
+        progress("drafting", f"Outline ready: {len(outline.sections)} sections", found=len(outline.sections), substep=True, step="outline")
 
         # Step 5: Generate sections in parallel (semaphore-limited to 3)
         try:
@@ -836,6 +844,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             })
 
         # Step 6: Assemble complete document
+        progress("drafting", "Assembling final document...", step="assemble")
         full_draft = _assemble_document(outline, sections, user_language)
 
         if failed_indices:

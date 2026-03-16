@@ -22,6 +22,7 @@ from core.clients import get_gemini_flash
 from core.chat_store import chat_store
 from core.language import detect_language
 from core.logger import get_logger, log_time
+from core.progress import progress
 from tools.inline.abbreviation import expand_abbreviations
 
 log = get_logger("Memory")
@@ -263,7 +264,9 @@ async def memory_node(state: LegalAgentState) -> dict:
         user_language = gateway_lang
         log.info("Language: using client preference", lang=user_language)
     else:
+        progress("memory", "Detecting language...", step="language")
         user_language = detect_language(original_query)
+        progress("memory", f"Detected: {user_language}", substep=True, step="language")
         log.info("Language detected", lang=user_language, query=original_query[:60])
 
     # Step 2: Expand abbreviations
@@ -278,8 +281,11 @@ async def memory_node(state: LegalAgentState) -> dict:
     restored_file_context: dict | None = None
 
     if thread_id:
+        progress("memory", "Loading conversation history...", step="history")
         log.debug("Loading chat history", thread_id=thread_id[:12])
         chat_history, summary_text = await _load_chat_history(thread_id)
+        turns = len(chat_history) // 2
+        progress("memory", f"Found {turns} previous turns", found=turns, substep=True, step="history")
         log.info("Chat history loaded",
                  messages=len(chat_history),
                  has_summary=bool(summary_text))
@@ -300,7 +306,10 @@ async def memory_node(state: LegalAgentState) -> dict:
                          gemini_parts=len(restored_file_context.get("gemini_file_parts", [])),
                          chromadb=len(restored_file_context.get("chromadb_collections", [])))
 
+            progress("memory", "Rewriting follow-up query...", step="rewrite")
             query = await asyncio.to_thread(_rewrite_query, query, chat_history)
+            if query != expand_abbreviations(original_query):
+                progress("memory", f"Expanded: {query[:60]}", substep=True, detail=query[:80], step="rewrite")
 
     log.info("Agent completed",
              final_query=query[:100],

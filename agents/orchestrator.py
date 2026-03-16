@@ -19,6 +19,7 @@ from core.state import LegalAgentState, AgentResult, FileContextData
 from core.clients import get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 from config.prompts import (
     TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT,
     DRAFT_SYNTHESIS_PROMPT, DRAFT_CITATION_PROMPT,
@@ -627,6 +628,8 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     log.info("Plan phase started", query=query[:100],
              has_summary=bool(summary))
 
+    progress("orchestrator", "Understanding your question...", step="classify")
+
     # --- Fast pre-checks (no LLM calls, uses original query) ---
     _GREETING_PREFIXES = (
         "hello", "hey", "hii", "helo", "hola", "namaste", "namaskar",
@@ -776,6 +779,8 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.info("Document agent added for file context (multi-intent support)",
                  file_names=fc.file_names)
 
+    progress("orchestrator", f"Identified: {', '.join(tasks_planned)}", substep=True, detail=task, step="classify")
+
     # Post-processing: multi-intent detection safety net
     if task not in ("Non_legal", "Document"):
         extra = _detect_multi_intent(query, task)
@@ -807,6 +812,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # Step 4: Per-agent query rewriting (only for multi-agent plans)
     agent_queries = {}
     if len(tasks_planned) > 1:
+        progress("orchestrator", f"Preparing search queries for {len(tasks_planned)} agents...", found=len(tasks_planned), step="plan")
         try:
             agent_queries = await asyncio.wait_for(
                 asyncio.to_thread(_rewrite_queries_for_agents, query, tasks_planned),
@@ -851,6 +857,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     log.info("Synthesize phase started",
              agents_received=list(agent_results.keys()),
              has_response_instructions=bool(response_instructions))
+
+    progress("orchestrator", f"Merging results from {len(agent_results)} agents...", found=len(agent_results), step="synthesize")
 
     if not agent_results:
         log.warning("No agent results to synthesize")
@@ -1001,6 +1009,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             }
 
     # --- Generic Multi-Agent Synthesis (non-drafting) ---
+    progress("orchestrator", "Composing final response...", step="synthesize")
     log.info("Multi-agent synthesis starting",
              agents=list(valid_results.keys()),
              content_lengths={n: len(r.content) for n, r in valid_results.items()})

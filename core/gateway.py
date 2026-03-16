@@ -660,6 +660,8 @@ async def search_stream(data: SearchRequest, request: Request):
                             }))
                         elif chunk.get("type") == "queue_status":
                             yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
+                        elif chunk.get("type") == "progress":
+                            yield f"data: {json.dumps(chunk)}\n\n"
                     continue
 
                 # --- Update events: node-level progress ---
@@ -976,6 +978,8 @@ async def chat_with_files(
                             }))
                         elif chunk.get("type") == "queue_status":
                             yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
+                        elif chunk.get("type") == "progress":
+                            yield f"data: {json.dumps(chunk)}\n\n"
                     continue
 
                 for node_name, update in chunk.items():
@@ -1169,6 +1173,8 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
                             }))
                         elif chunk.get("type") == "queue_status":
                             yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
+                        elif chunk.get("type") == "progress":
+                            yield f"data: {json.dumps(chunk)}\n\n"
                     continue
 
                 for node_name, update in chunk.items():

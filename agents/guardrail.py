@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from core.state import LegalAgentState
 from core.clients import get_gemini_flash
 from core.logger import get_logger, log_time
+from core.progress import progress
 from tools.inline.markdown import sanitize_markdown
 from tools.inline.disclaimer import add_disclaimer
 
@@ -130,6 +131,8 @@ async def guardrail_input_node(state: LegalAgentState) -> dict:
     log.info("Input check started",
              query=query[:100], query_len=len(query))
 
+    progress("guardrail", "Validating query...", step="validate")
+
     # Layer 1: Basic validation
     is_safe, reason = _validate_query(query)
     if not is_safe:
@@ -161,6 +164,8 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     """
     response = state.get("final_response", "")
     task = state.get("task", "Other")
+
+    progress("guardrail", "Finalizing response...", step="finalize")
 
     if not response:
         log.warning("Empty response detected in output guardrail, returning fallback message")

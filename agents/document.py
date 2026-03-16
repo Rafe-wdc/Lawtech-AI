@@ -28,6 +28,7 @@ from core.clients import get_gemini_pro, get_qa_embeddings
 from core.settings import CHROMA_STORE_ROOT, TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 
 import chromadb
 import threading
@@ -232,6 +233,7 @@ async def document_node(state: LegalAgentState) -> dict:
             log.info("Using inline file collections",
                      collections=all_collections, primary=unique_string)
 
+    progress("document", "Loading uploaded documents...", step="load")
     log.info("Agent started",
              collection=unique_string, query=query[:100])
 
@@ -403,6 +405,8 @@ async def document_node(state: LegalAgentState) -> dict:
         # Retrieve from ChromaDB and generate answer (blocking I/O + LLM → off-thread)
         # 90s timeout: ChromaDB MMR (k=30) + Gemini Pro generation can be slow,
         # but if ChromaDB hangs on a locked/stalled disk this prevents infinite hang.
+        n_colls = len(all_collections) if all_collections else 1
+        progress("document", f"Searching across {n_colls} document collections...", found=n_colls, step="search")
         with log_time(log, "Full document QA pipeline"):
             answer, tokens, retrieved_docs = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -414,6 +418,8 @@ async def document_node(state: LegalAgentState) -> dict:
         # Note: chat history is saved by the gateway after the full graph run,
         # not by the document agent. No duplicate save needed here.
 
+        progress("document", f"Found {len(retrieved_docs)} relevant passages", found=len(retrieved_docs), substep=True, step="search")
+        progress("document", "Generating answer from documents...", step="generate")
         log.info("Agent completed",
                  collection=unique_string,
                  response_len=len(answer), tokens=tokens)

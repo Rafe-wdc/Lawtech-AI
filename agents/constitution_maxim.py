@@ -30,6 +30,7 @@ from core.clients import get_gemini_flash, get_gemini_flash_full, get_es_client
 from core.settings import ES_INDICES
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 from config.prompts import (
     CONSTITUTION_SYSTEM_PROMPT,
     MAXIM_SYSTEM_PROMPT,
@@ -120,10 +121,12 @@ async def _handle_legal_concepts(query: str, chat_history: list,
                                    user_language: str = "en") -> AgentResult:
     """Handle Legal_Concepts task — web-grounded AI response for comprehensive coverage."""
     from core.agent_fallback import web_search_fallback
+    progress("legal_concepts", "Researching legal concept...", step="research")
     log.info("Legal concepts using web search for comprehensive response")
     result = await web_search_fallback(
         query, "Legal_Concepts", localize_prompt(LEGAL_CONCEPTS_PROMPT, user_language)
     )
+    progress("legal_concepts", "Generating explanation...", step="generate")
     return result
 
 
@@ -136,6 +139,8 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     )
 
     # Run ES retrieval and web enrichment in parallel
+    agent_label = task.lower()
+    progress(agent_label, f"Searching {task.lower()} provisions...", step="search")
     from core.agent_fallback import get_web_context
     with log_time(log, "ES + web enrichment (parallel)", task=task):
         docs, web_context = await asyncio.gather(
@@ -144,11 +149,13 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
         )
 
     if not docs:
+        progress(agent_label, "No results — searching the web...", step="fallback")
         log.warning("No documents found in ES, using web search fallback", task=task)
         from core.agent_fallback import web_search_fallback
         result = await web_search_fallback(query, task, system_prompt)
         return result
 
+    progress(agent_label, f"Found {len(docs)} matching results", found=len(docs), substep=True, step="search")
     docs_text = "\n\n".join(d.page_content for d in docs)
     source_name = docs[0].metadata.get("source", "unknown")
 
@@ -166,6 +173,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
               task=task, docs_count=len(docs),
               source=source_name, context_len=len(combined_context))
 
+    progress(agent_label, "Generating response...", step="generate")
     with log_time(log, "LLM generation", task=task):
         llm = get_gemini_flash_full(temperature=0.3)
         prompt = ChatPromptTemplate.from_messages([

@@ -16,6 +16,7 @@ from core.state import LegalAgentState, AgentResult
 from core.clients import get_gemini_flash_full
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 
 log = get_logger("NonLegal")
 
@@ -48,6 +49,8 @@ async def non_legal_node(state: LegalAgentState) -> dict:
     user_language = state.get("user_language", "en")
 
     log.info("Non-legal agent started", query=query[:80], lang=user_language)
+
+    progress("non_legal", "Preparing response...", step="generate")
 
     try:
         llm = get_gemini_flash_full(temperature=0.4)

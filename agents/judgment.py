@@ -39,6 +39,7 @@ from tools.shared.judgment_search import (
 )
 from tools.shared.storage_tools import generate_s3_link
 from tools.shared.llm_tools import CaseMetadata
+from core.progress import progress
 
 log = get_logger("Judgment")
 
@@ -244,6 +245,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
 
     try:
         # Steps 1 + 2: Run metadata extraction and preliminary ES search in parallel.
+        progress("judgment", "Extracting case details from query...", step="metadata")
         # Preliminary search uses regex-fallback metadata (fast) while GPT-4o extracts
         # richer metadata. If preliminary hits are found, we skip the refined search.
         def _preliminary_search():
@@ -260,6 +262,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 size=min(prelim_meta.size or 10, 50),
             )
 
+        progress("judgment", "Searching court judgments (2 strategies in parallel)...",
+                 step="search")
         with log_time(log, "Parallel metadata + ES search"):
             metadata_task = asyncio.create_task(
                 asyncio.to_thread(_extract_case_metadata, query)
@@ -288,10 +292,15 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # If preliminary search found hits, use them directly
         if prelim_result["hits"]:
             search_result = prelim_result
+            progress("judgment",
+                     f"Found {len(prelim_result['hits'])} judgments via {search_result['strategy_used']}",
+                     found=len(prelim_result["hits"]), substep=True, step="search")
             log.info("Preliminary ES search hit — skipping refined search",
                      strategy=search_result["strategy_used"])
         else:
             # Preliminary missed — do refined search with full GPT-4o metadata
+            progress("judgment", "Refining search with extracted metadata...",
+                     substep=True, step="search")
             with log_time(log, "Refined ES search with metadata"):
                 search_result = await asyncio.to_thread(
                     smart_judgment_search,
@@ -312,6 +321,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
 
         if not hits:
             # Phase 1: Query rewrite + retry
+            progress("judgment", "No results — rewriting query...", step="fallback")
             from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
             rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Judgment")
             if rewritten != query:
@@ -338,6 +348,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
 
             # Phase 2: Web search fallback if still empty
             if not hits:
+                progress("judgment", "Searching the web for case law...",
+                         step="fallback")
                 log.warning("All searches exhausted, using web fallback",
                             strategies_tried=strategies_tried)
                 fallback_result = await web_search_fallback(
@@ -354,6 +366,11 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # Step 3: Process hits into docs + source metadata
         docs_text_parts, sources = _process_hits(hits)
         first_title = sources[0].title if sources else ""
+
+        if first_title:
+            progress("judgment", f"Top match: {first_title[:70]}",
+                     found=len(hits), substep=True, step="search")
+        progress("judgment", "Generating response with citations...", step="generate")
 
         # Step 4: Generate response
         docs_text = "\n\n".join(docs_text_parts)

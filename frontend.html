@@ -736,6 +736,70 @@
   .stream-steps .step.done { color: var(--green); }
   .stream-steps .step .check { font-size: 11px; }
 
+  /* --- Progress panel (granular agent activity) --- */
+  .progress-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .progress-agent {
+    flex: 1;
+    min-width: 180px;
+    max-width: 300px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    animation: fadeSlideIn 0.25s ease;
+  }
+  .progress-agent-header {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text1);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .progress-agent-header .agent-icon {
+    font-size: 13px;
+  }
+  .progress-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 2px 0;
+    color: var(--text2);
+    font-size: 11.5px;
+    line-height: 1.4;
+    animation: fadeIn 0.2s ease;
+  }
+  .progress-item.substep {
+    padding-left: 14px;
+    font-size: 11px;
+    color: var(--text3, #888);
+  }
+  .progress-item .pi-icon {
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+    font-size: 10px;
+  }
+  .progress-item.active .pi-icon { color: var(--blue); }
+  .progress-item.done .pi-icon { color: var(--green); }
+  .progress-item .pi-found {
+    background: var(--accent-bg, rgba(37,99,235,0.1));
+    color: var(--blue);
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    margin-left: 4px;
+    font-weight: 600;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
   /* --- Draft Progress Card (multi-step pipeline) --- */
   .draft-progress-card {
     background: var(--surface2);
@@ -1825,7 +1889,13 @@ async function sendChatWithFiles(query, threadId) {
           if (evt.query_rewritten) {
             updateContextBar({rewritten: true, effectiveQuery: evt.effective_query, threadId: currentThreadId, turn: currentTurnCount});
           }
+        } else if (evt.type === 'progress') {
+          // Show progress in status area for chat endpoint
+          const label = evt.substep ? '  \u21B3 ' + evt.message : evt.message;
+          const found = evt.found != null ? ' (' + evt.found + ')' : '';
+          statusEl.innerHTML = '<span class="typing-indicator"></span> ' + escapeHtml(label + found);
         } else if (evt.type === 'token') {
+          statusEl.style.display = 'none';
           accumulatedContent += evt.content;
           contentEl.innerHTML = renderMarkdown(accumulatedContent);
           msgDiv.scrollIntoView({behavior: 'smooth', block: 'end'});
@@ -1944,6 +2014,7 @@ async function sendChatStream(query, threadId) {
     '<div class="agents-badge" id="streamAgents"></div>' +
     '<div id="streamStatus" class="stream-status"><span class="streaming-dot"></span> Connecting...</div>' +
     '<div id="streamSteps" class="stream-steps"></div>' +
+    '<div id="streamProgress" class="progress-panel" style="display:none;"></div>' +
     '<div id="streamContent" style="display:none;"></div>';
   document.getElementById('chatMessages').appendChild(msgDiv);
   scrollChat();
@@ -2062,6 +2133,56 @@ async function sendChatStream(query, threadId) {
           scrollChat();
           addLog('info', `${event.agent}: ${event.message}`);
 
+        } else if (event.type === 'progress') {
+          // Granular agent progress — render in progress panel
+          const progressPanel = document.getElementById('streamProgress');
+          if (progressPanel) {
+            progressPanel.style.display = 'flex';
+
+            // Agent icon mapping
+            const agentIcons = {
+              guardrail: '\u{1F6E1}', memory: '\u{1F9E0}', orchestrator: '\u{1F4CB}',
+              legislation: '\u{1F4DC}', judgment: '\u2696\uFE0F', sci_judgment: '\u{1F3DB}',
+              newacts: '\u{1F4D6}', drafting: '\u270F\uFE0F', scenario: '\u{1F50D}',
+              constitution: '\u{1F3DB}', maxim: '\u{1F4DA}', legal_concepts: '\u{1F4A1}',
+              document: '\u{1F4C4}', non_legal: '\u{1F4AC}',
+            };
+
+            // Get or create agent column
+            let agentCol = document.getElementById('progress_' + event.agent);
+            if (!agentCol) {
+              agentCol = document.createElement('div');
+              agentCol.id = 'progress_' + event.agent;
+              agentCol.className = 'progress-agent';
+              const icon = agentIcons[event.agent] || '\u2022';
+              const label = event.agent.charAt(0).toUpperCase() + event.agent.slice(1).replace('_', ' ');
+              agentCol.innerHTML = '<div class="progress-agent-header"><span class="agent-icon">' + icon + '</span> ' + escapeHtml(label) + '</div>';
+              progressPanel.appendChild(agentCol);
+            }
+
+            // Mark previous active item as done
+            const prevActive = agentCol.querySelector('.progress-item.active');
+            if (prevActive) {
+              prevActive.classList.remove('active');
+              prevActive.classList.add('done');
+              prevActive.querySelector('.pi-icon').textContent = '\u2713';
+            }
+
+            // Add new progress item
+            const item = document.createElement('div');
+            item.className = 'progress-item active' + (event.substep ? ' substep' : '');
+            let html = '<span class="pi-icon">\u25CF</span> ' + escapeHtml(event.message);
+            if (event.found != null) {
+              html += '<span class="pi-found">' + event.found + '</span>';
+            }
+            if (event.detail && !event.substep) {
+              html += ' <span style="color:var(--text3,#888)">(' + escapeHtml(event.detail.substring(0, 60)) + ')</span>';
+            }
+            item.innerHTML = html;
+            agentCol.appendChild(item);
+            scrollChat();
+          }
+
         } else if (event.type === 'drafting_progress') {
           // Dedicated draft section progress card
           const statusEl = document.getElementById('streamStatus');
@@ -2151,6 +2272,25 @@ async function sendChatStream(query, threadId) {
             if (statusEl) statusEl.style.display = 'none';
             const stepsEl = document.getElementById('streamSteps');
             if (stepsEl) stepsEl.style.display = 'none';
+            // Mark all progress items as done and collapse panel
+            const progressPanel = document.getElementById('streamProgress');
+            if (progressPanel) {
+              progressPanel.querySelectorAll('.progress-item.active').forEach(function(el) {
+                el.classList.remove('active');
+                el.classList.add('done');
+                el.querySelector('.pi-icon').textContent = '\u2713';
+              });
+              // Collapse panel with animation after brief delay
+              setTimeout(function() {
+                progressPanel.style.maxHeight = progressPanel.scrollHeight + 'px';
+                progressPanel.style.transition = 'max-height 0.4s ease, opacity 0.4s ease';
+                requestAnimationFrame(function() {
+                  progressPanel.style.maxHeight = '0';
+                  progressPanel.style.opacity = '0';
+                  progressPanel.style.overflow = 'hidden';
+                });
+              }, 800);
+            }
             // Hide draft progress card when final response starts streaming
             const draftCard = document.getElementById('draftProgressCard');
             if (draftCard) draftCard.style.display = 'none';
@@ -2298,7 +2438,7 @@ async function sendChatStream(query, threadId) {
   }
 
   // Remove temp IDs to avoid conflicts with next stream
-  ['streamAgents', 'streamStatus', 'streamSteps', 'streamContent'].forEach(id => {
+  ['streamAgents', 'streamStatus', 'streamSteps', 'streamProgress', 'streamContent'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.removeAttribute('id');
   });

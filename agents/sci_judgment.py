@@ -24,6 +24,7 @@ from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gemini_flash_full
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
 from tools.shared import AGENT_TOOLS, search_by_topic
 
@@ -48,6 +49,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
 
     try:
         # Build ReAct agent with SCI tools
+        progress("sci_judgment", "Preparing Supreme Court search...", step="prepare")
         llm = get_gemini_flash_full(temperature=0)
         tools = AGENT_TOOLS["sci_judgment"]
         log.debug("Building ReAct agent", tools_count=len(tools))
@@ -59,6 +61,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         )
 
         # Invoke the ReAct sub-agent
+        progress("sci_judgment", "Running multi-step research (ReAct agent)...", step="react")
         with log_time(log, "ReAct agent execution"):
             result = await agent.ainvoke(
                 {"messages": [("user", query)]}
@@ -103,6 +106,8 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                 else:
                     answer = raw
 
+        if tools_used:
+            progress("sci_judgment", f"Completed {len(tools_used)} search steps", found=len(tools_used), substep=True, step="react")
         log.info("ReAct agent completed",
                  tools_used=tools_used, tool_calls=len(tools_used),
                  response_len=len(answer),
@@ -220,6 +225,9 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             unique_sources.append(s)
         sources = unique_sources
 
+        if sources:
+            progress("sci_judgment", f"Found {len(sources)} Supreme Court judgments", found=len(sources), step="results")
+        progress("sci_judgment", "Generating response...", step="generate")
         log.info("Sources parsed from tool messages",
                  source_count=len(sources))
 

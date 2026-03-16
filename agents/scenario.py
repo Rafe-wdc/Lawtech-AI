@@ -22,6 +22,7 @@ from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_genai_client
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
 from config.prompts import SCENARIO_SYSTEM_PROMPT
 
@@ -66,6 +67,7 @@ async def scenario_node(state: LegalAgentState) -> dict:
 
     try:
         async with _AGENT_SEMAPHORE:
+            progress("scenario", "Analyzing legal scenario...", step="analyze")
             # Build prompt dynamically so we can inject language instruction
             system_prompt = localize_prompt(SCENARIO_SYSTEM_PROMPT, user_language)
             template = ChatPromptTemplate.from_messages([
@@ -81,6 +83,7 @@ async def scenario_node(state: LegalAgentState) -> dict:
             # Invoke Gemini 2.5 Flash with Google Search grounding
             # Uses asyncio.to_thread to avoid blocking the event loop
             # 120s timeout to prevent indefinite hangs on complex searches
+            progress("scenario", "Searching the web with Google Search...", step="web_search")
             with log_time(log, "Gemini Flash + Google Search"):
                 client = get_genai_client()
                 response = await asyncio.wait_for(
@@ -105,6 +108,8 @@ async def scenario_node(state: LegalAgentState) -> dict:
             else:
                 content = getattr(response.candidates[0].content.parts[0], "text", None) or ""
             tokens = getattr(response.usage_metadata, "total_token_count", 0)
+
+            progress("scenario", "Generating scenario analysis...", step="generate")
 
             # Extract web sources from Gemini grounding metadata
             sources = []

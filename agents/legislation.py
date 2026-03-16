@@ -38,6 +38,7 @@ from tools.shared.elasticsearch_tools import (
     _search_legislation_by_topic,
     _search_legislation_multi_section,
 )
+from core.progress import progress
 
 log = get_logger("Legislation")
 
@@ -281,9 +282,9 @@ async def legislation_node(state: LegalAgentState) -> dict:
              using_agent_query="Legislation" in agent_queries)
 
     try:
+        progress("legislation", "Parsing query for section references...", step="parse")
+
         # Strip subsection parentheticals for cleaner ES matching
-        # e.g. "Section 138(1) of NI Act" → "Section 138 of NI Act"
-        # Keep original query for LLM generation and user display
         clean_query = re.sub(r'\(\w+\)', '', query).strip()
         clean_query = re.sub(r'\s+', ' ', clean_query)
         if clean_query != query:
@@ -294,6 +295,12 @@ async def legislation_node(state: LegalAgentState) -> dict:
         multi_parsed = parse_multi_section_info(query)
         search_mode = "standard"
 
+        if multi_parsed and multi_parsed.get("section_numbers"):
+            sections_str = ", ".join(str(s) for s in multi_parsed["section_numbers"])
+            act_str = multi_parsed.get("act_name") or "legislation"
+            progress("legislation", f"Detected sections: {sections_str}",
+                     detail=act_str, substep=True, step="parse")
+
         # Step 2: Choose search strategy
         if multi_parsed and len(multi_parsed["section_numbers"]) > 1:
             # --- Multi-section path ---
@@ -301,6 +308,9 @@ async def legislation_node(state: LegalAgentState) -> dict:
             log.info("Multi-section query detected",
                      sections=multi_parsed["section_numbers"],
                      act=multi_parsed["act_name"])
+            progress("legislation",
+                     f"Searching {len(multi_parsed['section_numbers'])} sections in parallel...",
+                     step="search")
 
             with log_time(log, "Multi-section ES retrieval"):
                 result = await asyncio.to_thread(
@@ -323,6 +333,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
 
         else:
             # --- Standard single-section path (use clean_query) ---
+            progress("legislation", "Searching legislation database...", step="search")
             with log_time(log, "ES retrieval"):
                 hits, source_name = await asyncio.to_thread(_search_legislation, clean_query)
 
@@ -330,6 +341,8 @@ async def legislation_node(state: LegalAgentState) -> dict:
         if not hits and not multi_parsed:
             search_mode = "topic"
             log.info("No section hits, trying topic-based search")
+            progress("legislation", "No exact match — trying topic search...",
+                     substep=True, step="search")
             with log_time(log, "Topic ES retrieval"):
                 topic_result = await asyncio.to_thread(_search_legislation_by_topic, clean_query)
 
@@ -342,11 +355,19 @@ async def legislation_node(state: LegalAgentState) -> dict:
                         "_score": h["score"],
                     })
 
+        if hits:
+            progress("legislation", f"Found {len(hits)} matching provisions",
+                     found=len(hits), step="search")
+
         if not hits:
             # Phase 1: Query rewrite + retry
+            progress("legislation", "No results — rewriting query...",
+                     step="fallback")
             from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
             rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Legislation")
             if rewritten != query:
+                progress("legislation", "Retrying with refined query...",
+                         detail=rewritten[:80], substep=True, step="fallback")
                 log.info("Retrying with rewritten query", rewritten=rewritten[:100])
                 try:
                     retry_hits, retry_source = await asyncio.to_thread(_search_legislation, rewritten)
@@ -358,6 +379,8 @@ async def legislation_node(state: LegalAgentState) -> dict:
 
             # Phase 2: Web search fallback if still empty
             if not hits:
+                progress("legislation", "Searching the web for latest information...",
+                         step="fallback")
                 log.warning("All searches exhausted, using web fallback",
                             search_mode=search_mode)
                 fallback_result = await web_search_fallback(
@@ -387,6 +410,13 @@ async def legislation_node(state: LegalAgentState) -> dict:
                   docs_text_len=len(docs_text), search_mode=search_mode)
 
         # Step 5: Generate response (with 1 retry on disconnect)
+        source_display_progress = os.path.splitext(os.path.basename(
+            hits[0].get("_source", {}).get("source", "")
+        ))[0] if hits else ""
+        if source_display_progress:
+            progress("legislation", f"Reading: {source_display_progress}",
+                     substep=True, step="search")
+        progress("legislation", "Generating response...", step="generate")
         with log_time(log, "LLM generation"):
             llm = get_gemini_flash_full(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([

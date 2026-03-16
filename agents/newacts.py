@@ -33,6 +33,7 @@ from core.clients import (
 from core.settings import ES_INDICES, TIMEOUT_METADATA_SEC
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
+from core.progress import progress
 from config.prompts import NEWACTS_SYSTEM_PROMPT
 
 from tools.inline.section_parser import parse_multi_section_info
@@ -290,6 +291,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
     try:
         # Step 1: Extract metadata (GPT-4o in a thread, with timeout + regex fallback)
+        progress("newacts", "Extracting act and section details...", step="parse")
         try:
             metadata = await asyncio.wait_for(
                 asyncio.to_thread(_extract_act_metadata, query),
@@ -306,12 +308,17 @@ async def newacts_node(state: LegalAgentState) -> dict:
         # Step 1b: Detect old↔new mapping queries
         has_section = bool(metadata.section_number)
         has_act = bool(metadata.act_name and metadata.act_name in ACTS_PATHS)
+        if has_section and metadata.section_number:
+            sections_str = ", ".join(metadata.section_number[:5])
+            act_str = metadata.act_name or "unknown act"
+            progress("newacts", f"Detected: Section {sections_str}", detail=act_str, substep=True, step="parse")
         query_lower = query.lower()
         is_mapping_query = any(kw in query_lower for kw in _MAPPING_KEYWORDS)
 
         mapping_extra_hits = []  # extra hits from the counterpart act
 
         if is_mapping_query and has_section and metadata.section_number:
+            progress("newacts", "Checking old↔new law mapping...", step="mapping")
             log.info("Mapping query detected", act=metadata.act_name,
                      sections=metadata.section_number)
 
@@ -412,6 +419,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
                                             error=str(map_err))
 
         # Step 2: Decide search path
+        progress("newacts", "Searching new acts database...", step="search")
 
         # Large-range path: > 20 sections requested → switch to chapter overview
         # strategy instead of per-section ES retrieval.
@@ -557,6 +565,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
         if not hits:
             # Phase 1: Query rewrite + retry
             from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
+            progress("newacts", "No results — rewriting query...", step="fallback")
             rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Newacts")
             if rewritten != query:
                 log.info("Retrying with rewritten query", rewritten=rewritten[:100])
@@ -573,6 +582,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
             # Phase 2: Web search fallback if still empty
             if not hits:
+                progress("newacts", "Searching the web for latest information...", step="fallback")
                 log.warning("All searches exhausted, using web fallback")
                 fallback_result = await web_search_fallback(query, "Newacts", _system_prompt)
                 fallback_result.retry_attempted = True
@@ -580,6 +590,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
                     "agent_results": {"Newacts": fallback_result},
                 }
 
+        progress("newacts", f"Found {len(hits)} matching provisions", found=len(hits), step="search")
         log.info("ES results found", hit_count=len(hits))
 
         # Step 5: Convert hits to documents
@@ -587,6 +598,7 @@ async def newacts_node(state: LegalAgentState) -> dict:
         source_file = hits[0]["_source"].get("source", "unknown")
 
         # Step 6: Generate response (with 1 retry on disconnect)
+        progress("newacts", "Generating response...", step="generate")
         with log_time(log, "LLM generation"):
             llm = get_gemini_flash_full(temperature=0.1)
             prompt = ChatPromptTemplate.from_messages([

@@ -98,22 +98,20 @@ def _error_response(status_code: int, error: str, message: str, request_id: str 
     )
 
 
-# --- Rate Limiter (key by API key when present, fall back to IP) ---
+# --- Rate Limiter (key by API key or IP; admin keys get distinct bucket) ---
 def _rate_limit_key(request: Request) -> str:
+    """Rate limit key function. Admin keys get a distinct key prefix
+    so they don't share the per-user bucket."""
     key = request.headers.get("X-API-Key", "")
+    if _ADMIN_API_KEY and key == _ADMIN_API_KEY:
+        return "admin__exempt"
     if key:
         return get_key_identifier(key)
     return request.client.host if request.client else "unknown"
 
 
-def _is_admin_request(request: Request) -> bool:
-    key = request.headers.get("X-API-Key", "")
-    return bool(_ADMIN_API_KEY and key == _ADMIN_API_KEY)
-
-
 def _get_limit_for_request() -> str:
-    """Callable for @limiter.limit — slowapi calls this with no args.
-    We use the default limit here; admin keys are exempted via exempt_when."""
+    """Callable for @limiter.limit — slowapi calls this with no args."""
     return f"{RATE_LIMIT_PER_MINUTE}/minute"
 
 
@@ -382,7 +380,7 @@ def _safe_persist_dir(unique_string: str) -> str:
 # ============================================================
 
 @app.post("/pyapi/search", response_model=SearchResponse, dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request, exempt_when=_is_admin_request)
+@limiter.limit(_get_limit_for_request)
 async def search(data: SearchRequest, request: Request):
     """Main legal Q&A endpoint (batch mode).
 
@@ -570,7 +568,7 @@ _NODE_STATUS = {
 
 
 @app.post("/pyapi/search/stream", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request, exempt_when=_is_admin_request)
+@limiter.limit(_get_limit_for_request)
 async def search_stream(data: SearchRequest, request: Request):
     """Streaming legal Q&A endpoint (SSE).
 
@@ -841,7 +839,7 @@ async def search_stream(data: SearchRequest, request: Request):
 # ============================================================
 
 @app.post("/pyapi/chat", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request, exempt_when=_is_admin_request)
+@limiter.limit(_get_limit_for_request)
 async def chat_with_files(
     request: Request,
     query: str = Form(...),
@@ -1083,7 +1081,7 @@ class ContinueDraftRequest(BaseModel):
 
 
 @app.post("/pyapi/continue_draft", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request, exempt_when=_is_admin_request)
+@limiter.limit(_get_limit_for_request)
 async def continue_draft(data: ContinueDraftRequest, request: Request):
     """Continue an incomplete draft by regenerating failed sections.
 
@@ -1256,7 +1254,7 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
 # ============================================================
 
 @app.delete("/pyapi/delete_vectordb/{unique_string}", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request, exempt_when=_is_admin_request)
+@limiter.limit(_get_limit_for_request)
 async def delete_vectordb(unique_string: str, request: Request):
     """Delete a user's PDF document collection from ChromaDB."""
     persist_dir = _safe_persist_dir(unique_string)
@@ -1288,7 +1286,7 @@ async def delete_vectordb(unique_string: str, request: Request):
 # ============================================================
 
 @app.get("/pyapi/thread/{thread_id}/files", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request, exempt_when=_is_admin_request)
+@limiter.limit(_get_limit_for_request)
 async def list_thread_files(thread_id: str, request: Request):
     """List all files for a thread with their current status (including OCR status).
 
@@ -1302,7 +1300,7 @@ async def list_thread_files(thread_id: str, request: Request):
 
 
 @app.delete("/pyapi/thread/{thread_id}/files", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request, exempt_when=_is_admin_request)
+@limiter.limit(_get_limit_for_request)
 async def delete_thread_files(thread_id: str, request: Request):
     """Delete all files for a thread: local storage, Gemini URIs, ChromaDB, SQLite records."""
     from core.gemini_files import delete_gemini_file

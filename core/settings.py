@@ -37,7 +37,7 @@ OPENAI_API_KEY = _MaskedStr(_openai_key)
 GOOGLE_API_KEY = _MaskedStr(_google_key)
 
 # --- Agent Timeouts (seconds) ---
-TIMEOUT_WEB_SEARCH_SEC: float = 120.0      # Gemini + Google Search grounding
+TIMEOUT_WEB_SEARCH_SEC: float = 60.0       # Gemini + Google Search grounding (was 120)
 TIMEOUT_METADATA_SEC: float = 20.0         # GPT-4o metadata extraction
 TIMEOUT_ES_PARALLEL_SEC: float = 22.0      # Parallel ES search (per-agent)
 TIMEOUT_CHROMADB_SEC: float = 90.0         # ChromaDB retrieval + PDF Q&A

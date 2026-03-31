@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from datetime import date
 from typing import Optional, List
 
@@ -281,9 +282,16 @@ async def newacts_node(state: LegalAgentState) -> dict:
     6. If no section/act, fall back to topic-based search
     7. Generate response with provisions
     """
+    _AGENT_BUDGET_SEC = 150.0  # leave 30s margin before 180s gateway timeout
+    _t0 = time.monotonic()
+
+    def _budget_remaining() -> float:
+        return _AGENT_BUDGET_SEC - (time.monotonic() - _t0)
+
     agent_queries = state.get("agent_queries", {})
     # Prefer agent-specific query > normalized English query > original (for multilingual support)
     query = agent_queries.get("Newacts", state.get("query", state.get("original_query", "")))
+    user_context = state.get("user_context", "")
     _system_prompt = localize_prompt(NEWACTS_SYSTEM_PROMPT, state.get("user_language", "en"))
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
@@ -323,8 +331,6 @@ async def newacts_node(state: LegalAgentState) -> dict:
                      sections=metadata.section_number)
 
             # Scan ALL acts mentioned in query (not just metadata.act_name)
-            # This handles cases like "Section 498a of IPC in BNS" where
-            # metadata may extract BNS but the section belongs to IPC
             mentioned_old: list[tuple[str, str]] = []  # (full_name, abbrev)
             mentioned_new: list[tuple[str, str, str]] = []  # (full_name, short, old_key)
             for abbrev, full_name in _ABBREVIATION_MAP.items():
@@ -339,7 +345,27 @@ async def newacts_node(state: LegalAgentState) -> dict:
                      old_acts=[a for _, a in mentioned_old],
                      new_acts=[s for _, s, _ in mentioned_new])
 
-            # Strategy: try to find mapping from old→new first
+            # Collect all mapping fetch tasks to run in parallel
+            _mapping_tasks: list[asyncio.Task] = []
+
+            async def _fetch_nearby(section: str, act_full: str) -> list[dict]:
+                """Fetch nearby sections and return as hit dicts."""
+                nearby = await asyncio.to_thread(
+                    _get_nearby_sections, section, act_full, 0,
+                )
+                return [
+                    {
+                        "_source": {
+                            "page_content": nh["content"],
+                            "source": nh["source"],
+                            "section_number": nh.get("section_number"),
+                        },
+                        "_score": nh.get("score"),
+                    }
+                    for nh in nearby["hits"]
+                ]
+
+            # Strategy: find mappings from old→new
             for old_full, old_abbrev in mentioned_old:
                 mapping_table = _OLD_NEW_MAPPING.get(old_abbrev, {})
                 for sec in metadata.section_number:
@@ -355,24 +381,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
                                      old=f"{old_abbrev.upper()} {sec}",
                                      new=f"{mapped['new_act']} {mapped['new_section']}",
                                      desc=mapped["description"])
-                            # Fetch new section (sync ES call → off-thread)
-                            try:
-                                nearby = await asyncio.to_thread(
-                                    _get_nearby_sections,
-                                    mapped["new_section"], new_act_full, 0,
-                                )
-                                for nh in nearby["hits"]:
-                                    mapping_extra_hits.append({
-                                        "_source": {
-                                            "page_content": nh["content"],
-                                            "source": nh["source"],
-                                            "section_number": nh.get("section_number"),
-                                        },
-                                        "_score": nh.get("score"),
-                                    })
-                            except Exception as map_err:
-                                log.warning("Failed to fetch mapped section",
-                                            error=str(map_err))
+                            _mapping_tasks.append(
+                                _fetch_nearby(mapped["new_section"], new_act_full)
+                            )
                             # Also fetch old section if metadata points elsewhere
                             if metadata.act_name != old_full:
                                 log.info("Overriding metadata act for old section fetch",
@@ -400,23 +411,19 @@ async def newacts_node(state: LegalAgentState) -> dict:
                                      new=f"{new_short} {sec}",
                                      old=f"{mapped['old_act']} {mapped['old_section']}",
                                      desc=mapped["description"])
-                            try:
-                                nearby = await asyncio.to_thread(
-                                    _get_nearby_sections,
-                                    mapped["old_section"], old_act_full, 0,
-                                )
-                                for nh in nearby["hits"]:
-                                    mapping_extra_hits.append({
-                                        "_source": {
-                                            "page_content": nh["content"],
-                                            "source": nh["source"],
-                                            "section_number": nh.get("section_number"),
-                                        },
-                                        "_score": nh.get("score"),
-                                    })
-                            except Exception as map_err:
-                                log.warning("Failed to fetch reverse-mapped section",
-                                            error=str(map_err))
+                            _mapping_tasks.append(
+                                _fetch_nearby(mapped["old_section"], old_act_full)
+                            )
+
+            # Run all mapping fetches in parallel
+            if _mapping_tasks:
+                with log_time(log, "Parallel mapping fetch", count=len(_mapping_tasks)):
+                    results = await asyncio.gather(*_mapping_tasks, return_exceptions=True)
+                for r in results:
+                    if isinstance(r, Exception):
+                        log.warning("Mapping fetch failed", error=str(r))
+                    else:
+                        mapping_extra_hits.extend(r)
 
         # Step 2: Decide search path
         progress("newacts", "Searching new acts database...", step="search")
@@ -563,15 +570,15 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
 
         if not hits:
-            # Phase 1: Query rewrite + retry
-            from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
-            progress("newacts", "No results — rewriting query...", step="fallback")
-            rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Newacts")
-            if rewritten != query:
-                log.info("Retrying with rewritten query", rewritten=rewritten[:100])
+            # Phase 1: Regex-only query rewrite + retry (no LLM call — fast)
+            from core.agent_fallback import web_search_fallback
+            progress("newacts", "No results — retrying with rewritten query...", step="fallback")
+            retry_meta = _regex_fallback_metadata(query)
+            if retry_meta.act_name != metadata.act_name or retry_meta.section_number != metadata.section_number:
+                log.info("Retrying with regex-rewritten metadata",
+                         act=retry_meta.act_name, sections=retry_meta.section_number)
                 try:
-                    retry_meta = _regex_fallback_metadata(rewritten)
-                    retry_es_query = _build_newacts_query(retry_meta, rewritten)
+                    retry_es_query = _build_newacts_query(retry_meta, query)
                     es = get_es_client()
                     retry_resp = es.search(index=ES_INDICES["newacts"], body=retry_es_query)
                     hits = retry_resp["hits"]["hits"]
@@ -580,15 +587,21 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 except Exception as retry_err:
                     log.warning("Retry search failed", error=str(retry_err))
 
-            # Phase 2: Web search fallback if still empty
+            # Phase 2: Web search fallback if still empty (with budget check)
             if not hits:
-                progress("newacts", "Searching the web for latest information...", step="fallback")
-                log.warning("All searches exhausted, using web fallback")
-                fallback_result = await web_search_fallback(query, "Newacts", _system_prompt)
-                fallback_result.retry_attempted = True
-                return {
-                    "agent_results": {"Newacts": fallback_result},
-                }
+                remaining = _budget_remaining()
+                if remaining < 15:
+                    log.warning("Skipping web fallback — budget exhausted",
+                                remaining=f"{remaining:.1f}s")
+                else:
+                    progress("newacts", "Searching the web for latest information...", step="fallback")
+                    log.warning("All searches exhausted, using web fallback",
+                                budget_remaining=f"{remaining:.1f}s")
+                    fallback_result = await web_search_fallback(query, "Newacts", _system_prompt)
+                    fallback_result.retry_attempted = True
+                    return {
+                        "agent_results": {"Newacts": fallback_result},
+                    }
 
         progress("newacts", f"Found {len(hits)} matching provisions", found=len(hits), step="search")
         log.info("ES results found", hit_count=len(hits))
@@ -609,8 +622,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 ("user", "User Query: {query}"),
             ])
             chain = prompt | llm
+            gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
             invoke_kwargs = {
-                "query": query,
+                "query": gen_query,
                 "docs": docs_text,
                 "chat_history": chat_history,
                 "date": str(date.today()),

@@ -726,9 +726,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
     """
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Drafting") or state.get("query") or state.get("original_query", "")
+    user_context = state.get("user_context", "")
     user_language = state.get("user_language", "en")
     log.info("Agent started", query=query[:100],
+             has_user_context=bool(user_context),
              using_agent_query="Drafting" in agent_queries)
+    # For long queries: include pasted content in the drafting query
+    if user_context:
+        query = f"User's document/context:\n{user_context}\n\nUser's instruction:\n{query}"
 
     # Acquire concurrency slot; emit queue_status SSE event if at capacity
     try:

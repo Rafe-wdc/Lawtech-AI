@@ -276,6 +276,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
     agent_queries = state.get("agent_queries", {})
     # Prefer agent-specific query > normalized English query > original (for multilingual support)
     query = agent_queries.get("Legislation", state.get("query", state.get("original_query", "")))
+    user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
     _system_prompt = localize_prompt(LEGISLATION_SYSTEM_PROMPT, state.get("user_language", "en"))
     log.info("Agent started", query=query[:100],
@@ -427,8 +428,10 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 ("user", "User Query: {query}"),
             ])
             chain = prompt | llm
+            # For long queries: include user's pasted document in LLM generation
+            gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
             invoke_kwargs = {
-                "query": query,
+                "query": gen_query,
                 "docs": docs_text,
                 "chat_history": chat_history,
                 "date": str(date.today()),

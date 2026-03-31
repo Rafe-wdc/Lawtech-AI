@@ -46,11 +46,16 @@ async def scenario_node(state: LegalAgentState) -> dict:
     """
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Scenario", state.get("query", state["original_query"]))
+    user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
     user_language = state.get("user_language", "en")
     log.info("Agent started", query=query[:100],
              has_history=len(chat_history) > 0,
+             has_user_context=bool(user_context),
              using_agent_query="Scenario" in agent_queries)
+    # For long queries: prepend pasted content to the query for the LLM
+    if user_context:
+        query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}"
 
     # Acquire concurrency slot; emit queue_status SSE event if at capacity
     try:

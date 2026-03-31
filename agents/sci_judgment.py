@@ -43,9 +43,14 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
     agent_queries = state.get("agent_queries", {})
     # Prefer agent-specific query > normalized English query > original (for multilingual support)
     query = agent_queries.get("SCI_Judgment", state.get("query", state.get("original_query", "")))
+    user_context = state.get("user_context", "")
     user_language = state.get("user_language", "en")
     log.info("Agent started", query=query[:100],
+             has_user_context=bool(user_context),
              using_agent_query="SCI_Judgment" in agent_queries)
+    # For long queries: include pasted content for the ReAct agent
+    if user_context:
+        query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}"
 
     try:
         # Build ReAct agent with SCI tools

@@ -238,6 +238,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
     # Prefer agent-specific query > normalized English query > original (for multilingual support)
     query = agent_queries.get("Judgment", state.get("query", state.get("original_query", "")))
     original_query = state.get("original_query", query)
+    user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
     _system_prompt = localize_prompt(JUDGMENT_SYSTEM_PROMPT, state.get("user_language", "en"))
     log.info("Agent started", query=query[:100],
@@ -386,9 +387,10 @@ async def judgment_node(state: LegalAgentState) -> dict:
             ])
             chain = prompt | llm
 
+            gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
             from core.streaming import stream_chain_response
             llm_response = await stream_chain_response(chain, {
-                "query": query,
+                "query": gen_query,
                 "docs": docs_text,
                 "chat_history": chat_history,
                 "date": str(date.today()),

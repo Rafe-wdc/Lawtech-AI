@@ -55,6 +55,63 @@ def _sanitize_response_instructions(instructions: str) -> str:
     return cleaned
 
 
+# --- Long Query Extraction ---
+# When users paste 20-30K chars (e.g. a contract + question), we separate
+# the concise question from the pasted context. Classification/routing uses
+# only the question; the generating agent gets the full text as user_context.
+
+_LONG_QUERY_THRESHOLD = 5000  # chars — below this, treat as normal query
+
+_QUERY_EXTRACT_PROMPT = """You are a legal AI assistant. The user has sent a very long message that likely contains a pasted document (contract, notice, agreement, judgment) along with their actual question.
+
+Your task: Extract the user's actual QUESTION or INSTRUCTION from the text. The question is usually at the beginning or end of the message.
+
+If the entire text IS the document with no explicit question, infer the most likely intent (e.g., "Review this document and identify key legal issues").
+
+User message (first 3000 chars):
+{text_start}
+
+---
+User message (last 2000 chars):
+{text_end}
+
+Return JSON:
+{{"question": "<the user's actual question/instruction in 1-3 sentences>", "document_type": "<contract|notice|agreement|judgment|legislation|petition|affidavit|other>"}}"""
+
+
+class QueryExtraction(BaseModel):
+    question: str = Field(..., description="The user's actual question or instruction")
+    document_type: str = Field("other", description="Type of document pasted")
+
+
+def _extract_question_from_long_query(query: str) -> tuple[str, str]:
+    """Extract concise question from a long query containing pasted content.
+
+    Returns (concise_question, document_type).
+    Falls back to first 500 chars if extraction fails.
+    """
+    try:
+        with log_time(log, "Long query extraction"):
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(QueryExtraction)
+            prompt = ChatPromptTemplate.from_template(_QUERY_EXTRACT_PROMPT)
+            chain = prompt | llm
+            result = chain.invoke({
+                "text_start": query[:3000],
+                "text_end": query[-2000:],
+            })
+
+        log.info("Question extracted from long query",
+                 question_len=len(result.question),
+                 doc_type=result.document_type,
+                 original_len=len(query))
+        return result.question, result.document_type
+
+    except Exception as e:
+        log.warning("Long query extraction failed, using truncated query",
+                    error=str(e))
+        return query[:500], "other"
+
+
 # --- Task Classification (migrated from v1 task_identifer.py) ---
 
 class IdentifyTaskSchema(BaseModel):
@@ -625,10 +682,36 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     _original_query = state.get("original_query", query)
     summary = state.get("summary_text", "")
     user_language = state.get("user_language", "en")
+    user_context = ""  # long-form pasted content, empty for normal queries
     log.info("Plan phase started", query=query[:100],
-             has_summary=bool(summary))
+             has_summary=bool(summary), query_len=len(query))
 
     progress("orchestrator", "Understanding your question...", step="classify")
+
+    # --- Long query extraction: separate question from pasted content ---
+    if len(query) > _LONG_QUERY_THRESHOLD:
+        log.info("Long query detected, extracting question",
+                 query_len=len(query), threshold=_LONG_QUERY_THRESHOLD)
+        progress("orchestrator", "Analyzing your document...", step="extract")
+        try:
+            extracted_question, doc_type = await asyncio.wait_for(
+                asyncio.to_thread(_extract_question_from_long_query, query),
+                timeout=15,
+            )
+            user_context = query  # full text preserved for generating agent
+            query = extracted_question  # route/classify on concise question
+            log.info("Long query split",
+                     question=extracted_question[:100],
+                     doc_type=doc_type,
+                     context_len=len(user_context))
+        except asyncio.TimeoutError:
+            log.warning("Long query extraction timed out, using first 500 chars for routing")
+            user_context = query
+            query = query[:500]
+        except Exception as extract_err:
+            log.warning("Long query extraction failed", error=str(extract_err))
+            user_context = query
+            query = query[:500]
 
     # --- Fast pre-checks (no LLM calls, uses original query) ---
     _GREETING_PREFIXES = (
@@ -827,13 +910,16 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
              agent_queries_generated=len(agent_queries),
              has_response_instructions=bool(response_instructions))
 
-    return {
+    result = {
         "query": query,  # normalized English query replaces original
         "task": task,
         "tasks_planned": tasks_planned,
         "agent_queries": agent_queries,
         "response_instructions": response_instructions,
     }
+    if user_context:
+        result["user_context"] = user_context
+    return result
 
 
 async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:

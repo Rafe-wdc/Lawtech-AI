@@ -255,13 +255,16 @@ async def constitution_node(state: LegalAgentState) -> dict:
     """
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Constitution", state.get("query", state["original_query"]))
+    user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
     user_language = state.get("user_language", "en")
     log.info("Constitution agent started", query=query[:100],
              using_agent_query="Constitution" in agent_queries)
+    # For long queries: include user's pasted content in LLM generation query
+    gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
 
     try:
-        result = await _handle_constitution_or_maxim("Constitution", query, chat_history,
+        result = await _handle_constitution_or_maxim("Constitution", gen_query, chat_history,
                                                       user_language)
     except Exception as e:
         log.error("Constitution agent failed", error=str(e), exc_info=True)
@@ -285,13 +288,15 @@ async def maxim_node(state: LegalAgentState) -> dict:
     """
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Maxim", state.get("query", state["original_query"]))
+    user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
     user_language = state.get("user_language", "en")
     log.info("Maxim agent started", query=query[:100],
              using_agent_query="Maxim" in agent_queries)
+    gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
 
     try:
-        result = await _handle_constitution_or_maxim("Maxim", query, chat_history,
+        result = await _handle_constitution_or_maxim("Maxim", gen_query, chat_history,
                                                       user_language)
     except Exception as e:
         log.error("Maxim agent failed", error=str(e), exc_info=True)
@@ -312,13 +317,15 @@ async def legal_concepts_node(state: LegalAgentState) -> dict:
     """Handle Legal_Concepts queries — direct LLM response, no retrieval."""
     agent_queries = state.get("agent_queries", {})
     query = agent_queries.get("Legal_Concepts", state.get("query", state["original_query"]))
+    user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
     user_language = state.get("user_language", "en")
     log.info("Legal Concepts agent started", query=query[:100],
              using_agent_query="Legal_Concepts" in agent_queries)
+    gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
 
     try:
-        result = await _handle_legal_concepts(query, chat_history, user_language)
+        result = await _handle_legal_concepts(gen_query, chat_history, user_language)
     except Exception as e:
         log.error("Legal Concepts agent failed", error=str(e), exc_info=True)
         result = AgentResult(

@@ -107,6 +107,7 @@ class LegalAgentState(MessagesState):
     # Query lifecycle
     original_query: str
     query: str
+    user_context: str           # Long-form context extracted from queries >5K chars (pasted docs/contracts)
     thread_id: str | None
     unique_string: str | None
     user_language: str          # ISO 639-1 code detected from original_query, default "en"
@@ -138,6 +139,21 @@ class LegalAgentState(MessagesState):
     final_response: str
     source_metadata: Annotated[list[dict[str, Any]], _cap_source_metadata]
     tokens_consumed: Annotated[int, _sum_tokens]
+
+
+def get_query_with_context(state: dict) -> tuple[str, str]:
+    """Get the routing query and full user context for LLM generation.
+
+    For normal queries (<5K chars): returns (query, "")
+    For long queries (>5K chars): returns (concise_question, full_pasted_text)
+
+    Agents should:
+    - Use query for search/retrieval
+    - Include user_context in the LLM generation prompt if non-empty
+    """
+    query = state.get("query", state.get("original_query", ""))
+    user_context = state.get("user_context", "")
+    return query, user_context
 
 
 @dataclass

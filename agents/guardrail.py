@@ -25,7 +25,7 @@ log = get_logger("Guardrail")
 
 # --- Constants ---
 
-MAX_QUERY_LENGTH = 5000
+MAX_QUERY_LENGTH = 30000
 MIN_QUERY_LENGTH = 2
 
 INJECTION_PATTERNS = [

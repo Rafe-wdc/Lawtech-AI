@@ -155,18 +155,23 @@ jobs:
             source venv/bin/activate
             pip install -q -r requirements.txt
 
-            # Reload app — graceful: gunicorn master re-reads config and spawns
-            # new workers before old ones exit, so in-flight requests are never dropped.
-            # Falls back to full restart if gunicorn is not running.
+            # Full restart required because preload_app=True means HUP only
+            # respawns workers with the SAME preloaded code — new .py files
+            # on disk are never re-imported. Stop → start ensures fresh import.
             MASTER_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "0")
             if [ "$MASTER_PID" -gt "0" ] 2>/dev/null; then
-              kill -HUP "$MASTER_PID"
-              echo "Graceful reload sent to gunicorn master (PID $MASTER_PID)"
-            else
-              echo "Gunicorn not running — starting fresh"
-              /root/v2_multi_agent/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app
-              echo "Gunicorn started with gunicorn.conf.py"
+              echo "Stopping gunicorn master (PID $MASTER_PID)..."
+              kill -TERM "$MASTER_PID"
+              # Wait for master to exit (max 10s)
+              for j in $(seq 1 10); do
+                kill -0 "$MASTER_PID" 2>/dev/null || break
+                sleep 1
+              done
+              echo "Gunicorn stopped"
             fi
+            # Start fresh — new master loads updated code from disk
+            nohup /root/v2_multi_agent/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app > /dev/null 2>&1 &
+            echo "Gunicorn started fresh (new PID: $(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null))"
 
             # Wait for workers to cycle (max 60s — preload workers take longer)
             for i in $(seq 1 12); do

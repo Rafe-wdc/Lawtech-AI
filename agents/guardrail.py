@@ -33,7 +33,7 @@ INJECTION_PATTERNS = [
     r"disregard\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
     r"forget\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
     r"you\s+are\s+now\s+(a|an)\s+(?!legal|lawyer|judge)",
-    r"act\s+as\s+(?!a\s+legal|a\s+lawyer|a\s+judge|an\s+attorney)",
+    r"act\s+as\s+(?!a\s+legal|a\s+lawyer|a\s+judge|an?\s+attorney|an?\s+arbitrat|the\s+|agent|trustee|guardian|executor|administrator|mediator|arbitrat|receiver|liquidator|nominee|surety|guarantor|partner|director|secretary|manager|representative)",
     r"pretend\s+(you\s+are|to\s+be)\s+(?!a\s+legal|a\s+lawyer|a\s+judge)",
     r"system\s*prompt\s*[:=]",
     r"<\s*system\s*>",

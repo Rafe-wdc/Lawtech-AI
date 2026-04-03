@@ -74,7 +74,17 @@ HANDOFF.md
 # Monitoring local overrides (contain secrets)
 monitoring/prometheus.local.yml
 
+# Competitor research (internal, not for repo)
+competitors/
+
+# Test DOCX files
+test_docx/
+
+# Monitoring local overrides with real credentials
+monitoring/prometheus.local.yml
+
 # Temporary files
 tmp/
 temp/
 *.tmp
+tests/_temp_*

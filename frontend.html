@@ -1011,6 +1011,21 @@
   }
   .response-action-btn:hover { background: var(--surface); color: var(--text); border-color: var(--accent); }
   .response-action-btn.copied { color: var(--green); border-color: var(--green); }
+  .export-dropdown { position: relative; display: inline-block; }
+  .export-dropdown-menu {
+    display: none; position: absolute; bottom: 100%; left: 0; margin-bottom: 4px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; min-width: 140px; overflow: hidden;
+  }
+  .export-dropdown-menu.show { display: block; }
+  .export-dropdown-item {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px; cursor: pointer;
+    font-size: 12px; color: var(--text); transition: background 0.1s; border: none;
+    background: transparent; width: 100%; text-align: left; font-family: inherit;
+  }
+  .export-dropdown-item:hover { background: var(--surface2); }
+  .export-dropdown-item .ext { font-weight: 600; color: var(--accent); min-width: 36px; }
+  .export-dropdown-item.loading { opacity: 0.5; pointer-events: none; }
   .feedback-btn {
     background: transparent; border: 1px solid var(--border); border-radius: 6px;
     font-size: 14px; padding: 4px 8px; cursor: pointer; transition: all 0.15s; line-height: 1;
@@ -2748,7 +2763,14 @@ function renderResponseActions(turnNumber) {
   var tn = turnNumber || 0;
   return '<div class="response-actions">' +
     '<button class="response-action-btn" onclick="copyResponse(this)">\uD83D\uDCCB Copy</button>' +
-    '<button class="response-action-btn" onclick="exportResponse(this)">\uD83D\uDCE5 Export .md</button>' +
+    '<div class="export-dropdown">' +
+      '<button class="response-action-btn" onclick="toggleExportMenu(this)">\uD83D\uDCE5 Export \u25BE</button>' +
+      '<div class="export-dropdown-menu">' +
+        '<button class="export-dropdown-item" onclick="exportAs(this,\'docx\')" data-turn="' + tn + '"><span class="ext">.docx</span> Word Document</button>' +
+        '<button class="export-dropdown-item" onclick="exportAs(this,\'pdf\')" data-turn="' + tn + '"><span class="ext">.pdf</span> PDF Document</button>' +
+        '<button class="export-dropdown-item" onclick="exportResponse(this)"><span class="ext">.md</span> Markdown</button>' +
+      '</div>' +
+    '</div>' +
     '<div style="margin-left:auto;display:flex;gap:6px">' +
       '<button class="feedback-btn" data-turn="' + tn + '" onclick="sendFeedback(this,\'up\')">\uD83D\uDC4D</button>' +
       '<button class="feedback-btn" data-turn="' + tn + '" onclick="sendFeedback(this,\'down\')">\uD83D\uDC4E</button>' +
@@ -2783,6 +2805,92 @@ function exportResponse(btn) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  // Close dropdown
+  var menu = btn.closest('.export-dropdown-menu');
+  if (menu) menu.classList.remove('show');
+}
+
+function toggleExportMenu(btn) {
+  var menu = btn.nextElementSibling;
+  // Close all other open menus
+  document.querySelectorAll('.export-dropdown-menu.show').forEach(function(m) {
+    if (m !== menu) m.classList.remove('show');
+  });
+  menu.classList.toggle('show');
+}
+
+// Close export dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.export-dropdown')) {
+    document.querySelectorAll('.export-dropdown-menu.show').forEach(function(m) {
+      m.classList.remove('show');
+    });
+  }
+});
+
+async function exportAs(btn, format) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  var turn = parseInt(btn.dataset.turn) || 0;
+
+  if (!markdown.trim()) {
+    addLog('warn', 'No content to export');
+    return;
+  }
+
+  // Show loading state
+  var origText = btn.innerHTML;
+  btn.classList.add('loading');
+  btn.innerHTML = '<span class="ext">...</span> Generating...';
+
+  try {
+    var payload = { format: format };
+    // Prefer thread_id + turn for server-side export (preserves formatting)
+    if (currentThreadId && turn > 0) {
+      payload.thread_id = currentThreadId;
+      payload.turn_number = turn;
+    } else {
+      payload.raw_text = markdown;
+      payload.title = 'Lawttorney Export';
+    }
+
+    var resp = await fetch(getBase() + '/pyapi/export', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      var err = await resp.json().catch(function() { return { message: 'Export failed' }; });
+      throw new Error(err.message || 'Export failed');
+    }
+
+    // Download the file
+    var blob = await resp.blob();
+    var disposition = resp.headers.get('Content-Disposition') || '';
+    var filename = 'lawttorney_export.' + format;
+    var match = disposition.match(/filename="?([^"]+)"?/);
+    if (match) filename = match[1];
+
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    addLog('info', 'Exported as ' + format.toUpperCase() + ': ' + filename);
+  } catch (e) {
+    addLog('error', 'Export failed: ' + e.message);
+  } finally {
+    btn.classList.remove('loading');
+    btn.innerHTML = origText;
+    // Close dropdown
+    var menu = btn.closest('.export-dropdown-menu');
+    if (menu) menu.classList.remove('show');
+  }
 }
 
 async function sendFeedback(btn, rating) {

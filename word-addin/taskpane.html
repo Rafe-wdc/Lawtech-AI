@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lawttorney AI</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css" />
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">Lawttorney <span class="badge">AI</span></div>
+    <div class="subtitle">Indian Legal AI Assistant</div>
+  </div>
+
+  <!-- Settings Panel (collapsible) -->
+  <div class="settings-toggle" onclick="toggleSettings()">Settings</div>
+  <div class="settings-panel" id="settingsPanel">
+    <label>API URL
+      <input type="text" id="apiUrl" value="https://tool.lawttorney.com/pyapiv2" placeholder="https://tool.lawttorney.com/pyapiv2" />
+    </label>
+    <label>API Key
+      <input type="password" id="apiKey" value="" placeholder="Enter your API key" />
+    </label>
+    <button class="btn btn-sm" onclick="testConnection()">Test Connection</button>
+    <div id="connStatus" class="status-msg"></div>
+  </div>
+
+  <!-- Tab Navigation -->
+  <div class="tabs">
+    <button class="tab active" data-tab="research" onclick="switchTab(this)">Research</button>
+    <button class="tab" data-tab="draft" onclick="switchTab(this)">Draft</button>
+    <button class="tab" data-tab="review" onclick="switchTab(this)">Review</button>
+    <button class="tab" data-tab="cite" onclick="switchTab(this)">Cite</button>
+  </div>
+
+  <!-- Research Tab -->
+  <div class="tab-content active" id="tab-research">
+    <p class="hint">Select text in your document or type a legal question.</p>
+    <div class="input-group">
+      <textarea id="researchQuery" rows="3" placeholder="e.g., Section 302 IPC punishment for murder"></textarea>
+      <button class="btn btn-primary" onclick="getSelectedAndResearch()">Use Selection</button>
+    </div>
+    <button class="btn btn-accent btn-full" onclick="doResearch()" id="researchBtn">Research</button>
+    <div id="researchResult" class="result-area"></div>
+    <div id="researchActions" class="action-bar" style="display:none">
+      <button class="btn btn-sm" onclick="insertResult('researchResult')">Insert into Document</button>
+      <button class="btn btn-sm" onclick="exportResult('researchResult', 'docx')">Export .docx</button>
+      <button class="btn btn-sm" onclick="copyResult('researchResult')">Copy</button>
+    </div>
+  </div>
+
+  <!-- Draft Tab -->
+  <div class="tab-content" id="tab-draft">
+    <p class="hint">Describe the legal document you need. AI will generate and insert it at your cursor.</p>
+    <div class="input-group">
+      <textarea id="draftQuery" rows="3" placeholder="e.g., Draft a legal notice for non-payment of dues by tenant"></textarea>
+    </div>
+    <div class="input-group">
+      <label class="select-label">Document Type
+        <select id="draftType">
+          <option value="">Auto-detect</option>
+          <option value="legal_notice">Legal Notice</option>
+          <option value="petition">Petition/Plaint</option>
+          <option value="affidavit">Affidavit</option>
+          <option value="agreement">Agreement/Contract</option>
+          <option value="mou">MOU</option>
+          <option value="power_of_attorney">Power of Attorney</option>
+          <option value="will">Will/Testament</option>
+          <option value="complaint">Complaint</option>
+          <option value="reply">Reply/Written Statement</option>
+          <option value="bail_application">Bail Application</option>
+        </select>
+      </label>
+    </div>
+    <button class="btn btn-accent btn-full" onclick="doDraft()" id="draftBtn">Generate Draft</button>
+    <div id="draftResult" class="result-area"></div>
+    <div id="draftActions" class="action-bar" style="display:none">
+      <button class="btn btn-sm" onclick="insertResult('draftResult')">Insert into Document</button>
+      <button class="btn btn-sm" onclick="exportResult('draftResult', 'docx')">Export .docx</button>
+      <button class="btn btn-sm" onclick="copyResult('draftResult')">Copy</button>
+    </div>
+  </div>
+
+  <!-- Review Tab -->
+  <div class="tab-content" id="tab-review">
+    <p class="hint">Select a clause or paragraph in your document. AI will identify risks, compliance issues, and improvements.</p>
+    <div class="input-group">
+      <textarea id="reviewText" rows="4" placeholder="Select text in document and click 'Load Selection', or paste text here"></textarea>
+      <button class="btn btn-primary" onclick="getSelectedForReview()">Load Selection</button>
+    </div>
+    <div class="review-options">
+      <label><input type="checkbox" id="checkRisks" checked /> Risk Identification</label>
+      <label><input type="checkbox" id="checkCompliance" checked /> Compliance Check</label>
+      <label><input type="checkbox" id="checkImprove" /> Suggest Improvements</label>
+    </div>
+    <button class="btn btn-accent btn-full" onclick="doReview()" id="reviewBtn">Review</button>
+    <div id="reviewResult" class="result-area"></div>
+    <div id="reviewActions" class="action-bar" style="display:none">
+      <button class="btn btn-sm" onclick="insertResult('reviewResult')">Insert as Comment</button>
+      <button class="btn btn-sm" onclick="copyResult('reviewResult')">Copy</button>
+    </div>
+  </div>
+
+  <!-- Cite Tab -->
+  <div class="tab-content" id="tab-cite">
+    <p class="hint">Search for a case or statute and insert a formatted citation at your cursor.</p>
+    <div class="input-group">
+      <textarea id="citeQuery" rows="2" placeholder="e.g., Kesavananda Bharati vs State of Kerala"></textarea>
+    </div>
+    <button class="btn btn-accent btn-full" onclick="doCite()" id="citeBtn">Find Citation</button>
+    <div id="citeResult" class="result-area"></div>
+    <div id="citeActions" class="action-bar" style="display:none">
+      <button class="btn btn-sm" onclick="insertResult('citeResult')">Insert Citation</button>
+      <button class="btn btn-sm" onclick="copyResult('citeResult')">Copy</button>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar" id="statusBar"></div>
+
+  <script src="taskpane.js"></script>
+</body>
+</html>

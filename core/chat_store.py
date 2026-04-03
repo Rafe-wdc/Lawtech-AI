@@ -931,6 +931,42 @@ class _SqliteChatHistoryStore:
             self._load_thread_messages_sync, thread_id, limit
         )
 
+    def _load_single_turn_sync(
+        self,
+        thread_id: str,
+        turn_number: int,
+    ) -> dict | None:
+        """Load a single message by thread_id + turn_number.
+
+        Returns {turn_number, user_query, ai_response, created_at} or None.
+        """
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute("""
+                SELECT turn_number, user_query, ai_response, created_at
+                FROM messages
+                WHERE thread_id = ? AND turn_number = ?
+            """, (thread_id, turn_number)).fetchone()
+            if not row:
+                return None
+            return {
+                "turn_number": row["turn_number"],
+                "user_query": row["user_query"],
+                "ai_response": row["ai_response"],
+                "created_at": row["created_at"],
+            }
+        finally:
+            conn.close()
+
+    async def load_single_turn(
+        self, thread_id: str, turn_number: int,
+    ) -> dict | None:
+        """Async wrapper for load_single_turn."""
+        return await asyncio.to_thread(
+            self._load_single_turn_sync, thread_id, turn_number
+        )
+
     # ------------------------------------------------------------------
     # Feedback
     # ------------------------------------------------------------------
@@ -2188,6 +2224,24 @@ class _PostgresChatHistoryStore:
 
     async def load_thread_messages(self, thread_id: str, limit: int = 50) -> list:
         return await asyncio.to_thread(self._load_thread_messages_sync, thread_id, limit)
+
+    def _load_single_turn_sync(self, thread_id: str, turn_number: int) -> dict | None:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("""
+                SELECT turn_number, user_query, ai_response,
+                       TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at
+                FROM messages
+                WHERE thread_id = %s AND turn_number = %s
+            """, (thread_id, turn_number)).fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    async def load_single_turn(self, thread_id: str, turn_number: int) -> dict | None:
+        return await asyncio.to_thread(self._load_single_turn_sync, thread_id, turn_number)
 
     # ------------------------------------------------------------------
     # Feedback

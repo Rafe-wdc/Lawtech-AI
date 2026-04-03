@@ -1628,6 +1628,73 @@ async def get_thread_messages(thread_id: str, limit: int = 50):
         raise HTTPException(status_code=500, detail="Failed to load thread messages")
 
 
+# --- Export Endpoint ---
+
+class ExportRequest(BaseModel):
+    thread_id: Optional[str] = None
+    turn_number: Optional[int] = None
+    raw_text: Optional[str] = None
+    title: Optional[str] = None
+    format: str = Field(default="docx", pattern=r"^(docx|pdf)$")
+
+
+@app.post("/pyapi/export", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def export_document_endpoint(data: ExportRequest, request: Request):
+    """Export an AI response as a downloadable Word (.docx) or PDF file.
+
+    Provide either:
+    - thread_id + turn_number: loads saved response from chat history
+    - raw_text: exports the provided markdown text directly
+    """
+    from .export import export_document
+    from .chat_store import chat_store
+
+    try:
+        md_text = None
+        title = data.title
+        sources = None
+        created_at = None
+
+        if data.raw_text:
+            md_text = data.raw_text
+            title = title or "Lawttorney Export"
+        elif data.thread_id and data.turn_number:
+            msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
+            if not msg:
+                return _error_response("not_found", "Message not found", 404)
+            md_text = msg["ai_response"]
+            title = title or msg.get("user_query", "Lawttorney Export")[:100]
+            created_at = msg.get("created_at")
+        else:
+            return _error_response(
+                "validation_error",
+                "Provide either raw_text or thread_id + turn_number",
+                400,
+            )
+
+        if not md_text or not md_text.strip():
+            return _error_response("validation_error", "No content to export", 400)
+
+        buf, filename, media_type = export_document(
+            title=title,
+            md_text=md_text,
+            fmt=data.format,
+            sources=sources,
+            created_at=created_at,
+        )
+
+        return StreamingResponse(
+            buf,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        log.error("Export failed", error=str(e), exc_info=True)
+        return _error_response("export_error", f"Export failed: {e}", 500)
+
+
 @app.post("/pyapi/feedback", dependencies=[Depends(require_user_key)])
 async def submit_feedback(data: FeedbackRequest, request: Request):
     """Submit thumbs-up/down feedback for a specific response."""

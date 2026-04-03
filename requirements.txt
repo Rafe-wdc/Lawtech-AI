@@ -38,6 +38,9 @@ pikepdf>=9.0.0
 python-docx>=1.1.0
 openpyxl>=3.1.0
 
+# Markdown parsing (for Word/PDF export)
+markdown-it-py>=3.0.0
+
 # File uploads (FastAPI)
 python-multipart>=0.0.6
 werkzeug>=3.0.0

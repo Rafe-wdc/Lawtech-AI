@@ -239,6 +239,12 @@ async def serve_frontend():
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Frontend not found</h1>", status_code=404)
 
+# --- Word Add-in Static Files ---
+_WORD_ADDIN_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "word-addin")
+if os.path.isdir(_WORD_ADDIN_DIR):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/word-addin", StaticFiles(directory=_WORD_ADDIN_DIR, html=True), name="word-addin")
+
 
 # --- Request / Response Schemas ---
 

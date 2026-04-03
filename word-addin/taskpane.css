@@ -289,6 +289,46 @@ select {
 .status-bar.error { color: var(--red); }
 .status-bar.success { color: var(--green); }
 
+/* Source Cards (Cite tab) */
+.sources-section { margin-top: 12px; }
+.sources-section h3 { font-size: 12px; color: var(--accent); margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.source-card {
+  display: flex; gap: 8px; padding: 8px; margin-bottom: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); transition: border-color 0.15s;
+}
+.source-card:hover { border-color: var(--accent); }
+.source-num {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  min-width: 18px; height: 18px; text-align: center; line-height: 18px;
+  background: var(--surface2); border-radius: 50%; flex-shrink: 0;
+}
+.source-body { flex: 1; min-width: 0; }
+.source-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 3px; word-wrap: break-word; }
+.source-meta { font-size: 10px; color: var(--text2); line-height: 1.6; word-wrap: break-word; }
+.source-badge {
+  display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 600;
+  background: var(--surface2); color: var(--text2); text-transform: uppercase; letter-spacing: 0.3px;
+}
+.source-badge.agent { background: #e8f4fd; color: var(--blue); }
+.source-tags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+.tag {
+  display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px;
+  background: #f0f0f0; color: #555;
+}
+.tag.act { background: #fef3c7; color: #92400e; }
+.source-preview { font-size: 10px; color: var(--text2); margin-top: 4px; font-style: italic; line-height: 1.4; }
+.source-links { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 6px; }
+.source-link {
+  font-size: 10px; color: var(--blue); text-decoration: none; padding: 2px 6px;
+  border: 1px solid var(--blue); border-radius: 4px; transition: all 0.15s;
+}
+.source-link:hover { background: var(--blue); color: white; }
+.agents-used {
+  margin-top: 8px; font-size: 10px; color: var(--text2); font-style: italic;
+  padding-top: 6px; border-top: 1px solid var(--border);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

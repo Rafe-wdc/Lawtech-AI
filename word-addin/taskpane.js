@@ -209,6 +209,74 @@ function showResult(resultId, actionsId, html, rawMarkdown) {
 }
 
 // ============================================================
+// Source Cards Renderer (shared by Research, Review, Cite)
+// ============================================================
+
+function renderSourceCards(sources, agents) {
+  var html = '';
+  if (sources && sources.length > 0) {
+    html += '<div class="sources-section"><h3>Sources & Links (' + sources.length + ')</h3>';
+    sources.forEach(function(src, idx) {
+      html += '<div class="source-card">';
+      html += '<div class="source-num">' + (idx + 1) + '</div>';
+      html += '<div class="source-body">';
+
+      var title = src.title || src.agent_name || 'Source';
+      html += '<div class="source-title">' + escapeHtml(title) + '</div>';
+
+      var meta = [];
+      if (src.court_name) meta.push('<b>Court:</b> ' + escapeHtml(src.court_name));
+      if (src.case_no) meta.push('<b>Case No:</b> ' + escapeHtml(src.case_no));
+      if (src.judgment_date) meta.push('<b>Date:</b> ' + escapeHtml(src.judgment_date));
+      if (src.year) meta.push('<b>Year:</b> ' + src.year);
+      if (src.bench) meta.push('<b>Bench:</b> ' + escapeHtml(src.bench));
+      if (src.judgment_by) meta.push('<b>Judge:</b> ' + escapeHtml(src.judgment_by));
+      if (src.parties) meta.push('<b>Parties:</b> ' + escapeHtml(src.parties));
+      if (src.section_number) meta.push('<b>Section:</b> ' + escapeHtml(src.section_number));
+      if (src.act_name) meta.push('<b>Act:</b> ' + escapeHtml(src.act_name));
+      if (src.source_type) meta.push('<span class="source-badge">' + escapeHtml(src.source_type) + '</span>');
+      if (src.agent_name) meta.push('<span class="source-badge agent">' + escapeHtml(src.agent_name) + '</span>');
+      if (meta.length > 0) html += '<div class="source-meta">' + meta.join(' &middot; ') + '</div>';
+
+      if (src.keywords && src.keywords.length > 0) {
+        html += '<div class="source-tags">' + src.keywords.map(function(k) {
+          return '<span class="tag">' + escapeHtml(k) + '</span>';
+        }).join('') + '</div>';
+      }
+      if (src.acts_or_sections_invoked && src.acts_or_sections_invoked.length > 0) {
+        html += '<div class="source-tags">' + src.acts_or_sections_invoked.map(function(a) {
+          return '<span class="tag act">' + escapeHtml(a) + '</span>';
+        }).join('') + '</div>';
+      }
+
+      if (src.content && src.content.length > 0 && src.content[0]) {
+        var preview = src.content[0].substring(0, 200);
+        html += '<div class="source-preview">' + escapeHtml(preview) + '...</div>';
+      }
+
+      var links = [];
+      if (src.doc_link) links.push('<a href="' + escapeHtml(src.doc_link) + '" target="_blank" class="source-link">PDF Document</a>');
+      if (src.web_url) links.push('<a href="' + escapeHtml(src.web_url) + '" target="_blank" class="source-link">Web Source</a>');
+      if (src.pdf_links && src.pdf_links.length > 0) {
+        src.pdf_links.forEach(function(pl) {
+          if (pl.url && pl.url !== 'N/A') {
+            links.push('<a href="' + escapeHtml(pl.url) + '" target="_blank" class="source-link">' + escapeHtml(pl.label || 'PDF') + '</a>');
+          }
+        });
+      }
+      if (links.length > 0) html += '<div class="source-links">' + links.join(' ') + '</div>';
+
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+  if (agents && agents.length > 0) {
+    html += '<div class="agents-used">Agents: ' + agents.join(', ') + '</div>';
+  }
+  return html;
+}
+
+// ============================================================
 // Research
 // ============================================================
 
@@ -235,9 +303,11 @@ async function doResearch() {
   try {
     var data = await callApi(query);
     var result = data.result || "No results found.";
-    var html = mdToHtml(result);
+    var sources = data.source || [];
+    var agents = data.agents_used || [];
+    var html = mdToHtml(result) + renderSourceCards(sources, agents);
     showResult("researchResult", "researchActions", html, result);
-    setStatus("Research complete — " + data.agents_used.join(", "), "success");
+    setStatus("Found " + sources.length + " sources via " + agents.join(", "), "success");
   } catch (e) {
     setStatus("Research failed: " + e.message, "error");
   } finally {
@@ -327,16 +397,18 @@ async function doCite() {
   if (!query) { setStatus("Enter a case name or statute to cite", "error"); return; }
 
   var fullQuery = "Find and provide the full legal citation for: " + query +
-    ". Include case number, court, date, bench, and a 2-line summary.";
+    ". Include case number, court, date, bench, PDF link, and a 2-line summary.";
 
   setLoading("citeBtn", true);
   setStatus("Finding citation...");
   try {
     var data = await callApi(fullQuery);
     var result = data.result || "Citation not found.";
-    var html = mdToHtml(result);
+    var sources = data.source || [];
+    var agents = data.agents_used || [];
+    var html = mdToHtml(result) + renderSourceCards(sources, agents);
     showResult("citeResult", "citeActions", html, result);
-    setStatus("Citation found", "success");
+    setStatus("Found " + sources.length + " sources via " + agents.join(", "), "success");
   } catch (e) {
     setStatus("Citation search failed: " + e.message, "error");
   } finally {

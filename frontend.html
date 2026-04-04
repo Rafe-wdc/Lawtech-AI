@@ -2771,6 +2771,14 @@ function renderResponseActions(turnNumber) {
         '<button class="export-dropdown-item" onclick="exportResponse(this)"><span class="ext">.md</span> Markdown</button>' +
       '</div>' +
     '</div>' +
+    '<div class="export-dropdown">' +
+      '<button class="response-action-btn" onclick="toggleExportMenu(this)">\uD83D\uDCDD Memo \u25BE</button>' +
+      '<div class="export-dropdown-menu">' +
+        '<button class="export-dropdown-item" onclick="generateMemo(this,\'docx\')" data-turn="' + tn + '"><span class="ext">.docx</span> Word Memo</button>' +
+        '<button class="export-dropdown-item" onclick="generateMemo(this,\'pdf\')" data-turn="' + tn + '"><span class="ext">.pdf</span> PDF Memo</button>' +
+        '<button class="export-dropdown-item" onclick="generateMemo(this,\'md\')" data-turn="' + tn + '"><span class="ext">.md</span> Markdown Memo</button>' +
+      '</div>' +
+    '</div>' +
     '<div style="margin-left:auto;display:flex;gap:6px">' +
       '<button class="feedback-btn" data-turn="' + tn + '" onclick="sendFeedback(this,\'up\')">\uD83D\uDC4D</button>' +
       '<button class="feedback-btn" data-turn="' + tn + '" onclick="sendFeedback(this,\'down\')">\uD83D\uDC4E</button>' +
@@ -2888,6 +2896,86 @@ async function exportAs(btn, format) {
     btn.classList.remove('loading');
     btn.innerHTML = origText;
     // Close dropdown
+    var menu = btn.closest('.export-dropdown-menu');
+    if (menu) menu.classList.remove('show');
+  }
+}
+
+async function generateMemo(btn, format) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  var turn = parseInt(btn.dataset.turn) || 0;
+
+  if (!markdown.trim()) {
+    addLog('warn', 'No content for memo generation');
+    return;
+  }
+
+  var origText = btn.innerHTML;
+  btn.classList.add('loading');
+  btn.innerHTML = '<span class="ext">...</span> Generating memo...';
+
+  try {
+    var payload = {
+      format: format,
+      response_text: markdown,
+      query: '',
+      sources: [],
+      agents_used: [],
+    };
+
+    // Use thread_id + turn if available
+    if (currentThreadId && turn > 0) {
+      payload.thread_id = currentThreadId;
+      payload.turn_number = turn;
+    }
+
+    // Try to get the user query from the previous message
+    var prevMsg = msgDiv.previousElementSibling;
+    if (prevMsg && prevMsg.classList.contains('user')) {
+      payload.query = prevMsg.innerText.trim();
+    }
+
+    // Try to extract sources from the rendered citations
+    var citationEls = msgDiv.querySelectorAll('.citation-item');
+    if (citationEls.length > 0) {
+      citationEls.forEach(function(el) {
+        payload.sources.push({ title: el.innerText.trim().substring(0, 200) });
+      });
+    }
+
+    var resp = await fetch(getBase() + '/pyapi/memo', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      var err = await resp.json().catch(function() { return { message: 'Memo generation failed' }; });
+      throw new Error(err.message || 'Memo generation failed');
+    }
+
+    var blob = await resp.blob();
+    var disposition = resp.headers.get('Content-Disposition') || '';
+    var filename = 'research_memo.' + format;
+    var match = disposition.match(/filename="?([^"]+)"?/);
+    if (match) filename = match[1];
+
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    addLog('info', 'Research memo generated: ' + filename);
+  } catch (e) {
+    addLog('error', 'Memo generation failed: ' + e.message);
+  } finally {
+    btn.classList.remove('loading');
+    btn.innerHTML = origText;
     var menu = btn.closest('.export-dropdown-menu');
     if (menu) menu.classList.remove('show');
   }

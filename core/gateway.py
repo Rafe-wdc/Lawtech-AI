@@ -17,6 +17,7 @@ All intelligence lives in the agents.
 
 import asyncio
 from contextlib import asynccontextmanager
+import io
 import json
 import os
 import random
@@ -1699,6 +1700,86 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
     except Exception as e:
         log.error("Export failed", error=str(e), exc_info=True)
         return _error_response("export_error", f"Export failed: {e}", 500)
+
+
+# --- Research Memo Endpoint ---
+
+class MemoRequest(BaseModel):
+    thread_id: Optional[str] = None
+    turn_number: Optional[int] = None
+    query: Optional[str] = None
+    response_text: Optional[str] = None
+    sources: Optional[list[dict]] = None
+    agents_used: Optional[list[str]] = None
+    format: str = Field(default="docx", pattern=r"^(docx|pdf|md)$")
+
+
+@app.post("/pyapi/memo", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def generate_research_memo(data: MemoRequest, request: Request):
+    """Generate a structured legal research memorandum from an AI response.
+
+    Restructures the AI response into a formal legal memo with:
+    Issue, Brief Answer, Discussion, Sources, Conclusion.
+
+    Accepts either thread_id+turn_number (load from history) or direct text.
+    Returns downloadable .docx, .pdf, or .md file.
+    """
+    from .memo import generate_memo
+    from .export import export_document
+    from .chat_store import chat_store
+
+    try:
+        query = data.query or ""
+        response_text = data.response_text or ""
+        sources = data.sources or []
+        agents_used = data.agents_used or []
+
+        # Load from history if thread_id provided
+        if data.thread_id and data.turn_number and not response_text:
+            msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
+            if not msg:
+                return _error_response("not_found", "Message not found", 404)
+            response_text = msg["ai_response"]
+            query = query or msg.get("user_query", "")
+
+        if not response_text.strip():
+            return _error_response("validation_error", "No response content for memo", 400)
+
+        # Generate the memo markdown using LLM
+        memo_md = await generate_memo(
+            query=query,
+            response_text=response_text,
+            sources=sources,
+            agents_used=agents_used,
+        )
+
+        if data.format == "md":
+            # Return raw markdown
+            buf = io.BytesIO(memo_md.encode("utf-8"))
+            return StreamingResponse(
+                buf,
+                media_type="text/markdown; charset=utf-8",
+                headers={"Content-Disposition": 'attachment; filename="research_memo.md"'},
+            )
+
+        # Export as docx/pdf
+        buf, filename, media_type = export_document(
+            title="Legal Research Memorandum",
+            md_text=memo_md,
+            fmt=data.format,
+            sources=sources,
+        )
+
+        return StreamingResponse(
+            buf,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        log.error("Memo generation failed", error=str(e), exc_info=True)
+        return _error_response("memo_error", f"Memo generation failed: {e}", 500)
 
 
 @app.post("/pyapi/feedback", dependencies=[Depends(require_user_key)])

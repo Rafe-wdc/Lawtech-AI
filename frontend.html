@@ -1026,6 +1026,12 @@
   .export-dropdown-item:hover { background: var(--surface2); }
   .export-dropdown-item .ext { font-weight: 600; color: var(--accent); min-width: 36px; }
   .export-dropdown-item.loading { opacity: 0.5; pointer-events: none; }
+  .compliance-badge {
+    display: inline-block; background: #fef3c7; color: #92400e; font-size: 11px;
+    font-weight: 600; padding: 3px 10px; border-radius: 4px; margin-bottom: 8px;
+    border: 1px solid #fbbf24;
+  }
+  .compliance-report { border-left: 3px solid #f59e0b; }
   .feedback-btn {
     background: transparent; border: 1px solid var(--border); border-radius: 6px;
     font-size: 14px; padding: 4px 8px; cursor: pointer; transition: all 0.15s; line-height: 1;
@@ -2764,6 +2770,7 @@ function renderResponseActions(turnNumber) {
   return '<div class="response-actions">' +
     '<button class="response-action-btn" onclick="copyResponse(this)">\uD83D\uDCCB Copy</button>' +
     '<button class="response-action-btn" onclick="addStatuteRefs(this)" data-turn="' + tn + '">\u2696\uFE0F Add Statutes</button>' +
+    '<button class="response-action-btn" onclick="runComplianceCheck(this)" data-turn="' + tn + '">\uD83D\uDD0D Compliance</button>' +
     '<div class="export-dropdown">' +
       '<button class="response-action-btn" onclick="toggleExportMenu(this)">\uD83D\uDCE5 Export \u25BE</button>' +
       '<div class="export-dropdown-menu">' +
@@ -3057,6 +3064,104 @@ async function generateTOA(btn, format) {
     btn.innerHTML = origText;
     var menu = btn.closest('.export-dropdown-menu');
     if (menu) menu.classList.remove('show');
+  }
+}
+
+async function runComplianceCheck(btn) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  var turn = parseInt(btn.dataset.turn) || 0;
+
+  if (!markdown.trim()) {
+    addLog('warn', 'No content for compliance check');
+    return;
+  }
+
+  var origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '\uD83D\uDD0D Checking...';
+
+  try {
+    var payload = { format: 'md' };
+    if (currentThreadId && turn > 0) {
+      payload.thread_id = currentThreadId;
+      payload.turn_number = turn;
+    } else {
+      payload.text = markdown;
+    }
+
+    var resp = await fetch(getBase() + '/pyapi/compliance-check', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      var err = await resp.json().catch(function() { return { message: 'Failed' }; });
+      throw new Error(err.message || 'Compliance check failed');
+    }
+
+    var report = await resp.text();
+
+    // Show the compliance report as a new message in the chat
+    var reportHtml = renderMarkdown(report);
+    var reportDiv = document.createElement('div');
+    reportDiv.className = 'msg ai compliance-report';
+    reportDiv.dataset.markdown = report;
+    reportDiv.innerHTML = '<div class="compliance-badge">\uD83D\uDD0D Compliance Report</div>' +
+      '<div class="ai-content">' + reportHtml + '</div>' +
+      '<div class="response-actions">' +
+        '<button class="response-action-btn" onclick="copyResponse(this)">\uD83D\uDCCB Copy</button>' +
+        '<button class="response-action-btn" onclick="exportComplianceReport(this,\'docx\')">\uD83D\uDCE5 Export .docx</button>' +
+      '</div>';
+
+    // Insert after the current message
+    msgDiv.parentNode.insertBefore(reportDiv, msgDiv.nextSibling);
+
+    // Scroll to the report
+    reportDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    addLog('info', 'Compliance check complete (' + report.length + ' chars)');
+    btn.innerHTML = '\u2705 Checked';
+  } catch (e) {
+    addLog('error', 'Compliance check failed: ' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = origText;
+  }
+}
+
+async function exportComplianceReport(btn, format) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  if (!markdown.trim()) return;
+
+  var origText = btn.innerHTML;
+  btn.classList.add('loading');
+  btn.innerHTML = '\uD83D\uDCE5 Generating...';
+
+  try {
+    var resp = await fetch(getBase() + '/pyapi/export', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ raw_text: markdown, title: 'Compliance Check Report', format: format }),
+    });
+    if (!resp.ok) throw new Error('Export failed');
+
+    var blob = await resp.blob();
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'compliance_report.' + format;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog('info', 'Compliance report exported');
+  } catch (e) {
+    addLog('error', 'Export failed: ' + e.message);
+  } finally {
+    btn.classList.remove('loading');
+    btn.innerHTML = origText;
   }
 }
 

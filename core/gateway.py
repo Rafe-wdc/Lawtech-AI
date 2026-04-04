@@ -1702,6 +1702,68 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         return _error_response("export_error", f"Export failed: {e}", 500)
 
 
+# --- Compliance Check Endpoint ---
+
+class ComplianceRequest(BaseModel):
+    thread_id: Optional[str] = None
+    turn_number: Optional[int] = None
+    text: Optional[str] = None
+    doc_type: Optional[str] = None
+    format: str = Field(default="md", pattern=r"^(docx|pdf|md)$")
+
+
+@app.post("/pyapi/compliance-check", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def compliance_check_endpoint(data: ComplianceRequest, request: Request):
+    """Run compliance check on a legal document.
+
+    Flags missing clauses, procedural errors, incorrect statutes,
+    jurisdictional issues, and format deficiencies.
+    Returns a structured compliance report.
+    """
+    from .compliance import check_compliance
+    from .export import export_document
+    from .chat_store import chat_store
+
+    try:
+        text = data.text or ""
+
+        if data.thread_id and data.turn_number and not text:
+            msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
+            if not msg:
+                return _error_response("not_found", "Message not found", 404)
+            text = msg["ai_response"]
+
+        if not text.strip():
+            return _error_response("validation_error", "No text to check", 400)
+
+        report = await check_compliance(text, data.doc_type or "")
+
+        if data.format == "md":
+            buf = io.BytesIO(report.encode("utf-8"))
+            return StreamingResponse(
+                buf,
+                media_type="text/markdown; charset=utf-8",
+                headers={"Content-Disposition": 'attachment; filename="compliance_report.md"'},
+            )
+
+        buf, filename, media_type = export_document(
+            title="Compliance Check Report",
+            md_text=report,
+            fmt=data.format,
+        )
+
+        return StreamingResponse(
+            buf,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        log.error("Compliance check failed", error=str(e), exc_info=True)
+        return _error_response("compliance_error", f"Compliance check failed: {e}", 500)
+
+
 # --- Statute Referencing Endpoint ---
 
 class StatuteRefRequest(BaseModel):

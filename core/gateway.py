@@ -1702,6 +1702,59 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         return _error_response("export_error", f"Export failed: {e}", 500)
 
 
+# --- Fix Draft Endpoint ---
+
+class FixDraftRequest(BaseModel):
+    original_draft: str
+    compliance_report: str
+    format: str = Field(default="md", pattern=r"^(docx|pdf|md)$")
+
+
+@app.post("/pyapi/fix-draft", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def fix_draft_endpoint(data: FixDraftRequest, request: Request):
+    """Revise a legal draft based on compliance report findings.
+
+    Takes the original draft + compliance report, fixes all critical issues,
+    addresses warnings, and returns a revised draft with [REVISED] markers
+    and a revision summary table.
+    """
+    from .fix_draft import fix_draft
+    from .export import export_document
+
+    try:
+        if not data.original_draft.strip():
+            return _error_response("validation_error", "No original draft provided", 400)
+        if not data.compliance_report.strip():
+            return _error_response("validation_error", "No compliance report provided", 400)
+
+        revised = await fix_draft(data.original_draft, data.compliance_report)
+
+        if data.format == "md":
+            buf = io.BytesIO(revised.encode("utf-8"))
+            return StreamingResponse(
+                buf,
+                media_type="text/markdown; charset=utf-8",
+                headers={"Content-Disposition": 'attachment; filename="revised_draft.md"'},
+            )
+
+        buf, filename, media_type = export_document(
+            title="Revised Draft (Compliance Issues Fixed)",
+            md_text=revised,
+            fmt=data.format,
+        )
+
+        return StreamingResponse(
+            buf,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        log.error("Fix draft failed", error=str(e), exc_info=True)
+        return _error_response("fix_draft_error", f"Draft revision failed: {e}", 500)
+
+
 # --- Compliance Check Endpoint ---
 
 class ComplianceRequest(BaseModel):

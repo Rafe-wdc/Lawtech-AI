@@ -345,23 +345,40 @@ def _sanitize_md_tables(md_text: str) -> str:
     """Fix malformed markdown tables that cause rendering issues.
 
     - Truncates excessively long separator rows (|:---|:---|...)
-    - Removes orphan separator rows not preceded by a header row
-    - Limits cell content width to prevent page overflow
+    - Removes consecutive dash-only lines (broken table overflow)
+    - Limits repeated separator patterns to max 3 consecutive
     """
     lines = md_text.split("\n")
     cleaned = []
+    consecutive_dashes = 0
+
     for i, line in enumerate(lines):
         stripped = line.strip()
-        # Detect table separator rows: |:---|:---|  or |---|---|
-        if re.match(r"^\|[\s\-:|]+\|$", stripped) and len(stripped) > 200:
-            # Truncate to reasonable width — extract column count and rebuild
+
+        # Detect lines that are ONLY dashes, pipes, colons, spaces (table junk)
+        is_dash_line = bool(stripped) and bool(re.match(r"^[-\s|:]+$", stripped)) and len(stripped) > 20
+
+        if is_dash_line:
+            consecutive_dashes += 1
+            if consecutive_dashes <= 1:
+                # Keep first dash line (could be a valid table separator or HR)
+                # But truncate if too long
+                if len(stripped) > 80:
+                    cleaned.append("---")
+                else:
+                    cleaned.append(line)
+            # Skip all subsequent consecutive dash lines
+            continue
+
+        # Reset counter on non-dash line
+        consecutive_dashes = 0
+
+        # Truncate excessively long table separator rows with pipes
+        if re.match(r"^\|[\s\-:|]+\|$", stripped) and len(stripped) > 80:
             cols = stripped.strip("|").split("|")
-            n_cols = min(len(cols), 10)  # cap at 10 columns
+            n_cols = min(len(cols), 10)
             short_sep = "| " + " | ".join(":---" for _ in range(n_cols)) + " |"
             cleaned.append(short_sep)
-        # Also catch lines that are just long sequences of dashes (broken table overflow)
-        elif len(stripped) > 200 and re.match(r"^[-\s|:]+$", stripped):
-            continue  # skip entirely
         else:
             cleaned.append(line)
     return "\n".join(cleaned)

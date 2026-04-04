@@ -1,7 +1,7 @@
 """Agent #7 -- Drafting Agent (Multi-Step Pipeline)
 
 Court-filing quality legal document generation using a multi-step pipeline:
-  Step 1: Hybrid ES search (BM25 + kNN vector) for matching templates
+  Step 1: BM25 keyword search for matching templates
   Step 2: GPT-4o-mini selects best template (with content previews + validation)
   Step 3: Fetch full template (no truncation -- templates are 2K-9K chars)
   Step 4: Generate document outline (Gemini 2.5 Flash, structured output)
@@ -14,7 +14,7 @@ which merges results from parallel Judgment/Legislation/Newacts agents.
 Handles: "Draft bail application", "Legal notice for property dispute", etc.
 
 Uses: Gemini 2.5 Flash (outline + sections), GPT-4o-mini (template selection)
-Data Source: Elasticsearch "drafting" index (497 templates, BM25 + dense_vector)
+Data Source: Elasticsearch "drafting" index (497 templates, BM25 keyword search)
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import (
     get_es_client, get_gemini_flash, get_drafting_llm,
-    get_retriever_embeddings,
 )
 from core.settings import ES_INDICES
 from core.language import localize_prompt
@@ -107,39 +106,10 @@ class TemplateSource(BaseModel):
 
 # --- Step 1: Hybrid Template Search (BM25 + kNN, Python-side RRF merge) ---
 
-_RRF_K = 60  # Standard RRF constant
-
-
-def _rrf_merge(bm25_hits: list[dict], knn_hits: list[dict], top_n: int = 15) -> list[dict]:
-    """Merge BM25 and kNN results using Reciprocal Rank Fusion (Python-side).
-
-    score(doc) = 1/(k + bm25_rank) + 1/(k + knn_rank)
-    Docs appearing in only one list get only that term.
-    Returns top_n hits sorted by combined RRF score, preserving _source.
-    """
-    scores: dict[str, float] = {}
-    hit_by_id: dict[str, dict] = {}
-
-    for rank, hit in enumerate(bm25_hits, start=1):
-        doc_id = hit["_source"]["source"]
-        scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (_RRF_K + rank)
-        hit_by_id[doc_id] = hit
-
-    for rank, hit in enumerate(knn_hits, start=1):
-        doc_id = hit["_source"]["source"]
-        scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (_RRF_K + rank)
-        hit_by_id.setdefault(doc_id, hit)
-
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [hit_by_id[doc_id] for doc_id, _ in ranked[:top_n]]
-
-
 async def _search_templates(query: str) -> list[dict]:
-    """Search drafting index with hybrid BM25 + kNN, merged via Python-side RRF.
+    """Search drafting index with BM25 keyword matching.
 
-    Runs both searches concurrently, merges with RRF formula.
-    Falls back to BM25-only if kNN embedding fails.
-    Returns top 15 candidates.
+    Returns top 15 candidates sorted by relevance.
     """
     es = get_es_client()
     index = ES_INDICES["drafting"]
@@ -151,42 +121,10 @@ async def _search_templates(query: str) -> list[dict]:
         "_source": ["source", "page_content"],
     }
 
-    # Try hybrid (BM25 + kNN concurrent)
-    try:
-        embeddings = get_retriever_embeddings()
-        query_vector = await asyncio.to_thread(embeddings.embed_query, query)
-
-        knn_query = {
-            "size": 20,
-            "knn": {
-                "field": "embeddings",
-                "query_vector": query_vector,
-                "k": 20,
-                "num_candidates": 100,
-            },
-            "_source": ["source", "page_content"],
-        }
-
-        with log_time(log, "Hybrid template search (BM25 + kNN concurrent)"):
-            bm25_resp, knn_resp = await asyncio.gather(
-                asyncio.to_thread(es.search, index=index, body=bm25_query),
-                asyncio.to_thread(es.search, index=index, body=knn_query),
-            )
-
-        bm25_hits = bm25_resp["hits"]["hits"]
-        knn_hits = knn_resp["hits"]["hits"]
-        merged = _rrf_merge(bm25_hits, knn_hits, top_n=15)
-
-        log.info("Hybrid search completed", bm25_hits=len(bm25_hits),
-                 knn_hits=len(knn_hits), merged=len(merged))
-        return merged
-
-    except Exception as e:
-        log.warning("Hybrid search failed, falling back to BM25", error=str(e)[:200])
-
-    # Fallback: BM25-only
-    with log_time(log, "BM25 template search (fallback)"):
-        response = es.search(index=index, body=bm25_query)
+    with log_time(log, "BM25 template search"):
+        response = await asyncio.to_thread(
+            es.search, index=index, body=bm25_query,
+        )
         return response["hits"]["hits"][:15]
 
 
@@ -866,6 +804,16 @@ async def drafting_node(state: LegalAgentState) -> dict:
                      sections_generated=len(sections),
                      total_content_len=len(full_draft),
                      total_tokens=total_tokens)
+
+        # Step 7: Auto-inject statute references into the draft
+        if full_draft and not failed_indices:
+            try:
+                from core.statute_refs import add_statute_references
+                progress("drafting", "Adding statute references...", step="statute_refs")
+                full_draft = await add_statute_references(full_draft)
+            except Exception as ref_err:
+                log.warning("Statute reference injection skipped",
+                            error=str(ref_err))
 
         template_display = os.path.splitext(os.path.basename(selected_source))[0]
         result = AgentResult(

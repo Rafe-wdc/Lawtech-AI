@@ -2763,6 +2763,7 @@ function renderResponseActions(turnNumber) {
   var tn = turnNumber || 0;
   return '<div class="response-actions">' +
     '<button class="response-action-btn" onclick="copyResponse(this)">\uD83D\uDCCB Copy</button>' +
+    '<button class="response-action-btn" onclick="addStatuteRefs(this)" data-turn="' + tn + '">\u2696\uFE0F Add Statutes</button>' +
     '<div class="export-dropdown">' +
       '<button class="response-action-btn" onclick="toggleExportMenu(this)">\uD83D\uDCE5 Export \u25BE</button>' +
       '<div class="export-dropdown-menu">' +
@@ -3056,6 +3057,77 @@ async function generateTOA(btn, format) {
     btn.innerHTML = origText;
     var menu = btn.closest('.export-dropdown-menu');
     if (menu) menu.classList.remove('show');
+  }
+}
+
+async function addStatuteRefs(btn) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  var turn = parseInt(btn.dataset.turn) || 0;
+
+  if (!markdown.trim()) {
+    addLog('warn', 'No content for statute referencing');
+    return;
+  }
+
+  var origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '\u2696\uFE0F Adding statutes...';
+
+  try {
+    var payload = { format: 'md' };
+    if (currentThreadId && turn > 0) {
+      payload.thread_id = currentThreadId;
+      payload.turn_number = turn;
+    } else {
+      payload.text = markdown;
+    }
+
+    var resp = await fetch(getBase() + '/pyapi/statute-refs', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      var err = await resp.json().catch(function() { return { message: 'Failed' }; });
+      throw new Error(err.message || 'Statute referencing failed');
+    }
+
+    // Get enhanced text and replace the message content
+    var enhanced = await resp.text();
+    if (enhanced && enhanced.length > markdown.length * 0.8) {
+      // Update the message with enhanced content
+      msgDiv.dataset.markdown = enhanced;
+      // Re-render the content area (preserve actions and citations)
+      var contentArea = msgDiv.querySelector('.ai-content') || msgDiv;
+      var actionsHtml = msgDiv.querySelector('.response-actions');
+      var citationsHtml = msgDiv.querySelector('.citations-container');
+
+      // Rebuild inner HTML
+      var newHtml = '<div class="ai-content">' + renderMarkdown(enhanced) + '</div>';
+      if (citationsHtml) newHtml += citationsHtml.outerHTML;
+      if (actionsHtml) newHtml += actionsHtml.outerHTML;
+
+      // Find feedback section
+      var feedbackDiv = msgDiv.querySelector('.feedback-comment');
+      if (feedbackDiv) newHtml += feedbackDiv.outerHTML;
+
+      msgDiv.innerHTML = newHtml;
+
+      addLog('info', 'Statute references added (' + (enhanced.length - markdown.length) + ' chars added)');
+      btn = msgDiv.querySelector('[onclick*="addStatuteRefs"]');
+      if (btn) {
+        btn.innerHTML = '\u2705 Statutes Added';
+        btn.disabled = true;
+      }
+    } else {
+      throw new Error('Enhanced text was too short or empty');
+    }
+  } catch (e) {
+    addLog('error', 'Statute referencing failed: ' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = origText;
   }
 }
 

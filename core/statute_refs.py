@@ -15,6 +15,7 @@ from datetime import date
 
 from core.clients import get_gemini_flash_full
 from core.logger import get_logger, log_time
+from core.sanitize import sanitize_output
 
 log = get_logger("StatuteRefs")
 
@@ -116,7 +117,7 @@ async def add_statute_references(text: str) -> str:
                 STATUTE_REF_PROMPT.format(text=text),
             )
 
-        enhanced = response.content.strip()
+        enhanced = sanitize_output(response.content.strip())
 
         # Sanity check: enhanced text should be at least as long as original
         # (we're only adding, not removing)

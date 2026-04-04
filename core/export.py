@@ -17,6 +17,7 @@ import re
 from datetime import datetime
 
 from core.logger import get_logger
+from core.sanitize import sanitize_output
 
 log = get_logger("Export")
 
@@ -683,6 +684,9 @@ def export_document(
     Returns:
         Tuple of (BytesIO buffer, filename, media_type)
     """
+    # Sanitize LLM output before any rendering
+    md_text = sanitize_output(md_text)
+
     # Sanitize title for filename
     safe_title = re.sub(r"[^\w\s-]", "", title[:50]).strip().replace(" ", "_")
     if not safe_title:

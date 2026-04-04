@@ -17,6 +17,7 @@ from datetime import date
 
 from core.clients import get_gemini_flash_full
 from core.logger import get_logger, log_time
+from core.sanitize import sanitize_output
 
 log = get_logger("TOA")
 
@@ -145,7 +146,7 @@ async def generate_toa(
                 ),
             )
 
-        toa_md = response.content.strip()
+        toa_md = sanitize_output(response.content.strip())
         log.info("TOA generated",
                  query=query[:80],
                  toa_len=len(toa_md),

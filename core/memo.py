@@ -20,6 +20,7 @@ from datetime import date
 
 from core.clients import get_gemini_flash_full
 from core.logger import get_logger, log_time
+from core.sanitize import sanitize_output
 
 log = get_logger("Memo")
 
@@ -162,7 +163,7 @@ async def generate_memo(
                 ),
             )
 
-        memo_md = response.content.strip()
+        memo_md = sanitize_output(response.content.strip())
 
         log.info("Research memo generated",
                  query=query[:80],

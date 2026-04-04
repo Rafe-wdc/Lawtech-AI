@@ -13,6 +13,7 @@ from datetime import date
 
 from core.clients import get_gemini_flash_full
 from core.logger import get_logger, log_time
+from core.sanitize import sanitize_output
 
 log = get_logger("FixDraft")
 
@@ -92,7 +93,7 @@ async def fix_draft(
                 ),
             )
 
-        revised = response.content.strip()
+        revised = sanitize_output(response.content.strip())
 
         # Sanity: revised should be at least 50% of original (we're fixing, not deleting)
         if len(revised) < len(original_draft) * 0.5:

@@ -20,6 +20,7 @@ from datetime import date
 
 from core.clients import get_gemini_flash_full
 from core.logger import get_logger, log_time
+from core.sanitize import sanitize_output
 
 log = get_logger("Compliance")
 
@@ -162,7 +163,7 @@ async def check_compliance(
                 ),
             )
 
-        report = response.content.strip()
+        report = sanitize_output(response.content.strip())
 
         log.info("Compliance check complete",
                  doc_len=len(text),

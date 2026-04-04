@@ -1702,6 +1702,76 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         return _error_response("export_error", f"Export failed: {e}", 500)
 
 
+# --- Table of Authorities Endpoint ---
+
+class TOARequest(BaseModel):
+    thread_id: Optional[str] = None
+    turn_number: Optional[int] = None
+    query: Optional[str] = None
+    response_text: Optional[str] = None
+    sources: Optional[list[dict]] = None
+    format: str = Field(default="docx", pattern=r"^(docx|pdf|md)$")
+
+
+@app.post("/pyapi/toa", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def generate_toa_endpoint(data: TOARequest, request: Request):
+    """Generate a Table of Authorities from an AI response.
+
+    Extracts all legal citations (cases, statutes, constitutional provisions)
+    and returns a formatted document.
+    """
+    from .toa import generate_toa
+    from .export import export_document
+    from .chat_store import chat_store
+
+    try:
+        query = data.query or ""
+        response_text = data.response_text or ""
+        sources = data.sources or []
+
+        if data.thread_id and data.turn_number and not response_text:
+            msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
+            if not msg:
+                return _error_response("not_found", "Message not found", 404)
+            response_text = msg["ai_response"]
+            query = query or msg.get("user_query", "")
+
+        if not response_text.strip():
+            return _error_response("validation_error", "No content for TOA extraction", 400)
+
+        toa_md = await generate_toa(
+            query=query,
+            response_text=response_text,
+            sources=sources,
+        )
+
+        if data.format == "md":
+            buf = io.BytesIO(toa_md.encode("utf-8"))
+            return StreamingResponse(
+                buf,
+                media_type="text/markdown; charset=utf-8",
+                headers={"Content-Disposition": 'attachment; filename="table_of_authorities.md"'},
+            )
+
+        buf, filename, media_type = export_document(
+            title="Table of Authorities",
+            md_text=toa_md,
+            fmt=data.format,
+            sources=sources,
+        )
+
+        return StreamingResponse(
+            buf,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        log.error("TOA generation failed", error=str(e), exc_info=True)
+        return _error_response("toa_error", f"TOA generation failed: {e}", 500)
+
+
 # --- Research Memo Endpoint ---
 
 class MemoRequest(BaseModel):

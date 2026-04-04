@@ -2774,9 +2774,11 @@ function renderResponseActions(turnNumber) {
     '<div class="export-dropdown">' +
       '<button class="response-action-btn" onclick="toggleExportMenu(this)">\uD83D\uDCDD Memo \u25BE</button>' +
       '<div class="export-dropdown-menu">' +
-        '<button class="export-dropdown-item" onclick="generateMemo(this,\'docx\')" data-turn="' + tn + '"><span class="ext">.docx</span> Word Memo</button>' +
-        '<button class="export-dropdown-item" onclick="generateMemo(this,\'pdf\')" data-turn="' + tn + '"><span class="ext">.pdf</span> PDF Memo</button>' +
-        '<button class="export-dropdown-item" onclick="generateMemo(this,\'md\')" data-turn="' + tn + '"><span class="ext">.md</span> Markdown Memo</button>' +
+        '<button class="export-dropdown-item" onclick="generateMemo(this,\'docx\')" data-turn="' + tn + '"><span class="ext">.docx</span> Research Memo</button>' +
+        '<button class="export-dropdown-item" onclick="generateMemo(this,\'pdf\')" data-turn="' + tn + '"><span class="ext">.pdf</span> Research Memo</button>' +
+        '<div style="border-top:1px solid var(--border);margin:4px 0"></div>' +
+        '<button class="export-dropdown-item" onclick="generateTOA(this,\'docx\')" data-turn="' + tn + '"><span class="ext">.docx</span> Table of Authorities</button>' +
+        '<button class="export-dropdown-item" onclick="generateTOA(this,\'pdf\')" data-turn="' + tn + '"><span class="ext">.pdf</span> Table of Authorities</button>' +
       '</div>' +
     '</div>' +
     '<div style="margin-left:auto;display:flex;gap:6px">' +
@@ -2973,6 +2975,82 @@ async function generateMemo(btn, format) {
     addLog('info', 'Research memo generated: ' + filename);
   } catch (e) {
     addLog('error', 'Memo generation failed: ' + e.message);
+  } finally {
+    btn.classList.remove('loading');
+    btn.innerHTML = origText;
+    var menu = btn.closest('.export-dropdown-menu');
+    if (menu) menu.classList.remove('show');
+  }
+}
+
+async function generateTOA(btn, format) {
+  var msgDiv = btn.closest('.msg.ai');
+  var markdown = msgDiv ? (msgDiv.dataset.markdown || msgDiv.innerText) : '';
+  var turn = parseInt(btn.dataset.turn) || 0;
+
+  if (!markdown.trim()) {
+    addLog('warn', 'No content for TOA extraction');
+    return;
+  }
+
+  var origText = btn.innerHTML;
+  btn.classList.add('loading');
+  btn.innerHTML = '<span class="ext">...</span> Extracting citations...';
+
+  try {
+    var payload = {
+      format: format,
+      response_text: markdown,
+      query: '',
+      sources: [],
+    };
+
+    if (currentThreadId && turn > 0) {
+      payload.thread_id = currentThreadId;
+      payload.turn_number = turn;
+    }
+
+    var prevMsg = msgDiv.previousElementSibling;
+    if (prevMsg && prevMsg.classList.contains('user')) {
+      payload.query = prevMsg.innerText.trim();
+    }
+
+    var citationEls = msgDiv.querySelectorAll('.citation-item');
+    if (citationEls.length > 0) {
+      citationEls.forEach(function(el) {
+        payload.sources.push({ title: el.innerText.trim().substring(0, 200) });
+      });
+    }
+
+    var resp = await fetch(getBase() + '/pyapi/toa', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      var err = await resp.json().catch(function() { return { message: 'TOA generation failed' }; });
+      throw new Error(err.message || 'TOA generation failed');
+    }
+
+    var blob = await resp.blob();
+    var disposition = resp.headers.get('Content-Disposition') || '';
+    var filename = 'table_of_authorities.' + format;
+    var match = disposition.match(/filename="?([^"]+)"?/);
+    if (match) filename = match[1];
+
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    addLog('info', 'Table of Authorities generated: ' + filename);
+  } catch (e) {
+    addLog('error', 'TOA generation failed: ' + e.message);
   } finally {
     btn.classList.remove('loading');
     btn.innerHTML = origText;

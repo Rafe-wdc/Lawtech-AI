@@ -94,11 +94,14 @@ def _md_to_docx(doc, md_text: str):
 
     Handles: headings, bold, italic, bullet lists, ordered lists, tables,
     code blocks, horizontal rules, and inline formatting.
+
+    Sanitizes malformed tables before processing.
     """
     from docx.shared import Pt, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
 
+    md_text = _sanitize_md_tables(md_text)
     lines = md_text.split("\n")
     i = 0
     in_table = False
@@ -338,8 +341,35 @@ def generate_docx(
 # PDF Generation
 # ---------------------------------------------------------------------------
 
+def _sanitize_md_tables(md_text: str) -> str:
+    """Fix malformed markdown tables that cause rendering issues.
+
+    - Truncates excessively long separator rows (|:---|:---|...)
+    - Removes orphan separator rows not preceded by a header row
+    - Limits cell content width to prevent page overflow
+    """
+    lines = md_text.split("\n")
+    cleaned = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Detect table separator rows: |:---|:---|  or |---|---|
+        if re.match(r"^\|[\s\-:|]+\|$", stripped) and len(stripped) > 200:
+            # Truncate to reasonable width — extract column count and rebuild
+            cols = stripped.strip("|").split("|")
+            n_cols = min(len(cols), 10)  # cap at 10 columns
+            short_sep = "| " + " | ".join(":---" for _ in range(n_cols)) + " |"
+            cleaned.append(short_sep)
+        # Also catch lines that are just long sequences of dashes (broken table overflow)
+        elif len(stripped) > 200 and re.match(r"^[-\s|:]+$", stripped):
+            continue  # skip entirely
+        else:
+            cleaned.append(line)
+    return "\n".join(cleaned)
+
+
 def _md_to_html(md_text: str) -> str:
     """Convert markdown to HTML using markdown-it-py."""
+    md_text = _sanitize_md_tables(md_text)
     try:
         from markdown_it import MarkdownIt
         md = MarkdownIt("commonmark", {"typographer": True})

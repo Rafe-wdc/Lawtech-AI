@@ -1573,8 +1573,49 @@ async function restoreSession(threadId, totalTurns) {
 
     // Render each turn
     messages.forEach(msg => {
-      addChatMsg('user', msg.user_query);
-      addChatMsg('ai', msg.ai_response);
+      var q = msg.user_query || '';
+      var a = msg.ai_response || '';
+
+      // Special message types (compliance report, revised draft)
+      if (q.startsWith('[COMPLIANCE_CHECK]')) {
+        // Render as compliance report (amber)
+        var reportDiv = document.createElement('div');
+        reportDiv.className = 'msg ai compliance-report';
+        reportDiv.dataset.markdown = a;
+        reportDiv.dataset.originalDraft = q.replace('[COMPLIANCE_CHECK]', '').trim();
+        reportDiv.dataset.complianceReport = a;
+        reportDiv.innerHTML = '<div class="compliance-badge">\uD83D\uDD0D Compliance Report</div>' +
+          '<div class="ai-content">' + renderMarkdown(a) + '</div>' +
+          '<div class="response-actions">' +
+            '<button class="response-action-btn" onclick="copyResponse(this)">\uD83D\uDCCB Copy</button>' +
+            '<button class="response-action-btn" onclick="exportComplianceReport(this,\'docx\')">\uD83D\uDCE5 Export .docx</button>' +
+            '<button class="response-action-btn fix-draft-btn" onclick="fixDraft(this)">\uD83D\uDD27 Fix Draft</button>' +
+          '</div>';
+        chatMessages.appendChild(reportDiv);
+      } else if (q.startsWith('[FIX_DRAFT]')) {
+        // Render as revised draft (green)
+        var revisedDiv = document.createElement('div');
+        revisedDiv.className = 'msg ai revised-draft';
+        revisedDiv.dataset.markdown = a;
+        revisedDiv.innerHTML = '<div class="revised-badge">\uD83D\uDD27 Revised Draft (v2)</div>' +
+          '<div class="ai-content">' + renderMarkdown(a) + '</div>' +
+          '<div class="response-actions">' +
+            '<button class="response-action-btn" onclick="copyResponse(this)">\uD83D\uDCCB Copy</button>' +
+            '<button class="response-action-btn" onclick="addStatuteRefs(this)" data-turn="0">\u2696\uFE0F Add Statutes</button>' +
+            '<div class="export-dropdown">' +
+              '<button class="response-action-btn" onclick="toggleExportMenu(this)">\uD83D\uDCE5 Export \u25BE</button>' +
+              '<div class="export-dropdown-menu">' +
+                '<button class="export-dropdown-item" onclick="exportRevisedDraft(this,\'docx\')"><span class="ext">.docx</span> Word</button>' +
+                '<button class="export-dropdown-item" onclick="exportRevisedDraft(this,\'pdf\')"><span class="ext">.pdf</span> PDF</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        chatMessages.appendChild(revisedDiv);
+      } else {
+        // Normal user + AI message pair
+        addChatMsg('user', q);
+        addChatMsg('ai', a);
+      }
     });
 
     document.getElementById('chatMeta').textContent =
@@ -3133,6 +3174,19 @@ async function runComplianceCheck(btn) {
     // Scroll to the report
     reportDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
+    // Persist to chat history so it survives refresh
+    if (currentThreadId) {
+      fetch(getBase() + '/pyapi/save-turn', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({
+          thread_id: currentThreadId,
+          user_query: '[COMPLIANCE_CHECK]' + markdown,
+          ai_response: report,
+        }),
+      }).catch(function(e) { addLog('warn', 'Failed to save compliance report: ' + e.message); });
+    }
+
     addLog('info', 'Compliance check complete (' + report.length + ' chars)');
     btn.innerHTML = '\u2705 Checked';
   } catch (e) {
@@ -3235,6 +3289,19 @@ async function fixDraft(btn) {
     // Insert after the compliance report
     reportDiv.parentNode.insertBefore(revisedDiv, reportDiv.nextSibling);
     revisedDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // Persist to chat history so it survives refresh
+    if (currentThreadId) {
+      fetch(getBase() + '/pyapi/save-turn', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({
+          thread_id: currentThreadId,
+          user_query: '[FIX_DRAFT]',
+          ai_response: revisedDraft,
+        }),
+      }).catch(function(e) { addLog('warn', 'Failed to save revised draft: ' + e.message); });
+    }
 
     addLog('info', 'Draft revised (' + revisedDraft.length + ' chars, ' +
       (revisedDraft.match(/\[REVISED/g) || []).length + ' changes marked)');

@@ -1702,6 +1702,28 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         return _error_response("export_error", f"Export failed: {e}", 500)
 
 
+# --- Save Turn Endpoint (for persisting compliance reports, revised drafts) ---
+
+class SaveTurnRequest(BaseModel):
+    thread_id: str
+    user_query: str
+    ai_response: str
+
+
+@app.post("/pyapi/save-turn", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def save_turn_endpoint(data: SaveTurnRequest, request: Request):
+    """Save a special turn to chat history (compliance reports, revised drafts)."""
+    from .chat_store import chat_store
+
+    try:
+        turn = await chat_store.save_turn(data.thread_id, data.user_query, data.ai_response)
+        return JSONResponse({"turn_number": turn})
+    except Exception as e:
+        log.error("Save turn failed", error=str(e), exc_info=True)
+        return _error_response("save_error", f"Failed to save: {e}", 500)
+
+
 # --- Fix Draft Endpoint ---
 
 class FixDraftRequest(BaseModel):

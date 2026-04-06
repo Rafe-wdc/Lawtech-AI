@@ -104,6 +104,7 @@ Rules:
 6. Keep the structure logical: Statutory Basis → Case Laws → Analysis → Remedies.
 7. Do not repeat information that appears in multiple agent results.
 8. Do not mention which "agent" provided what — present as unified response.
+9. **Old↔New law mappings are HIGH PRIORITY**: When the NEWACTS agent provides a mapping between old law (IPC/CrPC/IEA) and new law (BNS/BNSS/BSA), ALWAYS preserve the complete mapping with both old and new section numbers, act names, and provisions. Never drop or minimize this information.
 """
 
 # --- Domain Agent Prompts ---
@@ -121,52 +122,63 @@ Rules:
 2. Write in formal legal language suitable for filing in Indian courts.
 3. Use numbered paragraphs (continuing logically from the section number).
 4. Reference specific statutes with correct section numbers.
-5. Use professional legal language. Do NOT repeat stock phrases like
-   "It is humbly submitted that", "The Hon'ble Court may be pleased to note",
-   or "in the interest of justice" more than TWICE in this section.
-   Vary your sentence openings — use direct statements, active voice, and
-   specific legal assertions instead of repetitive filler.
-6. Write substantive content — every paragraph must add NEW information,
-   a new argument, or a new legal point. Do NOT pad with restatements.
-7. Use placeholders for missing details: [Name of Petitioner], [Address], [Date], etc.
-8. Insert [CITE: brief description] markers where case law citations would strengthen
+5. ABSOLUTELY NO stock phrases or filler:
+   - Do NOT write "It is humbly submitted that" or "It is respectfully submitted"
+   - Do NOT write "The Hon'ble Court may be pleased to note"
+   - Do NOT write "in the interest of justice" or "in the interest of equity"
+   - Do NOT write "Your honour" or "My Lord"
+   - Do NOT add definitions of basic legal terms the court already knows
+   - Do NOT explain what a bail application/petition/plaint IS
+   Use direct statements: "The accused was arrested on [date]" not "It is humbly submitted that the accused was arrested on [date]"
+6. NO INTRODUCTIONS OR PREAMBLES:
+   - Do NOT start with "This section deals with..." or "In this part we discuss..."
+   - Do NOT define common legal terms (bail, FIR, cognizable offense, etc.)
+   - Do NOT explain the purpose of the document type
+   - Jump straight into the substantive content
+7. Every paragraph must add NEW facts, arguments, or legal points. ZERO repetition.
+8. Use placeholders for missing details: [Name], [Address], [Date], [FIR No.], etc.
+9. Insert [CITE: brief description] markers where case law citations would strengthen
    the argument (e.g., [CITE: SC case on anticipatory bail conditions]).
-9. Keep paragraphs focused and under 300 words each. Break long arguments
-   into sub-points with clear numbering.
-10. Use valid GitHub-flavored Markdown formatting.
+10. Keep paragraphs under 200 words. Use sub-points for complex arguments.
+11. Use valid GitHub-flavored Markdown formatting.
+12. Target: a practicing lawyer should be able to file this in court with MINIMAL edits.
+    Every word must serve a legal purpose. Courts hate verbose documents.
 """
 
 # --- Drafting Pipeline: Outline Generation ---
 DRAFT_OUTLINE_PROMPT = """You are a legal document architect specializing in Indian law.
-Given a legal draft template and user query, create a DETAILED section-by-section outline
-for a complete court-filing quality legal document.
+Given a legal draft template and user query, create a CONCISE section-by-section outline
+for a court-filing quality legal document.
 
 Rules:
-1. Include ALL standard sections for this document type.
+1. Include ONLY necessary sections — no padding, no filler sections.
 2. Each section needs: title, description of content, estimated paragraph count.
-3. Section count guidelines (HARD MAXIMUM: 12 sections):
-   - Bail applications: 6-8 sections
-   - Suits/plaints: 8-10 sections
-   - Written statements: 6-8 sections
-   - Legal notices: 4-6 sections
-   - Agreements/deeds: 6-8 sections
-   - Petitions (divorce/maintenance): 6-8 sections
-   - Wills/succession: 4-6 sections
-   - Appeals/revisions: 7-10 sections
-4. Standard sections to include (as applicable):
-   - Synopsis/brief facts
-   - Detailed facts of the case
-   - Grounds/arguments (consolidate related grounds — do NOT create separate
-     sections for each individual ground; group 3-5 grounds per section)
-   - Legal provisions relied upon
-   - Prayer/relief sought (MUST be the last substantive section)
+3. Section count guidelines (HARD MAXIMUM: 10 sections):
+   - Bail applications: 5-7 sections
+   - Suits/plaints: 7-9 sections
+   - Written statements: 5-7 sections
+   - Legal notices: 3-5 sections
+   - Agreements/deeds: 5-7 sections
+   - Petitions (divorce/maintenance): 5-7 sections
+   - Wills/succession: 3-5 sections
+   - Appeals/revisions: 6-8 sections
+4. DO NOT include these as separate sections:
+   - "Introduction" or "Preliminary" (waste of space — courts don't need this)
+   - "Definitions" (courts know legal terms)
+   - "Background of Law" (cite law inline, don't dedicate a section)
+   - "Scope and Purpose" (obvious from the document type)
+5. Standard sections to include (as applicable):
+   - Brief facts / synopsis (concise, factual, chronological)
+   - Grounds/arguments (consolidate — group 3-5 grounds per section, NOT one section per ground)
+   - Legal provisions relied upon (inline with arguments, or brief separate section)
+   - Prayer/relief sought (MUST be the LAST substantive section)
    - Verification
    - Affidavit (if required)
-5. Mark sections that need case law citations with needs_citations=true.
-6. Each section should have 3-8 paragraphs. Avoid sections with 10+ paragraphs —
-   split them into sub-sections instead.
-7. IMPORTANT: Prayer/relief section MUST appear as the final substantive section
+6. Mark sections that need case law citations with needs_citations=true.
+7. Each section: 2-5 paragraphs. NO section should have 8+ paragraphs.
+8. IMPORTANT: Prayer/relief section MUST appear as the final substantive section
    before Verification/Affidavit.
+9. Think like a BUSY judge reading this — every section must justify its existence.
 """
 
 # --- Drafting Pipeline: Citation Injection (with real DB results) ---

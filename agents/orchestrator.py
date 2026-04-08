@@ -862,6 +862,20 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.info("Document agent added for file context (multi-intent support)",
                  file_names=fc.file_names)
 
+    # Draft + file detection: if user wants to DRAFT from an uploaded document,
+    # route through Drafting pipeline (not just Document Q&A).
+    # Inject file content into Drafting agent's query for context.
+    _DRAFT_KEYWORDS = (
+        "draft", "prepare", "create", "write", "generate", "make",
+        "bail application", "petition", "plaint", "notice", "affidavit",
+        "agreement", "contract", "mou", "reply", "written statement",
+    )
+    if fc and fc.has_content and any(kw in _orig_lower for kw in _DRAFT_KEYWORDS):
+        if "Drafting" not in tasks_planned:
+            tasks_planned.insert(0, "Drafting")
+            log.info("Draft-from-file detected — adding Drafting agent",
+                     file_names=fc.file_names, plan=tasks_planned)
+
     progress("orchestrator", f"Identified: {', '.join(tasks_planned)}", substep=True, detail=task, step="classify")
 
     # Post-processing: multi-intent detection safety net
@@ -903,6 +917,24 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             )
         except asyncio.TimeoutError:
             log.warning("Per-agent query rewriting timed out")
+
+    # Inject file content into Drafting agent query when drafting from uploaded document
+    if "Drafting" in tasks_planned and fc and fc.has_content:
+        _file_text = ""
+        if fc.inline_text:
+            _file_text = fc.inline_text[:30000]
+        if _file_text:
+            _draft_query = agent_queries.get("Drafting", query)
+            agent_queries["Drafting"] = (
+                f"{_draft_query}\n\n"
+                f"--- CONTENT EXTRACTED FROM UPLOADED DOCUMENT ---\n"
+                f"Use ALL facts, names, dates, sections, addresses from this document. "
+                f"Do NOT use placeholders for information available below.\n\n"
+                f"{_file_text}"
+            )
+            log.info("Injected file content into Drafting agent query",
+                     file_text_len=len(_file_text),
+                     total_query_len=len(agent_queries["Drafting"]))
 
     log.info("Plan phase completed",
              task=task, agents_planned=tasks_planned,

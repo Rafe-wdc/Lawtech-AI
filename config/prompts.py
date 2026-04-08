@@ -143,6 +143,13 @@ Rules:
 11. Use valid GitHub-flavored Markdown formatting.
 12. Target: a practicing lawyer should be able to file this in court with MINIMAL edits.
     Every word must serve a legal purpose. Courts hate verbose documents.
+13. CRITICAL — If the user query contains "CONTENT EXTRACTED FROM UPLOADED DOCUMENT",
+    extract ALL factual details from that content (names, dates, FIR numbers, sections,
+    addresses, police station, court name, amounts, allegations) and use them DIRECTLY
+    in the draft. Do NOT use [placeholder] for information that IS available in the
+    extracted content. Only use [placeholder] for information NOT in the document.
+    This is the most important rule — the user uploaded a real document and expects
+    the draft to contain the real details from it.
 """
 
 # --- Drafting Pipeline: Outline Generation ---

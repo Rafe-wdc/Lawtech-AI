@@ -582,6 +582,25 @@ async def process_files(
                 pf.page_count = page_count
                 is_scanned = not text.strip()
 
+                # Detect garbled Devanagari text (common in Marathi/Hindi FIR PDFs
+                # with non-standard font encoding). If >20% of Devanagari chars
+                # are garbled, the text layer is unreliable — force Vision OCR.
+                if text.strip() and not is_scanned:
+                    _clean_deva = sum(1 for c in text if 0x0900 <= ord(c) <= 0x097F)
+                    _garbled = sum(1 for c in text if ord(c) in range(0x0220, 0x0250)
+                                   or c in '\u0110\u0124\u0134\u0139\u013D\u0147\u014B\u0154\u0158')
+                    if _clean_deva > 50 and _garbled > _clean_deva * 0.2:
+                        log.warning("Garbled Devanagari detected — forcing Vision OCR, "
+                                    "invalidating Gemini URI (text layer unreliable)",
+                                    file=pf.original_name, clean=_clean_deva,
+                                    garbled=_garbled, ratio=f"{_garbled*100//(_clean_deva+1)}%")
+                        is_scanned = True  # treat as scanned → triggers OCR path
+                        text = ""  # discard unreliable text
+                        # Invalidate Gemini URI — it reads the same broken text layer
+                        # and will hallucinate. Force Document agent to use OCR text.
+                        pf.gemini_uri = None
+                        pf.gemini_name = None
+
                 if is_scanned and pf.gemini_uri and page_count > MAX_INLINE_PDF_PAGES:
                     # Large scanned PDF with Gemini URI — schedule background OCR
                     # for ChromaDB. First answer uses Gemini URI (fast), follow-up

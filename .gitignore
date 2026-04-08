@@ -52,9 +52,16 @@ desktop.ini
 *.log
 logs/
 
-# Test result artifacts (large JSON dumps)
+# Test result artifacts (large JSON dumps, reports, evals)
 tests/test_results_*.json
 tests/test_eval_results.json
+tests/test_*_report.md
+tests/test_*_report.json
+tests/test_*_results.json
+tests/test_*_eval.json
+tests/test_*_eval_report.md
+tests/test_*_full.json
+tests/test_bge_*.json
 
 # Runtime directories
 temp_uploads/
@@ -70,6 +77,8 @@ agentic-workflow/
 # Local notes
 tasks.txt
 HANDOFF.md
+JD_AI_Engineer.md
+API_DOCUMENTATION.md
 
 # Monitoring local overrides (contain secrets)
 monitoring/prometheus.local.yml
@@ -79,9 +88,6 @@ competitors/
 
 # Test DOCX files
 test_docx/
-
-# Monitoring local overrides with real credentials
-monitoring/prometheus.local.yml
 
 # Temporary files
 tmp/

@@ -399,14 +399,24 @@ async def document_node(state: LegalAgentState) -> dict:
                     error=str(e),
                 )}}
 
-        log.warning("No unique_string provided and no file content")
+        log.warning("No file content available for Document agent",
+                    has_fc=fc is not None,
+                    has_gemini=bool(fc and fc.all_gemini_parts),
+                    has_inline=bool(fc and fc.inline_text),
+                    has_chromadb=bool(fc and fc.chromadb_collections))
         return {
             "agent_results": {"Document": AgentResult(
                 agent_name="Document",
-                content="No document collection specified. Please upload a PDF first.",
+                content=(
+                    "I was unable to read the uploaded file. This can happen if:\n"
+                    "- The file upload did not complete successfully\n"
+                    "- The file format is not supported\n"
+                    "- The file content could not be extracted\n\n"
+                    "Please try uploading the file again, or use a different format (PDF, JPEG, PNG, DOCX)."
+                ),
                 sources=[],
                 tokens_consumed=0,
-                error="missing_unique_string",
+                error="no_file_content",
             )},
         }
 

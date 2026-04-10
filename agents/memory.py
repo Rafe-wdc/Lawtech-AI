@@ -180,12 +180,12 @@ async def _restore_file_context(thread_id: str) -> dict | None:
         ts = record.get("created_at", "")
         if ts and latest_ts:
             # Simple comparison — both are ISO datetime strings
-            # Include files from the same batch (within ~60s of latest)
+            # Include files from the same batch (within ~10s of latest)
             try:
                 from datetime import datetime
                 t_latest = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
                 t_this = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                if abs((t_latest - t_this).total_seconds()) <= 60:
+                if abs((t_latest - t_this).total_seconds()) <= 10:
                     thread_files.append(record)
                 else:
                     break  # older batch, stop
@@ -361,6 +361,18 @@ async def memory_node(state: LegalAgentState) -> dict:
         "summary_text": summary_text,
         "user_language": user_language,
     }
-    if restored_file_context is not None:
+    # CRITICAL: Only set file_context if we're RESTORING from history.
+    # If new files were uploaded this turn (fc.has_content), do NOT touch
+    # file_context — the gateway already set it correctly in initial_state.
+    # Setting it here would OVERWRITE the new file context due to
+    # LangGraph's last-write-wins behavior (no custom reducer on file_context).
+    fc_from_state = FileContextData.from_state(state)
+    new_files_this_turn = fc_from_state and fc_from_state.has_content
+
+    if restored_file_context is not None and not new_files_this_turn:
         result["file_context"] = restored_file_context
+        log.info("Setting restored file_context (no new files this turn)")
+    elif new_files_this_turn:
+        log.info("Preserving new file_context from this turn (NOT overwriting)",
+                 files=fc_from_state.file_names)
     return result

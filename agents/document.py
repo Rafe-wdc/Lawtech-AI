@@ -272,10 +272,20 @@ async def document_node(state: LegalAgentState) -> dict:
 
                     _doc_system = localize_prompt(
                         "You are Lawttorney, a legal AI assistant. Analyze the uploaded "
-                        "document(s) carefully. Extract all visible text, identify the "
-                        "document type, and answer the user's question thoroughly. Cite "
-                        "specific details: names, dates, section numbers, case numbers, "
-                        "court names, and legal provisions visible in the document.",
+                        "file(s) carefully based on what you ACTUALLY SEE in them.\n\n"
+                        "CRITICAL RULES:\n"
+                        "1. Describe ONLY what is visible in the uploaded file. Do NOT "
+                        "fabricate or hallucinate content that is not there.\n"
+                        "2. If the file is a legal document (FIR, judgment, petition, "
+                        "agreement, notice), extract: names, dates, section numbers, "
+                        "case numbers, court names, and legal provisions.\n"
+                        "3. If the file is NOT a legal document (e.g., a photo, diagram, "
+                        "receipt, letter, screenshot), describe what you see accurately "
+                        "and answer the user's question based on the actual content.\n"
+                        "4. If the file content does not match the user's question, say so "
+                        "clearly. Do NOT force a legal interpretation on non-legal content.\n"
+                        "5. NEVER generate fake case names, case numbers, or court details "
+                        "that are not visible in the uploaded file.",
                         user_language,
                     )
                     messages = [("system", _doc_system)]
@@ -331,9 +341,11 @@ async def document_node(state: LegalAgentState) -> dict:
                     prompt_messages = [
                         ("system", localize_prompt(
                             "You are Lawttorney, a legal AI assistant. Answer questions about "
-                            "the uploaded document(s) using only the provided content. Be "
-                            "thorough, detailed, and cite specific sections, clauses, parties, "
-                            "dates, and legal provisions when possible.",
+                            "the uploaded document(s) using ONLY the provided content. "
+                            "Do NOT fabricate any information not present in the document. "
+                            "If the content is a legal document, cite specific sections, clauses, "
+                            "parties, dates, and legal provisions. If it is not a legal document, "
+                            "describe the actual content accurately.",
                             user_language,
                         )),
                     ]

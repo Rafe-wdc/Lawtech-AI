@@ -41,14 +41,21 @@ class ResponseCache:
         self._misses = 0
 
     @staticmethod
-    def _make_key(query: str) -> str:
-        """Normalize query and create cache key."""
+    def _make_key(query: str, file_fingerprint: str = "") -> str:
+        """Normalize query + file identity and create cache key.
+
+        file_fingerprint should be a string like "doc.pdf:1024,img.jpg:5000"
+        (filename:size pairs). Same query + same files = same key.
+        Different files = different key, even if query is identical.
+        """
         normalized = query.lower().strip()
+        if file_fingerprint:
+            normalized += "\x00" + file_fingerprint
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
-    def get(self, query: str) -> CacheEntry | None:
+    def get(self, query: str, file_fingerprint: str = "") -> CacheEntry | None:
         """Look up a cached response. Returns None on miss or expiry."""
-        key = self._make_key(query)
+        key = self._make_key(query, file_fingerprint)
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -62,9 +69,9 @@ class ResponseCache:
             log.info("Cache hit", key=key[:8], age_s=int(time.time() - entry.timestamp))
             return entry
 
-    def set(self, query: str, entry: CacheEntry) -> None:
+    def set(self, query: str, entry: CacheEntry, file_fingerprint: str = "") -> None:
         """Store a response in the cache."""
-        key = self._make_key(query)
+        key = self._make_key(query, file_fingerprint)
         with self._lock:
             # Evict expired entries if at capacity
             if len(self._store) >= self._max_entries:

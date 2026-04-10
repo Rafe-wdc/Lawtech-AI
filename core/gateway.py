@@ -926,11 +926,14 @@ async def chat_with_files(
                 fc = await process_files(file_tuples, thread_id)
                 file_context_dict = fc.to_dict()
                 # Note: process_files() already persists each file to thread_files table.
-                # No need for save_file_context() here.
+                # The latest batch timestamp ensures _restore_file_context() only
+                # restores these new files on follow-up turns, not older files.
 
                 # Send file processing summary
                 yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"
-                log.info("Files processed for chat", summary=fc.summary)
+                log.info("Files processed for chat",
+                         summary=fc.summary, thread_id=thread_id[:12],
+                         new_file_count=len(fc.file_names))
 
             except Exception as e:
                 log.error("File processing failed", error=str(e))

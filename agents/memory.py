@@ -154,6 +154,10 @@ async def _restore_file_context(thread_id: str) -> dict | None:
     """Load thread files from SQLite, re-upload any expired Gemini URIs, and
     reconstruct a FileContext dict for injection into state.
 
+    IMPORTANT: Only restores files from the MOST RECENT upload batch,
+    not all historical files. This prevents old file context from bleeding
+    into new turns when the user uploads a different file on the same thread.
+
     - Gemini URI valid  → use as-is (no upload)
     - Gemini URI expired → re-upload from local_path, update SQLite
     - DOCX / XLSX       → use extracted_text directly
@@ -162,9 +166,43 @@ async def _restore_file_context(thread_id: str) -> dict | None:
     """
     from core.gemini_files import is_uri_valid, upload_to_gemini
 
-    thread_files = await chat_store.load_thread_files(thread_id)
+    all_thread_files = await chat_store.load_thread_files(thread_id)
+    if not all_thread_files:
+        return None
+
+    # Only use files from the MOST RECENT upload batch.
+    # Files uploaded in the same turn share the same created_at timestamp
+    # (within a few seconds). We use the latest file's timestamp and include
+    # all files within 60 seconds of it (covers multi-file uploads).
+    latest_ts = all_thread_files[-1].get("created_at", "")  # already sorted ASC
+    thread_files = []
+    for record in reversed(all_thread_files):
+        ts = record.get("created_at", "")
+        if ts and latest_ts:
+            # Simple comparison — both are ISO datetime strings
+            # Include files from the same batch (within ~60s of latest)
+            try:
+                from datetime import datetime
+                t_latest = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
+                t_this = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if abs((t_latest - t_this).total_seconds()) <= 60:
+                    thread_files.append(record)
+                else:
+                    break  # older batch, stop
+            except (ValueError, TypeError):
+                thread_files.append(record)  # can't parse, include
+        else:
+            thread_files.append(record)
+
+    thread_files.reverse()  # restore chronological order
+
     if not thread_files:
         return None
+
+    log.info("Restoring file context (latest batch only)",
+             total_thread_files=len(all_thread_files),
+             latest_batch_files=len(thread_files),
+             latest_ts=latest_ts)
 
     gemini_file_parts: list[dict] = []
     chromadb_collections: list[str] = []

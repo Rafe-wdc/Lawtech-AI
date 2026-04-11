@@ -1159,7 +1159,7 @@ TIER 3: Web Search Fallback
 
 | Service | URL / Config | Used By | Purpose |
 |---------|-------------|---------|---------|
-| Elasticsearch | `http://139.84.219.174:9200` | All domain agents | Primary legal doc retrieval |
+| OpenSearch/ES | AWS OpenSearch (via `ES_URL` env var) | All domain agents | Primary legal doc retrieval |
 | Google Gemini | `GOOGLE_API_KEY` | All agents, file processor | LLM generation + files API |
 | Google Search | Via Gemini grounding tools | Scenario, web fallback, legal_concepts | Real-time web results |
 | OpenAI GPT | `OPENAI_API_KEY` | Orchestrator, drafting, fallback rewrite | Classification + planning |

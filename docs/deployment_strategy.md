@@ -569,7 +569,7 @@ spec:
 
 ### 4.3 Elasticsearch HA Cluster
 
-**Current**: Single node at `139.84.219.174:9200` (single point of failure).
+**Current**: AWS OpenSearch (managed). Previously single self-hosted node at `139.84.219.174:9200`.
 
 **Target**: 3-node cluster with replicas.
 

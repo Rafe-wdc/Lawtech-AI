@@ -15,13 +15,24 @@ from __future__ import annotations
 import threading
 import time
 from functools import lru_cache
-from elasticsearch import Elasticsearch
+
+# Try opensearch-py first (for AWS OpenSearch), fall back to elasticsearch
+try:
+    from opensearchpy import OpenSearch as _SearchClient
+    _USING_OPENSEARCH = True
+except ImportError:
+    from elasticsearch import Elasticsearch as _SearchClient
+    _USING_OPENSEARCH = False
+
 from langchain.chat_models import init_chat_model
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from google import genai
 
 from .settings import (
     ELASTICSEARCH_URL,
+    ES_USER,
+    ES_PASSWORD,
+    ES_USE_SSL,
     EMBEDDING_MODELS,
     EMBEDDING_SERVICE_URL,
 )
@@ -30,20 +41,40 @@ from .logger import get_logger
 _log = get_logger("Clients")
 
 
-# --- Elasticsearch ---
+# --- Elasticsearch / OpenSearch ---
 
-_es_client: Elasticsearch | None = None
+_es_client: _SearchClient | None = None
 
 
-def get_es_client(max_retries: int = 3, timeout: int = 30) -> Elasticsearch:
-    """Get or create singleton Elasticsearch client with connection pooling."""
+def get_es_client(max_retries: int = 3, timeout: int = 30) -> _SearchClient:
+    """Get or create singleton search client (OpenSearch or Elasticsearch)."""
     global _es_client
     if _es_client is None:
-        _es_client = Elasticsearch(
+        kwargs: dict = {
+            "request_timeout": timeout,
+            "max_retries": max_retries,
+            "retry_on_timeout": True,
+        }
+
+        if ES_USER and ES_PASSWORD:
+            kwargs["http_auth"] = (ES_USER, ES_PASSWORD)
+
+        if ES_USE_SSL:
+            kwargs["use_ssl"] = True
+            kwargs["verify_certs"] = True
+            kwargs["ssl_show_warn"] = True
+
+        _es_client = _SearchClient(
             ELASTICSEARCH_URL,
-            request_timeout=timeout,
-            max_retries=max_retries,
-            retry_on_timeout=True,
+            **kwargs,
+        )
+
+        _log.info(
+            "Search client initialized",
+            backend="opensearch" if _USING_OPENSEARCH else "elasticsearch",
+            url=ELASTICSEARCH_URL[:40] + "...",
+            ssl=ES_USE_SSL,
+            auth=bool(ES_USER),
         )
     return _es_client
 

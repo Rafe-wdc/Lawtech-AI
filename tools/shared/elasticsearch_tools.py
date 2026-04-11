@@ -111,7 +111,7 @@ def _es_search(index: str, body: dict) -> dict:
         )
     try:
         _client = get_es_client()
-        result = _client.options(request_timeout=30).search(index=index, body=body)
+        result = _client.search(index=index, body=body, request_timeout=30)
         record_es_success()
         return result
     except RuntimeError:
@@ -659,8 +659,8 @@ def search_judgments(
         },
     }
 
-    response = es.options(request_timeout=50).search(
-        index=ES_INDICES["judgments"], body=es_query
+    response = es.search(
+        index=ES_INDICES["judgments"], body=es_query, request_timeout=50
     )
 
     hits = response["hits"]["hits"]
@@ -1094,8 +1094,8 @@ def search_high_court(
         },
     }
 
-    response = es.options(request_timeout=50).search(
-        index=ES_INDICES["judgments"], body=es_query
+    response = es.search(
+        index=ES_INDICES["judgments"], body=es_query, request_timeout=50
     )
 
     hits = response["hits"]["hits"]

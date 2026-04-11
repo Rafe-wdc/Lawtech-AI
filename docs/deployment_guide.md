@@ -95,7 +95,9 @@ POSTGRES_URL=postgresql://lawtech:changeme@localhost:5432/lawtech
 POSTGRES_PASSWORD=changeme
 
 # ── Optional ──────────────────────────────────────────────────────────────────
-# ELASTICSEARCH_URL=http://139.84.219.174:9200
+# ES_URL=https://search-lawttorney-search-xxx.ap-south-1.es.amazonaws.com
+# ES_USER=app_user
+# ES_PASSWORD=changeme
 # RATE_LIMIT_PER_MINUTE=10
 ```
 

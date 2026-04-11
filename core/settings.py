@@ -61,15 +61,28 @@ MODELS = {
     "pdf_vision_ocr": "gemini-2.5-flash-lite",
 }
 
-# --- Elasticsearch ---
+# --- Elasticsearch / OpenSearch ---
 _ES_DEFAULT = "http://139.84.219.174:9200"
-ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", _ES_DEFAULT)
-if ELASTICSEARCH_URL == _ES_DEFAULT and not os.getenv("ELASTICSEARCH_URL"):
+# ES_URL is the preferred env var; fall back to ELASTICSEARCH_URL for backward compat
+ELASTICSEARCH_URL = (
+    os.getenv("ES_URL")
+    or os.getenv("ELASTICSEARCH_URL")
+    or _ES_DEFAULT
+)
+if ELASTICSEARCH_URL == _ES_DEFAULT and not os.getenv("ES_URL") and not os.getenv("ELASTICSEARCH_URL"):
     import logging as _logging
     _logging.getLogger("Settings").warning(
-        "ELASTICSEARCH_URL not set — using hardcoded default %s. "
-        "Set ELASTICSEARCH_URL env var for production.", _ES_DEFAULT
+        "ES_URL / ELASTICSEARCH_URL not set — using hardcoded default %s. "
+        "Set ES_URL env var for production.", _ES_DEFAULT
     )
+
+# Auth credentials (required for AWS OpenSearch, optional for self-hosted)
+ES_USER = os.getenv("ES_USER", "")
+ES_PASSWORD = os.getenv("ES_PASSWORD", "")
+
+# Auto-detect whether SSL is needed based on URL scheme
+ES_USE_SSL = ELASTICSEARCH_URL.startswith("https://")
+
 ES_INDICES = {
     "legislation": "legislation",
     "judgments": "judgements",

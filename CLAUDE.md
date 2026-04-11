@@ -72,7 +72,9 @@ Required in `.env`:
 - `GOOGLE_API_KEY` - Google API key (Gemini models + Search grounding)
 
 Optional:
-- `ELASTICSEARCH_URL` - ES URL (default: `http://139.84.219.174:9200`)
+- `ES_URL` - OpenSearch/ES URL (default: `http://139.84.219.174:9200`). Falls back to `ELASTICSEARCH_URL`.
+- `ES_USER` - OpenSearch/ES username (required for AWS OpenSearch)
+- `ES_PASSWORD` - OpenSearch/ES password (required for AWS OpenSearch)
 - `EMBEDDING_SERVICE_URL` - Remote embedding service URL
 - `LOG_LEVEL` - Logging level (default: DEBUG)
 

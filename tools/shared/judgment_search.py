@@ -69,8 +69,8 @@ def _has_good_results(hits: list[dict], min_hits: int = _MIN_GOOD_HITS) -> bool:
 def _es_search(body: dict, timeout: int = 30) -> list[dict]:
     """Execute ES search on judgment index and return formatted hits."""
     es = get_es_client()
-    resp = es.options(request_timeout=timeout).search(
-        index=INDEX, body=body,
+    resp = es.search(
+        index=INDEX, body=body, request_timeout=timeout,
     )
     return resp["hits"]["hits"]
 

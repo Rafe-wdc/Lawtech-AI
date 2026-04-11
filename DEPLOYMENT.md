@@ -30,7 +30,7 @@ nginx (443 SSL)
 - ChromaDB databases at `/root/Routing db/`
   - `constitution db`
   - `legal maximdb`
-- Elasticsearch accessible at `http://139.84.219.174:9200`
+- Elasticsearch / OpenSearch accessible (AWS OpenSearch or self-hosted)
 
 ---
 
@@ -103,7 +103,9 @@ Required keys:
 | `OPENAI_API_KEY` | Yes | OpenAI API key (GPT-4o for orchestrator, metadata, drafting) |
 | `GOOGLE_API_KEY` | Yes | Google API key (Gemini models for most agents) |
 | `PORT` | No | Server port (default: 5000, set 5001 to avoid v1 conflict) |
-| `ELASTICSEARCH_URL` | No | Default: `http://139.84.219.174:9200` |
+| `ES_URL` | No | OpenSearch/ES URL. Default: `http://139.84.219.174:9200`. Falls back to `ELASTICSEARCH_URL`. |
+| `ES_USER` | No | OpenSearch/ES username (required for AWS OpenSearch) |
+| `ES_PASSWORD` | No | OpenSearch/ES password (required for AWS OpenSearch) |
 | `S3_BUCKET` | No | Default: `lawttorney` |
 | `S3_REGION` | No | Default: `ap-south-1` |
 | `HOST` | No | Default: `0.0.0.0` |

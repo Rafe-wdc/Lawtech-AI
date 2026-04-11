@@ -21,6 +21,7 @@ langchain-classic
 
 # Vector store & search
 chromadb
+opensearch-py
 elasticsearch
 
 # LLM providers

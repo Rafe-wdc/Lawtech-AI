@@ -154,7 +154,7 @@ groups:
           description: >
             More than 5 web-search fallbacks per minute for 3+ minutes.
             Likely means Elasticsearch is unreachable.
-            Check: curl http://139.84.219.174:9200/_cluster/health
+            Check: curl $ES_URL/_cluster/health (see .env for current ES_URL)
         data:
           - refId: B
             relativeTimeRange:

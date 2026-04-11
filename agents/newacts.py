@@ -211,10 +211,10 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
     filters = []
 
     if metadata.act_name and metadata.act_name in ACTS_PATHS:
-        filters.append({"term": {"source": ACTS_PATHS[metadata.act_name]}})
+        filters.append({"term": {"source.keyword": ACTS_PATHS[metadata.act_name]}})
 
     if metadata.section_number:
-        filters.append({"terms": {"section_number": metadata.section_number}})
+        filters.append({"terms": {"section_number.keyword": metadata.section_number}})
 
     # Hybrid search: BM25 + cosine similarity on embedding field
     if metadata.hybrid_search and query_text:
@@ -225,7 +225,7 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
         should_clauses = [{"match": {"page_content": query_text}}]
         if metadata.act_name and metadata.act_name in ACTS_PATHS:
             should_clauses.append(
-                {"term": {"source": ACTS_PATHS[metadata.act_name]}}
+                {"term": {"source.keyword": ACTS_PATHS[metadata.act_name]}}
             )
 
         return {
@@ -250,7 +250,7 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
             },
             "sort": [
                 {"_score": {"order": "desc"}},
-                {"section_number": {"order": "asc"}},
+                {"section_number.keyword": {"order": "asc"}},
             ],
         }
 
@@ -264,7 +264,7 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
             }
         },
         "size": 10,
-        "sort": [{"section_number": {"order": "asc"}}],
+        "sort": [{"section_number.keyword": {"order": "asc"}}],
     }
 
 

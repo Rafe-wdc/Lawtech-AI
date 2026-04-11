@@ -725,10 +725,10 @@ def search_newacts(
     filters = []
 
     if act_name and act_name in ACTS_PATHS:
-        filters.append({"term": {"source": ACTS_PATHS[act_name]}})
+        filters.append({"term": {"source.keyword": ACTS_PATHS[act_name]}})
 
     if section_numbers:
-        filters.append({"terms": {"section_number": section_numbers}})
+        filters.append({"terms": {"section_number.keyword": section_numbers}})
 
     if hybrid_search and query:
         embeddings = get_retriever_embeddings()
@@ -736,7 +736,7 @@ def search_newacts(
 
         should_clauses = [{"match": {"page_content": query}}]
         if act_name and act_name in ACTS_PATHS:
-            should_clauses.append({"term": {"source": ACTS_PATHS[act_name]}})
+            should_clauses.append({"term": {"source.keyword": ACTS_PATHS[act_name]}})
 
         es_query = {
             "size": 20,
@@ -760,7 +760,7 @@ def search_newacts(
             },
             "sort": [
                 {"_score": {"order": "desc"}},
-                {"section_number": {"order": "asc"}},
+                {"section_number.keyword": {"order": "asc"}},
             ],
         }
     else:
@@ -772,7 +772,7 @@ def search_newacts(
                 }
             },
             "size": 10,
-            "sort": [{"section_number": {"order": "asc"}}],
+            "sort": [{"section_number.keyword": {"order": "asc"}}],
         }
 
     response = _es_search(index=ES_INDICES["newacts"], body=es_query)
@@ -803,7 +803,7 @@ def _search_newacts_by_topic(
 
     filters = []
     if act_name and act_name in ACTS_PATHS:
-        filters.append({"term": {"source": ACTS_PATHS[act_name]}})
+        filters.append({"term": {"source.keyword": ACTS_PATHS[act_name]}})
 
     es_query = {
         "size": size,
@@ -822,7 +822,7 @@ def _search_newacts_by_topic(
         },
         "sort": [
             {"_score": {"order": "desc"}},
-            {"section_number": {"order": "asc"}},
+            {"section_number.keyword": {"order": "asc"}},
         ],
     }
 
@@ -895,12 +895,12 @@ def _get_nearby_sections(
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {"source": ACTS_PATHS[act_name]}},
-                    {"terms": {"section_number": range_values}},
+                    {"term": {"source.keyword": ACTS_PATHS[act_name]}},
+                    {"terms": {"section_number.keyword": range_values}},
                 ]
             }
         },
-        "sort": [{"section_number": {"order": "asc"}}],
+        "sort": [{"section_number.keyword": {"order": "asc"}}],
     }
 
     response = _es_search(

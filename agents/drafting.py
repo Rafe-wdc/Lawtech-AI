@@ -29,7 +29,7 @@ from typing import List
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.state import LegalAgentState, AgentResult, SourceMetadata
+from core.state import LegalAgentState, AgentResult, SourceMetadata, IntegrationContextData
 from core.clients import (
     get_es_client, get_gemini_flash, get_drafting_llm,
 )
@@ -666,12 +666,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
     query = agent_queries.get("Drafting") or state.get("query") or state.get("original_query", "")
     user_context = state.get("user_context", "")
     user_language = state.get("user_language", "en")
+    integration_ctx = IntegrationContextData.from_state(state)
     log.info("Agent started", query=query[:100],
              has_user_context=bool(user_context),
+             has_integration_context=bool(integration_ctx and integration_ctx.has_content),
              using_agent_query="Drafting" in agent_queries)
     # For long queries: include pasted content in the drafting query
     if user_context:
         query = f"User's document/context:\n{user_context}\n\nUser's instruction:\n{query}"
+    # Prepend content fetched from third-party integrations (Google Docs, Notion)
+    if integration_ctx and integration_ctx.has_content:
+        query = integration_ctx.as_prompt_prefix() + f"User's instruction:\n{query}"
 
     # Acquire concurrency slot; emit queue_status SSE event if at capacity
     try:

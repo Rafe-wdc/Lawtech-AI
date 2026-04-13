@@ -983,7 +983,15 @@ async def chat_with_files(
                             for c in contents
                         ],
                     }
-                    yield f"data: {json.dumps({'type': 'integration_content', 'provider': contents[0].provider, 'title': integration_context_dict['title'], 'word_count': len(combined_text.split()), 'message': f'Extracted content from {integration_context_dict[\"title\"]}.'})}\n\n"
+                    _ic_title = integration_context_dict["title"]
+                    _ic_event = {
+                        "type": "integration_content",
+                        "provider": contents[0].provider,
+                        "title": _ic_title,
+                        "word_count": len(combined_text.split()),
+                        "message": f"Extracted content from {_ic_title}.",
+                    }
+                    yield f"data: {json.dumps(_ic_event)}\n\n"
 
         # Build state and run agent graph
         initial_state = _build_initial_state(

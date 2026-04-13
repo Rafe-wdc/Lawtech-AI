@@ -207,3 +207,35 @@ class FileContextData:
         if not fc:
             return None
         return cls(**{k: v for k, v in fc.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class IntegrationContextData:
+    """Helper for agents to access third-party integration content
+    (Google Docs, Notion pages) fetched via the FSD chat service.
+    """
+    provider: str = ""               # "google" | "notion"
+    title: str = ""
+    content: str = ""                # Combined text (may span multiple docs)
+    url: str = ""
+    metadata: dict = field(default_factory=dict)
+    documents: list[dict] = field(default_factory=list)  # Per-doc summary when multiple URLs
+
+    @property
+    def has_content(self) -> bool:
+        return bool(self.content)
+
+    def as_prompt_prefix(self) -> str:
+        """Format the integration content as a prompt prefix for LLM injection."""
+        if not self.content:
+            return ""
+        label = f"{self.provider.title()} document ({self.title})" if self.provider else self.title
+        return f"Reference content from user's {label}:\n{self.content}\n\n"
+
+    @classmethod
+    def from_state(cls, state: dict) -> IntegrationContextData | None:
+        """Deserialize integration_context dict from state, or None if absent."""
+        ic = state.get("integration_context")
+        if not ic:
+            return None
+        return cls(**{k: v for k, v in ic.items() if k in cls.__dataclass_fields__})

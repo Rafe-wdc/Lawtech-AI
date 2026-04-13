@@ -364,6 +364,7 @@ def _build_initial_state(
         "is_blocked": False,
         "block_reason": None,
         "file_context": file_context,
+        "integration_context": None,
         "draft_continuation": draft_continuation,
         "final_response": "",
         "source_metadata": [],
@@ -852,6 +853,7 @@ async def chat_with_files(
     query: str = Form(...),
     globalThreadId: Optional[str] = Form(None),
     preferred_language: Optional[str] = Form(None),
+    integration_token: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -939,11 +941,57 @@ async def chat_with_files(
                 log.error("File processing failed", error=str(e))
                 yield f"data: {json.dumps({'type': 'file_processing', 'message': f'File processing failed: {e}', 'files': []})}\n\n"
 
+        # --- Integration URL detection + content extraction ---
+        integration_context_dict = None
+        if integration_token:
+            from core.integration_service import (
+                detect_urls, IntegrationClient, process_integration_urls,
+            )
+            detected = detect_urls(query)
+            if detected:
+                _client = IntegrationClient()
+                providers_needed = list({d.provider for d in detected})
+
+                for provider in providers_needed:
+                    yield f"data: {json.dumps({'type': 'integration_status', 'provider': provider, 'message': f'{provider.title()} link detected. Checking connection...'})}\n\n"
+
+                _, statuses, contents = await process_integration_urls(
+                    query, integration_token, _client,
+                )
+
+                for provider in providers_needed:
+                    if not statuses.get(provider, False):
+                        auth_url = await _client.get_auth_url(provider, integration_token)
+                        if auth_url:
+                            yield f"data: {json.dumps({'type': 'integration_auth', 'provider': provider, 'auth_url': auth_url, 'message': f'Please connect your {provider.title()} account to access this content.'})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'type': 'integration_error', 'provider': provider, 'message': f'Failed to get {provider.title()} authorization URL.'})}\n\n"
+
+                if contents:
+                    combined_text = "\n\n".join(
+                        f"--- {c.title} ({c.provider}) ---\n{c.content}"
+                        for c in contents
+                    )
+                    integration_context_dict = {
+                        "provider": contents[0].provider,
+                        "title": contents[0].title if len(contents) == 1 else f"{len(contents)} documents",
+                        "content": combined_text,
+                        "url": contents[0].url if len(contents) == 1 else ", ".join(c.url for c in contents),
+                        "metadata": contents[0].metadata if len(contents) == 1 else {},
+                        "documents": [
+                            {"provider": c.provider, "title": c.title, "url": c.url, "word_count": len(c.content.split())}
+                            for c in contents
+                        ],
+                    }
+                    yield f"data: {json.dumps({'type': 'integration_content', 'provider': contents[0].provider, 'title': integration_context_dict['title'], 'word_count': len(combined_text.split()), 'message': f'Extracted content from {integration_context_dict[\"title\"]}.'})}\n\n"
+
         # Build state and run agent graph
         initial_state = _build_initial_state(
             query, thread_id, file_context=file_context_dict,
             preferred_language=preferred_language,
         )
+        if integration_context_dict:
+            initial_state["integration_context"] = integration_context_dict
         config = {"configurable": {"thread_id": thread_id}}
 
         step_count = 0
@@ -1079,6 +1127,61 @@ async def chat_with_files(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ============================================================
+# Integration Polling (post-OAuth confirmation + extraction)
+# ============================================================
+
+
+@app.get("/pyapi/integration/poll", dependencies=[Depends(require_user_key)])
+async def integration_poll(
+    provider: str,
+    url: str,
+    token: str,
+):
+    """Called by frontend after OAuth popup closes.
+
+    Checks if the user is now connected, and if so, extracts content.
+    Returns JSON (not SSE).
+    """
+    from core.integration_service import IntegrationClient
+
+    if provider not in ("google", "notion"):
+        raise HTTPException(status_code=400, detail="Unsupported provider")
+
+    client = IntegrationClient()
+    status = await client.check_provider_status(provider, token)
+    connected = client.is_connected(provider, status)
+
+    if not connected:
+        return {
+            "connected": False,
+            "provider": provider,
+            "message": f"{provider.title()} is not connected. Please try again.",
+        }
+
+    user_display = client.get_user_display(provider, status)
+    result = await client.extract_content(provider, url, token)
+    if not result:
+        return {
+            "connected": True,
+            "extracted": False,
+            "provider": provider,
+            "user": user_display,
+            "message": f"Connected as {user_display}, but failed to extract content.",
+        }
+
+    return {
+        "connected": True,
+        "extracted": True,
+        "provider": provider,
+        "user": user_display,
+        "title": result.title,
+        "content": result.content,
+        "word_count": len(result.content.split()),
+        "metadata": result.metadata,
+    }
 
 
 # ============================================================

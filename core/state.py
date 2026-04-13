@@ -132,6 +132,9 @@ class LegalAgentState(MessagesState):
     # File attachments (inline chat uploads)
     file_context: dict | None
 
+    # Third-party integration content (Google Docs, Notion)
+    integration_context: dict | None
+
     # Draft continuation (for incomplete drafts that need retry)
     draft_continuation: dict[str, Any] | None
 

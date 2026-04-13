@@ -122,6 +122,12 @@ CHAT_HISTORY_DB_PATH = os.getenv(
 S3_BUCKET = os.getenv("S3_BUCKET", "lawttorney")
 S3_REGION = os.getenv("S3_REGION", "ap-south-1")
 
+# --- Chat Service (FSD integration backend) ---
+# Used for Google/Notion OAuth + content extraction.
+CHAT_SERVICE_URL = os.getenv("CHAT_SERVICE_URL", "https://test.lawttorney.com/v2/api/chats")
+INTEGRATION_POLL_INTERVAL_SEC: float = 3.0
+INTEGRATION_POLL_TIMEOUT_SEC: float = 60.0
+
 # --- Redis ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 

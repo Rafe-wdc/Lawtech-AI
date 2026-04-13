@@ -171,14 +171,23 @@ def test_missing_query_rejected(base_url, user_headers):
 
 
 def test_overlength_query_rejected(base_url, user_headers):
-    """Query exceeding max length → 422."""
+    """Query exceeding max_length=30000 → 422.
+
+    Schema allows up to 30000 chars; sending 30001 should be rejected.
+    Uses stream=True and reads only headers so we never block on a
+    stream body that a (wrongly) accepted query would start producing.
+    """
     r = requests.post(
         f"{base_url}/search/stream",
-        json={"Promptquery": "x" * 10001},
+        json={"Promptquery": "x" * 30001},
         headers=user_headers,
-        timeout=10,
+        stream=True,
+        timeout=15,
     )
-    assert r.status_code == 422, f"Expected 422 for over-length query, got {r.status_code}"
+    try:
+        assert r.status_code == 422, f"Expected 422 for over-length query, got {r.status_code}"
+    finally:
+        r.close()
 
 
 # ── Test 5: SSE streaming ─────────────────────────────────────────────────────

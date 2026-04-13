@@ -62,12 +62,15 @@ jobs:
   #   INTEGRATION_ADMIN_KEY a valid admin API key
   integration:
     name: Integration Tests
-    needs: test
+    # Wait for deploy to finish before testing. Running in parallel causes
+    # flaky 502s when gunicorn is mid-restart. deploy only runs on push to
+    # master, so on PRs we fall back to just the syntax check.
+    needs: [test, deploy]
     runs-on: ubuntu-latest
     # Gate: set INTEGRATION_TEST_URL as a repository variable (not secret)
     # GitHub → Settings → Variables → Actions → New repository variable
     if: vars.INTEGRATION_TEST_URL != ''
-    continue-on-error: true   # don't block deploy if integration tests fail
+    continue-on-error: true   # informational, doesn't block anything
 
     steps:
       - uses: actions/checkout@v4

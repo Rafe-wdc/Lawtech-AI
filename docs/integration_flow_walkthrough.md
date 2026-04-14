@@ -828,7 +828,8 @@ data: {"type": "token", "content": "1."}
 data: {"type": "token", "content": " Policy"}
 data: {"type": "token", "content": " Objective"}
 ...
-data: {"type": "drafting_progress", "section": 2, "total": 5, "title": "Pricing Tiers"}
+data: {"type": "drafting_progress", "section": 2, "total": 5, "title": "Pricing Tiers", "status": "in_progress"}
+data: {"type": "drafting_progress", "section": 2, "total": 5, "title": "Pricing Tiers", "status": "completed", "char_count": 1820}
 ...
 data: {"type": "response", "content": "<full markdown draft>"}
 data: {"type": "sources", "data": [...]}

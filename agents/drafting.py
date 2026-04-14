@@ -349,22 +349,42 @@ async def _generate_sections_parallel(
     async def _gen_one(i: int, plan: SectionPlan):
         async with sem:
             progress_counter["count"] += 1
+            section_num = progress_counter["count"]
             if writer:
                 writer({
                     "type": "drafting_progress",
-                    "section": progress_counter["count"],
+                    "section": section_num,
                     "total": total,
                     "title": plan.title,
+                    "status": "in_progress",
                 })
             try:
                 text, tokens = await _generate_section(
                     query, template_text, plan, i, total, outline, user_language,
                 )
                 results[i] = (text, tokens, None)
+                if writer:
+                    writer({
+                        "type": "drafting_progress",
+                        "section": section_num,
+                        "total": total,
+                        "title": plan.title,
+                        "status": "completed",
+                        "char_count": len(text),
+                    })
             except Exception as e:
                 log.error("Section failed", section=i + 1, title=plan.title,
                           error=str(e)[:200])
                 results[i] = (None, 0, e)
+                if writer:
+                    writer({
+                        "type": "drafting_progress",
+                        "section": section_num,
+                        "total": total,
+                        "title": plan.title,
+                        "status": "failed",
+                        "error": str(e)[:200],
+                    })
 
     tasks = [_gen_one(i, plan) for i, plan in enumerate(outline.sections)]
     await asyncio.gather(*tasks)

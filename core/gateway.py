@@ -260,6 +260,10 @@ class SearchRequest(BaseModel):
     prompt_query: str = Field(..., alias="Promptquery", min_length=1, max_length=30000)
     globalThreadId: Optional[str] = None
     preferred_language: Optional[str] = None  # ISO 639-1 override (skips auto-detection)
+    # FSD JWT for Google Docs/Notion URL extraction. When set, the pipeline
+    # detects integration URLs in prompt_query, checks user's connection,
+    # extracts content, and injects it into the agent state.
+    integration_token: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
@@ -580,256 +584,44 @@ _NODE_STATUS = {
 async def search_stream(data: SearchRequest, request: Request):
     """Streaming legal Q&A endpoint (SSE).
 
-    Streams real-time progress as Server-Sent Events:
-    - status: Human-readable progress messages for each agent step
-    - response: The final clean answer (after all agents complete)
-    - done: Completion signal with metadata
+    Accepts JSON body (`SearchRequest`). Now also supports the
+    `integration_token` field to enable Google Docs/Notion URL extraction
+    without changing the request shape (just add one field).
 
-    Uses stream_mode=["updates", "custom"] to get both:
-    - Node-level updates (status messages, state captures)
-    - Token-by-token streaming from domain agents via get_stream_writer()
+    All streaming/persistence/caching logic is delegated to
+    `core.chat_runner.run_chat_pipeline` which is shared with /pyapi/chat.
     """
     agent_graph = request.app.state.agent_graph
     thread_id = data.globalThreadId or str(uuid.uuid4())
-    req_id = set_request_id(thread_id[:8])
+    set_request_id(thread_id[:8])
 
     log.info("Stream request received",
-             query=data.prompt_query[:100], thread_id=thread_id)
+             query=data.prompt_query[:100], thread_id=thread_id,
+             has_integration_token=bool(getattr(data, "integration_token", None)))
 
-    # --- Cache check for streaming endpoint ---
-    _is_first_turn = not data.globalThreadId
-    if _is_first_turn:
-        cached = response_cache.get(data.prompt_query)
-        if cached:
-            async def _cached_stream():
-                yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
-                yield f"data: {json.dumps({'type': 'status', 'message': 'Returning cached response...'})}\n\n"
-                yield f"data: {json.dumps({'type': 'response', 'content': cached.response})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'agents_used': cached.agents_used, 'total_tokens': cached.tokens_consumed, 'source_metadata': cached.source_metadata})}\n\n"
-            log.info("Stream cache hit", agents=cached.agents_used)
-            return StreamingResponse(
-                _cached_stream(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
-
-    initial_state = _build_initial_state(
-        data.prompt_query, thread_id, preferred_language=data.preferred_language
+    from core.chat_runner import ChatRunnerInputs, run_chat_pipeline
+    pipeline_inputs = ChatRunnerInputs(
+        agent_graph=agent_graph,
+        query=data.prompt_query,
+        thread_id=thread_id,
+        is_first_turn=not data.globalThreadId,
+        endpoint_name="/pyapi/search/stream",
+        preferred_language=data.preferred_language,
+        file_context=None,
+        integration_token=getattr(data, "integration_token", None),
+        enable_cache=True,
+        enable_quality_scoring=True,
     )
-    config = {"configurable": {"thread_id": thread_id}}
 
     async def event_generator():
-        """Generate SSE events from the agent graph stream."""
-        # Send thread_id as first event
-        yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
-        start = time.perf_counter()
-        step_count = 0
-        final_response = ""
-        agents_used = []
-        tasks_planned_stream: list[str] = []
-        user_language_stream: str = "en"
-        total_tokens = 0
-        all_source_metadata = []
-        effective_query = data.prompt_query
-        query_rewritten = False
-        draft_continuation_data = None
-
-        try:
-          async with _async_timeout(300):  # 5 min hard timeout on streaming
-            async for event in agent_graph.astream(
-                initial_state,
-                config=config,
-                stream_mode=["updates", "custom"],
-            ):
-                mode, chunk = event
-
-                # --- Custom events: token-by-token streaming ---
-                if mode == "custom":
-                    if isinstance(chunk, dict):
-                        if chunk.get("type") == "token":
-                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
-                        elif chunk.get("type") == "token_reset":
-                            yield f"data: {json.dumps({'type': 'token_reset'})}\n\n"
-                        elif chunk.get("type") == "drafting_progress":
-                            yield "data: {}\n\n".format(json.dumps({
-                                "type": "drafting_progress",
-                                "section": chunk["section"],
-                                "total": chunk["total"],
-                                "title": chunk["title"],
-                            }))
-                        elif chunk.get("type") == "draft_incomplete":
-                            yield "data: {}\n\n".format(json.dumps({
-                                "type": "draft_incomplete",
-                                "failed_sections": chunk["failed_sections"],
-                                "total_sections": chunk["total_sections"],
-                                "completed_sections": chunk["completed_sections"],
-                            }))
-                        elif chunk.get("type") == "queue_status":
-                            yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
-                        elif chunk.get("type") == "progress":
-                            yield f"data: {json.dumps(chunk)}\n\n"
-                    continue
-
-                # --- Update events: node-level progress ---
-                for node_name, update in chunk.items():
-                    step_count += 1
-                    log.debug("SSE agent step",
-                              node=node_name, step=step_count)
-
-                    # Send human-readable progress status
-                    status_msg = _NODE_STATUS.get(node_name, f"Processing {node_name}...")
-                    status_event = {
-                        "type": "status",
-                        "agent": node_name,
-                        "message": status_msg,
-                    }
-                    yield f"data: {json.dumps(status_event)}\n\n"
-
-                    # After memory agent: send context event with rewrite info
-                    if node_name == "memory" and "query" in update:
-                        effective_query = update["query"]
-                        query_rewritten = effective_query != data.prompt_query
-                        history_msgs = update.get("chat_history", [])
-                        context_event = {
-                            "type": "context",
-                            "query_rewritten": query_rewritten,
-                            "effective_query": effective_query if query_rewritten else None,
-                            "history_turns": len(history_msgs) // 2,
-                            "has_summary": bool(update.get("summary_text")),
-                        }
-                        yield f"data: {json.dumps(context_event)}\n\n"
-
-                    # Track final response from guardrail_output
-                    if "final_response" in update and update["final_response"]:
-                        final_response = update["final_response"]
-
-                    # Track task info from orchestrator + emit early agent badges
-                    if "tasks_planned" in update and update["tasks_planned"]:
-                        tasks_planned_stream = update["tasks_planned"]
-                        agents_used = update["tasks_planned"]
-                        yield f"data: {json.dumps({'type': 'agents_planned', 'agents': agents_used})}\n\n"
-
-                    # Capture user_language from memory node
-                    if node_name == "memory" and "user_language" in update:
-                        user_language_stream = update.get("user_language", "en") or "en"
-
-                    # Track tokens from agent results
-                    if "agent_results" in update:
-                        for name, r in update["agent_results"].items():
-                            if hasattr(r, "tokens_consumed"):
-                                total_tokens += r.tokens_consumed or 0
-
-                    # Capture source_metadata when it appears
-                    if "source_metadata" in update and update["source_metadata"]:
-                        all_source_metadata = update["source_metadata"]
-
-                    # Capture draft_continuation when it appears
-                    if "draft_continuation" in update and update["draft_continuation"]:
-                        draft_continuation_data = update["draft_continuation"]
-
-        except TimeoutError:
-            log.error("Stream timed out after 300s", thread_id=thread_id[:12])
-            yield f"data: {json.dumps({'type': 'error', 'data': 'Request timed out. Please try a simpler query.'})}\n\n"
-        except Exception as e:
-            log.error("Stream error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
-
-        # Send the clean final response
-        if final_response:
-            response_event = {
-                "type": "response",
-                "content": final_response,
-            }
-            yield f"data: {json.dumps(response_event)}\n\n"
-
-        # Send sources
-        if all_source_metadata:
-            sources_event = {
-                "type": "sources",
-                "data": all_source_metadata,
-            }
-            yield f"data: {json.dumps(sources_event)}\n\n"
-
-        # Generate and send follow-up suggestions
-        if final_response:
-            try:
-                suggestions = await _generate_followup_suggestions(
-                    data.prompt_query, final_response, agents_used
-                )
-                if suggestions:
-                    yield f"data: {json.dumps({'type': 'followup_suggestions', 'data': suggestions})}\n\n"
-            except Exception as e:
-                log.warning("Followup suggestions failed (stream)", error=str(e))
-
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        log.info("Stream completed",
-                 steps=step_count, duration_ms=f"{elapsed_ms:.0f}")
-
-        # --- Log request to SQLite (fire-and-forget) ---
-        _fire_and_forget(chat_store.log_request(
-            thread_id=thread_id,
-            endpoint="/pyapi/search/stream",
-            query_preview=data.prompt_query[:300],
-            user_language=user_language_stream,
-            tasks_planned=tasks_planned_stream,
-            agents_used=agents_used,
-            total_latency_ms=int(elapsed_ms),
-            total_tokens=total_tokens,
-            fallback_used=False,
-            is_blocked=False,
-        ))
-
-        # --- L4: Quality scoring (10% sample, fire-and-forget) ---
-        if final_response and random.random() < 0.10:
-            _fire_and_forget(_score_response(
-                query=data.prompt_query,
-                response=final_response,
-                agents_used=agents_used,
-                thread_id=thread_id,
-            ))
-
-        # Save chat history to SQLite after stream completes
-        conversation_turn = 0
-        if final_response:
-            try:
-                conversation_turn = await chat_store.save_turn(
-                    thread_id, effective_query, final_response
-                )
-                log.debug("Chat history saved (stream)",
-                          thread_id=thread_id[:12], turn=conversation_turn)
-            except Exception as e:
-                log.error("Failed to save chat history (stream)",
-                          thread_id=thread_id[:12], error=str(e))
-
-        # Persist draft continuation metadata for incomplete drafts
-        if draft_continuation_data:
-            try:
-                await chat_store.save_draft_continuation(thread_id, draft_continuation_data)
-                log.debug("Draft continuation saved", thread_id=thread_id[:12])
-            except Exception as e:
-                log.error("Failed to save draft continuation", error=str(e))
-
-        # Cache store for first-turn streaming responses
-        if _is_first_turn and final_response and not draft_continuation_data:
-            response_cache.set(data.prompt_query, CacheEntry(
-                response=final_response,
-                source_metadata=all_source_metadata,
-                agents_used=agents_used,
-                tokens_consumed=total_tokens,
-            ))
-
-        # Send completion event with metadata
-        done_event = {
-            "type": "done",
-            "agents_used": agents_used,
-            "total_tokens": total_tokens,
-            "thread_id": thread_id,
-            "conversation_turn": conversation_turn,
-            "query_rewritten": query_rewritten,
-            "effective_query": effective_query if query_rewritten else None,
-            "has_draft_continuation": draft_continuation_data is not None,
-        }
-        yield f"data: {json.dumps(done_event)}\n\n"
+        async for sse_chunk in run_chat_pipeline(
+            pipeline_inputs,
+            build_initial_state=_build_initial_state,
+            followup_suggestions_fn=_generate_followup_suggestions,
+            async_timeout_cm=_async_timeout,
+            node_status_map=_NODE_STATUS,
+        ):
+            yield sse_chunk
 
     return StreamingResponse(
         event_generator(),
@@ -913,210 +705,50 @@ async def chat_with_files(
             file_tuples.append((tmp_path, filename, len(content)))
 
     async def event_generator():
-        yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
-        start = time.perf_counter()
-
-        # Process files if any
+        # Process files before invoking the pipeline (they need to be staged
+        # into ChromaDB + Gemini Files API, which is /chat-specific).
         file_context_dict = None
+        # First, emit thread_id and file_processing events directly.
+        yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
+
         if file_tuples:
-            async def status_cb(msg: str):
-                pass  # Status sent via SSE below
-
             yield f"data: {json.dumps({'type': 'file_processing', 'message': 'Processing uploaded files...'})}\n\n"
-
             try:
                 fc = await process_files(file_tuples, thread_id)
                 file_context_dict = fc.to_dict()
-                # Note: process_files() already persists each file to thread_files table.
-                # The latest batch timestamp ensures _restore_file_context() only
-                # restores these new files on follow-up turns, not older files.
-
-                # Send file processing summary
                 yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"
                 log.info("Files processed for chat",
                          summary=fc.summary, thread_id=thread_id[:12],
                          new_file_count=len(fc.file_names))
-
             except Exception as e:
                 log.error("File processing failed", error=str(e))
                 yield f"data: {json.dumps({'type': 'file_processing', 'message': f'File processing failed: {e}', 'files': []})}\n\n"
 
-        # --- Integration URL detection + content extraction ---
-        integration_context_dict = None
-        if integration_token:
-            from core.integration_service import (
-                detect_urls, IntegrationClient, process_integration_urls,
-            )
-            detected = detect_urls(query)
-            if detected:
-                _client = IntegrationClient()
-                providers_needed = list({d.provider for d in detected})
-
-                for provider in providers_needed:
-                    yield f"data: {json.dumps({'type': 'integration_status', 'provider': provider, 'message': f'{provider.title()} link detected. Checking connection...'})}\n\n"
-
-                _, statuses, contents = await process_integration_urls(
-                    query, integration_token, _client,
-                )
-
-                for provider in providers_needed:
-                    if not statuses.get(provider, False):
-                        auth_url = await _client.get_auth_url(provider, integration_token)
-                        if auth_url:
-                            yield f"data: {json.dumps({'type': 'integration_auth', 'provider': provider, 'auth_url': auth_url, 'message': f'Please connect your {provider.title()} account to access this content.'})}\n\n"
-                        else:
-                            yield f"data: {json.dumps({'type': 'integration_error', 'provider': provider, 'message': f'Failed to get {provider.title()} authorization URL.'})}\n\n"
-
-                if contents:
-                    combined_text = "\n\n".join(
-                        f"--- {c.title} ({c.provider}) ---\n{c.content}"
-                        for c in contents
-                    )
-                    integration_context_dict = {
-                        "provider": contents[0].provider,
-                        "title": contents[0].title if len(contents) == 1 else f"{len(contents)} documents",
-                        "content": combined_text,
-                        "url": contents[0].url if len(contents) == 1 else ", ".join(c.url for c in contents),
-                        "metadata": contents[0].metadata if len(contents) == 1 else {},
-                        "documents": [
-                            {"provider": c.provider, "title": c.title, "url": c.url, "word_count": len(c.content.split())}
-                            for c in contents
-                        ],
-                    }
-                    _ic_title = integration_context_dict["title"]
-                    _ic_event = {
-                        "type": "integration_content",
-                        "provider": contents[0].provider,
-                        "title": _ic_title,
-                        "word_count": len(combined_text.split()),
-                        "message": f"Extracted content from {_ic_title}.",
-                    }
-                    yield f"data: {json.dumps(_ic_event)}\n\n"
-
-        # Build state and run agent graph
-        initial_state = _build_initial_state(
-            query, thread_id, file_context=file_context_dict,
+        # Delegate the rest (integration + agent graph + persistence) to the
+        # shared pipeline. Note that the pipeline emits its own thread_id event,
+        # which is deduplicated by the frontend (same thread_id value).
+        from core.chat_runner import ChatRunnerInputs, run_chat_pipeline
+        pipeline_inputs = ChatRunnerInputs(
+            agent_graph=agent_graph,
+            query=query,
+            thread_id=thread_id,
+            is_first_turn=not globalThreadId,
+            endpoint_name="/pyapi/chat",
             preferred_language=preferred_language,
+            file_context=file_context_dict,
+            integration_token=integration_token,
+            enable_cache=False,   # uploads / integration context make caching unsafe
+            enable_quality_scoring=True,
+            skip_thread_id_event=True,  # /chat already emitted before file processing
         )
-        if integration_context_dict:
-            initial_state["integration_context"] = integration_context_dict
-        config = {"configurable": {"thread_id": thread_id}}
-
-        step_count = 0
-        final_response = ""
-        agents_used = []
-        total_tokens = 0
-        all_source_metadata = []
-        effective_query = query
-        query_rewritten = False
-        draft_continuation_data = None
-
-        try:
-          async with _async_timeout(300):  # 5 min hard timeout on streaming
-            async for event in agent_graph.astream(
-                initial_state,
-                config=config,
-                stream_mode=["updates", "custom"],
-            ):
-                mode, chunk = event
-
-                if mode == "custom":
-                    if isinstance(chunk, dict):
-                        if chunk.get("type") == "token":
-                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
-                        elif chunk.get("type") == "token_reset":
-                            yield f"data: {json.dumps({'type': 'token_reset'})}\n\n"
-                        elif chunk.get("type") == "drafting_progress":
-                            yield "data: {}\n\n".format(json.dumps({
-                                "type": "drafting_progress",
-                                "section": chunk["section"],
-                                "total": chunk["total"],
-                                "title": chunk["title"],
-                            }))
-                        elif chunk.get("type") == "draft_incomplete":
-                            yield "data: {}\n\n".format(json.dumps({
-                                "type": "draft_incomplete",
-                                "failed_sections": chunk["failed_sections"],
-                                "total_sections": chunk["total_sections"],
-                                "completed_sections": chunk["completed_sections"],
-                            }))
-                        elif chunk.get("type") == "queue_status":
-                            yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
-                        elif chunk.get("type") == "progress":
-                            yield f"data: {json.dumps(chunk)}\n\n"
-                    continue
-
-                for node_name, update in chunk.items():
-                    step_count += 1
-                    status_msg = _NODE_STATUS.get(node_name, f"Processing {node_name}...")
-                    yield f"data: {json.dumps({'type': 'status', 'agent': node_name, 'message': status_msg})}\n\n"
-
-                    if node_name == "memory" and "query" in update:
-                        effective_query = update["query"]
-                        query_rewritten = effective_query != query
-                        history_msgs = update.get("chat_history", [])
-                        yield f"data: {json.dumps({'type': 'context', 'query_rewritten': query_rewritten, 'effective_query': effective_query if query_rewritten else None, 'history_turns': len(history_msgs) // 2, 'has_summary': bool(update.get('summary_text'))})}\n\n"
-
-                    if "final_response" in update and update["final_response"]:
-                        final_response = update["final_response"]
-
-                    if "tasks_planned" in update and update["tasks_planned"]:
-                        agents_used = update["tasks_planned"]
-                        yield f"data: {json.dumps({'type': 'agents_planned', 'agents': agents_used})}\n\n"
-
-                    if "agent_results" in update:
-                        for name, r in update["agent_results"].items():
-                            if hasattr(r, "tokens_consumed"):
-                                total_tokens += r.tokens_consumed or 0
-
-                    if "source_metadata" in update and update["source_metadata"]:
-                        all_source_metadata = update["source_metadata"]
-
-                    if "draft_continuation" in update and update["draft_continuation"]:
-                        draft_continuation_data = update["draft_continuation"]
-
-        except TimeoutError:
-            log.error("Chat stream timed out after 300s", thread_id=thread_id[:12])
-            yield f"data: {json.dumps({'type': 'error', 'data': 'Request timed out. Please try a simpler query.'})}\n\n"
-        except Exception as e:
-            log.error("Chat stream error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
-
-        # Send final response
-        if final_response:
-            yield f"data: {json.dumps({'type': 'response', 'content': final_response})}\n\n"
-
-        if all_source_metadata:
-            yield f"data: {json.dumps({'type': 'sources', 'data': all_source_metadata})}\n\n"
-
-        # Follow-up suggestions
-        if final_response:
-            try:
-                suggestions = await _generate_followup_suggestions(query, final_response, agents_used)
-                if suggestions:
-                    yield f"data: {json.dumps({'type': 'followup_suggestions', 'data': suggestions})}\n\n"
-            except Exception as e:
-                log.warning("Followup suggestions failed (chat)", error=str(e))
-
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        log.info("Chat stream completed", steps=step_count, duration_ms=f"{elapsed_ms:.0f}")
-
-        # Save chat history
-        conversation_turn = 0
-        if final_response:
-            try:
-                conversation_turn = await chat_store.save_turn(thread_id, effective_query, final_response)
-            except Exception as e:
-                log.error("Failed to save chat history (chat)", error=str(e))
-
-        if draft_continuation_data:
-            try:
-                await chat_store.save_draft_continuation(thread_id, draft_continuation_data)
-            except Exception as e:
-                log.error("Failed to save draft continuation (chat)", error=str(e))
-
-        # Done event
-        yield f"data: {json.dumps({'type': 'done', 'agents_used': agents_used, 'total_tokens': total_tokens, 'thread_id': thread_id, 'conversation_turn': conversation_turn, 'query_rewritten': query_rewritten, 'effective_query': effective_query if query_rewritten else None, 'has_draft_continuation': draft_continuation_data is not None})}\n\n"
+        async for sse_chunk in run_chat_pipeline(
+            pipeline_inputs,
+            build_initial_state=_build_initial_state,
+            followup_suggestions_fn=_generate_followup_suggestions,
+            async_timeout_cm=_async_timeout,
+            node_status_map=_NODE_STATUS,
+        ):
+            yield sse_chunk
 
         # Cleanup temp files
         for tp in temp_paths:

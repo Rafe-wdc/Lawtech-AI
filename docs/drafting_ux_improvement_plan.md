@@ -1,6 +1,6 @@
 # Drafting UX Improvement Plan
 
-**Status:** Phase A shipped ✅ — Phase C planned
+**Status:** Phase A + Phase C both shipped ✅
 **Owner:** Backend team
 **Last updated:** 2026-04-14
 **Related:** [frontend_integration_guide.md](frontend_integration_guide.md), [integration_flow_walkthrough.md](integration_flow_walkthrough.md)
@@ -265,7 +265,7 @@ easy `git log` filtering.
 | Phase | Status | Commit |
 |-------|--------|--------|
 | A | ✅ Shipped 2026-04-14 | `2ccb189` |
-| C | Planned | — |
+| C | ✅ Shipped 2026-04-14 | `d572ef8` |
 
 ## Phase A — Measured Impact
 
@@ -287,3 +287,28 @@ same prompt `"Draft a partnership agreement"`.
   single sequential LLM call, which is the correctly-scoped behavior.
 - 21% latency win is a bonus from not spinning up a stream writer per
   section.
+
+## Phase C — Measured Impact
+
+Verified by running `tests/verify_phase_c.py` against the live server.
+Prompt: `"Draft a partnership agreement"` (6 sections generated).
+
+| Check | Result |
+|-------|--------|
+| Total `drafting_progress` events | **12** (was 6 before C — one per section on start only) |
+| Events with `status` field | 12/12 ✅ |
+| `status="in_progress"` events | 6 (one per section start) |
+| `status="completed"` events | 6 (one per section completion, all with `char_count`) |
+| `status="failed"` events | 0 (no sections failed) |
+| Pairing invariant (2 events per section) | holds ✅ |
+
+Example completion event observed:
+```json
+{"type": "drafting_progress", "section": 2, "total": 6,
+ "title": "Capital Contribution and Financial",
+ "status": "completed", "char_count": 1975}
+```
+
+Frontend can now drive a section-level checklist: show each row as
+queued → in_progress → completed/failed, with `char_count` available
+for length hints once complete.

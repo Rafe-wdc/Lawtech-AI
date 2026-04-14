@@ -86,9 +86,11 @@ async def _handle_integrations(
     providers_needed = list({d.provider for d in detected})
 
     for provider in providers_needed:
+        provider_urls = [d.url for d in detected if d.provider == provider]
         yield (_sse({
             "type": "integration_status",
             "provider": provider,
+            "urls": provider_urls,
             "message": f"{provider.title()} link detected. Checking connection...",
         }), None)
 

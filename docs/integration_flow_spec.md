@@ -150,7 +150,7 @@ Emitted during the chat stream when an integration URL is detected:
 
 ```json
 // 1. URL detected, checking connection
-{"type": "integration_status", "provider": "google", "message": "Google link detected. Checking connection..."}
+{"type": "integration_status", "provider": "google", "urls": ["https://docs.google.com/document/d/abc123/edit"], "message": "Google link detected. Checking connection..."}
 
 // 2a. Not connected — need OAuth
 {"type": "integration_auth", "provider": "google", "auth_url": "https://accounts.google.com/o/oauth2/v2/auth?...", "message": "Please connect your Google account..."}

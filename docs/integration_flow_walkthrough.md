@@ -132,24 +132,32 @@ detected = [
 
 ## Stage 4: Emit "Checking" Status Event
 
-**File:** [core/gateway.py:953-954](../core/gateway.py#L953)
+**File:** [core/chat_runner.py:88-96](../core/chat_runner.py#L88)
 
 ```python
 for provider in providers_needed:
-    yield f"data: {json.dumps({
-        'type': 'integration_status',
-        'provider': provider,
-        'message': f'{provider.title()} link detected. Checking connection...'
-    })}\n\n"
+    provider_urls = [d.url for d in detected if d.provider == provider]
+    yield (_sse({
+        "type": "integration_status",
+        "provider": provider,
+        "urls": provider_urls,
+        "message": f"{provider.title()} link detected. Checking connection...",
+    }), None)
 ```
 
 **Frontend receives:**
-```
-data: {"type": "integration_status", "provider": "google",
-       "message": "Google link detected. Checking connection..."}
+```json
+{
+  "type": "integration_status",
+  "provider": "google",
+  "urls": ["https://docs.google.com/document/d/abc123/edit"],
+  "message": "Google link detected. Checking connection..."
+}
 ```
 
-Frontend UI renders: *"Checking your Google connection..."* — a spinner/loading indicator.
+If the user pastes multiple URLs for the same provider, `urls` is a list of
+all of them. Frontend UI renders: *"Checking your Google connection for N
+document(s)..."* — can show the doc URLs or filename chips right away.
 
 ---
 

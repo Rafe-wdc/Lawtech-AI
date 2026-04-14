@@ -173,12 +173,32 @@ async def run_chat_pipeline(
         if cached:
             yield _sse({"type": "status", "message": "Returning cached response..."})
             yield _sse({"type": "response", "content": cached.response})
+
+            # Emit the same `sources` event the non-cached path emits so
+            # frontend consumers see sources consistently.
+            if cached.source_metadata:
+                yield _sse({"type": "sources", "data": cached.source_metadata})
+
+            # Generate follow-up suggestions on demand (cheap vs the full
+            # agent pipeline we just avoided). Cached entries don't store
+            # suggestions to keep CacheEntry simple.
+            try:
+                suggestions = await followup_suggestions_fn(
+                    i.query, cached.response, cached.agents_used,
+                )
+                if suggestions:
+                    yield _sse({"type": "followup_suggestions", "data": suggestions})
+            except Exception as e:
+                log.warning("Cached followup suggestions failed",
+                            endpoint=i.endpoint_name, error=str(e))
+
             yield _sse({
                 "type": "done",
                 "agents_used": cached.agents_used,
                 "total_tokens": cached.tokens_consumed,
                 "thread_id": i.thread_id,
-                "source_metadata": cached.source_metadata,
+                "source_metadata": cached.source_metadata,  # kept for backward compat
+                "cached": True,
             })
             log.info("Cache hit", endpoint=i.endpoint_name,
                      agents=cached.agents_used)

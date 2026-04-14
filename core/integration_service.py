@@ -41,10 +41,13 @@ class IntegrationContent:
 
 
 _URL_PATTERNS: list[tuple[Provider, str, re.Pattern]] = [
-    ("google", "doc",   re.compile(r"https?://docs\.google\.com/document/d/([\w-]+)", re.IGNORECASE)),
-    ("google", "sheet", re.compile(r"https?://docs\.google\.com/spreadsheets/d/([\w-]+)", re.IGNORECASE)),
-    ("google", "drive", re.compile(r"https?://drive\.google\.com/file/d/([\w-]+)", re.IGNORECASE)),
-    ("notion", "notion_page", re.compile(r"https?://(?:www\.)?notion\.(so|site)/\S+", re.IGNORECASE)),
+    # Capture the full URL including query string / path suffix, stopping at
+    # whitespace. match.group(0) is the full match; trailing punctuation is
+    # stripped in detect_urls().
+    ("google", "doc",   re.compile(r"https?://docs\.google\.com/document/d/[\w-]+\S*", re.IGNORECASE)),
+    ("google", "sheet", re.compile(r"https?://docs\.google\.com/spreadsheets/d/[\w-]+\S*", re.IGNORECASE)),
+    ("google", "drive", re.compile(r"https?://drive\.google\.com/file/d/[\w-]+\S*", re.IGNORECASE)),
+    ("notion", "notion_page", re.compile(r"https?://(?:www\.)?notion\.(?:so|site)/\S+", re.IGNORECASE)),
 ]
 
 

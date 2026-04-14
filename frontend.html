@@ -1281,6 +1281,10 @@
         <label>API Key</label>
         <input type="password" id="apiKey" value="" placeholder="Enter API key" />
       </div>
+      <div class="field-group" style="margin-bottom: 8px;">
+        <label>Integration JWT <small style="opacity:0.7">(Google Docs / Notion)</small></label>
+        <input type="password" id="integrationToken" value="" placeholder="Paste user JWT from FSD login" />
+      </div>
       <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="checkHealth()">
         Test Connection
       </button>
@@ -1402,6 +1406,23 @@ function initApiKey() {
   var saved = localStorage.getItem('lawtech_api_key');
   if (saved) el.value = saved;
   el.addEventListener('change', function() { localStorage.setItem('lawtech_api_key', el.value); });
+}
+
+// Integration JWT (FSD login token used for Google Docs / Notion extraction).
+// Persisted in localStorage; sent as `integration_token` form/JSON field on
+// chat requests so the backend can detect & extract content from URLs.
+function initIntegrationToken() {
+  var el = document.getElementById('integrationToken');
+  if (!el) return;
+  var saved = localStorage.getItem('lawtech_integration_token');
+  if (saved) el.value = saved;
+  el.addEventListener('change', function() {
+    localStorage.setItem('lawtech_integration_token', el.value);
+  });
+}
+function getIntegrationToken() {
+  var el = document.getElementById('integrationToken');
+  return (el && el.value && el.value.trim()) || null;
 }
 
 // Language preference — persisted in localStorage across sessions
@@ -1883,6 +1904,9 @@ async function sendChatWithFiles(query, threadId) {
   if (threadId) formData.append('globalThreadId', threadId);
   const lang = getPreferredLang();
   if (lang && lang !== 'auto') formData.append('preferred_language', lang);
+  // Integration JWT — backend ignores when not present
+  const intToken = getIntegrationToken();
+  if (intToken) formData.append('integration_token', intToken);
   pendingFiles.forEach(f => formData.append('files', f));
 
   addLog('info', `POST /pyapi/chat (files: ${pendingFiles.length}) \u2014 "${query.substring(0, 60)}..."`);
@@ -2017,6 +2041,9 @@ async function sendChatBatch(query, threadId) {
   if (threadId) payload.globalThreadId = threadId;
   const lang = getPreferredLang();
   if (lang && lang !== 'auto') payload.preferred_language = lang;
+  // Integration JWT — backend ignores when not present
+  const intToken = getIntegrationToken();
+  if (intToken) payload.integration_token = intToken;
 
   addLog('info', `POST /pyapi/search — "${query.substring(0, 60)}..."`);
   const start = Date.now();
@@ -2061,6 +2088,10 @@ async function sendChatStream(query, threadId) {
   if (threadId) payload.globalThreadId = threadId;
   const lang = getPreferredLang();
   if (lang && lang !== 'auto') payload.preferred_language = lang;
+  // Integration JWT enables Google Docs / Notion URL extraction. If the user
+  // hasn't configured one, the backend just ignores the field — no harm.
+  const intToken = getIntegrationToken();
+  if (intToken) payload.integration_token = intToken;
 
   addLog('info', `POST /pyapi/search/stream (SSE) — "${query.substring(0, 60)}..."`);
 
@@ -2155,6 +2186,50 @@ async function sendChatStream(query, threadId) {
             ).join('');
           }
           addLog('info', 'Agents planned: ' + (event.agents || []).join(', '));
+
+        } else if (event.type === 'integration_status') {
+          // Backend detected a Google Docs / Notion URL in the query and
+          // is now checking the user's connection status with FSD.
+          const provider = (event.provider || 'integration');
+          const urlsArr = Array.isArray(event.urls) ? event.urls : [];
+          const urlsLabel = urlsArr.length === 1
+            ? urlsArr[0]
+            : (urlsArr.length + ' urls');
+          renderIntegrationCard('checking', provider, {
+            message: event.message || (provider + ' link detected'),
+            urls: urlsArr,
+            urlsLabel: urlsLabel,
+          });
+          addLog('info', `[integration] ${provider}: ${event.message || ''}`);
+
+        } else if (event.type === 'integration_auth') {
+          // User isn't connected to this provider — show a Connect button
+          // that opens FSD's OAuth URL in a popup.
+          const provider = (event.provider || 'integration');
+          renderIntegrationCard('auth', provider, {
+            message: event.message || ('Connect ' + provider + ' to access this content.'),
+            authUrl: event.auth_url,
+          });
+          addLog('warning', `[integration] ${provider}: needs OAuth`);
+
+        } else if (event.type === 'integration_content') {
+          // FSD extracted document content; the agent now has it as context.
+          const provider = (event.provider || 'integration');
+          renderIntegrationCard('content', provider, {
+            title: event.title || 'document',
+            wordCount: event.word_count || 0,
+            message: event.message || ('Extracted ' + (event.title || 'document')),
+          });
+          addLog('success',
+            `[integration] ${provider}: extracted "${event.title}" (${event.word_count || 0} words)`);
+
+        } else if (event.type === 'integration_error') {
+          const provider = (event.provider || 'integration');
+          renderIntegrationCard('error', provider, {
+            message: event.message || 'Integration failed',
+            error: event.error || '',
+          });
+          addLog('error', `[integration] ${provider}: ${event.message || 'failed'}`);
 
         } else if (event.type === 'status') {
           // Update current status text
@@ -2253,12 +2328,18 @@ async function sendChatStream(query, threadId) {
           }
 
         } else if (event.type === 'drafting_progress') {
-          // Dedicated draft section progress card
+          // Phase C: drafting_progress fires twice per section — once on start
+          // (status=in_progress) and again on finish (status=completed | failed).
+          // Sections complete out of order because they generate in parallel,
+          // so we track each section by its `section` number rather than
+          // append-order.
+          //
+          // Backward compat: events with no `status` field are treated as
+          // in_progress (the pre-Phase-C behavior).
           const statusEl = document.getElementById('streamStatus');
           const stepsEl = document.getElementById('streamSteps');
           let card = document.getElementById('draftProgressCard');
           if (!card) {
-            // First section — create the progress card
             if (statusEl) statusEl.style.display = 'none';
             card = document.createElement('div');
             card.id = 'draftProgressCard';
@@ -2272,40 +2353,77 @@ async function sendChatStream(query, threadId) {
               '<div class="draft-progress-bar"><div class="fill" id="draftFill" style="width:0%"></div></div>' +
               '<div class="draft-progress-label" id="draftLabel"></div>' +
               '<div class="draft-section-list" id="draftSections"></div>';
-            // Insert card before the steps list
             if (stepsEl && stepsEl.parentNode) {
               stepsEl.parentNode.insertBefore(card, stepsEl);
             }
           }
-          // Update progress bar
-          const pct = Math.round((event.section / event.total) * 100);
-          const fillEl = document.getElementById('draftFill');
-          if (fillEl) fillEl.style.width = pct + '%';
-          // Update counter
-          const counterEl = document.getElementById('draftCounter');
-          if (counterEl) counterEl.textContent = event.section + ' / ' + event.total;
-          // Update label
-          const labelEl = document.getElementById('draftLabel');
-          if (labelEl) labelEl.textContent = 'Writing: ' + event.title;
-          // Update section list
+
+          const status = event.status || 'in_progress';
+          const sectionNum = event.section;
+          const total = event.total;
+          const itemId = 'draftSection_' + sectionNum;
           const listEl = document.getElementById('draftSections');
-          if (listEl) {
-            // Mark previous active as done
-            const prevActive = listEl.querySelector('.active');
-            if (prevActive) {
-              prevActive.classList.remove('active');
-              prevActive.classList.add('done');
-              prevActive.querySelector('.icon').textContent = '\u2713';
-            }
-            // Add current section
-            const item = document.createElement('div');
-            item.className = 'draft-section-item active';
-            item.innerHTML = '<span class="icon">\u25CF</span> ' + escapeHtml(event.title);
+
+          // Find or create the row for this section number
+          let item = listEl ? document.getElementById(itemId) : null;
+          if (!item && listEl) {
+            item = document.createElement('div');
+            item.id = itemId;
             listEl.appendChild(item);
+          }
+          if (item) {
+            // Set state classes + icon based on status
+            item.classList.remove('active', 'done', 'failed');
+            let iconChar, color;
+            if (status === 'completed') {
+              item.classList.add('done');
+              iconChar = '\u2713';   // check
+              color = '';
+            } else if (status === 'failed') {
+              item.classList.add('failed');
+              iconChar = '\u2717';   // cross
+              color = 'var(--red, #ef4444)';
+            } else {
+              item.classList.add('active');
+              iconChar = '\u25CF';   // dot
+              color = '';
+            }
+            const charNote = (status === 'completed' && event.char_count)
+              ? ' <small style="opacity:0.6">(' + event.char_count + ' chars)</small>'
+              : '';
+            const errNote = (status === 'failed' && event.error)
+              ? ' <small style="opacity:0.7; color: var(--red, #ef4444)">' +
+                escapeHtml(String(event.error).slice(0, 80)) + '</small>'
+              : '';
+            item.className = 'draft-section-item ' + (item.classList.contains('done') ? 'done'
+                            : item.classList.contains('failed') ? 'failed' : 'active');
+            item.style.color = color;
+            item.innerHTML = '<span class="icon">' + iconChar + '</span> ' +
+                             escapeHtml(event.title) + charNote + errNote;
             listEl.scrollTop = listEl.scrollHeight;
           }
+
+          // Recompute progress bar from completed/failed count rather than
+          // the latest event's section number (which is meaningless when
+          // sections complete out of order).
+          if (listEl) {
+            const finished = listEl.querySelectorAll('.draft-section-item.done, .draft-section-item.failed').length;
+            const pct = total ? Math.round((finished / total) * 100) : 0;
+            const fillEl = document.getElementById('draftFill');
+            if (fillEl) fillEl.style.width = pct + '%';
+            const counterEl = document.getElementById('draftCounter');
+            if (counterEl) counterEl.textContent = finished + ' / ' + total;
+          }
+          // Label shows the most recent event
+          const labelEl = document.getElementById('draftLabel');
+          if (labelEl) {
+            const verb = status === 'completed' ? 'Completed: '
+                       : status === 'failed' ? 'Failed: ' : 'Writing: ';
+            labelEl.textContent = verb + event.title;
+          }
           scrollChat();
-          addLog('info', 'Drafting section ' + event.section + '/' + event.total + ': ' + event.title);
+          addLog('info',
+            'Drafting section ' + sectionNum + '/' + total + ' [' + status + ']: ' + event.title);
 
         } else if (event.type === 'draft_incomplete') {
           // Some sections failed — mark failed items in draft progress card
@@ -2573,6 +2691,79 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+// Render or update the integration status card (Google Docs / Notion).
+// Lives inside the live streaming status area so it disappears when the
+// stream ends. Phases: 'checking' -> ('auth' OR 'content') OR 'error'.
+function renderIntegrationCard(phase, provider, opts) {
+  opts = opts || {};
+  const stepsEl = document.getElementById('streamSteps');
+  const cardId = 'integrationCard_' + provider;
+  let card = document.getElementById(cardId);
+  if (!card) {
+    card = document.createElement('div');
+    card.id = cardId;
+    card.className = 'integration-card';
+    card.style.cssText =
+      'padding: 10px 12px; margin: 6px 0; border-left: 3px solid var(--accent, #6366f1);' +
+      'background: var(--surface-2, #f3f4f6); border-radius: 4px; font-size: 13px;';
+    if (stepsEl && stepsEl.parentNode) {
+      stepsEl.parentNode.insertBefore(card, stepsEl);
+    } else {
+      document.body.appendChild(card);
+    }
+  }
+  const providerLabel = provider.charAt(0).toUpperCase() + provider.slice(1);
+  let body = '<strong>' + escapeHtml(providerLabel) + '</strong> &middot; ';
+  if (phase === 'checking') {
+    body += '<span style="opacity:0.8">' + escapeHtml(opts.message || 'Checking connection...') + '</span>';
+    if (opts.urls && opts.urls.length) {
+      const links = opts.urls.map(u =>
+        '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener" style="word-break:break-all">' +
+        escapeHtml(u.length > 80 ? u.slice(0, 77) + '...' : u) + '</a>'
+      ).join('<br>');
+      body += '<div style="margin-top:6px; font-size:11px; opacity:0.7">' + links + '</div>';
+    }
+    card.style.borderLeftColor = 'var(--accent, #6366f1)';
+  } else if (phase === 'auth') {
+    body += '<span>' + escapeHtml(opts.message || 'Please connect.') + '</span>';
+    if (opts.authUrl) {
+      body += '<div style="margin-top:8px"><button class="btn btn-primary btn-sm" ' +
+              'onclick="openIntegrationOAuth(\'' + escapeHtml(opts.authUrl) + '\', \'' +
+              escapeHtml(provider) + '\')">Connect ' + escapeHtml(providerLabel) + '</button></div>';
+    }
+    card.style.borderLeftColor = 'var(--orange, #f59e0b)';
+  } else if (phase === 'content') {
+    body += '<span>\u2713 Extracted <strong>' + escapeHtml(opts.title || 'document') + '</strong>';
+    if (opts.wordCount) body += ' <small style="opacity:0.7">(' + opts.wordCount + ' words)</small>';
+    body += '</span>';
+    card.style.borderLeftColor = 'var(--green, #22c55e)';
+  } else if (phase === 'error') {
+    body += '<span style="color: var(--red, #ef4444)">' + escapeHtml(opts.message || 'Error') + '</span>';
+    if (opts.error) body += '<div style="margin-top:4px; font-size:11px; opacity:0.7">' + escapeHtml(opts.error) + '</div>';
+    card.style.borderLeftColor = 'var(--red, #ef4444)';
+  }
+  card.innerHTML = body;
+}
+
+// Opens the OAuth URL in a popup. After the popup closes the user sends
+// their original query again; the backend re-checks status and extracts.
+function openIntegrationOAuth(authUrl, provider) {
+  const popup = window.open(authUrl, 'oauth_' + provider, 'width=500,height=650');
+  if (!popup) {
+    alert('Popup blocked. Please allow popups for this site and try again.');
+    return;
+  }
+  addLog('info', '[integration] OAuth popup opened for ' + provider);
+  // Optional: poll for popup close, then prompt user to re-send query.
+  const watcher = setInterval(function() {
+    if (popup.closed) {
+      clearInterval(watcher);
+      addLog('info', '[integration] OAuth popup closed for ' + provider +
+        ' — re-send your prompt to continue.');
+    }
+  }, 1000);
 }
 
 function renderMarkdown(text) {
@@ -3749,6 +3940,7 @@ document.addEventListener('keydown', function(e) {
 // ============================================================
 initTheme();
 initApiKey();
+initIntegrationToken();
 checkHealth();
 loadSessionList();
 initLangSelect();

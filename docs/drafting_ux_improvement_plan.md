@@ -1,6 +1,6 @@
 # Drafting UX Improvement Plan
 
-**Status:** Planned — Phase A not yet implemented
+**Status:** Phase A shipped ✅ — Phase C planned
 **Owner:** Backend team
 **Last updated:** 2026-04-14
 **Related:** [frontend_integration_guide.md](frontend_integration_guide.md), [integration_flow_walkthrough.md](integration_flow_walkthrough.md)
@@ -264,5 +264,26 @@ easy `git log` filtering.
 
 | Phase | Status | Commit |
 |-------|--------|--------|
-| A | Planned | — |
+| A | ✅ Shipped 2026-04-14 | `2ccb189` |
 | C | Planned | — |
+
+## Phase A — Measured Impact
+
+Verified by re-running `tests/investigate_partnership_draft.py` against the
+live server (`https://tool.lawttorney.com/pyapiv2/search/stream`) with the
+same prompt `"Draft a partnership agreement"`.
+
+| Metric | Before A | After A | Delta |
+|--------|----------|---------|-------|
+| Total wall time | 266.5 s | 210.1 s | **−56 s (−21%)** |
+| `token_reset` events | 2 | 1 | **−1** |
+| `token_reset` from sections | 1 | **0** | **goal achieved** |
+| `token_reset` from synthesis | 1 | 1 | unchanged (legitimate retry) |
+| `drafting_progress` events | 6 | 6 | same |
+| Final response chars | 9,325 | ~same | unchanged |
+
+- Section generation no longer emits raw tokens → no interleaved scramble.
+- The remaining `token_reset` is from the orchestrator synthesis retrying a
+  single sequential LLM call, which is the correctly-scoped behavior.
+- 21% latency win is a bonus from not spinning up a stream writer per
+  section.

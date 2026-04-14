@@ -719,6 +719,38 @@
     padding: 4px 0;
     transition: opacity 0.2s;
   }
+
+  /* --- Collapsible details panel (hides agent plumbing by default) --- */
+  .stream-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text2);
+    padding: 4px 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .stream-summary:hover { color: var(--text1); }
+  .stream-summary .caret {
+    display: inline-block;
+    width: 0; height: 0;
+    border-left: 4px solid currentColor;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform 0.15s;
+  }
+  .stream-summary.open .caret { transform: rotate(90deg); }
+  .stream-details {
+    display: none;
+    padding: 8px 0 0 14px;
+    border-left: 2px solid var(--border);
+    margin: 4px 0 8px 4px;
+  }
+  .stream-summary.open + .stream-details { display: block; }
+  /* Always-visible cards (integration/error) live in this slot ABOVE the
+     summary toggle — never hidden, even when details are collapsed. */
+  .stream-actionable { margin-bottom: 4px; }
   .stream-steps {
     display: flex;
     flex-direction: column;
@@ -2107,14 +2139,26 @@ async function sendChatStream(query, threadId) {
     return;
   }
 
-  // Create streaming message element with status + content areas
+  // Create streaming message element. Layout:
+  //   1. streamActionable — always visible (integration auth/error cards)
+  //   2. streamSummary    — clickable toggle row ("Show progress")
+  //   3. streamDetails    — collapsed by default, holds agent badges + status + steps
+  //   4. streamContent    — the AI's final streaming response (always visible)
   const msgDiv = document.createElement('div');
   msgDiv.className = 'msg ai' + (getPreferredLang() === 'ur' ? ' lang-rtl' : '');
   msgDiv.innerHTML =
-    '<div class="agents-badge" id="streamAgents"></div>' +
-    '<div id="streamStatus" class="stream-status"><span class="streaming-dot"></span> Connecting...</div>' +
-    '<div id="streamSteps" class="stream-steps"></div>' +
-    '<div id="streamProgress" class="progress-panel" style="display:none;"></div>' +
+    '<div id="streamActionable" class="stream-actionable"></div>' +
+    '<div id="streamSummary" class="stream-summary" onclick="toggleStreamDetails()">' +
+      '<span class="caret"></span>' +
+      '<span class="streaming-dot"></span>' +
+      '<span id="streamSummaryText">Working...</span>' +
+    '</div>' +
+    '<div id="streamDetails" class="stream-details">' +
+      '<div class="agents-badge" id="streamAgents"></div>' +
+      '<div id="streamStatus" class="stream-status">Connecting...</div>' +
+      '<div id="streamSteps" class="stream-steps"></div>' +
+      '<div id="streamProgress" class="progress-panel" style="display:none;"></div>' +
+    '</div>' +
     '<div id="streamContent" style="display:none;"></div>';
   document.getElementById('chatMessages').appendChild(msgDiv);
   scrollChat();
@@ -2184,6 +2228,11 @@ async function sendChatStream(query, threadId) {
             agentsEl.innerHTML = event.agents.map(a =>
               '<span class="agent-tag">' + escapeHtml(a) + '</span>'
             ).join('');
+          }
+          // Always-visible 1-line summary (so users know what's happening
+          // without expanding the details panel)
+          if (event.agents && event.agents.length) {
+            setStreamSummaryText('Working — ' + event.agents.join(', '));
           }
           addLog('info', 'Agents planned: ' + (event.agents || []).join(', '));
 
@@ -2413,6 +2462,8 @@ async function sendChatStream(query, threadId) {
             if (fillEl) fillEl.style.width = pct + '%';
             const counterEl = document.getElementById('draftCounter');
             if (counterEl) counterEl.textContent = finished + ' / ' + total;
+            // Surface drafting progress in the always-visible summary line
+            setStreamSummaryText('Drafting — ' + finished + ' / ' + total + ' sections');
           }
           // Label shows the most recent event
           const labelEl = document.getElementById('draftLabel');
@@ -2455,6 +2506,8 @@ async function sendChatStream(query, threadId) {
           // Progressive token streaming
           if (!isTokenStreaming) {
             isTokenStreaming = true;
+            // Update the always-visible 1-line summary
+            setStreamSummaryText('Writing response...');
             const statusEl = document.getElementById('streamStatus');
             if (statusEl) statusEl.style.display = 'none';
             const stepsEl = document.getElementById('streamSteps');
@@ -2551,6 +2604,11 @@ async function sendChatStream(query, threadId) {
               `<span class="agent-tag">${escapeHtml(a)}</span>`
             ).join('');
           }
+          // Hide the summary toggle now that streaming is done. The
+          // collapsed details panel is still inspectable via DevTools, but
+          // we don't pester the user with a "Show progress" arrow forever.
+          const summaryEl = document.getElementById('streamSummary');
+          if (summaryEl) summaryEl.style.display = 'none';
           addLog('success', `Stream complete: ${agents.join(', ')} | ${totalTokens} tokens | Turn ${currentTurnCount}`);
 
         } else if (event.type === 'error') {
@@ -2693,13 +2751,40 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+// Toggle the collapsible "Show progress" panel that holds agent plumbing.
+function toggleStreamDetails() {
+  const summary = document.getElementById('streamSummary');
+  if (summary) summary.classList.toggle('open');
+}
+// Update the always-visible 1-line summary text (shown next to the caret).
+function setStreamSummaryText(text) {
+  const el = document.getElementById('streamSummaryText');
+  if (el) el.textContent = text;
+}
+
 // Render or update the integration status card (Google Docs / Notion).
-// Lives inside the live streaming status area so it disappears when the
-// stream ends. Phases: 'checking' -> ('auth' OR 'content') OR 'error'.
+// Phases: 'checking' -> ('auth' OR 'content') OR 'error'.
+// Auth + error cards live in the always-visible 'streamActionable' slot
+// because they require user action / signal failure. Checking + content
+// cards collapse into the details panel.
 function renderIntegrationCard(phase, provider, opts) {
   opts = opts || {};
-  const stepsEl = document.getElementById('streamSteps');
-  const cardId = 'integrationCard_' + provider;
+  // Where does this card go? Auth/error are interactive => always visible.
+  // Status/content are informational => inside the collapsible details.
+  const containerId = (phase === 'auth' || phase === 'error')
+    ? 'streamActionable'
+    : 'streamDetails';
+  const container = document.getElementById(containerId)
+                  || document.getElementById('streamSteps');
+  const cardId = 'integrationCard_' + provider + '_' + phase;
+  // Remove any previous card for this provider so we don't accumulate
+  // (e.g., a 'checking' card stops being shown once content arrives).
+  const prevPhases = ['checking', 'auth', 'content', 'error'];
+  prevPhases.forEach(p => {
+    if (p === phase) return;
+    const stale = document.getElementById('integrationCard_' + provider + '_' + p);
+    if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+  });
   let card = document.getElementById(cardId);
   if (!card) {
     card = document.createElement('div');
@@ -2708,11 +2793,7 @@ function renderIntegrationCard(phase, provider, opts) {
     card.style.cssText =
       'padding: 10px 12px; margin: 6px 0; border-left: 3px solid var(--accent, #6366f1);' +
       'background: var(--surface-2, #f3f4f6); border-radius: 4px; font-size: 13px;';
-    if (stepsEl && stepsEl.parentNode) {
-      stepsEl.parentNode.insertBefore(card, stepsEl);
-    } else {
-      document.body.appendChild(card);
-    }
+    if (container) container.appendChild(card);
   }
   const providerLabel = provider.charAt(0).toUpperCase() + provider.slice(1);
   let body = '<strong>' + escapeHtml(providerLabel) + '</strong> &middot; ';

@@ -292,8 +292,15 @@ async def _generate_section(
         ])
         chain = prompt | llm
 
-        from core.streaming import stream_chain_response
-        response = await stream_chain_response(chain, {
+        # Sections generate in parallel (Semaphore(3) + asyncio.gather), so
+        # token streaming here produces an interleaved, unattributed stream
+        # that the frontend can't reconstruct. token_reset from one section's
+        # retry also wipes valid tokens from other concurrent sections. Use
+        # chain.ainvoke instead — clients still see per-section status via the
+        # drafting_progress events emitted in _gen_one(). Final response
+        # streaming happens during orchestrator synthesis. See
+        # docs/drafting_ux_improvement_plan.md (Phase A).
+        response = await asyncio.wait_for(chain.ainvoke({
             "query": query,
             "doc_title": outline.document_title,
             "court_details": outline.court_details,
@@ -305,7 +312,7 @@ async def _generate_section(
             "section_desc": section.description,
             "est_paragraphs": str(section.estimated_paragraphs),
             "needs_citations": "Yes -- include [CITE: ...] markers" if section.needs_citations else "No",
-        }, timeout=180)
+        }), timeout=180)
 
     tokens = 0
     if hasattr(response, "usage_metadata") and response.usage_metadata:

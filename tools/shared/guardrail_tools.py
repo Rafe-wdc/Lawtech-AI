@@ -29,21 +29,32 @@ log = get_logger("GuardrailTools")
 MAX_QUERY_LENGTH = 5000
 MIN_QUERY_LENGTH = 2
 
+# Legal role-noun allow-list shared with agents/guardrail.py. Keeps legitimate
+# phrasing ("Act as a civil and constitutional litigation lawyer") passing
+# while still blocking injection attempts like "Act as a DAN".
+_LEGAL_ROLE_NOUNS = (
+    r"lawyer|attorney|judge|legal\s+\w+|counsel|advocate|solicitor|barrister|"
+    r"jurist|arbitrat(?:or|er)|mediator|agent|trustee|guardian|executor|"
+    r"administrator|receiver|liquidator|nominee|surety|guarantor|partner|"
+    r"director|secretary|manager|representative"
+)
+_LEGAL_ROLE_LOOKAHEAD = r"(?:\w+[\s-]+){0,8}(?:" + _LEGAL_ROLE_NOUNS + r")"
+
 INJECTION_PATTERNS = [
-    r"ignore\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
-    r"disregard\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
-    r"forget\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
-    r"you\s+are\s+now\s+(a|an)\s+(?!legal|lawyer|judge)",
-    r"act\s+as\s+(?!a\s+legal|a\s+lawyer|a\s+judge|an\s+attorney)",
-    r"pretend\s+(you\s+are|to\s+be)\s+(?!a\s+legal|a\s+lawyer|a\s+judge)",
+    r"ignore\s+(?:the\s+)?(?:all\s+)?(?:previous|above|prior)\s+(?:instructions|prompts|rules)",
+    r"disregard\s+(?:the\s+)?(?:all\s+)?(?:previous|above|prior)\s+(?:instructions|prompts|rules)",
+    r"forget\s+(?:the\s+)?(?:all\s+)?(?:previous|above|prior)\s+(?:instructions|prompts|rules)",
+    r"you\s+are\s+now\s+(?!" + _LEGAL_ROLE_LOOKAHEAD + r")",
+    r"act\s+as\s+(?!" + _LEGAL_ROLE_LOOKAHEAD + r")",
+    r"pretend\s+(?:you\s+are|to\s+be)\s+(?!" + _LEGAL_ROLE_LOOKAHEAD + r")",
     r"system\s*prompt\s*[:=]",
     r"<\s*system\s*>",
     r"\[\s*INST\s*\]",
     r"jailbreak",
     r"DAN\s+mode",
     r"do\s+anything\s+now",
-    r"bypass\s+(safety|filter|restriction|guardrail)",
-    r"override\s+(safety|filter|restriction|instruction)",
+    r"bypass\s+(?:the\s+)?(?:safety|filter|restriction|guardrail)",
+    r"override\s+(?:the\s+)?(?:safety|filter|restriction|instruction)",
 ]
 
 COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in INJECTION_PATTERNS]

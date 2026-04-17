@@ -28,21 +28,35 @@ log = get_logger("Guardrail")
 MAX_QUERY_LENGTH = 30000
 MIN_QUERY_LENGTH = 2
 
+# Allow-list of legal role nouns. If any of these appears within ~8 words after
+# "act as" / "you are now" / "pretend to be", we treat the phrasing as a
+# legitimate legal role-play request and skip the injection flag. This keeps
+# prompts like "Act as a civil and constitutional litigation lawyer" passing
+# while still blocking "Act as a DAN" / "Act as an unrestricted AI".
+_LEGAL_ROLE_NOUNS = (
+    r"lawyer|attorney|judge|legal\s+\w+|counsel|advocate|solicitor|barrister|"
+    r"jurist|arbitrat(?:or|er)|mediator|agent|trustee|guardian|executor|"
+    r"administrator|receiver|liquidator|nominee|surety|guarantor|partner|"
+    r"director|secretary|manager|representative"
+)
+# (?:\w+[\s-]+){0,8} — up to 8 intermediary words (adjectives, articles)
+_LEGAL_ROLE_LOOKAHEAD = r"(?:\w+[\s-]+){0,8}(?:" + _LEGAL_ROLE_NOUNS + r")"
+
 INJECTION_PATTERNS = [
-    r"ignore\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
-    r"disregard\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
-    r"forget\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)",
-    r"you\s+are\s+now\s+(a|an)\s+(?!legal|lawyer|judge)",
-    r"act\s+as\s+(?!a\s+legal|a\s+lawyer|a\s+judge|an?\s+attorney|an?\s+arbitrat|the\s+|agent|trustee|guardian|executor|administrator|mediator|arbitrat|receiver|liquidator|nominee|surety|guarantor|partner|director|secretary|manager|representative)",
-    r"pretend\s+(you\s+are|to\s+be)\s+(?!a\s+legal|a\s+lawyer|a\s+judge)",
+    r"ignore\s+(?:the\s+)?(?:all\s+)?(?:previous|above|prior)\s+(?:instructions|prompts|rules)",
+    r"disregard\s+(?:the\s+)?(?:all\s+)?(?:previous|above|prior)\s+(?:instructions|prompts|rules)",
+    r"forget\s+(?:the\s+)?(?:all\s+)?(?:previous|above|prior)\s+(?:instructions|prompts|rules)",
+    r"you\s+are\s+now\s+(?!" + _LEGAL_ROLE_LOOKAHEAD + r")",
+    r"act\s+as\s+(?!" + _LEGAL_ROLE_LOOKAHEAD + r")",
+    r"pretend\s+(?:you\s+are|to\s+be)\s+(?!" + _LEGAL_ROLE_LOOKAHEAD + r")",
     r"system\s*prompt\s*[:=]",
     r"<\s*system\s*>",
     r"\[\s*INST\s*\]",
     r"jailbreak",
     r"DAN\s+mode",
     r"do\s+anything\s+now",
-    r"bypass\s+(safety|filter|restriction|guardrail)",
-    r"override\s+(safety|filter|restriction|instruction)",
+    r"bypass\s+(?:the\s+)?(?:safety|filter|restriction|guardrail)",
+    r"override\s+(?:the\s+)?(?:safety|filter|restriction|instruction)",
 ]
 
 COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in INJECTION_PATTERNS]

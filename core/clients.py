@@ -60,9 +60,12 @@ def get_es_client(max_retries: int = 3, timeout: int = 30) -> _SearchClient:
             kwargs["http_auth"] = (ES_USER, ES_PASSWORD)
 
         if ES_USE_SSL:
-            kwargs["use_ssl"] = True
+            # opensearch-py accepts use_ssl/ssl_show_warn; elasticsearch>=8
+            # rejects them (use https:// URL scheme + verify_certs only).
             kwargs["verify_certs"] = True
-            kwargs["ssl_show_warn"] = True
+            if _USING_OPENSEARCH:
+                kwargs["use_ssl"] = True
+                kwargs["ssl_show_warn"] = True
 
         _es_client = _SearchClient(
             ELASTICSEARCH_URL,

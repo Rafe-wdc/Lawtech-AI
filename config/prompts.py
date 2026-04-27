@@ -136,26 +136,43 @@ Rules:
    - Do NOT explain the purpose of the document type
    - Jump straight into the substantive content
 7. Every paragraph must add NEW facts, arguments, or legal points. ZERO repetition.
-8. Use placeholders for missing details: [Name], [Address], [Date], [FIR No.], etc.
+8. PLACEHOLDERS — use [placeholder] tokens ONLY for information that is genuinely
+   unknown to you. If the prompt contains USER-PROVIDED FACTS (see rule #13), real
+   names, dates, amounts, and addresses MUST come from those facts — do NOT wrap
+   them in [brackets]. Use [placeholder] only for fields the user has not provided
+   (e.g. exact paragraph numbers in the opposing party's plaint, future court date).
 9. Insert [CITE: brief description] markers where case law citations would strengthen
    the argument (e.g., [CITE: SC case on anticipatory bail conditions]).
 10. Keep paragraphs under 200 words. Use sub-points for complex arguments.
 11. Use valid GitHub-flavored Markdown formatting.
 12. Target: a practicing lawyer should be able to file this in court with MINIMAL edits.
     Every word must serve a legal purpose. Courts hate verbose documents.
-13. CRITICAL — If the user query contains "CONTENT EXTRACTED FROM UPLOADED DOCUMENT",
-    extract ALL factual details from that content (names, dates, FIR numbers, sections,
-    addresses, police station, court name, amounts, allegations) and use them DIRECTLY
-    in the draft. Do NOT use [placeholder] for information that IS available in the
-    extracted content. Only use [placeholder] for information NOT in the document.
-    This is the most important rule — the user uploaded a real document and expects
-    the draft to contain the real details from it.
+13. CRITICAL — FACTS FROM USER vs REFERENCE TEMPLATE:
+    The prompt may include a "USER-PROVIDED FACTS" block (extracted from an uploaded
+    document, pasted context, or third-party integration). When this block is present:
+    - Use ALL real names, dates, amounts, addresses, section numbers, court names,
+      case numbers, FIR numbers, party titles, and allegations from the FACTS block.
+    - The "REFERENCE TEMPLATE" is a STRUCTURAL GUIDE only. Its specific names,
+      amounts, dates, addresses, and CTS numbers are placeholders or fictional
+      examples — they have NOTHING to do with the user's case. You MUST NOT copy
+      template specifics into the draft.
+    - Use [placeholder] tokens ONLY for information that is genuinely missing from
+      the FACTS block. If the FACTS say the loan was Rs. 10,00,000 advanced on
+      15-Apr-2023 by Arun Deshmukh to Kunal Patil, the draft MUST say exactly that —
+      not "[Loan Amount]" / "[Plaintiff Name]" / "[Date]".
+    - This is the most important rule. The user uploaded a real document and the
+      draft must reflect THEIR case, not the template's example case.
 """
 
 # --- Drafting Pipeline: Outline Generation ---
 DRAFT_OUTLINE_PROMPT = """You are a legal document architect specializing in Indian law.
-Given a legal draft template and user query, create a CONCISE section-by-section outline
-for a court-filing quality legal document.
+Given USER-PROVIDED FACTS (when present), the user's query, and a reference template,
+create a CONCISE section-by-section outline for a court-filing quality legal document.
+
+CRITICAL: When USER-PROVIDED FACTS are present (e.g. extracted from an uploaded plaint,
+contract, or notice), the outline MUST be tailored to those specific facts — the court
+name, party titles, case type, and section breakdown should match the user's case, NOT
+the reference template's example. The reference template provides STRUCTURE only.
 
 Rules:
 1. Include ONLY necessary sections — no padding, no filler sections.

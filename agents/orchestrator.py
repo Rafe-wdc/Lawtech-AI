@@ -55,6 +55,158 @@ def _sanitize_response_instructions(instructions: str) -> str:
     return cleaned
 
 
+# --- Internal cite-marker stripper (BUG-09) ---
+# The drafting agent emits [CITE: brief description] markers as placeholders
+# for case law that the citation-injection step is supposed to fill in. After
+# we switched to append-only synthesis (BUG-03), unfilled markers leaked to
+# the user. This stripper removes any unfilled marker before the draft is
+# returned. Keep markers that look like real legal citations alone.
+_INTERNAL_CITE_MARKER_RE = re.compile(
+    # [CITE: anything that's not a closing bracket]
+    r"\s*\[CITE:[^\]\n]*\]\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_internal_cite_markers(text: str) -> str:
+    """Remove unfilled `[CITE: ...]` placeholder markers from the final draft.
+
+    These are internal scaffolding emitted by the section-generation prompt
+    rule #9. After synthesis, any marker that survived was never matched to
+    a real citation — surfacing it to users is noise.
+    """
+    if not text:
+        return text
+    cleaned = _INTERNAL_CITE_MARKER_RE.sub(" ", text)
+    # Tidy stray whitespace/punctuation introduced by the substitution
+    cleaned = re.sub(r" +([.,;:!?])", r"\1", cleaned)  # " ." -> "."
+    cleaned = re.sub(r"  +", " ", cleaned)              # double spaces
+    cleaned = re.sub(r"\n +", "\n", cleaned)            # leading line spaces
+    return cleaned.strip()
+
+
+# --- Drafting Intent Detection ---
+# Used to decide whether to add the Drafting agent to the plan when a file is
+# attached. Matches only when the user *explicitly* asks for a document to be
+# produced — never on bare document-noun mentions like "what's in this plaint?"
+# or substring collisions like "plaint" inside "plaintiff".
+
+# Document-type nouns that name a kind of legal document.
+_DOC_NOUN_PATTERN = (
+    r"plaint|petition|affidavit|notice|legal\s+notice|agreement|contract|"
+    r"m\.?o\.?u\.?|deed|bail\s+application|written\s+statement|application|"
+    r"complaint|response|reply|rejoinder|caveat|counter|writ|appeal|memo|"
+    r"will|power\s+of\s+attorney|partnership\s+deed|sale\s+deed|gift\s+deed|"
+    r"lease\s+deed|rental\s+agreement|nda|non[\s-]disclosure|"
+    r"settlement\s+deed|divorce\s+petition|legal\s+document|"
+    r"plea|pleading|brief|summons|subpoena|injunction\s+application"
+)
+
+# (1) Strong drafting verbs in any form — almost always indicate drafting intent
+# in a legal-AI chat context (e.g. "Draft a plaint", "Drafting an affidavit").
+_DRAFTING_VERB_RE = re.compile(
+    r"\b(draft|drafts|drafted|drafting|redraft|redrafts|redrafted|redrafting)\b",
+    re.IGNORECASE,
+)
+
+# (2) Verb + (article + optional adjective) + document-noun = drafting intent
+# e.g. "write a plaint", "prepare a bail application", "compose an MOU",
+# "give me a written statement", "I need a notice for property dispute",
+# "give me a sample plaint" (article + adjective + doc-noun).
+_DRAFTING_INTENT_RE = re.compile(
+    r"\b(?:write|prepare|create|generate|compose|draw\s+up|"
+    r"give\s+me|i\s+(?:need|want|require)|need|want|provide|build|produce|"
+    r"craft|formulate|put\s+together|help\s+me\s+(?:write|prepare|create|make)|"
+    r"could\s+you\s+(?:write|prepare|draft|make|create))\s+"
+    r"(?:a|an|the|me\s+a|me\s+an|us\s+a|us\s+an|one|some|"
+    r"(?:a|an|the)\s+\w+(?:\s+\w+)?)"
+    r"\s+"  # whitespace between article (group) and document noun
+    r"(?:" + _DOC_NOUN_PATTERN + r")\b",
+    re.IGNORECASE,
+)
+
+# (3) Format / sample / template requests
+# e.g. "format of bail application", "sample affidavit", "template for plaint".
+_DRAFTING_FORMAT_RE = re.compile(
+    r"\b(?:format|sample|specimen|template|model|standard\s+form|proforma)"
+    r"(?:\s+(?:of|for|to|to\s+make))?\s+"
+    r"(?:a|an|the)?\s*"
+    r"(?:" + _DOC_NOUN_PATTERN + r")\b",
+    re.IGNORECASE,
+)
+
+# (4) "Drafting/preparation of X"
+_DRAFTING_OF_RE = re.compile(
+    r"\b(?:drafting|preparation|preparing)\s+(?:of\s+)?(?:a|an|the)?\s*"
+    r"(?:" + _DOC_NOUN_PATTERN + r")\b",
+    re.IGNORECASE,
+)
+
+# (5) Negative signals — Q&A intent that should NEVER trigger drafting even
+# when paired with document nouns. Used to short-circuit before regex checks.
+_QA_INTENT_RE = re.compile(
+    r"\b(?:summari[sz]e|summary\s+of|explain|describe|what\s+is|what\s+are|"
+    r"what\s+does|what's|whats|who\s+is|who\s+are|when\s+(?:is|was|did)|"
+    r"why\s+(?:is|did|does)|how\s+(?:is|does|did|much|many)|where\s+(?:is|was)|"
+    r"which|tell\s+me\s+about|analy[sz]e|review|critique|extract|"
+    r"list\s+(?:the|all|out)|find|identify|cite|enumerate|"
+    r"is\s+the\s+(?:suit|case|claim|petition|plaint)|"
+    r"are\s+the|does\s+the|did\s+the|can\s+(?:i|you|the))\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_drafting(query: str) -> bool:
+    """Return True iff the query *explicitly* asks for a legal document to be drafted.
+
+    This must NEVER trigger on:
+      - Bare document-noun mentions ("what's in this plaint?")
+      - Substring collisions ("plaintiff", "complaint", "explaining")
+      - Q&A about an existing document ("who wrote the petition?")
+      - Reference to a draft ("review my draft")  — handled by Q&A short-circuit
+
+    Triggers when the query contains:
+      (1) An explicit drafting verb: "draft", "drafting", "redraft" (any tense)
+      (2) Verb + document-noun pattern: "write a plaint", "prepare an affidavit"
+      (3) Format / sample / template request: "format of bail application"
+      (4) "Drafting of X" / "preparation of X"
+    """
+    q = (query or "").strip()
+    if not q:
+        return False
+
+    has_explicit_draft_verb = bool(_DRAFTING_VERB_RE.search(q))
+    has_format_request = (
+        bool(_DRAFTING_FORMAT_RE.search(q))
+        or bool(_DRAFTING_OF_RE.search(q))
+    )
+    has_qa_framing = bool(_QA_INTENT_RE.search(q))
+
+    # Format/template/sample requests are inherently drafting requests, even
+    # when phrased as a question (e.g. "What is the format of a bail
+    # application?", "Show me a sample plaint"). Override Q&A short-circuit.
+    if has_format_request:
+        return True
+
+    # Explicit drafting verb wins over everything else.
+    # ("Draft this", "Please draft a notice", "Drafting needed".)
+    if has_explicit_draft_verb:
+        return True
+
+    # Pure Q&A framing without any drafting signal — never trigger drafting.
+    # Catches "who is the plaintiff?", "summarize the plaint", "what's in
+    # this petition?" etc. The document-noun substring is incidental.
+    if has_qa_framing:
+        return False
+
+    # Verb + article + document-noun = drafting intent.
+    # ("write a plaint", "prepare a bail application", "compose an MOU".)
+    if _DRAFTING_INTENT_RE.search(q):
+        return True
+
+    return False
+
+
 # --- Long Query Extraction ---
 # When users paste 20-30K chars (e.g. a contract + question), we separate
 # the concise question from the pasted context. Classification/routing uses
@@ -865,12 +1017,12 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # Draft + file detection: if user wants to DRAFT from an uploaded document,
     # route through Drafting pipeline (not just Document Q&A).
     # Inject file content into Drafting agent's query for context.
-    _DRAFT_KEYWORDS = (
-        "draft", "prepare", "create", "write", "generate", "make",
-        "bail application", "petition", "plaint", "notice", "affidavit",
-        "agreement", "contract", "mou", "reply", "written statement",
-    )
-    if fc and fc.has_content and any(kw in _orig_lower for kw in _DRAFT_KEYWORDS):
+    #
+    # IMPORTANT: must use intent detection (verb + document noun, or explicit
+    # drafting verb), NOT raw substring matching. A naive substring approach
+    # mis-routes pure Q&A queries — e.g. "summarize the attached plaint" or
+    # "who is the plaintiff?" both contain "plaint" but neither asks for a draft.
+    if fc and fc.has_content and _wants_drafting(_original_query):
         if "Drafting" not in tasks_planned:
             tasks_planned.insert(0, "Drafting")
             log.info("Draft-from-file detected — adding Drafting agent",
@@ -918,23 +1070,21 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         except asyncio.TimeoutError:
             log.warning("Per-agent query rewriting timed out")
 
-    # Inject file content into Drafting agent query when drafting from uploaded document
-    if "Drafting" in tasks_planned and fc and fc.has_content:
-        _file_text = ""
-        if fc.inline_text:
-            _file_text = fc.inline_text[:30000]
-        if _file_text:
-            _draft_query = agent_queries.get("Drafting", query)
-            agent_queries["Drafting"] = (
-                f"{_draft_query}\n\n"
-                f"--- CONTENT EXTRACTED FROM UPLOADED DOCUMENT ---\n"
-                f"Use ALL facts, names, dates, sections, addresses from this document. "
-                f"Do NOT use placeholders for information available below.\n\n"
-                f"{_file_text}"
-            )
-            log.info("Injected file content into Drafting agent query",
-                     file_text_len=len(_file_text),
-                     total_query_len=len(agent_queries["Drafting"]))
+    # NOTE: Previously this block concatenated 30K chars of PDF text into
+    # agent_queries["Drafting"] so the drafting agent would receive the
+    # uploaded-document content. That approach had three flaws (BUG-02, BUG-05,
+    # BUG-16): (a) it bloated the BM25 template-search query and biased
+    # selection toward irrelevant templates, (b) it buried the facts at the
+    # end of the prompt where the LLM ignored them, and (c) it forced the
+    # entire pipeline through one giant string. The drafting agent now reads
+    # file_context directly via FileContextData.from_state(state) and passes
+    # the document text as an explicit FACTS field to outline + section
+    # generation. The agent_queries["Drafting"] entry now holds only the
+    # user's clean question (used for template search and selection).
+    if "Drafting" in tasks_planned and fc and fc.has_content and fc.inline_text:
+        log.info("Drafting will receive uploaded document via file_context",
+                 file_text_len=len(fc.inline_text),
+                 file_names=fc.file_names)
 
     log.info("Plan phase completed",
              task=task, agents_planned=tasks_planned,
@@ -1034,26 +1184,20 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     if len(valid_results) == 1 and not has_unprocessed_file:
         name, result = next(iter(valid_results.items()))
 
-        # Drafting solo: auto-enrich with AI-generated citations
-        if name == "Drafting" and len(result.content) > 500:
-            log.info("Drafting solo — auto-citation enrichment starting",
-                     draft_len=len(result.content))
-            try:
-                enriched, cite_tokens = await _auto_cite_draft(
-                    query, result.content, response_instructions, user_language
-                )
-                log.info("Auto-citation enrichment completed",
-                         original_len=len(result.content),
-                         enriched_len=len(enriched))
-                return_dict = {
-                    "final_response": enriched,
-                    "source_metadata": _serialize_sources(result),
-                    "tokens_consumed": result.tokens_consumed + cite_tokens,
-                }
-                return return_dict
-            except Exception as e:
-                log.warning("Auto-citation failed, passing draft through",
-                            error=str(e))
+        # Drafting solo: previously this called _auto_cite_draft which used an
+        # LLM to rewrite the draft and add citations. That LLM rewrite would
+        # routinely strip facts the drafting agent had carefully extracted
+        # from the user's uploaded file (BUG-03). Pass the draft through
+        # unmodified, just stripping internal [CITE: No matching case] markers.
+        if name == "Drafting":
+            cleaned = _strip_internal_cite_markers(result.content)
+            log.info("Drafting solo — passing through unmodified (BUG-03 fix)",
+                     draft_len=len(result.content), cleaned_len=len(cleaned))
+            return {
+                "final_response": cleaned,
+                "source_metadata": _serialize_sources(result),
+                "tokens_consumed": result.tokens_consumed,
+            }
 
         log.info("Single agent pass-through",
                  agent=name, content_len=len(result.content),
@@ -1066,11 +1210,26 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         return return_dict
 
     # --- Draft-Aware Synthesis ---
-    # When Drafting is one of the agents, preserve the full draft
-    # and inject citations from the other agents (Judgment, Legislation, Newacts)
+    # When Drafting is one of the agents, the drafting agent's output is the
+    # primary content. Other agents' results become citation references that
+    # we APPEND in a separate block — we MUST NOT rewrite the draft via an LLM
+    # (BUG-03: an earlier _inject_citations_into_draft LLM call routinely
+    # stripped real names/dates/amounts and replaced them with template
+    # placeholders, losing all the file-grounded facts the drafting agent
+    # had carefully extracted).
     if "Drafting" in valid_results:
         drafting_result = valid_results.pop("Drafting")
-        citation_results = valid_results  # remaining: Judgment, Legislation, etc.
+        citation_results = valid_results  # Judgment, Legislation, Newacts, Document, ...
+
+        # When the user attached a file, the Document agent's analysis is
+        # redundant with the drafting agent's content (drafting already
+        # consumed the file via case_facts + raw text). Including it in the
+        # citation block can dilute the response with template-style language.
+        fc_check = FileContextData.from_state(state)
+        if fc_check and fc_check.has_content and "Document" in citation_results:
+            log.info("Drafting+file: dropping Document from citation block "
+                     "(content already incorporated into the draft)")
+            citation_results = {k: v for k, v in citation_results.items() if k != "Document"}
 
         log.info("Draft-aware synthesis starting",
                  draft_len=len(drafting_result.content),
@@ -1086,31 +1245,17 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 total_tokens += result.tokens_consumed
                 all_serialized_sources.extend(_serialize_sources(result))
 
-        # For large drafts (>40K chars), LLM citation injection truncates the draft.
-        # Instead, append citations as a separate section at the end.
-        LARGE_DRAFT_THRESHOLD = 40_000
-
+        # APPEND-ONLY synthesis: preserve the draft verbatim, strip internal
+        # [CITE: ...] placeholder markers (BUG-09), append a References section.
         try:
-            if len(drafting_result.content) > LARGE_DRAFT_THRESHOLD:
-                log.info("Draft too large for LLM injection, appending citations",
-                         draft_len=len(drafting_result.content),
-                         threshold=LARGE_DRAFT_THRESHOLD)
-                enriched = drafting_result.content
-                if citations_text.strip():
-                    enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
-            elif citations_text.strip():
-                enriched, cite_tokens = await _inject_citations_into_draft(
-                    query, drafting_result.content, citations_text, user_language
-                )
-                total_tokens += cite_tokens
-            else:
-                enriched, cite_tokens = await _auto_cite_draft(
-                    query, drafting_result.content, user_language=user_language
-                )
-                total_tokens += cite_tokens
+            enriched = _strip_internal_cite_markers(drafting_result.content)
+            if citations_text.strip():
+                enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
 
-            log.info("Draft synthesis completed",
-                     enriched_len=len(enriched), total_tokens=total_tokens)
+            log.info("Draft synthesis completed (append-only)",
+                     enriched_len=len(enriched),
+                     citation_agents=list(citation_results.keys()),
+                     total_tokens=total_tokens)
 
             return {
                 "final_response": enriched,

@@ -650,10 +650,14 @@ async def process_files(
                         pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
                         inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
                 elif text.strip():
-                    # Small PDF with text — use inline
-                    if not pf.gemini_uri:
-                        pf.extracted_text = text
-                        inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+                    # Small PDF with text — record inline text so non-multimodal
+                    # downstream agents (Drafting, Scenario, Legislation) can
+                    # consume the document content. Previously we ONLY populated
+                    # inline_text when the Gemini upload failed, but the Drafting
+                    # agent does not use Gemini Files API URIs — it needs the
+                    # raw text to extract case_facts (BUG-02 dependency).
+                    pf.extracted_text = text
+                    inline_parts.append(f"[File: {pf.original_name}]\n{text}")
 
             except Exception as e:
                 if not pf.gemini_uri:

@@ -10,7 +10,15 @@ LEGAL_DISCLAIMER = (
     "a qualified legal professional for advice specific to your situation."
 )
 
-DISCLAIMER_TASKS = {"Scenario", "Legal_Concepts", "Other", "Drafting"}
+# All legal task types get the disclaimer (BUG-15: previously only 4 of the
+# 11 task types got one, leading to inconsistent footers across answers from
+# the same chat session). Only `Non_legal` is excluded — greetings, casual
+# chat, and bot-identity questions don't need a legal-advice disclaimer.
+DISCLAIMER_TASKS = {
+    "Scenario", "Legal_Concepts", "Other", "Drafting",
+    "Document", "Judgment", "Legislation", "Newacts",
+    "Constitution", "Maxim", "SCI_Judgment",
+}
 
 DISCLAIMER_INDICATORS = [
     "does not constitute legal advice",

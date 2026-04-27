@@ -322,10 +322,21 @@ async def memory_node(state: LegalAgentState) -> dict:
         progress("memory", "Loading conversation history...", step="history")
         log.debug("Loading chat history", thread_id=thread_id[:12])
         chat_history, summary_text = await _load_chat_history(thread_id)
-        turns = len(chat_history) // 2
+        # Compute REAL turn count: `_load_chat_history` returns a 2-message
+        # placeholder ("Previous summary:" + "Fresh chat started.") for new
+        # threads with no real history, and naive `len // 2` would mis-count
+        # that as 1 prior turn (BUG-14). Detect and strip the placeholder.
+        is_placeholder_history = (
+            len(chat_history) == 2
+            and isinstance(chat_history[1], AIMessage)
+            and "Fresh chat started" in chat_history[1].content
+        )
+        turns = 0 if is_placeholder_history else len(chat_history) // 2
         progress("memory", f"Found {turns} previous turns", found=turns, substep=True, step="history")
         log.info("Chat history loaded",
                  messages=len(chat_history),
+                 turns=turns,
+                 placeholder_history=is_placeholder_history,
                  has_summary=bool(summary_text))
 
         # Step 4: Check file context — attached this turn OR restore from thread history

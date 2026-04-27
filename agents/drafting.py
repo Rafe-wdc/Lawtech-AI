@@ -29,7 +29,10 @@ from typing import List
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.state import LegalAgentState, AgentResult, SourceMetadata, IntegrationContextData
+from core.state import (
+    LegalAgentState, AgentResult, SourceMetadata,
+    IntegrationContextData, FileContextData,
+)
 from core.clients import (
     get_es_client, get_gemini_flash, get_drafting_llm,
 )
@@ -128,26 +131,116 @@ async def _search_templates(query: str) -> list[dict]:
         return response["hits"]["hits"][:15]
 
 
+# --- Step 1.5: Extract key facts from uploaded document for fact-grounded drafting ---
+#
+# When the user has attached a document (PDF, DOCX) or pasted long context, the
+# raw 30K-char text is too long for parallel section-generation LLMs to reliably
+# extract specific facts (names, amounts, dates) — they default to placeholders.
+# So we run ONE fast Gemini Flash call up front to pull the structured entities
+# and prepend them to every per-section prompt as a non-negotiable list.
+#
+# This is the key fix for BUG-02 (drafting agent ignores PDF facts).
+
+_CASE_FACTS_PROMPT = """You are a legal entity extractor. Read the user-provided
+document/context and produce a CONCISE list of the case-specific entities the
+drafter MUST use verbatim. Pull only what is present; do NOT invent.
+
+INPUT:
+{facts_text}
+
+Return a Markdown bullet list with these labels (omit any that are absent):
+- **Court**: full court name as stated
+- **Case Number**: case/suit number as stated
+- **Plaintiff**: full name(s) — first occurrence's wording
+- **Plaintiff Address**: as stated (one line)
+- **Defendant**: full name(s)
+- **Defendant Address**: as stated (one line)
+- **Cause of Action / Claim**: 1-line summary (e.g. "recovery of Rs. 10L friendly loan")
+- **Principal Amount**: with figure and words as stated
+- **Interest Rate**: as claimed
+- **Key Date - Loan/Agreement**: DD-Mon-YYYY
+- **Key Date - Demand/Notice**: DD-Mon-YYYY
+- **Key Date - Cause of Action accrual**: DD-Mon-YYYY
+- **Witnesses**: comma-separated names
+- **Statutory Provisions invoked**: e.g. "Order VII Rule 1 CPC"
+- **Counsel**: as stated
+- **Filing/Verification Date**: DD-Mon-YYYY
+- **Other key facts**: any other specific details (sections, addresses, IDs)
+
+Output ONLY the bullet list. No preamble, no explanations.
+"""
+
+
+async def _extract_case_facts(user_facts: str) -> str:
+    """Pull structured entities from the user-provided document/context.
+
+    Returns a markdown bullet list of case-specific facts (names, amounts, dates,
+    court, etc.) that the section-generation LLMs must use verbatim. Used to
+    prevent placeholder leakage when the underlying PDF text is long enough that
+    parallel LLM calls might skim past specific values.
+
+    Returns "" on failure (caller should treat as no extracted facts).
+    """
+    if not user_facts.strip():
+        return ""
+    try:
+        with log_time(log, "Case-fact extraction"):
+            llm = get_gemini_flash(temperature=0.0)
+            prompt = ChatPromptTemplate.from_template(_CASE_FACTS_PROMPT)
+            chain = prompt | llm
+            response = await asyncio.wait_for(
+                chain.ainvoke({"facts_text": user_facts[:30000]}),
+                timeout=20,
+            )
+        extracted = response.content.strip()
+        log.info("Case facts extracted",
+                 chars=len(extracted), bullets=extracted.count("- **"))
+        return extracted
+    except Exception as e:
+        log.warning("Case-fact extraction failed; falling back to raw text",
+                    error=str(e)[:200])
+        return ""
+
+
 # --- Step 2: Template Selection (GPT-4o-mini with previews + validation) ---
 
-TEMPLATE_SELECTION_PROMPT = """You are a legal AI assistant selecting the best legal document template.
+TEMPLATE_SELECTION_PROMPT = """You are a legal AI assistant selecting the best legal document template for an Indian law drafting task.
 
 User wants to draft: {query}
 
-Select the MOST relevant template. Each entry shows the file path and a content preview:
+{facts_summary}Select the MOST relevant template based on (a) the user's instruction, (b) the case context (when supplied above). The case context tells you what KIND of dispute/matter the user is dealing with (e.g. money recovery, divorce, bail, property dispute) — use that to pick a template whose document type matches the user's actual case, NOT just keyword overlap with the question.
+
+Each candidate shows the file path and a content preview:
 
 {candidates}
 
 Return only the file path of the best matching template."""
 
 
-def _select_best_template(query: str, candidates: list[dict]) -> tuple[str, list[str]]:
-    """Use GPT-4o-mini to select the most relevant template.
+def _select_best_template(
+    query: str, candidates: list[dict], user_facts: str = "",
+) -> tuple[str, list[str]]:
+    """Use Gemini Flash to select the most relevant template.
 
     Shows content previews alongside file paths for better selection.
+    When `user_facts` is provided (PDF text, pasted context), a brief summary
+    of the case context is included in the selection prompt so the LLM picks
+    a template matching the user's actual case (BUG-05) — not just one whose
+    preview shares keywords with the user's question.
     Returns (selected_source, all_valid_paths) for fallback support.
     """
     valid_paths = list(dict.fromkeys(c["_source"]["source"] for c in candidates))
+
+    # Brief context from user_facts (first 1500 chars). Plenty for the LLM to
+    # spot the case-type signals — court name, party titles, claim, statutory
+    # references — without bloating the selection prompt.
+    facts_summary = ""
+    if user_facts.strip():
+        facts_summary = (
+            f"USER CASE CONTEXT (from uploaded document or pasted content — "
+            f"use this to identify the case type, not the template's example):\n"
+            f"{user_facts.strip()[:1500]}\n\n"
+        )
 
     with log_time(log, "Template selection (LLM)"):
         # Build candidate list with previews
@@ -163,6 +256,7 @@ def _select_best_template(query: str, candidates: list[dict]) -> tuple[str, list
         result = chain.invoke({
             "query": query,
             "candidates": "\n".join(candidate_lines),
+            "facts_summary": facts_summary,
         })
 
     selected = result.source.strip()
@@ -185,18 +279,40 @@ def _select_best_template(query: str, candidates: list[dict]) -> tuple[str, list
 
 # --- Step 3: Generate Document Outline ---
 
-async def _generate_outline(query: str, template_text: str, user_language: str = "en") -> DraftOutline:
+async def _generate_outline(
+    query: str, template_text: str, user_language: str = "en",
+    user_facts: str = "", case_facts: str = "",
+) -> DraftOutline:
     """Generate a structured outline with all sections for the document.
 
     Uses Gemini 2.5 Flash with structured output for reliable section list.
+
+    When `case_facts` (structured bullets) and/or `user_facts` (raw text) are
+    non-empty, the outline is tailored to those specific facts so e.g. a
+    "Suit For Recovery Of Money" outline knows to include sections referring
+    to the actual loan amount and dates.
     """
+    facts_block = ""
+    if case_facts.strip() or user_facts.strip():
+        parts = [
+            "USER-PROVIDED FACTS — the outline must be tailored to THIS "
+            "specific case, not the generic template scenario:"
+        ]
+        if case_facts.strip():
+            parts.append("\nKEY ENTITIES:\n" + case_facts.strip())
+        if user_facts.strip():
+            parts.append("\nFULL DOCUMENT TEXT:\n" + user_facts[:25000])
+        facts_block = "\n".join(parts) + "\n\n"
+
     with log_time(log, "Outline generation"):
         llm = get_drafting_llm().with_structured_output(DraftOutline)
         prompt = ChatPromptTemplate.from_messages([
             ("system", localize_prompt(DRAFT_OUTLINE_PROMPT, user_language)),
-            ("user", "Reference Template:\n{template}"),
+            ("user", "{facts_block}USER QUERY:\n{query}"),
+            ("user",
+             "Reference Template (use ONLY for STRUCTURE/section names — "
+             "do NOT copy the template's facts/parties/amounts):\n{template}"),
             ("user", "Current Date: {date}"),
-            ("user", "User Query:\n{query}"),
         ])
         chain = prompt | llm
         try:
@@ -204,6 +320,7 @@ async def _generate_outline(query: str, template_text: str, user_language: str =
                 "query": query,
                 "template": template_text,
                 "date": str(date.today()),
+                "facts_block": facts_block,
             })
         except Exception as e:
             log.error("Structured outline generation failed, using fallback",
@@ -266,29 +383,71 @@ async def _generate_section(
     total_sections: int,
     outline: DraftOutline,
     user_language: str = "en",
+    user_facts: str = "",
+    case_facts: str = "",
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
     Returns (section_text, tokens_consumed).
-    Sends the FULL template (2K-9K chars) -- no truncation needed.
+
+    Prompt order is critical: user-provided facts MUST appear before the
+    reference template, otherwise the LLM apes the template's placeholders
+    instead of inserting the real names/dates/amounts (BUG-02). When
+    `case_facts` (a pre-extracted structured bullet list) is supplied, it is
+    placed ABOVE the raw text so the LLM cannot miss key entities.
     """
     outline_summary = "\n".join(
         f"  {i+1}. {s.title}" for i, s in enumerate(outline.sections)
+    )
+
+    facts_block = ""
+    if case_facts.strip() or user_facts.strip():
+        parts = ["USER-PROVIDED FACTS — MANDATORY VALUES YOU MUST USE VERBATIM."]
+        parts.append(
+            "These are the REAL names, dates, amounts, addresses, courts, "
+            "and statutory references for THIS case. The reference template "
+            "below contains DIFFERENT (illustrative or fictional) values — "
+            "you MUST IGNORE the template's specifics in favor of these:"
+        )
+        if case_facts.strip():
+            parts.append("\nKEY ENTITIES (extracted from user's document):\n" + case_facts.strip())
+        if user_facts.strip():
+            parts.append(
+                "\nFULL DOCUMENT TEXT (for additional context — refer back to "
+                "this for any detail not in the KEY ENTITIES list):\n"
+                + user_facts[:25000]
+            )
+        facts_block = "\n".join(parts) + "\n\n"
+
+    facts_reminder = (
+        "USE THE USER-PROVIDED FACTS ABOVE for all names, dates, amounts, "
+        "addresses, court details, statutory references. Do NOT wrap any "
+        "real value from the FACTS in [brackets]. Use [placeholder] only "
+        "for information that is genuinely missing from the FACTS. "
+        if (case_facts.strip() or user_facts.strip()) else ""
     )
 
     with log_time(log, f"Section {section_index+1}/{total_sections}: {section.title}"):
         llm = get_drafting_llm()
         prompt = ChatPromptTemplate.from_messages([
             ("system", localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language)),
+            # FACTS FIRST — most prominent position (BUG-02)
+            ("user", "{facts_block}USER INSTRUCTION:\n{query}"),
             ("user", "Document: {doc_title}\nCourt: {court_details}"),
             ("user", "Full Document Outline:\n{outline_summary}"),
-            ("user", "Reference Template:\n{template}"),
+            # Template AFTER facts, explicitly framed as structure-only
             ("user",
-             "NOW WRITE section {section_num} of {total} IN FULL DETAIL:\n\n"
+             "REFERENCE TEMPLATE (use ONLY for STRUCTURE, formatting style, "
+             "section ordering, and clause organization — DO NOT copy any "
+             "names, dates, amounts, addresses, or factual content from the "
+             "template into the draft. The template's specifics are illustrative "
+             "and UNRELATED to the user's case):\n{template}"),
+            ("user",
+             "NOW WRITE section {section_num} of {total} IN FULL DETAIL.\n"
+             "{facts_reminder}\n\n"
              "## {section_title}\n{section_desc}\n\n"
              "Expected paragraphs: {est_paragraphs}\n"
              "Needs case law citations: {needs_citations}"),
-            ("user", "User Query:\n{query}"),
         ])
         chain = prompt | llm
 
@@ -312,6 +471,8 @@ async def _generate_section(
             "section_desc": section.description,
             "est_paragraphs": str(section.estimated_paragraphs),
             "needs_citations": "Yes -- include [CITE: ...] markers" if section.needs_citations else "No",
+            "facts_block": facts_block,
+            "facts_reminder": facts_reminder,
         }), timeout=180)
 
     tokens = 0
@@ -332,6 +493,8 @@ async def _generate_sections_parallel(
     outline: DraftOutline,
     writer=None,
     user_language: str = "en",
+    user_facts: str = "",
+    case_facts: str = "",
 ) -> tuple[list[str], list[int], int]:
     """Generate all sections with bounded parallelism via asyncio.Semaphore.
 
@@ -349,11 +512,20 @@ async def _generate_sections_parallel(
     async def _gen_one(i: int, plan: SectionPlan):
         async with sem:
             progress_counter["count"] += 1
-            section_num = progress_counter["count"]
+            # `section`: NATURAL document index (1-based, stable across runs).
+            # The frontend can render a fixed list of N sections and update
+            # each slot's status as events arrive in arbitrary order (BUG-13).
+            #
+            # `start_order`: original ordering by which a section's coroutine
+            # actually acquired the semaphore — useful for debugging only.
+            section_num = i + 1
+            start_order = progress_counter["count"]
             if writer:
                 writer({
                     "type": "drafting_progress",
                     "section": section_num,
+                    "index": i,                # 0-based for direct array indexing
+                    "start_order": start_order,
                     "total": total,
                     "title": plan.title,
                     "status": "in_progress",
@@ -361,12 +533,16 @@ async def _generate_sections_parallel(
             try:
                 text, tokens = await _generate_section(
                     query, template_text, plan, i, total, outline, user_language,
+                    user_facts=user_facts,
+                    case_facts=case_facts,
                 )
                 results[i] = (text, tokens, None)
                 if writer:
                     writer({
                         "type": "drafting_progress",
                         "section": section_num,
+                        "index": i,
+                        "start_order": start_order,
                         "total": total,
                         "title": plan.title,
                         "status": "completed",
@@ -380,6 +556,8 @@ async def _generate_sections_parallel(
                     writer({
                         "type": "drafting_progress",
                         "section": section_num,
+                        "index": i,
+                        "start_order": start_order,
                         "total": total,
                         "title": plan.title,
                         "status": "failed",
@@ -544,10 +722,14 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
     completed_sections = continuation["completed_sections"]
     failed_indices = continuation["failed_indices"]
     outline = DraftOutline.model_validate(continuation["outline"])
+    # Continuation: persisted facts (if first attempt had a file/context attached)
+    user_facts = continuation.get("user_facts", "")
+    case_facts = continuation.get("case_facts", "")
 
     log.info("Continue draft started",
              failed_sections=len(failed_indices),
-             total_sections=len(outline.sections))
+             total_sections=len(outline.sections),
+             facts_chars=len(user_facts))
 
     # Acquire concurrency slot; emit queue_status SSE event if at capacity
     try:
@@ -597,6 +779,8 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                     query, template_text, section_plan,
                     idx, len(outline.sections), outline,
                     state.get("user_language", "en"),
+                    user_facts=user_facts,
+                    case_facts=case_facts,
                 )
                 sections[idx] = section_text
                 total_tokens += section_tokens
@@ -694,16 +878,35 @@ async def drafting_node(state: LegalAgentState) -> dict:
     user_context = state.get("user_context", "")
     user_language = state.get("user_language", "en")
     integration_ctx = IntegrationContextData.from_state(state)
+    fc = FileContextData.from_state(state)
+
+    # Collect ALL fact sources (uploaded PDF, pasted long-form context,
+    # third-party integration content) into a single `user_facts` blob.
+    # These are passed to outline + section gen as a SEPARATE field so the
+    # template doesn't dominate the prompt (BUG-02). The clean `query`
+    # (user's actual instruction) is what we use for template search and
+    # selection — keeping the BM25 query small and on-target (BUG-16).
+    fact_blocks: list[str] = []
+    if fc and fc.inline_text:
+        # Uploaded document (PDF, DOCX, TXT) extracted text
+        fact_blocks.append(
+            f"[Uploaded document text — {', '.join(fc.file_names) or 'attached'}]\n"
+            f"{fc.inline_text[:30000]}"
+        )
+    if user_context:
+        # Long-form pasted content embedded in the user's typed query
+        fact_blocks.append(f"[Pasted context]\n{user_context[:30000]}")
+    if integration_ctx and integration_ctx.has_content:
+        # Content fetched from Google Docs / Notion
+        fact_blocks.append(integration_ctx.as_prompt_prefix().rstrip())
+    user_facts = "\n\n".join(fact_blocks)
+
     log.info("Agent started", query=query[:100],
              has_user_context=bool(user_context),
+             has_file_context=bool(fc and fc.inline_text),
              has_integration_context=bool(integration_ctx and integration_ctx.has_content),
+             facts_chars=len(user_facts),
              using_agent_query="Drafting" in agent_queries)
-    # For long queries: include pasted content in the drafting query
-    if user_context:
-        query = f"User's document/context:\n{user_context}\n\nUser's instruction:\n{query}"
-    # Prepend content fetched from third-party integrations (Google Docs, Notion)
-    if integration_ctx and integration_ctx.has_content:
-        query = integration_ctx.as_prompt_prefix() + f"User's instruction:\n{query}"
 
     # Acquire concurrency slot; emit queue_status SSE event if at capacity
     try:
@@ -721,6 +924,15 @@ async def drafting_node(state: LegalAgentState) -> dict:
     try:
         es = get_es_client()
         index = ES_INDICES["drafting"]
+
+        # Step 0: Extract structured key facts from any uploaded document /
+        # pasted context. The structured list is prepended to outline +
+        # section-gen prompts so the LLM uses real names/dates/amounts
+        # instead of [Plaintiff Name] / [Loan Amount] placeholders. (BUG-02)
+        case_facts = ""
+        if user_facts:
+            progress("drafting", "Extracting key facts from your document...", step="extract")
+            case_facts = await _extract_case_facts(user_facts)
 
         # Step 1: Hybrid search for templates (BM25 + kNN, top 15)
         progress("drafting", "Searching for document templates...", step="search")
@@ -741,10 +953,10 @@ async def drafting_node(state: LegalAgentState) -> dict:
         progress("drafting", f"Found {len(hits)} matching templates", found=len(hits), substep=True, step="search")
         log.info("Template candidates found", count=len(hits))
 
-        # Step 2: Select best template (with content previews + validation)
+        # Step 2: Select best template (previews + case-context + validation)
         progress("drafting", "Selecting best template...", step="select")
         selected_source, all_paths = await asyncio.to_thread(
-            _select_best_template, query, hits
+            _select_best_template, query, hits, user_facts,
         )
         template_display_name = os.path.splitext(os.path.basename(selected_source))[0]
         progress("drafting", f"Selected: {template_display_name[:60]}", substep=True, step="select")
@@ -792,7 +1004,11 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
         # Step 4: Generate document outline (max 12 sections)
         progress("drafting", "Generating document outline...", step="outline")
-        outline = await _generate_outline(query, template_text, user_language)
+        outline = await _generate_outline(
+            query, template_text, user_language,
+            user_facts=user_facts,
+            case_facts=case_facts,
+        )
         progress("drafting", f"Outline ready: {len(outline.sections)} sections", found=len(outline.sections), substep=True, step="outline")
 
         # Step 5: Generate sections in parallel (semaphore-limited to 3)
@@ -804,6 +1020,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
         sections, failed_indices, total_tokens = await _generate_sections_parallel(
             query, template_text, outline, writer, user_language,
+            user_facts=user_facts,
+            case_facts=case_facts,
         )
 
         # Emit incomplete event if needed
@@ -870,6 +1088,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 "template_text": template_text,
                 "template_source": selected_source,
                 "query": query,
+                "user_facts": user_facts,
+                "case_facts": case_facts,  # preserve extracted entities for retries
                 "completed_sections": {
                     str(i): sections[i] for i in range(len(sections))
                     if i not in failed_indices

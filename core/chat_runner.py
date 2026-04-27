@@ -253,17 +253,22 @@ async def run_chat_pipeline(
                         elif kind == "token_reset":
                             yield _sse({"type": "token_reset"})
                         elif kind == "drafting_progress":
-                            # Pass through all optional fields (status, char_count,
-                            # error) added by Phase C. Keep required fields first
-                            # so old consumers reading {section,total,title} stay
-                            # happy.
+                            # Required fields kept first so old consumers reading
+                            # {section,total,title} stay happy. Optional fields
+                            # added over time:
+                            #   - status, char_count, error: Phase C
+                            #   - index, start_order: BUG-13 (stable natural
+                            #     section index for frontend slot rendering;
+                            #     start_order is the parallel-execution order
+                            #     for debugging only).
                             dp_event: dict = {
                                 "type": "drafting_progress",
                                 "section": chunk["section"],
                                 "total": chunk["total"],
                                 "title": chunk["title"],
                             }
-                            for optional in ("status", "char_count", "error"):
+                            for optional in ("status", "char_count", "error",
+                                             "index", "start_order"):
                                 if optional in chunk:
                                     dp_event[optional] = chunk[optional]
                             yield _sse(dp_event)

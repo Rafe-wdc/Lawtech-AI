@@ -25,8 +25,9 @@ from pathlib import Path
 
 import httpx
 
-BASE = "http://localhost:5000/pyapi"
-API_KEY = "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+import os
+BASE = os.environ.get("LAWTECH_TEST_BASE", "http://localhost:5000/pyapi")
+API_KEY = os.environ.get("LAWTECH_TEST_API_KEY", "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51")
 PDF_PATH = Path(r"D:\agentic_proj\Lawtech-AI\test_pdfs\plaint.pdf")
 
 # Single drafting prompt. We use the exact P6 from the original eval — it was

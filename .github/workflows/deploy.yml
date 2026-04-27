@@ -176,18 +176,36 @@ jobs:
             nohup /root/v2_multi_agent/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app > /dev/null 2>&1 &
             echo "Gunicorn started fresh (new PID: $(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null))"
 
-            # Wait for workers to cycle (max 60s — preload workers take longer)
-            for i in $(seq 1 12); do
+            # Wait for ALL workers to settle, not just the first to respond.
+            # /health on localhost bypasses nginx, so a single 200/503 only
+            # proves ONE worker is up. Integration tests hit nginx, which
+            # round-robins across all 16 workers. If a worker is still in
+            # FastAPI lifespan startup (PG pool + graph compile), that
+            # request will TLS-handshake-timeout. Require 3 CONSECUTIVE
+            # healthy polls (≈10s of stable readiness) before declaring
+            # the deploy done.
+            CONSECUTIVE_OK=0
+            NEEDED=3
+            for i in $(seq 1 24); do
               sleep 5
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/pyapi/health || echo "000")
               if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
-                echo "Health check passed (HTTP $STATUS)"
-                exit 0
+                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+                if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                  echo "Stable health: $NEEDED consecutive checks at HTTP $STATUS"
+                  # Final settle period for any remaining workers to finish
+                  # their lifespan startup before external traffic arrives.
+                  sleep 10
+                  exit 0
+                fi
+                echo "Healthy (HTTP $STATUS), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              else
+                CONSECUTIVE_OK=0
+                echo "Waiting... attempt $i/24 (HTTP $STATUS)"
               fi
-              echo "Waiting... attempt $i/12 (HTTP $STATUS)"
             done
 
-            echo "ERROR: Health check did not pass after 60s"
+            echo "ERROR: did not see $NEEDED consecutive healthy checks within 120s"
             tail -50 /root/v2_multi_agent/logs/error.log
             exit 1
           ENDSSH

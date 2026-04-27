@@ -269,12 +269,11 @@ class SearchRequest(BaseModel):
 class SearchResponse(BaseModel):
     globalThreadId: Optional[str]
     result: str
-    total_tokens_consumed: int
     # Detailed input/output/cache breakdown for the entire request, plus
     # per-agent and per-model rollups and per-LLM-call list. See
-    # core/token_tracker.TokenUsage.to_dict() for the schema. None means
-    # this response was served from cache and the per-call detail is no
-    # longer available (the flat total_tokens_consumed is still authoritative).
+    # core/token_tracker.TokenUsage.to_dict() for the schema. The aggregate
+    # total is at token_usage.total_tokens. (The legacy
+    # total_tokens_consumed flat int was removed in favour of this field.)
     token_usage: Optional[dict] = None
     source: list[dict]
     agents_used: list[str]
@@ -422,10 +421,17 @@ async def search(data: SearchRequest, request: Request):
             _latency_ms = int((time.perf_counter() - _req_start) * 1000)
             log.info("Cache hit, returning cached response",
                      latency_ms=_latency_ms, agents=cached.agents_used)
+            cached_token_usage = cached.token_usage or {
+                "input_tokens": 0, "output_tokens": 0,
+                "total_tokens": cached.tokens_consumed or 0,
+                "cache_read_tokens": 0, "cache_creation_tokens": 0,
+                "reasoning_tokens": 0, "cost_usd": 0.0,
+                "by_agent": {}, "by_model": {}, "calls": [],
+            }
             return SearchResponse(
                 globalThreadId=thread_id,
                 result=cached.response,
-                total_tokens_consumed=cached.tokens_consumed,
+                token_usage=cached_token_usage,
                 source=cached.source_metadata,
                 agents_used=cached.agents_used,
             )
@@ -463,7 +469,7 @@ async def search(data: SearchRequest, request: Request):
         return SearchResponse(
             globalThreadId=thread_id,
             result=final_state.get("block_reason", "Query blocked by safety filter."),
-            total_tokens_consumed=0,
+            token_usage=_token_tracker.to_dict(include_calls=True),
             source=[{"source_type": "blocked", "title": "Blocked", "content": ["Query blocked by safety filter"]}],
             agents_used=[],
         )
@@ -553,12 +559,12 @@ async def search(data: SearchRequest, request: Request):
             source_metadata=final_state.get("source_metadata", []),
             agents_used=agents_used,
             tokens_consumed=total_tokens,
+            token_usage=_token_tracker.to_dict(include_calls=True),
         ))
 
     return SearchResponse(
         globalThreadId=thread_id,
         result=final_response,
-        total_tokens_consumed=total_tokens,
         token_usage=_token_tracker.to_dict(include_calls=True),
         source=final_state.get("source_metadata", []),
         agents_used=agents_used,
@@ -877,6 +883,11 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
         yield f"data: {json.dumps({'type': 'status', 'agent': 'continue_draft', 'message': 'Retrying incomplete sections...'})}\n\n"
         yield f"data: {json.dumps({'type': 'agents_planned', 'agents': ['Drafting']})}\n\n"
 
+        # Per-request token tracker — captures every LLM call made by the
+        # continue_draft pipeline (one section regen per failed index).
+        from core.token_tracker import start_request as _start_token_tracking
+        _cd_token_tracker = _start_token_tracking()
+
         start = time.perf_counter()
         final_response = ""
         total_tokens = 0
@@ -991,7 +1002,7 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
         done_event = {
             "type": "done",
             "agents_used": ["Drafting"],
-            "total_tokens": total_tokens,
+            "token_usage": _cd_token_tracker.to_dict(include_calls=True),
             "thread_id": thread_id,
             "conversation_turn": conversation_turn,
             "query_rewritten": False,

@@ -2047,7 +2047,7 @@ async function sendChatWithFiles(query, threadId) {
           note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${parseInt(evt.completed_sections)||0}/${parseInt(evt.total_sections)||0} sections completed. ${parseInt(evt.failed_sections)||0} section(s) failed. <button class="btn btn-secondary btn-sm" onclick="continueDraft(this)">Retry failed sections</button>`;
           msgDiv.appendChild(note);
         } else if (evt.type === 'done') {
-          lastTokens = evt.total_tokens || 0;
+          lastTokens = (evt.token_usage && evt.token_usage.total_tokens) || 0;
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
           statusEl.remove();
           persistThread(evt.thread_id, evt.conversation_turn || currentTurnCount + 1);
@@ -2107,9 +2107,11 @@ async function sendChatBatch(query, threadId) {
     threadId: currentThreadId,
   });
 
-  addChatMsg('ai', data.result, data.agents_used, data.total_tokens_consumed, elapsed, data.source,
+  const _tu = data.token_usage || {};
+  const _totalTokens = _tu.total_tokens || 0;
+  addChatMsg('ai', data.result, data.agents_used, _totalTokens, elapsed, data.source,
     data.conversation_turn || currentTurnCount, data.followup_suggestions);
-  addLog('success', `Response: ${data.agents_used.join(',')} | ${data.total_tokens_consumed} tokens | ${elapsed}s | ${(data.source || []).length} sources`);
+  addLog('success', `Response: ${data.agents_used.join(',')} | ${_totalTokens} tokens | ${elapsed}s | ${(data.source || []).length} sources`);
   if (data.query_rewritten) {
     addLog('info', `Query rewritten: "${data.effective_query}"`);
   }
@@ -2586,7 +2588,7 @@ async function sendChatStream(query, threadId) {
 
         } else if (event.type === 'done') {
           agents = event.agents_used || [];
-          totalTokens = event.total_tokens || 0;
+          totalTokens = (event.token_usage && event.token_usage.total_tokens) || 0;
           const convTurn = event.conversation_turn || 0;
           if (convTurn > 0) persistThread(currentThreadId, convTurn);
           // Update context bar with final turn count
@@ -3872,7 +3874,7 @@ async function continueDraft(btn) {
             sourcesData = event.data || [];
 
           } else if (event.type === 'done') {
-            totalTokens = event.total_tokens || 0;
+            totalTokens = (event.token_usage && event.token_usage.total_tokens) || 0;
             var convTurn = event.conversation_turn || 0;
             if (convTurn > 0) persistThread(currentThreadId, convTurn);
             addLog('success', 'Continue draft complete | ' + totalTokens + ' tokens');

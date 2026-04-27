@@ -25,7 +25,8 @@ class CacheEntry:
     response: str
     source_metadata: list[dict]
     agents_used: list[str]
-    tokens_consumed: int
+    tokens_consumed: int           # legacy aggregate; kept for backward compat
+    token_usage: dict | None = None  # full per-LLM-call breakdown captured by token_tracker
     timestamp: float = field(default_factory=time.time)
 
 

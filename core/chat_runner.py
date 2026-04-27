@@ -192,10 +192,26 @@ async def run_chat_pipeline(
                 log.warning("Cached followup suggestions failed",
                             endpoint=i.endpoint_name, error=str(e))
 
+            # On cache hit, replay the originally-captured per-LLM-call
+            # token breakdown if it was stored. Older cache entries (pre
+            # token_usage support) only stored the aggregate int — synthesise
+            # a minimal token_usage from that for shape consistency.
+            cached_token_usage = cached.token_usage or {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": cached.tokens_consumed or 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "reasoning_tokens": 0,
+                "cost_usd": 0.0,
+                "by_agent": {},
+                "by_model": {},
+                "calls": [],
+            }
             yield _sse({
                 "type": "done",
                 "agents_used": cached.agents_used,
-                "total_tokens": cached.tokens_consumed,
+                "token_usage": cached_token_usage,
                 "thread_id": i.thread_id,
                 "source_metadata": cached.source_metadata,  # kept for backward compat
                 "cached": True,
@@ -429,17 +445,17 @@ async def run_chat_pipeline(
             source_metadata=all_source_metadata,
             agents_used=agents_used,
             tokens_consumed=total_tokens,
+            token_usage=token_usage_dict,
         ))
 
     # Done event — includes the detailed per-agent / per-model / per-call
-    # token breakdown captured by the request-scoped tracker. The flat
-    # `total_tokens` field is preserved for backward compatibility with
-    # any client that already reads it.
+    # token breakdown captured by the request-scoped tracker.
+    # The previously-emitted flat `total_tokens` int has been removed in
+    # favour of `token_usage.total_tokens`; clients should read that.
     token_usage_dict = token_tracker.to_dict(include_calls=True)
     yield _sse({
         "type": "done",
         "agents_used": agents_used,
-        "total_tokens": total_tokens,
         "token_usage": token_usage_dict,
         "thread_id": i.thread_id,
         "conversation_turn": conversation_turn,

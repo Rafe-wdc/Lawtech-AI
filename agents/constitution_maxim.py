@@ -193,9 +193,8 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
             "date": str(date.today()),
         })
 
-    tokens = 0
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        tokens = response.usage_metadata.get("total_tokens", 0)
+    from core.token_tracker import record as _record_tokens
+    tokens = _record_tokens("Constitution_Maxim", "generate", response)
 
     # Check if LLM apologized (docs were irrelevant) — fall back to web search
     _sorry_patterns = ["i am sorry", "i'm sorry", "does not contain", "no information",

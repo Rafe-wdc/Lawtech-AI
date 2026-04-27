@@ -224,6 +224,14 @@ async def run_chat_pipeline(
 
     config = {"configurable": {"thread_id": i.thread_id}}
 
+    # Initialise the per-request token tracker. Every LLM call made by
+    # any agent / orchestrator step on this asyncio task (and its
+    # spawned children, since asyncio propagates contextvars) will
+    # accumulate into this instance. Read out at the end and surface
+    # in the `done` SSE event.
+    from core.token_tracker import start_request as _start_token_tracking
+    token_tracker = _start_token_tracking()
+
     step_count = 0
     final_response = ""
     agents_used: list[str] = []
@@ -423,11 +431,16 @@ async def run_chat_pipeline(
             tokens_consumed=total_tokens,
         ))
 
-    # Done event
+    # Done event — includes the detailed per-agent / per-model / per-call
+    # token breakdown captured by the request-scoped tracker. The flat
+    # `total_tokens` field is preserved for backward compatibility with
+    # any client that already reads it.
+    token_usage_dict = token_tracker.to_dict(include_calls=True)
     yield _sse({
         "type": "done",
         "agents_used": agents_used,
         "total_tokens": total_tokens,
+        "token_usage": token_usage_dict,
         "thread_id": i.thread_id,
         "conversation_turn": conversation_turn,
         "query_rewritten": query_rewritten,

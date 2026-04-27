@@ -396,9 +396,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 "date": str(date.today()),
             })
 
-        tokens = 0
-        if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
-            tokens = llm_response.usage_metadata.get("total_tokens", 0)
+        from core.token_tracker import record as _record_tokens
+        tokens = _record_tokens("Judgment", "generate", llm_response)
 
         # Check if LLM apologized (ES hits were irrelevant) — fall back to web search
         _sorry_patterns = [

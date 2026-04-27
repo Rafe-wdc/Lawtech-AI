@@ -193,9 +193,8 @@ def _retrieve_and_answer(
             invoke_args["history"] = history_text
         response = chain.invoke(invoke_args)
 
-    tokens = 0
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        tokens = response.usage_metadata.get("total_tokens", 0)
+    from core.token_tracker import record as _record_tokens
+    tokens = _record_tokens("Document", "qa_chromadb", response)
 
     return response.content, tokens, docs
 
@@ -298,9 +297,8 @@ async def document_node(state: LegalAgentState) -> dict:
 
                     response = llm.invoke(messages)
 
-                tokens = 0
-                if hasattr(response, "usage_metadata") and response.usage_metadata:
-                    tokens = response.usage_metadata.get("total_tokens", 0)
+                from core.token_tracker import record as _record_tokens
+                tokens = _record_tokens("Document", "qa_gemini_files", response)
 
                 log.info("Gemini file parts document QA completed",
                          response_len=len(response.content), tokens=tokens)
@@ -367,9 +365,8 @@ async def document_node(state: LegalAgentState) -> dict:
                         invoke_args["history"] = history_text
                     response = chain.invoke(invoke_args)
 
-                tokens = 0
-                if hasattr(response, "usage_metadata") and response.usage_metadata:
-                    tokens = response.usage_metadata.get("total_tokens", 0)
+                from core.token_tracker import record as _record_tokens
+                tokens = _record_tokens("Document", "qa_inline_text", response)
 
                 log.info("Inline document QA completed",
                          response_len=len(response.content), tokens=tokens)

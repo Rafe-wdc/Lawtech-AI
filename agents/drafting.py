@@ -192,6 +192,8 @@ async def _extract_case_facts(user_facts: str) -> str:
                 chain.ainvoke({"facts_text": user_facts[:30000]}),
                 timeout=20,
             )
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "extract_case_facts", response)
         extracted = response.content.strip()
         log.info("Case facts extracted",
                  chars=len(extracted), bullets=extracted.count("- **"))
@@ -475,9 +477,10 @@ async def _generate_section(
             "facts_reminder": facts_reminder,
         }), timeout=180)
 
-    tokens = 0
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        tokens = response.usage_metadata.get("total_tokens", 0)
+    from core.token_tracker import record as _record_tokens
+    tokens = _record_tokens(
+        "Drafting", f"section_{section_index + 1}_{section.title[:30]}", response,
+    )
 
     log.debug("Section completed",
               section=section.title,

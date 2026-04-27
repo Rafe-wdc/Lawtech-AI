@@ -1306,9 +1306,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             }, timeout=180)  # Multi-agent synthesis needs more time
 
         synthesized = response.content
-        synth_tokens = 0
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            synth_tokens = response.usage_metadata.get("total_tokens", 0)
+        from core.token_tracker import record as _record_tokens
+        synth_tokens = _record_tokens("Orchestrator", "synthesize", response)
 
         # Cap synthesis output to prevent oversized responses from blocking
         # the event loop in sanitize_markdown (349K response observed in prod)
@@ -1394,9 +1393,8 @@ async def _inject_citations_into_draft(
             "citations": citations_text,
         }, timeout=180)  # Citation injection on full draft needs more time
 
-    tokens = 0
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        tokens = response.usage_metadata.get("total_tokens", 0)
+    from core.token_tracker import record as _record_tokens
+    tokens = _record_tokens("Orchestrator", "inject_citations", response)
     log.info("Citation injection completed",
              draft_len=len(draft), enriched_len=len(response.content),
              tokens=tokens)
@@ -1429,9 +1427,8 @@ async def _auto_cite_draft(
             "response_instructions": instructions_text,
         }, timeout=180)  # Auto-citation on full draft needs more time
 
-    tokens = 0
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        tokens = response.usage_metadata.get("total_tokens", 0)
+    from core.token_tracker import record as _record_tokens
+    tokens = _record_tokens("Orchestrator", "auto_cite", response)
     log.info("Auto-citation completed",
              draft_len=len(draft), enriched_len=len(response.content),
              tokens=tokens)

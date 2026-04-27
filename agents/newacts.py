@@ -633,9 +633,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
             from core.streaming import stream_chain_response
             llm_response = await stream_chain_response(chain, invoke_kwargs)
 
-        tokens = 0
-        if hasattr(llm_response, "usage_metadata") and llm_response.usage_metadata:
-            tokens = llm_response.usage_metadata.get("total_tokens", 0)
+        from core.token_tracker import record as _record_tokens
+        tokens = _record_tokens("Newacts", "generate", llm_response)
 
         # Check if LLM apologized (ES hits were irrelevant) — fall back to web search
         _sorry_patterns = [

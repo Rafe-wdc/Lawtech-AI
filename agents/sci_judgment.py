@@ -179,11 +179,11 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             except Exception as fb_err:
                 log.error("Fallback search failed", error=str(fb_err))
 
-        # Estimate token usage from messages
+        # Sum token usage across the ReAct trajectory's AI messages
+        from core.token_tracker import record as _record_tokens
         tokens = 0
-        for msg in messages:
-            if hasattr(msg, "usage_metadata") and msg.usage_metadata:
-                tokens += msg.usage_metadata.get("total_tokens", 0)
+        for i, msg in enumerate(messages):
+            tokens += _record_tokens("SCI_Judgment", f"react_msg_{i}", msg)
 
         # Parse tool response messages to extract structured case data
         for msg in messages:

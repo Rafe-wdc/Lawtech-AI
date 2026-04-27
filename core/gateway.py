@@ -270,6 +270,12 @@ class SearchResponse(BaseModel):
     globalThreadId: Optional[str]
     result: str
     total_tokens_consumed: int
+    # Detailed input/output/cache breakdown for the entire request, plus
+    # per-agent and per-model rollups and per-LLM-call list. See
+    # core/token_tracker.TokenUsage.to_dict() for the schema. None means
+    # this response was served from cache and the per-call detail is no
+    # longer available (the flat total_tokens_consumed is still authoritative).
+    token_usage: Optional[dict] = None
     source: list[dict]
     agents_used: list[str]
     # Memory context metadata
@@ -429,6 +435,11 @@ async def search(data: SearchRequest, request: Request):
     )
     config = {"configurable": {"thread_id": thread_id}}
 
+    # Initialise the per-request token tracker. Every LLM call made by
+    # any agent / orchestrator step on this asyncio task accumulates here.
+    from core.token_tracker import start_request as _start_token_tracking
+    _token_tracker = _start_token_tracking()
+
     _graph_error: str | None = None
     try:
         with log_time(log, "Full graph execution"):
@@ -548,6 +559,7 @@ async def search(data: SearchRequest, request: Request):
         globalThreadId=thread_id,
         result=final_response,
         total_tokens_consumed=total_tokens,
+        token_usage=_token_tracker.to_dict(include_calls=True),
         source=final_state.get("source_metadata", []),
         agents_used=agents_used,
         effective_query=effective_query if query_rewritten else None,

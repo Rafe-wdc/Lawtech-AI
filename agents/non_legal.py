@@ -63,9 +63,8 @@ async def non_legal_node(state: LegalAgentState) -> dict:
             response = await chain.ainvoke({"query": query})
 
         content = response.content if hasattr(response, "content") else str(response)
-        tokens = 0
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            tokens = response.usage_metadata.get("total_tokens", 0)
+        from core.token_tracker import record as _record_tokens
+        tokens = _record_tokens("Non_legal", "respond", response)
 
         log.info("Non-legal agent completed", response_len=len(content))
 

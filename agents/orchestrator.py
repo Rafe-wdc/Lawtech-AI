@@ -244,13 +244,18 @@ def _extract_question_from_long_query(query: str) -> tuple[str, str]:
     """
     try:
         with log_time(log, "Long query extraction"):
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(QueryExtraction)
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(
+                QueryExtraction, include_raw=True,
+            )
             prompt = ChatPromptTemplate.from_template(_QUERY_EXTRACT_PROMPT)
             chain = prompt | llm
-            result = chain.invoke({
+            raw_and_parsed = chain.invoke({
                 "text_start": query[:3000],
                 "text_end": query[-2000:],
             })
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Orchestrator", "extract_long_query", raw_and_parsed.get("raw"))
+        result = raw_and_parsed["parsed"]
 
         log.info("Question extracted from long query",
                  question_len=len(result.question),
@@ -341,9 +346,14 @@ def _classify_task(query: str, chat_summary: str | None = None) -> str:
     try:
         with log_time(log, "Task classification"):
             prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(IdentifyTaskSchema)
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(
+                IdentifyTaskSchema, include_raw=True,
+            )
             formatted = prompt.format(query=query, chat_summary=chat_summary or "")
-            result = llm.invoke(formatted)
+            raw_and_parsed = llm.invoke(formatted)
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Orchestrator", "classify_task", raw_and_parsed.get("raw"))
+        result = raw_and_parsed["parsed"]
         log.info("Task classified", task=result.task, query=query[:80])
         return result.task
     except Exception as e:
@@ -452,13 +462,18 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
     """
     try:
         with log_time(log, "Classify + plan (merged)"):
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(ClassifyAndPlan)
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(
+                ClassifyAndPlan, include_raw=True,
+            )
             prompt = ChatPromptTemplate.from_template(CLASSIFY_AND_PLAN_PROMPT)
             chain = prompt | llm
-            result = chain.invoke({
+            raw_and_parsed = chain.invoke({
                 "query": query,
                 "chat_summary": chat_summary or "",
             })
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Orchestrator", "classify_and_plan", raw_and_parsed.get("raw"))
+        result = raw_and_parsed["parsed"]
 
         task = result.task
         agents = result.agents[:3]  # cap at 3
@@ -584,10 +599,15 @@ def _plan_agents(query: str, task: str) -> list[str]:
     # Try multi-agent planning with LLM
     try:
         with log_time(log, "Multi-agent planning"):
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(AgentPlan)
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(
+                AgentPlan, include_raw=True,
+            )
             prompt = ChatPromptTemplate.from_template(PLAN_PROMPT)
             chain = prompt | llm
-            plan = chain.invoke({"query": query, "task": task})
+            raw_and_parsed = chain.invoke({"query": query, "task": task})
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Orchestrator", "plan_agents", raw_and_parsed.get("raw"))
+        plan = raw_and_parsed["parsed"]
         agents = plan.agents[:3]  # max 3 agents
         log.info("Agent plan created",
                  agents=agents, reasoning=plan.reasoning[:120])
@@ -698,10 +718,15 @@ def _analyze_and_normalize_query(query: str) -> tuple[str, str]:
     """
     try:
         with log_time(log, "Query analysis & normalization"):
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(QueryAnalysis)
+            llm = get_gemini_flash(temperature=0.1).with_structured_output(
+                QueryAnalysis, include_raw=True,
+            )
             prompt = ChatPromptTemplate.from_template(QUERY_NORMALIZE_PROMPT)
             chain = prompt | llm
-            result = chain.invoke({"query": query})
+            raw_and_parsed = chain.invoke({"query": query})
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Orchestrator", "normalize_query", raw_and_parsed.get("raw"))
+        result = raw_and_parsed["parsed"]
 
         log.info("Query normalized",
                  original_len=len(query),
@@ -734,6 +759,8 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
                 "query": query,
                 "agents": ", ".join(agents),
             })
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Orchestrator", "rewrite_per_agent_queries", response)
 
         # Parse JSON from response
         text = response.content.strip()

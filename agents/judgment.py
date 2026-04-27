@@ -76,10 +76,15 @@ Output only valid JSON."""
 def _extract_case_metadata(query: str) -> CaseMetadata:
     """Use Gemini Flash Lite to extract structured metadata from a judgment query."""
     with log_time(log, "Case metadata extraction"):
-        llm = get_gemini_flash(temperature=0.1).with_structured_output(CaseMetadata)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(
+            CaseMetadata, include_raw=True,
+        )
         prompt = ChatPromptTemplate.from_template(METADATA_EXTRACTION_PROMPT)
         chain = prompt | llm
-        result = chain.invoke({"query": query})
+        raw_and_parsed = chain.invoke({"query": query})
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Judgment", "extract_metadata", raw_and_parsed.get("raw"))
+    result = raw_and_parsed["parsed"]
 
     log.info("Metadata extracted",
              court=result.court_name,

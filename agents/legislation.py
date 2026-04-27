@@ -73,10 +73,15 @@ Return JSON only:
 
 def _extract_match_phrase(query: str, text: str, title: str) -> QueryMetadata:
     """Use Gemini Flash Lite to extract a match phrase for targeted ES search."""
-    llm = get_gemini_flash(temperature=0.1).with_structured_output(QueryMetadata)
+    llm = get_gemini_flash(temperature=0.1).with_structured_output(
+        QueryMetadata, include_raw=True,
+    )
     prompt = ChatPromptTemplate.from_template(MATCH_PHRASE_PROMPT)
     chain = prompt | llm
-    return chain.invoke({'query': query, 'text': text, 'title': title})
+    raw_and_parsed = chain.invoke({'query': query, 'text': text, 'title': title})
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Legislation", "extract_match_phrase", raw_and_parsed.get("raw"))
+    return raw_and_parsed["parsed"]
 
 
 # --- Act Name Extraction from Query ---

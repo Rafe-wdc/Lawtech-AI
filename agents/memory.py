@@ -131,6 +131,8 @@ def _rewrite_query(
             chain = prompt | llm
 
             response = chain.invoke({"query": query, "chat_history_text": chat_history_text})
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Memory", "rewrite_query", response)
         rewritten = response.content.strip()
 
         if not rewritten or len(rewritten) > 1000:

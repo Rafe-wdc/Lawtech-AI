@@ -158,10 +158,15 @@ Return only valid JSON:
 def _extract_act_metadata(query: str) -> ActQueryMetadata:
     """Use Gemini Flash Lite to extract act metadata from a newacts query."""
     with log_time(log, "Act metadata extraction"):
-        llm = get_gemini_flash(temperature=0.1).with_structured_output(ActQueryMetadata)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(
+            ActQueryMetadata, include_raw=True,
+        )
         prompt = ChatPromptTemplate.from_template(METADATA_PROMPT)
         chain = prompt | llm
-        result = chain.invoke({"query": query})
+        raw_and_parsed = chain.invoke({"query": query})
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Newacts", "extract_metadata", raw_and_parsed.get("raw"))
+    result = raw_and_parsed["parsed"]
 
     log.info("Metadata extracted",
              act=result.act_name, sections=result.section_number,

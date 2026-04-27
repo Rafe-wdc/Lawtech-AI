@@ -252,14 +252,19 @@ def _select_best_template(
             preview = c["_source"]["page_content"][:200].replace("\n", " ")
             candidate_lines.append(f"{i}. {path}\n   Preview: {preview}...")
 
-        llm = get_gemini_flash(temperature=0.1).with_structured_output(TemplateSource)
+        llm = get_gemini_flash(temperature=0.1).with_structured_output(
+            TemplateSource, include_raw=True,
+        )
         prompt = ChatPromptTemplate.from_template(TEMPLATE_SELECTION_PROMPT)
         chain = prompt | llm
-        result = chain.invoke({
+        raw_and_parsed = chain.invoke({
             "query": query,
             "candidates": "\n".join(candidate_lines),
             "facts_summary": facts_summary,
         })
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Drafting", "select_template", raw_and_parsed.get("raw"))
+    result = raw_and_parsed["parsed"]
 
     selected = result.source.strip()
 
@@ -307,7 +312,9 @@ async def _generate_outline(
         facts_block = "\n".join(parts) + "\n\n"
 
     with log_time(log, "Outline generation"):
-        llm = get_drafting_llm().with_structured_output(DraftOutline)
+        llm = get_drafting_llm().with_structured_output(
+            DraftOutline, include_raw=True,
+        )
         prompt = ChatPromptTemplate.from_messages([
             ("system", localize_prompt(DRAFT_OUTLINE_PROMPT, user_language)),
             ("user", "{facts_block}USER QUERY:\n{query}"),
@@ -318,7 +325,7 @@ async def _generate_outline(
         ])
         chain = prompt | llm
         try:
-            outline = await chain.ainvoke({
+            raw_and_parsed = await chain.ainvoke({
                 "query": query,
                 "template": template_text,
                 "date": str(date.today()),
@@ -352,6 +359,11 @@ async def _generate_outline(
                     ),
                 ],
             )
+            raw_and_parsed = None  # no token usage to record on fallback path
+        else:
+            from core.token_tracker import record as _record_tokens
+            _record_tokens("Drafting", "outline", raw_and_parsed.get("raw"))
+            outline = raw_and_parsed["parsed"]
 
     # Remove meta-sections that don't need LLM generation
     META_SECTION_KEYWORDS = ("index", "table of contents", "contents page")

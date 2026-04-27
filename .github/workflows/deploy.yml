@@ -82,7 +82,7 @@ jobs:
           cache: pip
 
       - name: Install test dependencies
-        run: pip install --quiet pytest requests pytest-timeout
+        run: pip install --quiet pytest requests pytest-timeout pytest-rerunfailures
 
       - name: Run integration tests
         env:
@@ -90,10 +90,17 @@ jobs:
           API_PREFIX: /pyapiv2
           API_KEY:   ${{ secrets.INTEGRATION_API_KEY }}
           ADMIN_KEY: ${{ secrets.INTEGRATION_ADMIN_KEY }}
+        # --reruns 2: GitHub Actions runners occasionally see TLS handshake
+        # timeouts to tool.lawttorney.com (likely nginx upstream cycling
+        # or Cloudflare-style burst rate-limiting). Prod is healthy from
+        # other IPs at the same instant, so this is purely a CI-side
+        # network blip. Auto-retry tolerates ≤3 transient blips per test
+        # without masking real regressions.
         run: |
           pytest tests/integration/test_api.py -v \
             --tb=short \
             --timeout=60 \
+            --reruns 2 --reruns-delay 5 \
             -x
 
   # ── Job 3: Deploy to production server (master only) ──────────────────────

@@ -26,7 +26,7 @@ POST https://tool.lawttorney.com/pyapiv2/search/stream
 
 ```json
 {
-  "Promptquery": "string (1-30000 chars)",
+  "Promptquery": "string (1-200000 chars)",
   "globalThreadId": "string (optional)",
   "preferred_language": "string (optional, ISO 639-1)",
   "integration_token": "string (optional, user's JWT)"
@@ -35,7 +35,7 @@ POST https://tool.lawttorney.com/pyapiv2/search/stream
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `Promptquery` | string | ✅ | User's chat message. 1–30000 chars. |
+| `Promptquery` | string | ✅ | User's chat message. 1–200000 chars. |
 | `globalThreadId` | string | optional | Omit for first turn (gets a new UUID + may hit cache). Pass to continue a thread. |
 | `preferred_language` | string | optional | ISO 639-1 code (`"en"`, `"hi"`, `"ta"`, etc). Overrides auto-detection. |
 | `integration_token` | string | optional | **User's JWT from the login endpoint.** Required only when you want Google Docs / Notion URL extraction. |
@@ -511,7 +511,7 @@ async function onConnectClick(provider, authUrl, originalQuery, originalUrl) {
 | Situation | Response |
 |-----------|----------|
 | Missing `X-API-Key` | HTTP 401 `{"detail": "Invalid or missing API key"}` |
-| `Promptquery` empty or > 30000 chars | HTTP 422 with validation error |
+| `Promptquery` empty or > 200000 chars | HTTP 422 with validation error |
 | Invalid JSON | HTTP 422 |
 | Backend timeout (300s) | `{type: "error", data: "Request timed out..."}` event, stream closes |
 | FSD Chat Service down | `integration_error` event, agent continues without content |

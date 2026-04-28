@@ -257,7 +257,7 @@ _VALID_LANGUAGES = {
 class SearchRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     # alias keeps backward-compat with existing clients sending "Promptquery"
-    prompt_query: str = Field(..., alias="Promptquery", min_length=1, max_length=30000)
+    prompt_query: str = Field(..., alias="Promptquery", min_length=1, max_length=200000)
     globalThreadId: Optional[str] = None
     preferred_language: Optional[str] = None  # ISO 639-1 override (skips auto-detection)
     # FSD JWT for Google Docs/Notion URL extraction. When set, the pipeline
@@ -294,7 +294,7 @@ class FeedbackRequest(BaseModel):
 
 class PdfChatRequest(BaseModel):
     uniqueString: str = Field(..., min_length=1)
-    question: str = Field(..., min_length=1, max_length=30000)
+    question: str = Field(..., min_length=1, max_length=200000)
 
 
 # --- Helpers ---
@@ -684,8 +684,8 @@ async def chat_with_files(
              file_count=len(files) if files else 0)
 
     # Validate query
-    if not query or len(query) > 30000:
-        raise HTTPException(status_code=400, detail="Query must be 1-30000 characters")
+    if not query or len(query) > 200000:
+        raise HTTPException(status_code=400, detail="Query must be 1-200000 characters")
 
     # Validate and save files to temp dir
     file_tuples: list[tuple[str, str, int]] = []

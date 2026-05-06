@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import threading
 import uuid
@@ -120,6 +121,168 @@ def validate_upload(filename: str, size_bytes: int) -> str | None:
 
 # --- PDF helpers ---
 
+# --- Garbled text-layer detector (Latin-script PDFs) ---
+#
+# PyMuPDF returns gibberish when a PDF font has Identity-H encoding without
+# a ToUnicode CMap, when the embedded text was OCR'd by a low-quality engine,
+# or when the page contains vector-outlined glyphs. Symptoms include:
+#   - Many tokens with no vowels ("PHHC vvm rrr")
+#   - 5+ consonants in a row (real English: <2%)
+#   - Repeated chars like "iiiii" or "1111"
+#   - Mostly numeric or single-char fragments
+#
+# Without this check, the bad text pollutes the Document agent's grounding
+# anchor and the Gemini multimodal call hallucinates specific names/numbers
+# (root cause of the "IIT Roorkee" misread on the Chandigarh DPR matter where
+# the actual document says "IIT Ropar").
+#
+# Designed to be:
+#   - Latin-script specific (defers to other checks for Devanagari/Tamil/etc.)
+#   - Tolerant of legal acronyms (PHHC, NGT, IIT, SWM, DPR, BNS, etc.)
+#   - Tolerant of imperfect-but-readable OCR ("apphcation", "Honb1e")
+#   - Strict on actual gibberish (broken CMaps, page-as-noise)
+#
+# References:
+#   - PyMuPDF maintainer's official advice: OCR fallback for broken CMaps
+#     (PyMuPDF Discussion #3801)
+#   - firecrawl/pdf-inspector (Rust): per-PDF font-structural detection — we
+#     achieve similar discrimination with cheaper text-statistics signals
+
+_GARBLE_VOWELS = frozenset("aeiouyAEIOUY")
+_GARBLE_CONS_RUN_RE = re.compile(r"[^aeiouyAEIOUY\s\d\W_]{5,}")
+_GARBLE_REPEAT_RE = re.compile(r"(.)\1{3,}")
+_GARBLE_TOKEN_RE = re.compile(r"[A-Za-z]{3,}")
+
+
+def _score_text_quality(text: str, sample_chars: int = 20_000) -> dict:
+    """Score a single block of extracted text for grounding-quality.
+
+    Returns {"verdict": str, "score": int, "metrics": dict}. Verdicts:
+      - "garbled":   text-layer is unreliable, prefer Vision OCR
+      - "clean":     usable as grounding anchor
+      - "non_latin": dominated by non-Latin script (deferred to other checks)
+      - "empty"/"too_short": insufficient signal to decide
+    """
+    if not text:
+        return {"verdict": "empty", "score": 0, "metrics": {}}
+
+    sample = text[:sample_chars]
+    raw_tokens = sample.split()
+    if not raw_tokens:
+        return {"verdict": "empty", "score": 0, "metrics": {}}
+
+    # Script-dominance check: this detector is Latin-script specific. Non-Latin
+    # scripts have their own quality signals — defer to the existing Devanagari
+    # check below for Hindi PDFs, and treat other Indic / CJK / Arabic as
+    # opaque (we don't currently detect garble in those scripts).
+    deva = sum(1 for c in sample if 0x0900 <= ord(c) <= 0x097F)
+    tamil = sum(1 for c in sample if 0x0B80 <= ord(c) <= 0x0BFF)
+    bengali = sum(1 for c in sample if 0x0980 <= ord(c) <= 0x09FF)
+    cjk = sum(1 for c in sample if 0x4E00 <= ord(c) <= 0x9FFF)
+    arabic = sum(1 for c in sample if 0x0600 <= ord(c) <= 0x06FF)
+    non_latin = deva + tamil + bengali + cjk + arabic
+    latin_alpha = sum(1 for c in sample if c.isalpha() and c.isascii())
+
+    if non_latin > 0 and non_latin > latin_alpha * 0.5:
+        return {
+            "verdict": "non_latin",
+            "score": 0,
+            "metrics": {"non_latin_chars": non_latin, "latin_chars": latin_alpha},
+        }
+
+    alpha_tokens = _GARBLE_TOKEN_RE.findall(sample)
+    long_tokens = [t for t in alpha_tokens if len(t) >= 4]
+    alpha_coverage = len(alpha_tokens) / len(raw_tokens) if raw_tokens else 0.0
+
+    # Strong-noise short-circuit — text is dominated by numbers, single chars,
+    # or non-alphabetic fragments. Real legal docs have alpha_coverage > 0.5.
+    if len(raw_tokens) >= 50 and alpha_coverage < 0.30:
+        return {
+            "verdict": "garbled",
+            "score": 99,
+            "metrics": {"alpha_coverage": round(alpha_coverage, 3),
+                        "raw_tokens": len(raw_tokens),
+                        "alpha_tokens": len(alpha_tokens),
+                        "reason": "low_alpha_coverage"},
+        }
+
+    if len(long_tokens) < 50:
+        return {"verdict": "too_short", "score": 0,
+                "metrics": {"long_tokens": len(long_tokens),
+                            "alpha_coverage": round(alpha_coverage, 3)}}
+
+    no_vowel = sum(1 for t in long_tokens if not any(c in _GARBLE_VOWELS for c in t))
+    no_vowel_ratio = no_vowel / len(long_tokens)
+    cons_run = sum(1 for t in long_tokens if _GARBLE_CONS_RUN_RE.search(t))
+    cons_run_ratio = cons_run / len(long_tokens)
+    repeat_heavy = sum(1 for t in long_tokens if _GARBLE_REPEAT_RE.search(t))
+    repeat_ratio = repeat_heavy / len(long_tokens)
+    avg_len = sum(len(t) for t in long_tokens) / len(long_tokens)
+
+    score = 0
+    score += int(no_vowel_ratio > 0.20)   # real English: ~2-5%; legal acronyms allowed
+    score += int(cons_run_ratio > 0.08)   # 5+ consonants in a row is rare
+    score += int(cons_run_ratio > 0.15)   # severe — broken-CMap signature
+    score += int(repeat_ratio > 0.08)     # "iiii", "1111" patterns
+    score += int(avg_len < 3.5 or avg_len > 9.0)
+    score += int(alpha_coverage < 0.50)
+
+    return {
+        "verdict": "garbled" if score >= 2 else "clean",
+        "score": score,
+        "metrics": {"long_tokens": len(long_tokens),
+                    "alpha_coverage": round(alpha_coverage, 3),
+                    "no_vowel_ratio": round(no_vowel_ratio, 3),
+                    "cons_run_ratio": round(cons_run_ratio, 3),
+                    "repeat_ratio": round(repeat_ratio, 3),
+                    "avg_token_len": round(avg_len, 2)},
+    }
+
+
+def _detect_garbled_pdf(per_page_texts: list[str]) -> dict:
+    """Decide whether the PDF's text-layer is unreliable enough to warrant
+    falling back to Vision OCR.
+
+    A PDF is flagged "garbled" when either:
+      (a) the aggregate full-text score is >=2, OR
+      (b) >=10% of pages individually score as garbled
+
+    Returns:
+      {
+        "garbled": bool,
+        "garbled_pages": list[int],      # 0-indexed page numbers needing re-OCR
+        "garbled_pct": float,            # percentage of bad pages
+        "page_count": int,
+        "full_score": int,
+      }
+    """
+    page_count = len(per_page_texts)
+    if page_count == 0:
+        return {"garbled": False, "garbled_pages": [], "garbled_pct": 0.0,
+                "page_count": 0, "full_score": 0}
+
+    bad_pages: list[int] = []
+    for i, ptext in enumerate(per_page_texts):
+        if not ptext or not ptext.strip():
+            continue
+        page_score = _score_text_quality(ptext, sample_chars=10_000)
+        if page_score["verdict"] == "garbled":
+            bad_pages.append(i)
+
+    full_text = "\n\n".join(per_page_texts)
+    full = _score_text_quality(full_text, sample_chars=20_000)
+    garbled_pct = (len(bad_pages) / page_count) * 100
+
+    is_garbled = (full["verdict"] == "garbled") or (garbled_pct >= 10.0)
+    return {
+        "garbled": is_garbled,
+        "garbled_pages": bad_pages,
+        "garbled_pct": round(garbled_pct, 1),
+        "page_count": page_count,
+        "full_score": full["score"],
+    }
+
+
 def _extract_pdf_text(file_path: str) -> tuple[str, int]:
     """Extract text from PDF with PyMuPDF. Returns (text, page_count)."""
     import fitz
@@ -143,6 +306,33 @@ def _extract_pdf_text(file_path: str) -> tuple[str, int]:
 
     doc.close()
     return "\n\n".join(all_text), page_count
+
+
+def _extract_pdf_text_per_page(file_path: str) -> tuple[list[str], int]:
+    """Extract text per page (without page-marker headers) for garble scoring.
+
+    Mirrors `_extract_pdf_text` but returns the raw per-page list so callers
+    can score each page individually for selective re-OCR.
+    """
+    import fitz
+
+    doc = fitz.open(file_path)
+    page_count = doc.page_count
+
+    if doc.is_encrypted:
+        doc.close()
+        raise ValueError("PDF is encrypted/password-protected")
+
+    if page_count == 0:
+        doc.close()
+        raise ValueError("PDF has no pages")
+
+    pages: list[str] = []
+    for page in doc:
+        pages.append(page.get_text("text") or "")
+
+    doc.close()
+    return pages, page_count
 
 
 def _file_hash(file_path: str) -> str:
@@ -578,7 +768,17 @@ async def process_files(
         # --- PDF-specific handling ---
         if ext == ".pdf":
             try:
-                text, page_count = await asyncio.to_thread(_extract_pdf_text, local_path)
+                # Per-page extraction so we can score each page for garbled
+                # text-layer (broken Identity-H fonts, bad embedded OCR).
+                # Joined text reproduces the legacy `_extract_pdf_text`
+                # output format with "--- Page N ---" markers.
+                per_page_texts, page_count = await asyncio.to_thread(
+                    _extract_pdf_text_per_page, local_path,
+                )
+                text = "\n\n".join(
+                    f"--- Page {i + 1} ---\n{t.strip()}"
+                    for i, t in enumerate(per_page_texts) if t.strip()
+                )
                 pf.page_count = page_count
                 is_scanned = not text.strip()
 
@@ -600,6 +800,67 @@ async def process_files(
                         # and will hallucinate. Force Document agent to use OCR text.
                         pf.gemini_uri = None
                         pf.gemini_name = None
+
+                # Detect garbled Latin-script text (broken Identity-H CMap,
+                # noisy embedded OCR, vector-outlined glyphs). Symptoms include
+                # consonant pile-ups ("vvm111"), random Latin substitutions
+                # ("PUHJAE Aim HARYAIIA" for "PUNJAB AND HARYANA"), or numeric
+                # noise ("1121111 11"). Without this check, the bad text-layer
+                # pollutes the Document agent's grounding anchor and triggers
+                # small hallucinations like "IIT Roorkee" when the doc actually
+                # says "IIT Ropar". Re-OCR via Gemini Vision (cached by file
+                # hash) replaces the bad text. Gemini URI is preserved —
+                # multimodal vision still works on the native PDF; OCR is the
+                # grounding anchor for inline_text + ChromaDB.
+                if text.strip() and not is_scanned:
+                    garble = _detect_garbled_pdf(per_page_texts)
+                    if garble["garbled"]:
+                        log.warning(
+                            "Garbled Latin text-layer detected — re-OCR via "
+                            "Vision (Gemini URI preserved)",
+                            file=pf.original_name,
+                            garbled_pages=len(garble["garbled_pages"]),
+                            page_count=garble["page_count"],
+                            garbled_pct=garble["garbled_pct"],
+                            full_score=garble["full_score"],
+                        )
+                        try:
+                            # Cap latency on giant PDFs. 113-page Indian
+                            # court PDFs at 200 DPI take ~570s in measurement;
+                            # 900s gives ~50% headroom. The OCR cache
+                            # (`_save_ocr_cache`) makes repeat uploads of the
+                            # same file hash instant. If the timeout is hit,
+                            # the in-flight thread continues running to
+                            # populate the cache for the next request.
+                            ocr_text = await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    _vision_ocr_pdf, local_path, page_count,
+                                ),
+                                timeout=900,
+                            )
+                            if ocr_text.strip():
+                                text = ocr_text
+                                log.info(
+                                    "Garble-triggered Vision OCR succeeded",
+                                    file=pf.original_name, ocr_chars=len(text),
+                                )
+                            else:
+                                log.warning(
+                                    "Garble-triggered Vision OCR returned no "
+                                    "text — keeping existing text-layer",
+                                    file=pf.original_name,
+                                )
+                        except asyncio.TimeoutError:
+                            log.error(
+                                "Garble-triggered Vision OCR timed out — "
+                                "keeping existing text-layer (degraded)",
+                                file=pf.original_name, page_count=page_count,
+                            )
+                        except Exception as e:
+                            log.error(
+                                "Garble-triggered Vision OCR failed",
+                                file=pf.original_name, error=str(e),
+                            )
 
                 if is_scanned and pf.gemini_uri and page_count > MAX_INLINE_PDF_PAGES:
                     # Large scanned PDF with Gemini URI — schedule background OCR
@@ -636,7 +897,15 @@ async def process_files(
                     text = await asyncio.to_thread(_vision_ocr_pdf, local_path, page_count)
 
                 # Store large PDFs in ChromaDB for retrieval (even if Gemini has it,
-                # ChromaDB enables targeted chunk retrieval for follow-up questions)
+                # ChromaDB enables targeted chunk retrieval for follow-up questions).
+                # Also populate inline_text as a grounding anchor — Gemini's
+                # multimodal PDF reader can silently under-sample scanned-but-
+                # text-layered legal PDFs and confabulate from training memory
+                # (BUG-04 large-PDF branch: J&K hallucination on a Chandigarh
+                # DPR matter triggered by case-number string match). The
+                # Document agent's Gemini-files path appends fc.inline_text as
+                # "Additional document text" to anchor the model in real
+                # content. Mirrors the small-PDF branch fix (BUG-02).
                 if text.strip() and (page_count > MAX_INLINE_PDF_PAGES or len(text) > MAX_INLINE_TEXT_CHARS):
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     try:
@@ -647,8 +916,8 @@ async def process_files(
                                  file=pf.original_name, pages=page_count, collection=collection_id)
                     except Exception as e:
                         log.error("ChromaDB storage failed", error=str(e))
-                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
+                    pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
+                    inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
                 elif text.strip():
                     # Small PDF with text — record inline text so non-multimodal
                     # downstream agents (Drafting, Scenario, Legislation) can

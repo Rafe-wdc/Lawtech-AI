@@ -656,6 +656,25 @@ async def search_stream(data: SearchRequest, request: Request):
 # Chat with Files (inline file attachments)
 # ============================================================
 
+def safe_upload_name(original: str) -> str:
+    """Sanitize an uploaded filename without dropping non-ASCII-named files.
+
+    Werkzeug's ``secure_filename()`` strips ALL non-ASCII characters, so a file
+    named entirely in Kannada / Hindi / Tamil / etc. collapses to ``''`` (then
+    silently skipped) or to just ``'pdf'`` (extension lost -> "unsupported file
+    type"). This keeps the real (ASCII) extension and falls back to a UUID stem
+    when the name has no usable ASCII left, so the file is still processed.
+    A non-ASCII / oversized extension is dropped so ``validate_upload`` can
+    reject the file with a clear message rather than mis-routing it.
+    """
+    root, ext = os.path.splitext(original or "")
+    ext = ext.lower()
+    if not (ext and ext.isascii() and len(ext) <= 10):
+        ext = ""
+    stem = secure_filename(root) or f"document_{uuid.uuid4().hex[:8]}"
+    return f"{stem}{ext}"
+
+
 @app.post("/pyapi/chat", dependencies=[Depends(require_user_key)])
 @limiter.limit(_get_limit_for_request)
 async def chat_with_files(
@@ -690,6 +709,7 @@ async def chat_with_files(
     # Validate and save files to temp dir
     file_tuples: list[tuple[str, str, int]] = []
     temp_paths: list[str] = []
+    rejected_files: list[dict] = []   # surfaced to the client as a file_processing event
 
     if files:
         if len(files) > MAX_FILES:
@@ -702,9 +722,8 @@ async def chat_with_files(
             if not f.filename or f.filename == "":
                 continue
 
-            filename = secure_filename(f.filename)
-            if not filename:
-                continue
+            original_name = f.filename
+            filename = safe_upload_name(original_name)
 
             # Save to temp file
             suffix = os.path.splitext(filename)[1]
@@ -717,7 +736,9 @@ async def chat_with_files(
 
             err = validate_upload(filename, len(content))
             if err:
-                log.warning("File rejected in chat", file=filename, reason=err)
+                log.warning("File rejected in chat", file=original_name,
+                            sanitized=filename, reason=err)
+                rejected_files.append({"name": original_name, "reason": err})
                 continue
 
             file_tuples.append((tmp_path, filename, len(content)))
@@ -728,6 +749,10 @@ async def chat_with_files(
         file_context_dict = None
         # First, emit thread_id and file_processing events directly.
         yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
+
+        if rejected_files:
+            _names = ", ".join(r["name"] for r in rejected_files)
+            yield f"data: {json.dumps({'type': 'file_processing', 'message': f'{len(rejected_files)} file(s) could not be accepted: {_names}', 'rejected': rejected_files, 'files': []})}\n\n"
 
         if file_tuples:
             yield f"data: {json.dumps({'type': 'file_processing', 'message': 'Processing uploaded files...'})}\n\n"

@@ -153,6 +153,172 @@ _GARBLE_CONS_RUN_RE = re.compile(r"[^aeiouyAEIOUY\s\d\W_]{5,}")
 _GARBLE_REPEAT_RE = re.compile(r"(.)\1{3,}")
 _GARBLE_TOKEN_RE = re.compile(r"[A-Za-z]{3,}")
 
+# --- Script-aware text-quality detection (all scripts, not just Latin) ---
+#
+# Indian-language PDFs (Kannada, Hindi, Tamil, Telugu, Malayalam, Bengali,
+# Marathi, Gujarati, Punjabi, Odia, ...) routinely ship with broken font
+# encodings — an Identity-H CMap with no ToUnicode table, or a Devanagari/
+# Kannada glyph set mislabelled as WinAnsiEncoding — so PyMuPDF returns either
+# U+FFFD replacement chars or a deterministic-but-wrong Latin/Latin-Extended
+# soup ("ªÉÉ´ÉlÉ" for real Kannada/Devanagari). See PyMuPDF Discussions/Issues
+# #3801, #3799, #4805, #4701 — the maintainer's advice is "fall back to OCR".
+#
+# The Latin-script garble heuristics above can't see this (the bad output isn't
+# Latin words), so we add a *script-coherence* check: real text is dominated by
+# one or two coherent scripts with very few U+FFFD and very little Latin-Extended
+# "dump-zone" noise; broken-CMap output is the opposite.
+
+# Inclusive Unicode-block ranges for the scripts we care about. Order matters
+# only for the first-match lookup in _script_of(); ranges don't overlap.
+_SCRIPT_BLOCKS: tuple[tuple[int, int, str], ...] = (
+    (0x0900, 0x097F, "devanagari"),   # Hindi, Marathi, Sanskrit, Nepali, Konkani
+    (0x0980, 0x09FF, "bengali"),      # Bengali, Assamese
+    (0x0A00, 0x0A7F, "gurmukhi"),     # Punjabi
+    (0x0A80, 0x0AFF, "gujarati"),
+    (0x0B00, 0x0B7F, "oriya"),        # Odia
+    (0x0B80, 0x0BFF, "tamil"),
+    (0x0C00, 0x0C7F, "telugu"),
+    (0x0C80, 0x0CFF, "kannada"),
+    (0x0D00, 0x0D7F, "malayalam"),
+    (0x0D80, 0x0DFF, "sinhala"),
+    (0x0E00, 0x0E7F, "thai"),
+    (0x0E80, 0x0EFF, "lao"),
+    (0x1000, 0x109F, "myanmar"),
+    (0x0F00, 0x0FFF, "tibetan"),
+    (0x3040, 0x30FF, "kana"),         # Hiragana + Katakana
+    (0x3400, 0x4DBF, "cjk"),          # CJK Extension A
+    (0x4E00, 0x9FFF, "cjk"),          # CJK Unified Ideographs
+    (0xAC00, 0xD7AF, "hangul"),
+    (0x0600, 0x06FF, "arabic"),
+    (0x0750, 0x077F, "arabic"),       # Arabic Supplement
+    (0x0590, 0x05FF, "hebrew"),
+    (0x0400, 0x04FF, "cyrillic"),
+    (0x0370, 0x03FF, "greek"),
+)
+
+# Latin-1 Supplement + Latin Extended-A/B + Latin Extended Additional. The
+# *letters* in this zone are accented Latin in legitimate text — but it is also
+# exactly where broken Identity-H CMaps for Indic fonts dump their gibberish, so
+# we keep it as its own bucket rather than lumping it with plain ASCII Latin.
+_LATIN_EXT_RANGES: tuple[tuple[int, int], ...] = ((0x00A0, 0x024F), (0x1E00, 0x1EFF))
+
+
+def _script_of(ch: str) -> str | None:
+    """Return a coarse script name for a *letter* character, or None for
+    digits / punctuation / symbols / whitespace / control chars.
+
+    Buckets: "latin" (ASCII letters), "latin_ext" (accented + Latin Extended —
+    also the broken-CMap dump zone), a named non-Latin script, or
+    "other_letter" (a letter in some script we don't enumerate).
+    """
+    o = ord(ch)
+    if o < 0x80:
+        return "latin" if ch.isalpha() else None
+    for lo, hi, name in _SCRIPT_BLOCKS:
+        if lo <= o <= hi:
+            return name
+    for lo, hi in _LATIN_EXT_RANGES:
+        if lo <= o <= hi:
+            return "latin_ext" if ch.isalpha() else None
+    # Everything else: only count it if Python considers it a letter (covers
+    # less-common scripts we don't enumerate); otherwise ignore.
+    return "other_letter" if ch.isalpha() else None
+
+
+def _script_profile(text: str, sample_chars: int = 20_000) -> dict:
+    """Profile the script composition of a text sample.
+
+    Returns:
+      {
+        "letters": int,                 # total letter chars considered
+        "by_script": {script: count},   # includes "latin", "latin_ext", named scripts
+        "replacement": int,             # count of U+FFFD
+        "replacement_ratio": float,     # U+FFFD / (letters + U+FFFD)
+        "latin_ext_ratio": float,       # latin_ext / letters
+        "dominant": str | None,         # script with the most letters (excl. latin_ext)
+        "dominant_ratio": float,        # dominant count / letters
+        "nonlatin_letters": int,        # letters in named non-Latin scripts
+      }
+    """
+    sample = text[:sample_chars] if text else ""
+    by_script: dict[str, int] = {}
+    replacement = 0
+    for ch in sample:
+        if ch == "�":
+            replacement += 1
+            continue
+        s = _script_of(ch)
+        if s is not None:
+            by_script[s] = by_script.get(s, 0) + 1
+
+    letters = sum(by_script.values())
+    latin_ext = by_script.get("latin_ext", 0)
+    # "Real" scripts = everything except the latin_ext dump-zone bucket.
+    real = {k: v for k, v in by_script.items() if k != "latin_ext"}
+    dominant, dominant_n = (None, 0)
+    for k, v in real.items():
+        if v > dominant_n:
+            dominant, dominant_n = k, v
+    nonlatin_letters = sum(
+        v for k, v in by_script.items()
+        if k not in ("latin", "latin_ext")
+    )
+    denom = letters + replacement
+    return {
+        "letters": letters,
+        "by_script": by_script,
+        "replacement": replacement,
+        "replacement_ratio": (replacement / denom) if denom else 0.0,
+        "latin_ext_ratio": (latin_ext / letters) if letters else 0.0,
+        "dominant": dominant,
+        "dominant_ratio": (dominant_n / letters) if letters else 0.0,
+        "nonlatin_letters": nonlatin_letters,
+    }
+
+
+def _is_garbled_by_script(profile: dict) -> tuple[bool, str]:
+    """Language-agnostic garble signal from a script profile.
+
+    A text layer is "garbled" when it shows broken-CMap fingerprints:
+      - many U+FFFD replacement chars (font has no ToUnicode for these glyphs), or
+      - a large share of letters in the Latin-Extended dump-zone with no coherent
+        dominant script (the deterministic-but-wrong mojibake case), or
+      - no single script accounts for even ~45% of letters while there is
+        meaningful dump-zone / replacement noise (incoherent soup), or
+      - a real non-Latin script is present but is heavily contaminated by
+        Latin-Extended dump-zone chars (partial broken-CMap — same font, some
+        spans correct, some declared WinAnsi; this is the original Devanagari
+        FIR-PDF failure mode, now generalised to Kannada/Tamil/Telugu/...).
+
+    Returns (is_garbled, reason). Conservative on purpose — a clean bilingual
+    English+Kannada legal PDF has low U+FFFD, low latin_ext, and a clear
+    dominant script, so it is *not* flagged.
+    """
+    letters = profile["letters"]
+    repl_ratio = profile["replacement_ratio"]
+    ext_ratio = profile["latin_ext_ratio"]
+    dom_ratio = profile["dominant_ratio"]
+    nonlatin = profile["nonlatin_letters"]
+    latin_ext_n = profile["by_script"].get("latin_ext", 0)
+
+    if repl_ratio >= 0.05:
+        return True, f"replacement_chars={repl_ratio:.2%}"
+    # Partial broken-CMap on a real non-Latin script (correct spans + mojibake
+    # spans of the same font). Mirrors the legacy `garbled > clean_deva*0.2`
+    # Devanagari check, generalised to all non-Latin scripts. The extra absolute
+    # + total-ratio gates keep a few accented Latin names (Müller, François) in a
+    # doc that happens to contain a short non-Latin quote from being flagged.
+    if (nonlatin >= 50 and latin_ext_n >= 20
+            and latin_ext_n >= nonlatin * 0.15 and ext_ratio >= 0.05):
+        return True, f"nonlatin_contaminated latin_ext={latin_ext_n}/nonlatin={nonlatin}"
+    # Need enough signal to judge coherence at all.
+    if letters >= 200:
+        if ext_ratio >= 0.25 and dom_ratio < 0.45:
+            return True, f"latin_ext_dump={ext_ratio:.2%},dominant={dom_ratio:.2%}"
+        if ext_ratio >= 0.10 and (ext_ratio + repl_ratio) >= 0.20 and dom_ratio < 0.45:
+            return True, f"incoherent latin_ext={ext_ratio:.2%}+repl={repl_ratio:.2%}"
+    return False, "clean"
+
 
 def _score_text_quality(text: str, sample_chars: int = 20_000) -> dict:
     """Score a single block of extracted text for grounding-quality.
@@ -160,7 +326,8 @@ def _score_text_quality(text: str, sample_chars: int = 20_000) -> dict:
     Returns {"verdict": str, "score": int, "metrics": dict}. Verdicts:
       - "garbled":   text-layer is unreliable, prefer Vision OCR
       - "clean":     usable as grounding anchor
-      - "non_latin": dominated by non-Latin script (deferred to other checks)
+      - "non_latin": dominated by a coherent non-Latin script (looks fine —
+                     deferred to the language-aware downstream handling)
       - "empty"/"too_short": insufficient signal to decide
     """
     if not text:
@@ -171,23 +338,34 @@ def _score_text_quality(text: str, sample_chars: int = 20_000) -> dict:
     if not raw_tokens:
         return {"verdict": "empty", "score": 0, "metrics": {}}
 
-    # Script-dominance check: this detector is Latin-script specific. Non-Latin
-    # scripts have their own quality signals — defer to the existing Devanagari
-    # check below for Hindi PDFs, and treat other Indic / CJK / Arabic as
-    # opaque (we don't currently detect garble in those scripts).
-    deva = sum(1 for c in sample if 0x0900 <= ord(c) <= 0x097F)
-    tamil = sum(1 for c in sample if 0x0B80 <= ord(c) <= 0x0BFF)
-    bengali = sum(1 for c in sample if 0x0980 <= ord(c) <= 0x09FF)
-    cjk = sum(1 for c in sample if 0x4E00 <= ord(c) <= 0x9FFF)
-    arabic = sum(1 for c in sample if 0x0600 <= ord(c) <= 0x06FF)
-    non_latin = deva + tamil + bengali + cjk + arabic
-    latin_alpha = sum(1 for c in sample if c.isalpha() and c.isascii())
+    # First, a language-agnostic broken-CMap check (U+FFFD soup, Latin-Extended
+    # dump zone, no coherent dominant script). This catches garbled Kannada /
+    # Hindi / Tamil / etc. text layers that the Latin word-statistics below
+    # can't see. Runs for *every* script, including Latin.
+    profile = _script_profile(sample, sample_chars=sample_chars)
+    garbled_by_script, gb_reason = _is_garbled_by_script(profile)
+    if garbled_by_script:
+        return {
+            "verdict": "garbled",
+            "score": 98,
+            "metrics": {"reason": gb_reason,
+                        "replacement_ratio": round(profile["replacement_ratio"], 3),
+                        "latin_ext_ratio": round(profile["latin_ext_ratio"], 3),
+                        "dominant": profile["dominant"],
+                        "dominant_ratio": round(profile["dominant_ratio"], 3)},
+        }
 
+    # If the text is dominated by a *coherent* non-Latin script, the Latin
+    # word-statistics below don't apply — the text looks fine. Defer.
+    non_latin = profile["nonlatin_letters"]
+    latin_alpha = profile["by_script"].get("latin", 0)
     if non_latin > 0 and non_latin > latin_alpha * 0.5:
         return {
             "verdict": "non_latin",
             "score": 0,
-            "metrics": {"non_latin_chars": non_latin, "latin_chars": latin_alpha},
+            "metrics": {"non_latin_chars": non_latin, "latin_chars": latin_alpha,
+                        "dominant": profile["dominant"],
+                        "dominant_ratio": round(profile["dominant_ratio"], 3)},
         }
 
     alpha_tokens = _GARBLE_TOKEN_RE.findall(sample)
@@ -415,12 +593,22 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
                 {
                     "type": "text",
                     "text": (
-                        f"Extract all visible text from these scanned legal document images "
-                        f"(Pages {batch_start + 1} to {batch_start + len(batch_b64)}). "
-                        "Preserve formatting, paragraph breaks, and structure. "
-                        "Pay attention to: party names, case numbers, dates, section numbers, "
-                        "court names, and legal provisions. If text is blurred or illegible, "
-                        "replace with most likely text based on legal context."
+                        f"You are an OCR engine for legal documents. Transcribe ALL visible "
+                        f"text from these document images (pages {batch_start + 1} to "
+                        f"{batch_start + len(batch_b64)}), exactly as it appears.\n"
+                        "- The document may be in English OR an Indian language (Hindi, "
+                        "Kannada, Tamil, Telugu, Malayalam, Bengali, Marathi, Gujarati, "
+                        "Punjabi, Odia, Assamese, Urdu, etc.). Transcribe text in its "
+                        "ORIGINAL script. Do NOT translate. Do NOT transliterate to the "
+                        "Latin/Roman alphabet. If the page mixes scripts (e.g. English "
+                        "headers with Kannada body text), keep each part in its own script.\n"
+                        "- Preserve formatting, paragraph breaks, headings, lists, tables, "
+                        "and the natural reading order.\n"
+                        "- Transcribe party names, case numbers, dates, section numbers, "
+                        "court names, statutory provisions, and amounts EXACTLY as written.\n"
+                        "- If a word or passage is genuinely illegible, write [illegible] in "
+                        "its place. Do NOT guess, fill in, or invent text.\n"
+                        "Output only the transcribed text, nothing else."
                     ),
                 },
                 *[
@@ -782,22 +970,31 @@ async def process_files(
                 pf.page_count = page_count
                 is_scanned = not text.strip()
 
-                # Detect garbled Devanagari text (common in Marathi/Hindi FIR PDFs
-                # with non-standard font encoding). If >20% of Devanagari chars
-                # are garbled, the text layer is unreliable — force Vision OCR.
+                # Script-aware garbled-text-layer check (Kannada / Hindi / Tamil
+                # / Telugu / Bengali / Marathi / Gujarati / Punjabi / Odia / ...
+                # PDFs with broken Identity-H CMaps, missing ToUnicode tables, or
+                # glyphs mislabelled WinAnsiEncoding). PyMuPDF returns U+FFFD soup
+                # or a Latin-Extended mojibake dump for these.
                 if text.strip() and not is_scanned:
-                    _clean_deva = sum(1 for c in text if 0x0900 <= ord(c) <= 0x097F)
-                    _garbled = sum(1 for c in text if ord(c) in range(0x0220, 0x0250)
-                                   or c in '\u0110\u0124\u0134\u0139\u013D\u0147\u014B\u0154\u0158')
-                    if _clean_deva > 50 and _garbled > _clean_deva * 0.2:
-                        log.warning("Garbled Devanagari detected — forcing Vision OCR, "
-                                    "invalidating Gemini URI (text layer unreliable)",
-                                    file=pf.original_name, clean=_clean_deva,
-                                    garbled=_garbled, ratio=f"{_garbled*100//(_clean_deva+1)}%")
-                        is_scanned = True  # treat as scanned → triggers OCR path
-                        text = ""  # discard unreliable text
-                        # Invalidate Gemini URI — it reads the same broken text layer
-                        # and will hallucinate. Force Document agent to use OCR text.
+                    _profile = _script_profile(text)
+                    _gb, _gb_reason = _is_garbled_by_script(_profile)
+                    # Non-Latin text layer (Kannada/Hindi/Tamil/Telugu/...) that
+                    # is garbled: the embedded glyph encoding is broken, so the
+                    # Gemini native PDF read sees the same bad bytes and tends to
+                    # confabulate (original Devanagari FIR-PDF failure mode). Drop
+                    # the text + invalidate the Gemini URI and force Vision OCR
+                    # below. Pure-Latin garble is left for the next block, which
+                    # preserves the URI and only re-OCRs the grounding anchor.
+                    if _gb and _profile["nonlatin_letters"] >= 50:
+                        log.warning("Garbled non-Latin text layer detected - forcing "
+                                    "Vision OCR, invalidating Gemini URI",
+                                    file=pf.original_name, reason=_gb_reason,
+                                    dominant=_profile["dominant"],
+                                    nonlatin=_profile["nonlatin_letters"],
+                                    latin_ext=_profile["by_script"].get("latin_ext", 0),
+                                    replacement=_profile["replacement"])
+                        is_scanned = True   # routes to the Vision OCR path below
+                        text = ""           # discard the unreliable text layer
                         pf.gemini_uri = None
                         pf.gemini_name = None
 
@@ -891,10 +1088,22 @@ async def process_files(
                              file=pf.original_name, pages=page_count)
 
                 elif is_scanned:
-                    # Scanned PDF and no Gemini URI — must run Vision OCR
-                    log.info("Scanned PDF: no Gemini URI, running Vision OCR",
+                    # Scanned PDF (or a garbled non-Latin text layer we just
+                    # invalidated) and no Gemini URI — must run Vision OCR.
+                    # Capped so a giant document can't block the request past the
+                    # gateway timeout; the in-flight thread keeps running to fill
+                    # the OCR cache for the retry.
+                    log.info("Scanned/garbled PDF: no Gemini URI, running Vision OCR",
                              file=pf.original_name, pages=page_count)
-                    text = await asyncio.to_thread(_vision_ocr_pdf, local_path, page_count)
+                    try:
+                        text = await asyncio.wait_for(
+                            asyncio.to_thread(_vision_ocr_pdf, local_path, page_count),
+                            timeout=900,
+                        )
+                    except asyncio.TimeoutError:
+                        log.error("Vision OCR timed out for scanned/garbled PDF",
+                                  file=pf.original_name, page_count=page_count)
+                        text = ""
 
                 # Store large PDFs in ChromaDB for retrieval (even if Gemini has it,
                 # ChromaDB enables targeted chunk retrieval for follow-up questions).

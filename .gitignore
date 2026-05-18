@@ -93,4 +93,18 @@ test_docx/
 tmp/
 temp/
 *.tmp
-tests/_temp_*
+
+# Scratch test files (underscore-prefix convention = local debug/repro,
+# not for commit). Covers _bug*, _capture_*, _debug_*, _eval_*, _prod_*,
+# _render_*, _repro_*, _temp_*, _case_facts*, _test_garble_*, etc.
+tests/_*
+
+# Single-investigation artifact dumps
+tests/test101_*
+tests/prompt_*
+tests/partnership_draft_events.txt
+
+# Root-level scratch / one-off captures
+prompt_*.txt
+prod_chat_*.json
+test_image/

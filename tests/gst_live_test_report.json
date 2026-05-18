@@ -1,0 +1,206 @@
+{
+  "routing": [
+    {
+      "i": 1,
+      "label": "topic-from-brief",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 2,
+      "label": "party-name",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 3,
+      "label": "state-filter",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 4,
+      "label": "case-number",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 5,
+      "label": "state+topic",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 6,
+      "label": "intent-generic",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 7,
+      "label": "topic-from-brief",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 8,
+      "label": "party-name",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 9,
+      "label": "state-filter",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    },
+    {
+      "i": 10,
+      "label": "case-number",
+      "task": "GST_Judgment",
+      "agents": [
+        "GST_Judgment"
+      ]
+    }
+  ],
+  "agent": [
+    {
+      "i": 1,
+      "label": "topic-from-brief",
+      "ok": true,
+      "elapsed_s": 14.0,
+      "error": null,
+      "content_len": 2875,
+      "content_preview": "The AAARs have ruled on the appropriate classification under SAC Heading in the following cases:  ### 1. M/s Sumeet Facilities Limited (Tamil Nadu)  *   **Applicant:** M/s Sumeet Facilities Limited * ",
+      "source_count": 3,
+      "first_source_party": "M/s Sumeet Facilities Limited",
+      "first_source_state": "Tamil Nadu"
+    },
+    {
+      "i": 2,
+      "label": "party-name",
+      "ok": true,
+      "elapsed_s": 8.8,
+      "error": null,
+      "content_len": 2031,
+      "content_preview": "Here's a summary of the GST AAAR ruling involving M/s Tiruppur City Municipal Corporation:  ### M/s Tiruppur City Municipal Corporation *   **State/UT**: Tamil Nadu *   **Appeal Order No**: TN/AAAR/21",
+      "source_count": 10,
+      "first_source_party": "M/s Tiruppur City Municipal Corporation",
+      "first_source_state": "Tamil Nadu"
+    },
+    {
+      "i": 3,
+      "label": "state-filter",
+      "ok": true,
+      "elapsed_s": 14.8,
+      "error": null,
+      "content_len": 3315,
+      "content_preview": "Here are some Telangana AAAR rulings on GST classification:  ### 1. Classification of Services Provided to Employees by a Government Company  *   **Applicant:** M/s The Singareni Collieries Company Li",
+      "source_count": 3,
+      "first_source_party": "M/s The Singareni Collieries Company Limited",
+      "first_source_state": "Telangana"
+    },
+    {
+      "i": 4,
+      "label": "case-number",
+      "ok": true,
+      "elapsed_s": 7.7,
+      "error": null,
+      "content_len": 1318,
+      "content_preview": "Here's a summary of the GST AAAR order you requested:  ### **M/s. Kitchen Express Overseas Ltd. (Gujarat AAAR)**  *   **Applicant:** M/s. Kitchen Express Overseas Ltd. *   **Appeal Order No:** GUJ/GAA",
+      "source_count": 10,
+      "first_source_party": "M/s. Kitchen express overseas ltd",
+      "first_source_state": "Gujarat"
+    },
+    {
+      "i": 5,
+      "label": "state+topic",
+      "ok": true,
+      "elapsed_s": 12.1,
+      "error": null,
+      "content_len": 2686,
+      "content_preview": "Here are the Andhra Pradesh GST Appellate Authority for Advance Ruling (AAAR) orders that confirm and uphold the decision of the Authority for Advance Ruling:  ### 1. M/s. Sri Venkateswara Cashew Chik",
+      "source_count": 3,
+      "first_source_party": "M/s. Sri Venkateswara Cashew Chikky Manufacturers",
+      "first_source_state": "Andhra Pradesh"
+    },
+    {
+      "i": 6,
+      "label": "intent-generic",
+      "ok": true,
+      "elapsed_s": 10.8,
+      "error": null,
+      "content_len": 1803,
+      "content_preview": "Here are two GST Advance Ruling Appellate Authority (AAAR) orders where the appellate authority confirmed the ruling pronounced by the Authority for Advance Ruling (AAR):  ### 1. M/s. Hafele India Pvt",
+      "source_count": 5,
+      "first_source_party": "M/s. Hafele India Pvt. Ltd.",
+      "first_source_state": "Maharashtra"
+    },
+    {
+      "i": 7,
+      "label": "topic-from-brief",
+      "ok": true,
+      "elapsed_s": 12.5,
+      "error": null,
+      "content_len": 3333,
+      "content_preview": "The AAAR's stance on the eligibility of Input Tax Credit (ITC) for input services being \"integrally connected with the business of manufacturing the final product\" can be inferred from the available r",
+      "source_count": 3,
+      "first_source_party": "(1) National Aluminium Company Limited; (2) The Commissioner, GST & C.Ex., Bhubaneswar",
+      "first_source_state": "Odisha"
+    },
+    {
+      "i": 8,
+      "label": "party-name",
+      "ok": true,
+      "elapsed_s": 7.8,
+      "error": null,
+      "content_len": 1478,
+      "content_preview": "Here's a summary of the GST AAAR ruling involving M/s Dhingra Trucking:  ### M/s Dhingra Trucking (Haryana AAAR)  **Applicant:** M/s Dhingra Trucking Pvt. Ltd. **State/UT:** Haryana **Appeal Order No:",
+      "source_count": 10,
+      "first_source_party": "M/s Dhingra Trucking",
+      "first_source_state": "Haryana"
+    },
+    {
+      "i": 9,
+      "label": "state-filter",
+      "ok": true,
+      "elapsed_s": 10.6,
+      "error": null,
+      "content_len": 1887,
+      "content_preview": "Here are some West Bengal AAAR rulings on GST classification:  ### 1. Classification of Baked Food Products with Meat Content  *   **Applicant:** M/s Switz Foods Pvt. Ltd. *   **Appeal Order No.:** 01",
+      "source_count": 3,
+      "first_source_party": "M/s IZ Kartex named after P G Korobkov Limited",
+      "first_source_state": "West Bengal"
+    },
+    {
+      "i": 10,
+      "label": "case-number",
+      "ok": true,
+      "elapsed_s": 7.6,
+      "error": null,
+      "content_len": 1145,
+      "content_preview": "Here is a summary of the GST AAAR order you requested:  ### M/s. Precision Camshafts Limited  *   **Applicant:** M/s. Precision Camshafts Limited *   **State/UT:** Maharashtra *   **Appeal Order No.:*",
+      "source_count": 10,
+      "first_source_party": "M/s.Precision Camshafts Limited",
+      "first_source_state": "Maharashtra"
+    }
+  ]
+}

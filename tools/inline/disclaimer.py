@@ -17,7 +17,7 @@ LEGAL_DISCLAIMER = (
 DISCLAIMER_TASKS = {
     "Scenario", "Legal_Concepts", "Other", "Drafting",
     "Document", "Judgment", "Legislation", "Newacts",
-    "Constitution", "Maxim", "SCI_Judgment",
+    "Constitution", "Maxim", "SCI_Judgment", "GST_Judgment",
 }
 
 DISCLAIMER_INDICATORS = [

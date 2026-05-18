@@ -275,7 +275,7 @@ class IdentifyTaskSchema(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="The primary legal task type")
 
@@ -285,12 +285,12 @@ class ClassifyAndPlan(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="The primary legal task type")
     agents: list[str] = Field(
         ...,
-        description="List of agent names to invoke (1-3): Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, Document",
+        description="List of agent names to invoke (1-3): Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document",
     )
     reasoning: str = Field(..., description="Brief reasoning for task type and agent selection")
 
@@ -305,6 +305,16 @@ def _classify_task_regex_fallback(query: str) -> str:
                         "who are you", "what are you", "what can you do"}
     if q in _greeting_tokens or any(q.startswith(g) for g in _greeting_tokens):
         return "Non_legal"
+    # GST AAAR short-circuit (must run BEFORE generic act/section keywords so
+    # queries like "GST advance ruling on Section 17(5)" don't fall into Legislation)
+    if any(k in q for k in (
+        "advance ruling", "aaar", " aar ", "appellate authority for advance ruling",
+        "gst appeal", "gst appellate", "gst ruling", "gst classification",
+    )) or (("gst" in q or "cgst" in q or "sgst" in q or "igst" in q) and any(k in q for k in (
+        "appeal", "ruling", "classification", "itc", "input tax credit", "valuation",
+        "exemption", "hsn", "notification",
+    ))):
+        return "GST_Judgment"
     if any(k in q for k in ("draft", "agreement", "notice", "plaint", "petition", "template", "format")):
         return "Drafting"
     if any(k in q for k in ("bns", "bnss", "bsa", "ipc", "crpc", "iea",
@@ -368,7 +378,7 @@ def _classify_task(query: str, chat_summary: str | None = None) -> str:
 class AgentPlan(BaseModel):
     agents: list[str] = Field(
         ...,
-        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, Document",
+        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document",
     )
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
@@ -385,6 +395,7 @@ Available agents:
 - Maxim: Legal maxims and doctrines (Latin phrases like res judicata, audi alteram partem, estoppel)
 - Legal_Concepts: General legal explanations (use only when no specific category applies)
 - SCI_Judgment: Supreme Court of India case search
+- GST_Judgment: GST Appellate Authority for Advance Ruling (AAAR) orders. Use for any query about GST/CGST/SGST/IGST advance rulings, AAR, AAAR, GST classification appeals, GST ITC disputes, GST valuation rulings, or state-level GST appellate orders.
 - Document: Answers questions about user-uploaded documents (PDFs, images, DOCX). Use when user has uploaded files.
 
 Rules:
@@ -424,6 +435,7 @@ Identify the PRIMARY legal task type. Choose EXACTLY ONE:
 - **Scenario** → Situational legal query, real-life legal situation analysis, legal advice.
 - **Judgment** → Case law, court decisions, precedents (general / High Court / unspecified courts).
 - **SCI_Judgment** → Supreme Court of India cases. Use when user explicitly mentions "Supreme Court" or "SC", or names a landmark SC case.
+- **GST_Judgment** → GST Appellate Authority for Advance Ruling (AAAR) orders. Use when the query is about: GST/CGST/SGST/IGST advance rulings, AAR or AAAR orders, GST classification appeals, GST input tax credit (ITC) disputes, GST valuation rulings, HSN classification under GST, or state-level GST appellate decisions.
 - **Maxim** → Legal maxims, Latin phrases, legal doctrines (res judicata, estoppel, etc.).
 - **Legal_Concepts** → General legal explanations that don't fit above categories.
 - **Document** → Questions about uploaded files/documents.
@@ -431,7 +443,7 @@ Identify the PRIMARY legal task type. Choose EXACTLY ONE:
 - **Other** → Legal-adjacent queries that don't fit other categories.
 
 ## Task 2: Plan which agents to invoke
-Available agents: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, Document
+Available agents: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document
 
 Rules:
 1. Most queries need only the PRIMARY agent matching the task type.
@@ -660,6 +672,7 @@ Each agent has a different database and purpose:
 - Maxim: Searches legal maxims database. Query should specify: maxim name, doctrine, Latin phrase.
 - Legal_Concepts: General legal explanation. Query should be the legal concept to explain.
 - SCI_Judgment: Searches Supreme Court database. Query should focus on: SC-specific case names, constitutional questions, landmark rulings.
+- GST_Judgment: Searches GST AAAR (Appellate Authority for Advance Ruling) order database. Query should focus on: GST issue (classification / ITC / valuation / exemption), HSN code, GST section/notification, applicant name, state. Do NOT include unrelated tax topics (income tax, customs).
 
 Rules:
 1. Each rewritten query must be self-contained and optimized for that agent's search database.
@@ -801,6 +814,11 @@ _PLAN_SIGNALS: list[tuple[tuple[str, ...], str, int]] = [
 
     # SCI signals (backup for pre-check): "supreme court", "SC" → need SCI_Judgment
     (("supreme court", "apex court"), "SCI_Judgment", 2),
+
+    # GST AAAR signals
+    (("advance ruling", "aaar", "appellate authority for advance ruling",
+      "gst appeal", "gst appellate", "gst ruling", "gst classification"),
+     "GST_Judgment", 2),
 
     # Old act names → need Newacts for new equivalents
     (("ipc", "crpc", "cr.p.c", "cr pc", "iea",
@@ -1385,6 +1403,7 @@ def _serialize_sources(result: AgentResult) -> list[dict]:
             "keywords", "acts_or_sections_invoked",
             "case_no", "judgment_date", "bench", "judgment_by",
             "pdf_links", "parties", "db_id",
+            "state_ut", "brief_of_order", "ar_order_no_date",
             "section_number", "act_name",
             "template_type",
             "web_url", "web_title",

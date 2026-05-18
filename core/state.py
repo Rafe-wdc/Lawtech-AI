@@ -15,7 +15,7 @@ from langgraph.graph import MessagesState
 TaskType = Literal[
     "Drafting", "Judgment", "Legislation", "Constitution",
     "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-    "SCI_Judgment", "Document",
+    "SCI_Judgment", "GST_Judgment", "Document",
     "Non_legal", "Other",
 ]
 
@@ -50,6 +50,11 @@ class SourceMetadata:
     pdf_links: list[dict] = field(default_factory=list)
     parties: str | None = None
     db_id: str | None = None
+
+    # GST Judgment fields (AAAR appellate orders)
+    state_ut: str | None = None
+    brief_of_order: str | None = None
+    ar_order_no_date: str | None = None
 
     # Legislation / Newacts fields
     section_number: str | None = None

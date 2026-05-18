@@ -591,6 +591,7 @@ _NODE_STATUS = {
     "legal_concepts": "Explaining legal concepts...",
     "document": "Searching uploaded documents...",
     "sci_judgment": "Searching Supreme Court judgments...",
+    "gst_judgment": "Searching GST AAAR orders...",
     "orchestrator_synthesize": "Injecting citations into draft...",
     "guardrail_output": "Finalizing...",
     "blocked_response": "Query blocked.",

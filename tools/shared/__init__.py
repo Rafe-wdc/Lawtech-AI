@@ -129,6 +129,17 @@ from .sci_judgment_tools import (
     get_case_details,
 )
 
+# --- GST Judgment (AAAR) Tools ---
+from .gst_judgment_tools import (
+    gst_search_by_topic,
+    gst_search_by_keyword,
+    gst_search_by_case_number,
+    gst_search_by_party_name,
+    gst_search_by_date_range,
+    gst_search_by_state,
+    gst_get_case_details,
+)
+
 
 # ============================================================
 # ALL_TOOLS — flat list of every tool for convenience
@@ -220,6 +231,14 @@ ALL_TOOLS = [
     search_by_date_range,
     search_by_judge,
     get_case_details,
+    # GST Judgment / AAAR (7)
+    gst_search_by_topic,
+    gst_search_by_keyword,
+    gst_search_by_case_number,
+    gst_search_by_party_name,
+    gst_search_by_date_range,
+    gst_search_by_state,
+    gst_get_case_details,
 ]
 
 
@@ -330,5 +349,14 @@ AGENT_TOOLS = {
         search_by_date_range,
         search_by_judge,
         get_case_details,
+    ],
+    "gst_judgment": [
+        gst_search_by_topic,
+        gst_search_by_keyword,
+        gst_search_by_case_number,
+        gst_search_by_party_name,
+        gst_search_by_date_range,
+        gst_search_by_state,
+        gst_get_case_details,
     ],
 }

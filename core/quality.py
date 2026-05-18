@@ -25,7 +25,7 @@ log = get_logger("QualityScorer")
 
 # Agents worth scoring (skip Non_legal greetings, Drafting, Document)
 _SCOREABLE_AGENTS = {
-    "Legislation", "Judgment", "SCI_Judgment", "Newacts",
+    "Legislation", "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts",
     "Constitution", "Maxim", "Legal_Concepts", "Scenario",
 }
 

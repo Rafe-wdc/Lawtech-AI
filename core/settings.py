@@ -89,6 +89,7 @@ ES_INDICES = {
     "drafting": "drafting",
     "newacts": "newacts_v1",
     "sci_judgments": "supreme_court_judgement",
+    "gst_judgments": "gst_judgements",
     "constitution": "constitution",
     "maxims": "legal_maxims",
 }

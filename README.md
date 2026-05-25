@@ -1,106 +1,212 @@
-# Lawtech-AI v2 — Multi-Agent Architecture
+# Lawtech-AI
 
-## Structure
+Legal AI backend powered by FastAPI, LangGraph, LangChain, and multiple LLM providers. Provides intelligent legal assistance for Indian law: judgment Q&A, legislation lookup, scenario analysis, PDF document chat, legal drafting, and more.
+
+## Tech Stack
+
+- **Framework**: FastAPI (Python 3.12+), uvicorn on port 5000
+- **Agent orchestration**: LangGraph 1.x multi-agent graph
+- **LLM orchestration**: LangChain 1.x (provider-agnostic via `init_chat_model`)
+- **LLM providers**: OpenAI (GPT-4o for orchestration/metadata), Google GenAI (Gemini 2.5 Flash / Pro for generation), Google Search grounding for web fallback
+- **Search**: AWS OpenSearch (via `opensearch-py`, with `elasticsearch` fallback) for legal documents
+- **Vector store**: ChromaDB (PDF uploads only) with HuggingFace embeddings (BGE-large-en-v1.5, all-MiniLM-L6-v2)
+- **PDF processing**: PyMuPDF, with Gemini Vision fallback for scanned/garbled PDFs (Indic-script-aware detection)
+- **Storage**: AWS S3 (`lawttorney` bucket, `ap-south-1`) for judgment PDFs; PostgreSQL for chat history
+
+## Project Structure
 
 ```
 ├── core/                          # Core infrastructure
-│   ├── state.py                   # Shared agent state (LangGraph state schema)
-│   ├── graph.py                   # LangGraph graph definition (agent wiring)
-│   ├── gateway.py                 # FastAPI gateway (thin API layer)
-│   └── settings.py                # Centralized config (models, URLs, keys)
+│   ├── gateway.py                 # FastAPI app, SSE streaming, all API endpoints
+│   ├── graph.py                   # LangGraph graph definition and compilation
+│   ├── state.py                   # Shared state schema (LegalAgentState)
+│   ├── settings.py                # Configuration, env vars, model IDs
+│   ├── clients.py                 # LLM client singletons (GPT-4o, Gemini, OpenSearch)
+│   ├── chat_store.py              # PostgreSQL chat history store
+│   ├── chat_runner.py             # Chat orchestration helper
+│   ├── streaming.py               # SSE event streaming
+│   ├── file_processor.py          # PDF/image processing (PyMuPDF + Gemini Vision)
+│   ├── language.py                # Multilingual support (14 Indian languages)
+│   ├── agent_fallback.py          # Query rewrite + web search fallback utilities
+│   ├── auth.py, compliance.py     # Auth, rate limiting, audit
+│   ├── checkpointer.py            # LangGraph checkpoint persistence
+│   ├── response_cache.py          # Response caching layer
+│   └── logger.py                  # Structured logging
 │
-├── agents/                        # 10 specialized agents
-│   ├── orchestrator.py            # #1 — Plans, delegates, merges
-│   ├── guardrail.py               # #2 — Input/output safety
-│   ├── memory.py                  # #3 — Chat history, query rewriting
-│   ├── legislation.py             # #4 — Central/state law retrieval
-│   ├── judgment.py                # #5 — Case law search
-│   ├── newacts.py                 # #6 — BNS/BNSS/BSA/IPC/CrPC/IEA
-│   ├── drafting.py                # #7 — Legal document drafting
-│   ├── scenario.py                # #8 — Situational analysis + web search
-│   ├── constitution_maxim.py      # #9 — Constitution + legal maxims
-│   └── document.py                # #10 — PDF upload, OCR, document Q&A
+├── agents/                        # 12 LangGraph nodes
+│   ├── orchestrator.py            # Plans tasks, fans out to domain agents, merges
+│   ├── guardrail.py               # Input/output safety (injection, PII, hallucination)
+│   ├── memory.py                  # Chat history + query rewriting + follow-up detection
+│   ├── legislation.py             # Legislation lookup (OpenSearch)
+│   ├── judgment.py                # High Court judgment search (OpenSearch + S3)
+│   ├── sci_judgment.py            # Supreme Court judgment search
+│   ├── gst_judgment.py            # GST AAAR appellate-order search
+│   ├── newacts.py                 # BNS / BNSS / BSA new-code lookup
+│   ├── drafting.py                # Per-section legal-document drafting (Gemini Flash)
+│   ├── scenario.py                # Scenario analysis (Gemini + Google Search grounding)
+│   ├── constitution_maxim.py      # Constitution + maxims + general legal concepts
+│   ├── document.py                # PDF upload, OCR, vector storage, Q&A
+│   └── non_legal.py               # Non-legal query handler
 │
-├── tools/                         # Tool definitions
-│   ├── inline/                    # Pure functions (no I/O, run in-process)
+├── tools/
+│   ├── inline/                    # Pure in-process helpers
 │   │   ├── abbreviation.py        # expand_abbreviations()
 │   │   ├── section_parser.py      # parse_section_info()
 │   │   ├── markdown.py            # sanitize_markdown()
-│   │   ├── disclaimer.py          # add_disclaimer()
-│   │   └── formatters.py          # format_judgment(), format_legislation(), etc.
-│   └── shared/                    # Shared tool utilities
-│       └── registry.py            # Tool registration and discovery
+│   │   └── disclaimer.py          # add_disclaimer()
+│   └── shared/                    # @tool functions for agents
+│       ├── elasticsearch_tools.py
+│       ├── vectordb_tools.py
+│       ├── llm_tools.py
+│       ├── storage_tools.py
+│       ├── guardrail_tools.py
+│       ├── memory_tools.py
+│       ├── orchestrator_tools.py
+│       ├── scenario_tools.py
+│       ├── document_tools.py
+│       ├── judgment_search.py
+│       ├── sci_judgment_tools.py
+│       └── gst_judgment_tools.py
 │
-├── mcp_servers/                   # MCP tool servers (separate processes)
-│   ├── elasticsearch_server/      # ES search operations
-│   │   └── server.py
-│   ├── vectordb_server/           # ChromaDB operations
-│   │   └── server.py
-│   ├── pdf_server/                # PDF processing + OCR
-│   │   └── server.py
-│   ├── llm_server/                # Unified LLM access with caching
-│   │   └── server.py
-│   ├── storage_server/            # S3 + file + chat history
-│   │   └── server.py
-│   ├── legal_utils_server/        # Domain-specific legal tools
-│   │   └── server.py
-│   └── guardrails_server/         # Safety tools
-│       └── server.py
+├── config/
+│   └── prompts.py                 # All system prompts (per agent)
 │
-├── workers/                       # Background task workers
-│   └── celery_app.py              # Celery worker config
-│
-├── config/                        # Configuration
-│   └── prompts.py                 # All prompt templates (migrated from v1)
-│
-├── tests/                         # Tests
-│   ├── agents/                    # Per-agent unit tests
-│   ├── tools/                     # Per-tool unit tests
-│   └── integration/               # End-to-end flow tests
-│
-├── requirements.txt               # v2 dependencies
-└── README.md                      # This file
+├── services/                      # Embedding service for remote deployment
+├── workers/                       # Background workers
+├── scripts/                       # Operational scripts
+├── deploy/                        # Deployment manifests
+├── docs/                          # Internal docs / plans
+├── tests/                         # Test suites and evaluation scripts
+├── frontend.html                  # Built-in test UI
+├── requirements.txt
+└── CLAUDE.md                      # Project guide for Claude Code
 ```
 
 ## Agent Overview
 
 | # | Agent | Model | Trigger |
 |---|-------|-------|---------|
-| 1 | Orchestrator | Claude Sonnet / GPT-4o | Every request |
-| 2 | Guardrail | Gemini Flash Lite | Before + after domain agents |
+| 1 | Orchestrator | GPT-4o | Every request — plans tasks, fans out, synthesizes |
+| 2 | Guardrail (in/out) | Gemini Flash Lite | Before + after domain agents |
 | 3 | Memory | Gemini Flash Lite | After guardrail, before routing |
-| 4 | Legislation | Gemini Flash Lite | task == "Legislation" |
-| 5 | Judgment | GPT-4o | task == "Judgment" |
-| 6 | Newacts | GPT-4o + Gemini Flash Lite | task == "Newacts" |
-| 7 | Drafting | GPT-4o | task == "Drafting" |
-| 8 | Scenario | Gemini 2.5 Pro | task == "Scenario" / "Other" / fallback |
-| 9 | Constitution & Maxim | Gemini Flash Lite | task == "Constitution" / "Maxim" / "Legal_Concepts" |
-| 10 | Document | Gemini 2.5 Pro | PDF endpoints |
+| 4 | Legislation | Gemini Flash | task == `Legislation` |
+| 5 | Judgment (High Court) | GPT-4o + Gemini | task == `Judgment` |
+| 6 | SCI Judgment (Supreme Court) | GPT-4o + Gemini | task == `SCI_Judgment` |
+| 7 | GST Judgment (AAAR) | GPT-4o + Gemini | task == `GST_Judgment` |
+| 8 | Newacts | GPT-4o + Gemini Flash | task == `Newacts` |
+| 9 | Drafting | Gemini Flash (per-section) | task == `Drafting` |
+| 10 | Scenario | Gemini 2.5 Pro + Google Search | task == `Scenario` / fallback |
+| 11 | Constitution & Maxim | Gemini Flash | `Constitution` / `Maxim` / `Legal_Concepts` |
+| 12 | Document | Gemini 2.5 Pro | PDF chat endpoints |
+
+## Task Types
+
+The orchestrator classifies queries into one of:
+`Drafting`, `Legislation`, `Judgment`, `SCI_Judgment`, `GST_Judgment`, `Newacts`, `Scenario`, `Constitution`, `Maxim`, `Legal_Concepts`, `Non_legal`, `Other`.
+
+## Agent Resilience
+
+All domain agents have a 3-tier fallback:
+
+1. **Primary search** — OpenSearch / ChromaDB retrieval
+2. **Query rewrite + retry** — GPT-4o-mini rewrites the query, retries search
+3. **Web search fallback** — Gemini 2.5 Flash + Google Search grounding
+
+Shared utilities live in `core/agent_fallback.py`.
+
+## Multilingual Support
+
+`core/language.py` detects user language (14 Indian languages supported) and localizes system prompts via `localize_prompt()`. The gateway accepts a `preferred_language` parameter; the frontend persists the selection in `localStorage`. Query fallback order:
+`agent_queries[key] → state["query"] (normalized EN) → state["original_query"]`.
 
 ## Execution Flow
 
 ```
-Request → Gateway → Guardrail → Memory → Orchestrator
-                                             │
-                          ┌──────────────────┼──────────────────┐
-                          │                  │                  │
-                     [Agent A]          [Agent B]          [Agent C]
-                          │                  │                  │
-                          └──────────────────┼──────────────────┘
-                                             │
-                                        Orchestrator (merge)
-                                             │
-                                         Guardrail (output)
-                                             │
-                                        Memory (store)
-                                             │
-                                          Response
+Request → Gateway → Guardrail(in) → Memory → Orchestrator
+                                                  │
+                              ┌───────────────────┼───────────────────┐
+                              │                   │                   │
+                         [Agent A]           [Agent B]           [Agent C]   (parallel via Send)
+                              │                   │                   │
+                              └───────────────────┼───────────────────┘
+                                                  │
+                                       Orchestrator (synthesize)
+                                                  │
+                                          Guardrail(out)
+                                                  │
+                                      Memory (persist history)
+                                                  │
+                                           SSE Response
 ```
 
-## Migration from v1
+## API Routes
 
-This is Phase 3 of the migration plan:
-- Phase 1 (DONE in v1): Redis caching + async + connection pooling
-- Phase 2: Extract tools into MCP servers
-- Phase 3: Build LangGraph agent graph (this project)
-- Phase 4: WebSocket streaming, Celery workers, production hardening
+All routes are prefixed with `/pyapi`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/pyapi/search` | Batch legal Q&A |
+| POST | `/pyapi/search/stream` | Streaming Q&A (Server-Sent Events) |
+| POST | `/pyapi/chat` | Unified chat (SSE + inline file uploads, up to 30 files / 1 GB each) |
+| POST | `/pyapi/continue_draft` | Continue an incomplete draft |
+| DELETE | `/pyapi/delete_vectordb/{unique_string}` | Delete a PDF collection |
+| POST | `/pyapi/feedback` | Submit user feedback |
+| GET | `/pyapi/health` | Health check |
+| GET | `/` | Frontend UI (`frontend.html`) |
+
+## Environment Variables
+
+Required in `.env`:
+
+| Var | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI (GPT-4o, GPT-4o-mini) |
+| `GOOGLE_API_KEY` | Google GenAI (Gemini) + Search grounding |
+
+Optional:
+
+| Var | Default | Purpose |
+|---|---|---|
+| `ES_URL` | `http://139.84.219.174:9200` | OpenSearch endpoint (falls back to `ELASTICSEARCH_URL`) |
+| `ES_USER` | — | OpenSearch username (required for AWS OpenSearch) |
+| `ES_PASSWORD` | — | OpenSearch password (required for AWS OpenSearch) |
+| `EMBEDDING_SERVICE_URL` | — | Remote embedding service URL |
+| `RATE_LIMIT_PER_MINUTE` | 200 | Per-key request limit |
+| `API_KEYS` | — | Comma-separated user API keys |
+| `ADMIN_API_KEY` | — | Admin API key |
+| `LOG_LEVEL` | `DEBUG` | Logging level |
+
+OpenSearch indices used: `legislation`, `judgements`, `drafting`, `newacts_v1`, `supreme_court_judgement`, `constitution`, `legal_maxims`.
+
+## Commands
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the server
+python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5000
+
+# Development with auto-reload
+python -m uvicorn core.gateway:app --host 0.0.0.0 --port 5000 --reload
+
+# Run tests
+python tests/test_agents.py --concurrency 3
+python tests/evaluate_agents.py
+```
+
+## Code Style
+
+- Python 3.12+ with type hints
+- `core.logger.get_logger("ModuleName")` for logging — never `print()`
+- Pydantic models for request/response schemas
+- LangChain abstractions for LLM chains and prompts
+- LangGraph state accessed as dict: `state["key"]` / `state.get("key")` (TypedDict)
+- Imports: `langchain.messages` for message types (`HumanMessage`, `AIMessage`, …); `langchain_core.messages` for the `BaseMessage` base class
+
+## Notes
+
+- Local embedding models live in `./models/` (not committed)
+- References Indian legal codes — both old (IPC, CrPC, IEA) and new (BNS, BNSS, BSA)
+- `.env` and API keys must never be committed
+- See [CLAUDE.md](CLAUDE.md) for the Claude Code project guide

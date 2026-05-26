@@ -249,12 +249,21 @@ async def document_node(state: LegalAgentState) -> dict:
                 with log_time(log, "Gemini file parts document QA"):
                     llm = get_gemini_pro(temperature=0.3)
 
-                    # Build content list: file parts + question text
+                    # Build content list: file parts + question text.
+                    # Translate the internal {"file_data": {...}, "name": ...}
+                    # representation into a LangChain media content block — raw
+                    # Gemini-shaped dicts have no "type" key, so langchain-google-genai
+                    # logs "Unrecognized message part format" and stringifies them,
+                    # which silently drops the PDF and lets Gemini hallucinate.
                     user_content: list = []
                     for part in parts:
                         if "file_data" in part:
-                            # Gemini Files API URI — pass as file_data dict
-                            user_content.append(part)
+                            fd = part["file_data"]
+                            user_content.append({
+                                "type": "media",
+                                "file_uri": fd["file_uri"],
+                                "mime_type": fd.get("mime_type", "application/octet-stream"),
+                            })
                         elif "inline_data" in part:
                             # Legacy base64 — pass as image_url for LangChain
                             d = part["inline_data"]

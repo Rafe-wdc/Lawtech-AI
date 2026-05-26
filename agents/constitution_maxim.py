@@ -27,6 +27,9 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gemini_flash, get_gemini_flash_full, get_es_client
+from core.retrieval_relevance import (
+    check_retrieval_relevance, head_tail_apology_detected,
+)
 from core.settings import ES_INDICES
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
@@ -159,6 +162,29 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     docs_text = "\n\n".join(d.page_content for d in docs)
     source_name = docs[0].metadata.get("source", "unknown")
 
+    # Relevance gate — reject keyword-shared-but-unrelated articles/maxims
+    # (e.g. Article 14 cited incidentally in an unrelated provision).
+    progress(agent_label, "Verifying retrieval relevance...",
+             step="relevance_check")
+    chunks_for_judge = [d.page_content for d in docs]
+    is_relevant, judge_telemetry = await check_retrieval_relevance(
+        query, chunks_for_judge, source_name, agent_name=task,
+    )
+    log.info("Relevance judge verdict",
+             task=task, passed=is_relevant, source=source_name,
+             **judge_telemetry)
+    if not is_relevant:
+        log.warning("Retrieved docs failed relevance gate — falling back to web search",
+                    task=task, rejected_source=source_name, **judge_telemetry)
+        mismatch = judge_telemetry.get("matched_subject") or "different subject"
+        progress(agent_label,
+                 f"Retrieved results don't match the query "
+                 f"({mismatch[:60]}) — searching the web...",
+                 step="fallback", substep=True)
+        from core.agent_fallback import web_search_fallback
+        result = await web_search_fallback(query, task, system_prompt)
+        return result
+
     # Combine ES text with web context for richer input
     combined_context = docs_text
     if web_context:
@@ -196,11 +222,9 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Constitution_Maxim", "generate", response)
 
-    # Check if LLM apologized (docs were irrelevant) — fall back to web search
-    _sorry_patterns = ["i am sorry", "i'm sorry", "does not contain", "no information",
-                       "not contain information", "cannot find", "no relevant"]
-    content_lower = response.content.lower()[:200]
-    if any(p in content_lower for p in _sorry_patterns) or len(response.content) < 50:
+    # Check if LLM apologized (docs were irrelevant) — fall back to web search.
+    # Uses the shared head+tail scanner so end-of-response hedges don't slip through.
+    if head_tail_apology_detected(response.content):
         log.warning("LLM response is an apology or too short, using web fallback",
                     task=task, response_preview=response.content[:100])
         # Emit token_reset so frontend clears the sorry text

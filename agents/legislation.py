@@ -27,6 +27,9 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_es_client, get_gemini_flash, get_gemini_flash_full
+from core.retrieval_relevance import (
+    check_retrieval_relevance, head_tail_apology_detected,
+)
 from core.settings import ES_INDICES
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
@@ -124,6 +127,10 @@ def _extract_act_name_from_query(query: str) -> str | None:
             act_name = match.group(1).strip().rstrip(",")
             return act_name
     return None
+
+
+# Relevance gate is in core.retrieval_relevance — shared across agents.
+# See that module for the full design rationale.
 
 
 # --- Elasticsearch Search (single-section path) ---
@@ -394,6 +401,38 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Legislation": fallback_result}}
 
+        # Step 3.5: Relevance gate — LLM-as-judge. See core/retrieval_relevance.py
+        # for full rationale (LexRAG 2025 pattern). On reject, fall back to web.
+        progress("legislation", "Verifying retrieval relevance...",
+                 step="relevance_check")
+        chunks_for_judge = [
+            (h.get("_source") or {}).get("page_content", "") for h in hits
+        ]
+        is_relevant, judge_telemetry = await check_retrieval_relevance(
+            query, chunks_for_judge, source_name, agent_name="Legislation",
+        )
+        log.info("Relevance judge verdict",
+                 passed=is_relevant,
+                 source=source_name,
+                 search_mode=search_mode,
+                 **judge_telemetry)
+
+        if not is_relevant:
+            log.warning("Retrieved hits failed relevance gate — "
+                        "falling back to web search",
+                        rejected_source=source_name,
+                        **judge_telemetry)
+            mismatch = judge_telemetry.get("matched_subject") or "different subject"
+            progress("legislation",
+                     f"Retrieved provisions don't match the query "
+                     f"({mismatch[:60]}) — searching the web...",
+                     step="fallback", substep=True)
+            from core.agent_fallback import web_search_fallback
+            fallback_result = await web_search_fallback(
+                query, "Legislation", _system_prompt)
+            fallback_result.retry_attempted = True
+            return {"agent_results": {"Legislation": fallback_result}}
+
         # Step 4: Convert hits to documents (cap each hit to 3000 chars, total to 30KB)
         _MAX_DOC_CHARS = 3000
         _MAX_TOTAL_CHARS = 30_000
@@ -448,18 +487,10 @@ async def legislation_node(state: LegalAgentState) -> dict:
         from core.token_tracker import record as _record_tokens
         tokens = _record_tokens("Legislation", "generate", response)
 
-        # Check if LLM apologized (ES hits were irrelevant) — fall back to web search
-        _sorry_patterns = [
-            "i am sorry", "i'm sorry", "does not contain", "no information",
-            "not contain information", "cannot find", "no relevant",
-            "cannot provide information", "no direct information",
-            "no specific information", "no information available",
-            "unable to find", "could not find", "not available in",
-            "there is no", "does not have information",
-            "based on the provided agent",
-        ]
-        content_lower = response.content.lower()[:300]
-        if any(p in content_lower for p in _sorry_patterns) or len(response.content) < 50:
+        # Check if LLM apologized (ES hits were irrelevant) — fall back to web search.
+        # Uses the shared head+tail scanner so end-of-response hedges (after a
+        # dutiful write-up of irrelevant retrievals) don't slip through.
+        if head_tail_apology_detected(response.content):
             log.warning("LLM response is an apology or too short, using web fallback",
                         response_preview=response.content[:100], search_mode=search_mode)
             try:

@@ -28,6 +28,9 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gemini_flash, get_gemini_flash_full
+from core.retrieval_relevance import (
+    check_retrieval_relevance, head_tail_apology_detected,
+)
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.settings import TIMEOUT_ES_PARALLEL_SEC, TIMEOUT_METADATA_SEC
@@ -376,6 +379,36 @@ async def judgment_node(state: LegalAgentState) -> dict:
         if first_title:
             progress("judgment", f"Top match: {first_title[:70]}",
                      found=len(hits), substep=True, step="search")
+
+        # Step 3.5: Relevance gate — reject keyword-shared-but-subject-different
+        # judgments (e.g. same parties named but unrelated dispute, or citation
+        # match against a case that decides a different question).
+        progress("judgment", "Verifying retrieval relevance...",
+                 step="relevance_check")
+        is_relevant, judge_telemetry = await check_retrieval_relevance(
+            query, docs_text_parts,
+            source_name=first_title or hits[0].get("source"),
+            agent_name="Judgment",
+        )
+        log.info("Relevance judge verdict",
+                 passed=is_relevant, strategy=strategy,
+                 top_match=first_title[:60], **judge_telemetry)
+
+        if not is_relevant:
+            log.warning("Retrieved judgments failed relevance gate — "
+                        "falling back to web search",
+                        top_match=first_title[:60], **judge_telemetry)
+            mismatch = judge_telemetry.get("matched_subject") or "different subject"
+            progress("judgment",
+                     f"Retrieved cases don't match the query "
+                     f"({mismatch[:60]}) — searching the web...",
+                     step="fallback", substep=True)
+            from core.agent_fallback import web_search_fallback
+            fallback_result = await web_search_fallback(
+                query, "Judgment", _system_prompt, original_query=original_query)
+            fallback_result.retry_attempted = True
+            return {"agent_results": {"Judgment": fallback_result}}
+
         progress("judgment", "Generating response with citations...", step="generate")
 
         # Step 4: Generate response
@@ -404,18 +437,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
         from core.token_tracker import record as _record_tokens
         tokens = _record_tokens("Judgment", "generate", llm_response)
 
-        # Check if LLM apologized (ES hits were irrelevant) — fall back to web search
-        _sorry_patterns = [
-            "i am sorry", "i'm sorry", "does not contain", "no information",
-            "not contain information", "cannot find", "no relevant",
-            "cannot provide information", "no direct information",
-            "no specific information", "no information available",
-            "unable to find", "could not find", "not available in",
-            "there is no", "does not have information",
-            "based on the provided agent",
-        ]
-        content_lower = llm_response.content.lower()[:300]
-        if any(p in content_lower for p in _sorry_patterns) or len(llm_response.content) < 50:
+        # Check if LLM apologized (ES hits were irrelevant) — fall back to web search.
+        # Uses the shared head+tail scanner so end-of-response hedges don't slip through.
+        if head_tail_apology_detected(llm_response.content):
             log.warning("LLM response is an apology or too short, using web fallback",
                         response_preview=llm_response.content[:100], strategy=strategy)
             try:

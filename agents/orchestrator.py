@@ -21,7 +21,7 @@ from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.progress import progress
 from config.prompts import (
-    TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT,
+    TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT, SYNTHESIS_TABLE_PROMPT,
     DRAFT_SYNTHESIS_PROMPT, DRAFT_CITATION_PROMPT,
 )
 
@@ -66,6 +66,39 @@ _INTERNAL_CITE_MARKER_RE = re.compile(
     r"\s*\[CITE:[^\]\n]*\]\s*",
     re.IGNORECASE,
 )
+
+
+# --- Table-format intent detection ---
+# When the user's response_instructions or query indicate they want a comparison
+# table (not a prose explanation), the synth node switches to SYNTHESIS_TABLE_PROMPT
+# which constrains the LLM to produce ONLY a table — no preamble, no postamble.
+_TABLE_INTENT_RE = re.compile(
+    r"\b("
+    r"table\s+format|format\s+of\s+(a\s+)?table|"
+    r"in\s+a\s+table|as\s+a\s+table|"
+    r"comparison\s+table|comparative\s+table|"
+    r"tabular(?:ly|\s+(?:form|format|comparison))?|"
+    r"side[- ]by[- ]side|"
+    r"compare(?:\s+and\s+contrast)?(?:\s+the\s+\w+){0,3}\s+in\s+(?:a\s+)?(?:table|tabular|tabulated)|"
+    r"differences?\s+between\s+.*\bin\s+(?:a\s+)?table"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_table_format(response_instructions: str, query: str = "") -> bool:
+    """Return True iff the user has explicitly asked for tabular output.
+
+    Checks response_instructions first (extracted by the query analyzer) and
+    falls back to the raw query. Be conservative — the synth_table prompt is
+    strict (table only), so a false positive produces a worse result than a
+    false negative.
+    """
+    if response_instructions and _TABLE_INTENT_RE.search(response_instructions):
+        return True
+    if query and _TABLE_INTENT_RE.search(query):
+        return True
+    return False
 
 
 def _strip_internal_cite_markers(text: str) -> str:
@@ -1086,15 +1119,30 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                      extra=extra, all_agents=tasks_planned)
 
     # Drafting citation agents
+    # Phase 1: gated behind cite_appendix flag (per-request) + env default.
+    # Default OFF — citations doubled response length and ~50% of token spend
+    # without making the draft itself more file-ready. Callers that want the
+    # appendix pass `cite_appendix=true`.
     has_drafting = task == "Drafting" or "Drafting" in tasks_planned
     if has_drafting:
         if "Drafting" not in tasks_planned:
             tasks_planned.insert(0, "Drafting")
-        citation_agents = _select_citation_agents(query)
-        for ca in citation_agents:
-            if ca not in tasks_planned:
-                tasks_planned.append(ca)
-        tasks_planned = tasks_planned[:4]
+        from core.settings import DRAFTING_CITE_APPENDIX_DEFAULT
+        _flag = state.get("cite_appendix")
+        cite_appendix_on = _flag if _flag is not None else DRAFTING_CITE_APPENDIX_DEFAULT
+        if cite_appendix_on:
+            citation_agents = _select_citation_agents(query)
+            for ca in citation_agents:
+                if ca not in tasks_planned:
+                    tasks_planned.append(ca)
+            tasks_planned = tasks_planned[:4]
+            log.info("Drafting citation appendix enabled",
+                     citation_agents=citation_agents,
+                     source="request" if _flag is not None else "env_default")
+        else:
+            tasks_planned = [t for t in tasks_planned if t == "Drafting" or t == "Document"][:3]
+            log.info("Drafting citation appendix skipped",
+                     source="request" if _flag is not None else "env_default")
     else:
         tasks_planned = tasks_planned[:3]
 
@@ -1224,9 +1272,14 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # BUT if file context has inline text, always synthesize so file content is used
     # If file context has inline text but single result is NOT from Document agent,
     # force synthesis so file content gets incorporated. Otherwise pass through.
+    #
+    # Also force synthesis when the user explicitly asked for a comparison table —
+    # pass-through would deliver the raw agent prose, bypassing SYNTHESIS_TABLE_PROMPT
+    # and leaving the user without the table they requested.
     has_unprocessed_file = (fc is not None and fc.inline_text
                            and "Document" not in valid_results)
-    if len(valid_results) == 1 and not has_unprocessed_file:
+    _wants_table_single = _wants_table_format(response_instructions, query)
+    if len(valid_results) == 1 and not has_unprocessed_file and not _wants_table_single:
         name, result = next(iter(valid_results.items()))
 
         # Drafting solo: previously this called _auto_cite_draft which used an
@@ -1335,11 +1388,29 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         total_tokens += result.tokens_consumed
         all_serialized_sources.extend(_serialize_sources(result))
 
+    # Pick prompt template: table-mode if user asked for a comparison table,
+    # else the general synthesis prompt. SYNTHESIS_TABLE_PROMPT constrains output
+    # to a single markdown table with no preamble/postamble.
+    wants_table = _wants_table_format(response_instructions, query)
+    synth_template = SYNTHESIS_TABLE_PROMPT if wants_table else SYNTHESIS_PROMPT
+    log.info("Synthesis prompt selected",
+             template="SYNTHESIS_TABLE_PROMPT" if wants_table else "SYNTHESIS_PROMPT",
+             response_instructions=response_instructions[:120] if response_instructions else "")
+
     try:
         with log_time(log, "LLM synthesis"):
-            llm = get_gemini_flash_full(temperature=0.2)
+            # Synthesis is pure generation (merge → format), not analysis. Disable
+            # thinking_budget to reclaim the full 65K-token output budget for visible
+            # content. Without this, Gemini 2.5 Flash can silently spend thousands
+            # of tokens on hidden reasoning while emitting only a handful of visible
+            # chars (observed in production logs).
+            # Use temperature=0 for table mode (deterministic formatting).
+            llm = get_gemini_flash_full(
+                temperature=0.0 if wants_table else 0.2,
+                thinking_budget=0,
+            )
             prompt = ChatPromptTemplate.from_template(
-                localize_prompt(SYNTHESIS_PROMPT, user_language)
+                localize_prompt(synth_template, user_language)
             )
             chain = prompt | llm
 
@@ -1354,9 +1425,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         from core.token_tracker import record as _record_tokens
         synth_tokens = _record_tokens("Orchestrator", "synthesize", response)
 
-        # Cap synthesis output to prevent oversized responses from blocking
-        # the event loop in sanitize_markdown (349K response observed in prod)
-        _MAX_SYNTHESIS_LEN = 50000
+        # Defense-in-depth cap: at 65K-token output ceiling (~260K chars at
+        # ~4 chars/token) the LLM cannot legitimately exceed ~260K chars. We
+        # cap at 250K to allow full-budget responses but still catch upstream
+        # streaming bugs (e.g. cumulative-content chunk double-counting).
+        _MAX_SYNTHESIS_LEN = 250_000
         if len(synthesized) > _MAX_SYNTHESIS_LEN:
             log.warning("Synthesis output too large, truncating",
                         original_len=len(synthesized), cap=_MAX_SYNTHESIS_LEN)

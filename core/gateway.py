@@ -264,6 +264,10 @@ class SearchRequest(BaseModel):
     # detects integration URLs in prompt_query, checks user's connection,
     # extracts content, and injects it into the agent state.
     integration_token: Optional[str] = None
+    # Drafting-only: include "## REFERENCES & CITATIONS" appendix (fans out
+    # Scenario/Legislation/Judgment alongside Drafting). None → use
+    # DRAFTING_CITE_APPENDIX_DEFAULT env default (off).
+    cite_appendix: Optional[bool] = None
 
 
 class SearchResponse(BaseModel):
@@ -350,6 +354,7 @@ def _build_initial_state(
     draft_continuation: dict | None = None,
     file_context: dict | None = None,
     preferred_language: str | None = None,
+    cite_appendix: bool | None = None,
 ) -> dict:
     """Build the initial LangGraph state with all required fields."""
     # Validate and normalise preferred_language (client override for user_language)
@@ -375,6 +380,7 @@ def _build_initial_state(
         "file_context": file_context,
         "integration_context": None,
         "draft_continuation": draft_continuation,
+        "cite_appendix": cite_appendix,
         "final_response": "",
         "source_metadata": [],
         "tokens_consumed": 0,
@@ -437,7 +443,9 @@ async def search(data: SearchRequest, request: Request):
             )
 
     initial_state = _build_initial_state(
-        data.prompt_query, thread_id, preferred_language=data.preferred_language
+        data.prompt_query, thread_id,
+        preferred_language=data.preferred_language,
+        cite_appendix=data.cite_appendix,
     )
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -628,6 +636,7 @@ async def search_stream(data: SearchRequest, request: Request):
         preferred_language=data.preferred_language,
         file_context=None,
         integration_token=getattr(data, "integration_token", None),
+        cite_appendix=getattr(data, "cite_appendix", None),
         enable_cache=True,
         enable_quality_scoring=True,
     )
@@ -684,6 +693,7 @@ async def chat_with_files(
     globalThreadId: Optional[str] = Form(None),
     preferred_language: Optional[str] = Form(None),
     integration_token: Optional[str] = Form(None),
+    cite_appendix: Optional[bool] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -781,6 +791,7 @@ async def chat_with_files(
             preferred_language=preferred_language,
             file_context=file_context_dict,
             integration_token=integration_token,
+            cite_appendix=cite_appendix,
             enable_cache=False,   # uploads / integration context make caching unsafe
             enable_quality_scoring=True,
             skip_thread_id_event=True,  # /chat already emitted before file processing

@@ -47,8 +47,10 @@ log = get_logger("Drafting")
 # Max concurrent section generations (avoids Gemini rate limits)
 _SECTION_CONCURRENCY = 3
 
-# Max sections the outline can contain (aligned with prompt: 10-15 for complex docs)
-_MAX_SECTIONS = 12
+# Max sections the outline can contain. Civil suits with the full procedural
+# pack (Schedule, Court Fee, List of Docs, separate IA for TI, Verification,
+# Affidavit) routinely need 14-16 sections, so the cap is generous.
+_MAX_SECTIONS = 16
 
 # Limit concurrent Drafting/ContinueDraft executions per worker process
 _AGENT_SEMAPHORE = asyncio.Semaphore(3)
@@ -374,6 +376,13 @@ async def _generate_outline(
         log.info("Removed meta-sections from outline", removed=removed)
         outline.sections = filtered
 
+    # Inject mandatory procedural sections that the LLM may have omitted.
+    # This guards against LLM-outline drift -- the procedural blocks (Schedule,
+    # Court Fee, List of Documents, separate IA for TI, notarised Affidavit)
+    # are not optional in a real civil suit filing, even if the template skips
+    # them. Detection is signal-based on the query + outline title.
+    outline.sections = _inject_mandatory_sections(outline, query)
+
     # Cap sections (aligned with prompt: bail 10-12, suits 12-15)
     if len(outline.sections) > _MAX_SECTIONS:
         log.warning("Outline has too many sections, capping",
@@ -385,6 +394,479 @@ async def _generate_outline(
              sections=len(outline.sections),
              total_paragraphs=sum(s.estimated_paragraphs for s in outline.sections))
     return outline
+
+
+# --- Pre-return validator ---
+#
+# Runs over the fully assembled draft, fixes cheap mojibake / placeholder
+# leakage in-place, and returns a list of structural warnings for callers
+# (logged + surfaced in the AgentResult). Designed to never raise -- a
+# validator bug must not block delivery of the draft.
+
+# Common UTF-8 -> cp1252 -> UTF-8 round-trip artefacts in Indian legal text.
+_MOJIBAKE_REPLACEMENTS = [
+    ("â€“", "–"),   # â€" -> en dash
+    ("â€”", "—"),   # â€" -> em dash
+    ("â€˜", "‘"),   # â€˜ -> left single quote
+    ("â€™", "’"),   # â€™ -> right single quote
+    ("â€œ", "“"),   # â€œ -> left double quote
+    ("â€", "”"),   # â€ -> right double quote
+    ("â€¦", "…"),   # â€¦ -> ellipsis
+    ("Â ",       " "),   # Â  -> nbsp
+    ("ï¿½", "?"),        # replacement char (no-info fallback)
+]
+
+# Internal LLM artefacts that should never survive to the user.
+_CITE_PLACEHOLDER_RE = re.compile(r"\[CITE:[^\]]*\]", flags=re.IGNORECASE)
+_BARE_CITATION_TAIL_RE = re.compile(
+    r"(?:Supreme Court|High Court|the Hon'?ble Court|as held|as observed)\s+in\.\s*",
+    flags=re.IGNORECASE,
+)
+_TRAILING_PREP_RE = re.compile(
+    r"\b(?:in|of|by|the|for|to|under|with|on|at|from)\.\s*$",
+    flags=re.IGNORECASE,
+)
+
+# Forbidden statute pairings: (statute_pattern, banned_context_pattern, message).
+_STATUTE_TRAPS: list[tuple[re.Pattern, re.Pattern, str]] = [
+    (
+        re.compile(r"Section\s*38[\s,]+(?:of\s+)?(?:the\s+)?Specific\s+Relief\s+Act",
+                   flags=re.IGNORECASE),
+        re.compile(r"\btemporary\s+injunction|ad[\s-]?interim\s+injunction|interim\s+relief\b",
+                   flags=re.IGNORECASE),
+        "Section 38 SRA cited near 'temporary injunction' -- Sec 38 SRA is for "
+        "permanent injunction only; temporary injunction belongs to Order XXXIX CPC.",
+    ),
+    (
+        re.compile(r"Section\s*54[\s,]+(?:of\s+)?(?:the\s+)?CPC|Section\s*54\s+CPC",
+                   flags=re.IGNORECASE),
+        re.compile(r"\bpartition\s+of\s+(?:flat|apartment|residential)\b",
+                   flags=re.IGNORECASE),
+        "Section 54 CPC cited for partition of residential property -- Sec 54 "
+        "applies to estates assessed to land revenue; use Order XX Rule 18 CPC.",
+    ),
+]
+
+
+def validate_draft(
+    full_draft: str,
+    stance: "DoctrinalStance | None" = None,
+) -> tuple[str, list[str]]:
+    """Run cheap repairs and rule checks on the assembled draft.
+
+    Returns (possibly-cleaned draft, list of warning messages).
+    Never raises -- failures inside individual rules are logged and skipped.
+    """
+    warnings: list[str] = []
+    cleaned = full_draft
+
+    # --- Auto-fix: mojibake ---
+    # The canonical fix for cp1252-misread-as-UTF-8: encode as cp1252 and
+    # decode as UTF-8 again, recovering the original bytes. Skip if the round
+    # trip would fail (string contains chars not in cp1252) -- those strings
+    # are already clean. Fall back to the substring table for any survivors.
+    if any(s in cleaned for s in ("â€", "Â ", "Ã©", "Ã ", "ï¿½")):
+        try:
+            roundtripped = cleaned.encode("cp1252", errors="strict").decode("utf-8", errors="strict")
+            if roundtripped != cleaned:
+                cleaned = roundtripped
+                log.info("Validator: mojibake auto-fixed (cp1252->utf-8 roundtrip)")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            # Mixed encodings -- fall through to per-substring repair below.
+            log.debug("Validator: full cp1252 roundtrip failed, using substring table")
+
+    fixed_count = 0
+    for bad, good in _MOJIBAKE_REPLACEMENTS:
+        if bad in cleaned:
+            cleaned = cleaned.replace(bad, good)
+            fixed_count += 1
+    if fixed_count:
+        log.info("Validator: mojibake auto-fixed (substring fallback)",
+                 patterns_fixed=fixed_count)
+
+    # --- Auto-fix: strip [CITE: ...] markers + log if any survived ---
+    cite_hits = _CITE_PLACEHOLDER_RE.findall(cleaned)
+    if cite_hits:
+        cleaned = _CITE_PLACEHOLDER_RE.sub("", cleaned)
+        warnings.append(
+            f"Stripped {len(cite_hits)} leftover [CITE: ...] placeholder(s). "
+            "Drafting prompt was meant to prevent this -- check section "
+            "prompts if it keeps happening."
+        )
+
+    # --- Auto-fix: trim "Supreme Court in." style orphan tails ---
+    tail_hits = _BARE_CITATION_TAIL_RE.findall(cleaned)
+    if tail_hits:
+        cleaned = _BARE_CITATION_TAIL_RE.sub("", cleaned)
+        warnings.append(
+            f"Trimmed {len(tail_hits)} orphan citation tail(s) "
+            "(e.g. 'as held in.'). LLM emitted a case-citation intent without "
+            "completing the cite."
+        )
+
+    # --- Rule: forbidden statute pairings ---
+    for statute_re, ctx_re, msg in _STATUTE_TRAPS:
+        # Scan paragraph by paragraph (avoid cross-paragraph false positives)
+        for para in re.split(r"\n\s*\n", cleaned):
+            if statute_re.search(para) and ctx_re.search(para):
+                warnings.append(msg)
+                break  # one warning per rule is enough
+
+    # --- Rule: trailing preposition at end of any paragraph ---
+    bad_para_endings = 0
+    for para in re.split(r"\n\s*\n", cleaned):
+        para_strip = para.rstrip()
+        if not para_strip:
+            continue
+        # Look at last line of the para
+        last_line = para_strip.split("\n")[-1].rstrip()
+        if _TRAILING_PREP_RE.search(last_line):
+            bad_para_endings += 1
+    if bad_para_endings:
+        warnings.append(
+            f"{bad_para_endings} paragraph(s) end with an orphan preposition "
+            "(e.g. 'as held by the Supreme Court in.') -- LLM truncated a "
+            "citation sentence."
+        )
+
+    # --- Rule: stance compliance (when available) ---
+    if stance is not None:
+        for bad_stmt in stance.non_applicable_statutes:
+            # Crude check: if the stance flagged "Sec X SRA" as non-applicable,
+            # warn if it shows up in the draft. Limit to first 60 chars of the
+            # rule string (the rule itself includes prose after the statute).
+            anchor = bad_stmt.split(" -- ")[0].split(" — ")[0][:60].strip()
+            if not anchor:
+                continue
+            # Match the anchor loosely (whitespace + case insensitive)
+            anchor_re = re.compile(re.escape(anchor), flags=re.IGNORECASE)
+            if anchor_re.search(cleaned):
+                warnings.append(
+                    f"Stance flagged '{anchor}' as non-applicable but draft "
+                    "still references it -- review the offending paragraph."
+                )
+
+    if warnings:
+        log.warning("Validator surfaced issues",
+                    count=len(warnings),
+                    sample=warnings[0][:120])
+
+    return cleaned, warnings
+
+
+# --- Step 3.25: Mandatory procedural section injection ---
+#
+# The LLM-generated outline sometimes drops procedural blocks that a real
+# civil suit filing cannot omit (Schedule, Court Fee, List of Docs, etc.).
+# This injector classifies the document type from query + outline title and
+# appends any missing sections from the appropriate pack so every filing has
+# the full skeleton -- regardless of which template was selected.
+
+def _detect_doc_type(query: str, outline_title: str) -> str:
+    """Classify the document type for mandatory-section injection.
+
+    Returns one of: "civil_suit", "bail", "writ", "appeal", "notice", "other".
+    """
+    text = (query + " " + outline_title).lower()
+    # Civil suit / plaint family (broadest -- order matters)
+    if any(k in text for k in (
+        "suit", "plaint", "partition", "specific performance",
+        "recovery of money", "declaration", "permanent injunction",
+        "civil suit", "money suit", "title suit",
+    )):
+        return "civil_suit"
+    if any(k in text for k in ("bail", "anticipatory bail", "regular bail")):
+        return "bail"
+    if any(k in text for k in ("writ", "article 226", "article 32", "pil")):
+        return "writ"
+    if any(k in text for k in ("appeal", "revision", "review")):
+        return "appeal"
+    if any(k in text for k in ("legal notice", "demand notice", "notice under")):
+        return "notice"
+    return "other"
+
+
+def _wants_temporary_injunction(query: str, outline: DraftOutline) -> bool:
+    """True if the draft prays for an interim/temporary injunction (needs a
+    separate IA under Order XXXIX Rules 1 & 2 CPC alongside the main relief).
+    """
+    text = (
+        query + " "
+        + " ".join(s.title + " " + s.description for s in outline.sections)
+    ).lower()
+    return any(k in text for k in (
+        "temporary injunction", "interim injunction", "ad-interim",
+        "ad interim", "interim relief", "stay order", "status quo",
+        "restrain", "restraining order",
+    ))
+
+
+# Per-doc-type mandatory pack: (title, description, est_paragraphs, needs_citations).
+# The injector only adds the section if no existing section in the outline
+# matches the title keywords -- so an LLM that already produced "Schedule" is
+# left untouched.
+_MANDATORY_PACKS: dict[str, list[tuple[str, str, int, bool]]] = {
+    "civil_suit": [
+        ("Schedule of Properties",
+         "Full schedule of all suit properties with CTS/survey number, area, "
+         "boundaries, and address per asset (Schedule A, Schedule B, etc.).",
+         3, False),
+        ("Valuation and Court Fee",
+         "Suit valuation for jurisdiction and court fee under the applicable "
+         "Court Fees Act; state ad valorem or fixed basis tied to possession status.",
+         2, False),
+        ("List of Documents",
+         "List of documents relied upon under Order VII Rule 14 / Order XI Rule 14 "
+         "CPC -- title deeds, certificates, prior notices, etc.",
+         3, False),
+        ("Verification",
+         "Verification of the plaint under Order VI Rule 15 CPC, signed by the "
+         "plaintiff at the place of filing.",
+         1, False),
+        ("Affidavit in Support",
+         "Notarised affidavit of the plaintiff under Order XIX Rule 3 CPC, "
+         "with deponent declaration and 'Solemnly affirmed before me, Notary / "
+         "Oath Commissioner' attestation block.",
+         2, False),
+    ],
+}
+
+# Section added only when a temporary injunction is prayed for. Independent of
+# document type -- a writ or appeal could also need it.
+_TI_PACK: list[tuple[str, str, int, bool]] = [
+    ("Interim Application under Order XXXIX Rules 1 & 2 CPC",
+     "Separate Interim Application (IA) for temporary injunction restraining "
+     "the defendant from alienating, encumbering, or creating third-party "
+     "rights in the suit properties during pendency; three-fold test "
+     "(prima facie, balance of convenience, irreparable injury) applied to "
+     "the specific facts; supported by its own affidavit.",
+     5, True),
+]
+
+
+def _section_already_present(sections: list[SectionPlan], title_keywords: list[str]) -> bool:
+    """True if any existing section's title contains all of the keywords."""
+    for s in sections:
+        title_low = s.title.lower()
+        if all(kw in title_low for kw in title_keywords):
+            return True
+    return False
+
+
+def _inject_mandatory_sections(outline: DraftOutline, query: str) -> list[SectionPlan]:
+    """Append missing procedural sections per document type.
+
+    Insertion strategy:
+    - TI section is inserted just AFTER any existing "Prayer" / "Grounds for
+      Injunction" section (or before Verification if no Prayer found).
+    - Schedule / Court Fee / List of Documents / Verification / Affidavit are
+      appended in that order at the end, before any meta-footer.
+    """
+    sections = list(outline.sections)
+    doc_type = _detect_doc_type(query, outline.document_title)
+
+    # Temporary-injunction IA (independent of doc_type)
+    if _wants_temporary_injunction(query, outline):
+        for title, desc, paras, cites in _TI_PACK:
+            keywords = ["interim", "application"]
+            if not _section_already_present(sections, keywords):
+                # Insert after Prayer if present, else at end
+                insert_at = len(sections)
+                for i, s in enumerate(sections):
+                    if "prayer" in s.title.lower() or "relief" in s.title.lower():
+                        insert_at = i + 1
+                        break
+                sections.insert(insert_at, SectionPlan(
+                    title=title, description=desc,
+                    estimated_paragraphs=paras, needs_citations=cites,
+                ))
+                log.info("Injected mandatory section", title=title,
+                         reason="temporary_injunction_requested",
+                         position=insert_at)
+
+    # Doc-type pack
+    pack = _MANDATORY_PACKS.get(doc_type, [])
+    keyword_map = {
+        "Schedule of Properties": ["schedule"],
+        "Valuation and Court Fee": ["court fee"],
+        "List of Documents": ["list", "document"],
+        "Verification": ["verification"],
+        "Affidavit in Support": ["affidavit"],
+    }
+    for title, desc, paras, cites in pack:
+        keywords = keyword_map.get(title, [title.lower()])
+        if not _section_already_present(sections, keywords):
+            sections.append(SectionPlan(
+                title=title, description=desc,
+                estimated_paragraphs=paras, needs_citations=cites,
+            ))
+            log.info("Injected mandatory section", title=title,
+                     reason=f"doc_type={doc_type}")
+
+    return sections
+
+
+# --- Step 3.5: Doctrinal Stance (shared legal lane across sections) ---
+#
+# Sections are generated in parallel with no shared legal context, which led
+# to contradictions within one draft — e.g. para 2.2 calling property
+# "self-acquired" while para 4.3 called it "ancestral", or sections citing
+# Sec 38 SRA for temporary injunction when Order XXXIX CPC is the right
+# authority. The doctrinal stance is a one-shot Gemini Flash call that, given
+# the facts + template + query, picks ONE legal lane for the draft and
+# enumerates statutes/cases to use vs avoid. Every parallel section call gets
+# this stance JSON prepended, so all sections plead from the same theory.
+
+_DOCTRINAL_STANCE_SYSTEM = """You are a senior Indian litigator setting the
+legal lane for ONE draft. Read the facts and the user's query, then commit to
+a single coherent theory of the case. Other section-writers will follow your
+stance verbatim — contradictions in their output are caused by ambiguity in
+yours, so be decisive.
+
+Return a JSON object with these keys:
+
+- "property_lane" (string): for partition / inheritance / property suits, one
+  of "self_acquired_intestate", "self_acquired_testamentary",
+  "coparcenary_ancestral_2005", "coparcenary_ancestral_pre_2005",
+  "joint_tenancy", "not_applicable". Pick exactly ONE.
+- "injunction_lane" (string): "temporary_only", "permanent_only", "both",
+  "not_applicable". A temporary injunction restrains conduct during
+  pendency (Order XXXIX CPC); a permanent injunction is the final relief
+  (Section 38 SRA). Pick what the user actually asked for.
+- "applicable_statutes" (list of strings): every statute the draft SHOULD
+  cite. Use full names + section numbers, e.g.
+  "Section 8 + Schedule, Hindu Succession Act, 1956".
+- "non_applicable_statutes" (list of strings): statutes that LOOK related
+  but are wrong for this fact pattern. Always include here the alternatives
+  to your chosen lanes (e.g. if injunction_lane is "temporary_only", list
+  "Section 38, Specific Relief Act, 1963 — applies only to permanent
+  injunction, not the temporary injunction sought here").
+- "key_cases" (list of {{name, citation, holding}}): 3-6 real Indian SC/HC
+  cases you will cite. Use confident citations only; if unsure, omit.
+  Suggested anchors (cite only if relevant to the fact pattern):
+    * Vineeta Sharma v. Rakesh Sharma, (2020) 9 SCC 1 — daughter coparcenary
+    * Smt. Sitabai v. Ramchandra, AIR 1970 SC 343 — adopted child equal rights
+    * Dalpat Kumar v. Prahlad Singh, (1992) 1 SCC 719 — three-fold injunction test
+    * Sawarni v. Inder Kaur, (1996) 6 SCC 223 — mutation does not confer title
+    * Wander Ltd. v. Antox India, 1990 (Supp) SCC 727 — interim injunction principles
+- "must_plead" (list of strings): specific facts/elements every section
+  writer must include where relevant (e.g. "Section 11 HAMA giving-and-taking
+  ceremony with date and adoptive parents named").
+- "must_not_plead" (list of strings): things to avoid (e.g. "do not invoke
+  the 2005 HSA amendment when property_lane is self_acquired_intestate;
+  the amendment governs coparcenary, not self-acquired property").
+- "court_fee_rule" (string): one sentence on the court fee basis (e.g.
+  "Section 6(vii) Maharashtra Court Fees Act, 1959 — ad valorem on share's
+  market value since plaintiff is dispossessed from one flat").
+
+Be terse. JSON only. No prose around it.
+"""
+
+
+class DoctrinalCase(BaseModel):
+    name: str = Field(..., description="Case name (e.g. 'Vineeta Sharma v. Rakesh Sharma')")
+    citation: str = Field(..., description="Full citation (e.g. '(2020) 9 SCC 1')")
+    holding: str = Field(..., description="One-line holding")
+
+
+class DoctrinalStance(BaseModel):
+    property_lane: str = Field("not_applicable")
+    injunction_lane: str = Field("not_applicable")
+    applicable_statutes: List[str] = Field(default_factory=list)
+    non_applicable_statutes: List[str] = Field(default_factory=list)
+    key_cases: List[DoctrinalCase] = Field(default_factory=list)
+    must_plead: List[str] = Field(default_factory=list)
+    must_not_plead: List[str] = Field(default_factory=list)
+    court_fee_rule: str = Field("")
+
+
+async def _generate_doctrinal_stance(
+    query: str,
+    doc_title: str,
+    user_facts: str = "",
+    case_facts: str = "",
+) -> DoctrinalStance | None:
+    """One-shot Flash call producing the legal lane the whole draft will follow.
+
+    Returns None on failure — section generation falls back to template-only
+    guidance, same as before this step existed.
+    """
+    facts_block = ""
+    if case_facts.strip():
+        facts_block += "KEY ENTITIES:\n" + case_facts.strip() + "\n\n"
+    if user_facts.strip():
+        facts_block += "FULL DOCUMENT TEXT:\n" + user_facts[:8000]
+
+    with log_time(log, "Doctrinal stance generation"):
+        try:
+            llm = get_drafting_llm().with_structured_output(
+                DoctrinalStance, include_raw=True,
+            )
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", _DOCTRINAL_STANCE_SYSTEM),
+                ("user",
+                 "USER QUERY:\n{query}\n\n"
+                 "DOCUMENT TYPE (from template selection): {doc_title}\n\n"
+                 "USER-PROVIDED FACTS (may be empty):\n{facts_block}"),
+            ])
+            chain = prompt | llm
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({
+                    "query": query,
+                    "doc_title": doc_title,
+                    "facts_block": facts_block or "(none -- proceed from query alone)",
+                }),
+                timeout=30,
+            )
+        except Exception as e:
+            log.warning("Doctrinal stance generation failed -- continuing without it",
+                        error=str(e)[:200])
+            return None
+
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "doctrinal_stance", raw_and_parsed.get("raw"))
+        stance = raw_and_parsed["parsed"]
+        log.info("Doctrinal stance generated",
+                 property_lane=stance.property_lane,
+                 injunction_lane=stance.injunction_lane,
+                 applicable_count=len(stance.applicable_statutes),
+                 non_applicable_count=len(stance.non_applicable_statutes),
+                 cases=len(stance.key_cases))
+        return stance
+
+
+def _format_stance_for_section(stance: DoctrinalStance | None) -> str:
+    """Render the stance as a compact prompt block for each section call."""
+    if stance is None:
+        return ""
+    lines = ["DOCTRINAL STANCE — every section in this draft must follow this lane:\n"]
+    if stance.property_lane and stance.property_lane != "not_applicable":
+        lines.append(f"- PROPERTY LANE: {stance.property_lane}")
+    if stance.injunction_lane and stance.injunction_lane != "not_applicable":
+        lines.append(f"- INJUNCTION LANE: {stance.injunction_lane}")
+    if stance.court_fee_rule:
+        lines.append(f"- COURT FEE: {stance.court_fee_rule}")
+    if stance.applicable_statutes:
+        lines.append("- USE THESE STATUTES (cite by name + section):")
+        for s in stance.applicable_statutes:
+            lines.append(f"    * {s}")
+    if stance.non_applicable_statutes:
+        lines.append("- DO NOT CITE THESE STATUTES (wrong for this fact pattern):")
+        for s in stance.non_applicable_statutes:
+            lines.append(f"    * {s}")
+    if stance.key_cases:
+        lines.append("- USE THESE CASE LAWS (cite by name + citation; never as [CITE: ...]):")
+        for c in stance.key_cases:
+            lines.append(f"    * {c.name}, {c.citation} -- {c.holding}")
+    if stance.must_plead:
+        lines.append("- MUST PLEAD where relevant:")
+        for m in stance.must_plead:
+            lines.append(f"    * {m}")
+    if stance.must_not_plead:
+        lines.append("- MUST NOT PLEAD:")
+        for m in stance.must_not_plead:
+            lines.append(f"    * {m}")
+    return "\n".join(lines) + "\n\n"
 
 
 # --- Step 4: Generate Each Section ---
@@ -399,6 +881,7 @@ async def _generate_section(
     user_language: str = "en",
     user_facts: str = "",
     case_facts: str = "",
+    stance_block: str = "",
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
@@ -447,7 +930,9 @@ async def _generate_section(
             ("system", localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language)),
             # FACTS FIRST — most prominent position (BUG-02)
             ("user", "{facts_block}USER INSTRUCTION:\n{query}"),
-            ("user", "Document: {doc_title}\nCourt: {court_details}"),
+            # Stance block: shared legal lane across all parallel sections
+            # (empty string when stance generation failed -- silent fallback).
+            ("user", "{stance_block}Document: {doc_title}\nCourt: {court_details}"),
             ("user", "Full Document Outline:\n{outline_summary}"),
             # Template AFTER facts, explicitly framed as structure-only
             ("user",
@@ -484,9 +969,15 @@ async def _generate_section(
             "section_title": section.title,
             "section_desc": section.description,
             "est_paragraphs": str(section.estimated_paragraphs),
-            "needs_citations": "Yes -- include [CITE: ...] markers" if section.needs_citations else "No",
+            "needs_citations": (
+                "Yes -- cite real Indian case names + citations inline (e.g., "
+                "'Vineeta Sharma v. Rakesh Sharma, (2020) 9 SCC 1'). If you "
+                "cannot name a case with confidence, cite the doctrine without "
+                "a case label. NEVER emit [CITE: ...] placeholder markers."
+            ) if section.needs_citations else "No",
             "facts_block": facts_block,
             "facts_reminder": facts_reminder,
+            "stance_block": stance_block,
         }), timeout=180)
 
     from core.token_tracker import record as _record_tokens
@@ -510,6 +1001,7 @@ async def _generate_sections_parallel(
     user_language: str = "en",
     user_facts: str = "",
     case_facts: str = "",
+    stance_block: str = "",
 ) -> tuple[list[str], list[int], int]:
     """Generate all sections with bounded parallelism via asyncio.Semaphore.
 
@@ -550,6 +1042,7 @@ async def _generate_sections_parallel(
                     query, template_text, plan, i, total, outline, user_language,
                     user_facts=user_facts,
                     case_facts=case_facts,
+                    stance_block=stance_block,
                 )
                 results[i] = (text, tokens, None)
                 if writer:
@@ -1026,6 +1519,16 @@ async def drafting_node(state: LegalAgentState) -> dict:
         )
         progress("drafting", f"Outline ready: {len(outline.sections)} sections", found=len(outline.sections), substep=True, step="outline")
 
+        # Step 4.5: Generate doctrinal stance (one-shot Flash call that fixes
+        # the legal lane every parallel section must follow). Silent fallback
+        # to empty stance_block if it fails — drafting still runs.
+        stance = await _generate_doctrinal_stance(
+            query, outline.document_title,
+            user_facts=user_facts,
+            case_facts=case_facts,
+        )
+        stance_block = _format_stance_for_section(stance)
+
         # Step 5: Generate sections in parallel (semaphore-limited to 3)
         try:
             from langgraph.config import get_stream_writer
@@ -1037,6 +1540,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             query, template_text, outline, writer, user_language,
             user_facts=user_facts,
             case_facts=case_facts,
+            stance_block=stance_block,
         )
 
         # Emit incomplete event if needed
@@ -1054,6 +1558,10 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # Step 6: Assemble complete document
         progress("drafting", "Assembling final document...", step="assemble")
         full_draft = _assemble_document(outline, sections, user_language)
+
+        # Step 6.5: Validator -- auto-fix mojibake + leftover [CITE: ...], log
+        # warnings for statute traps and orphan citation tails. Never raises.
+        full_draft, draft_warnings = validate_draft(full_draft, stance)
 
         if failed_indices:
             log.warning("Agent completed with incomplete sections",

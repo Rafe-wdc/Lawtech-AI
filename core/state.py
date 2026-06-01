@@ -143,6 +143,11 @@ class LegalAgentState(MessagesState):
     # Draft continuation (for incomplete drafts that need retry)
     draft_continuation: dict[str, Any] | None
 
+    # Per-request drafting flag: include the REFERENCES & CITATIONS appendix
+    # (fans out Scenario/Legislation/Judgment alongside Drafting). None means
+    # "use DRAFTING_CITE_APPENDIX_DEFAULT from settings".
+    cite_appendix: bool | None
+
     # Final output
     final_response: str
     source_metadata: Annotated[list[dict[str, Any]], _cap_source_metadata]

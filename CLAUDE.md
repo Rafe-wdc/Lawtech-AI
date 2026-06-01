@@ -122,6 +122,44 @@ The orchestrator classifies queries into tasks:
 - **Non_legal** - Non-legal query detection
 - **Other** - Fallback
 
+## Drafting invariants (do not regress)
+
+The Drafting pipeline has guard rails that protect file-readiness and token
+cost. Before touching `agents/drafting.py`, `agents/orchestrator.py`, or
+`config/prompts.py`, know these:
+
+1. **Citations appendix is OFF by default.** When `task == "Drafting"`, the
+   orchestrator does NOT fan out Scenario/Legislation/Judgment unless the
+   request passes `cite_appendix: true` (or `DRAFTING_CITE_APPENDIX_DEFAULT=true`
+   in the environment). Tokens go to the draft body, not a 16k-char appendix.
+2. **Doctrinal stance precedes section generation.** `_generate_doctrinal_stance`
+   produces a JSON contract (`property_lane`, `injunction_lane`,
+   `applicable_statutes`, `non_applicable_statutes`, `key_cases`, `must_plead`,
+   `must_not_plead`) that every parallel section call respects. This is what
+   prevents self-acquired vs ancestral contradictions and Sec 38 SRA vs Order
+   XXXIX CPC mis-citations across sections.
+3. **Outline injects mandatory procedural sections.** `_inject_mandatory_sections`
+   guarantees a civil suit outline includes Schedule of Properties, Valuation
+   and Court Fee, List of Documents, Verification, and a notarised Affidavit.
+   When a temporary injunction is prayed for, a separate IA under Order XXXIX
+   Rules 1 & 2 CPC is also injected.
+4. **Pre-return validator runs on every assembled draft.** `validate_draft`
+   auto-fixes cp1252-misread-as-UTF-8 mojibake, strips leftover `[CITE: ...]`
+   placeholders, trims orphan citation tails ("as held in."), and logs
+   warnings for forbidden statute pairings (Sec 38 SRA + temporary injunction;
+   Sec 54 CPC + residential partition).
+5. **`[CITE: ...]` placeholders are forbidden.** Section prompts must cite real
+   case names + citations inline (driven by the stance JSON), or omit the case
+   label entirely. The orchestrator still strips any survivors as a defensive
+   fallback (`_INTERNAL_CITE_MARKER_RE`).
+
+Regression tests live in `tests/test_drafting_quality.py` (24 unit + 8 e2e).
+Run them via:
+```bash
+pytest tests/test_drafting_quality.py -v
+DRAFTING_QUALITY_E2E=1 LAWTECH_API_KEY=<key> pytest tests/test_drafting_quality.py::TestPartitionSuitE2E -v
+```
+
 ## Agent Resilience
 
 All domain agents have a 3-tier fallback:

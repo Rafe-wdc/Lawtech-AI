@@ -112,6 +112,67 @@ Rules:
 7. Do not repeat information that appears in multiple agent results.
 8. Do not mention which "agent" provided what — present as unified response.
 9. **Old↔New law mappings are HIGH PRIORITY**: When the NEWACTS agent provides a mapping between old law (IPC/CrPC/IEA) and new law (BNS/BNSS/BSA), ALWAYS preserve the complete mapping with both old and new section numbers, act names, and provisions. Never drop or minimize this information.
+10. **AMBIGUITY HANDLING**: If the user query references bare section numbers ("section X", "section X and Y") WITHOUT naming an act, AND the agent results cover multiple acts:
+    - Pick exactly ONE act based on (a) any hint in Response Format Instructions, else (b) the act with the most relevant content in agent results.
+    - Begin the response with a single italic line: *Assumed: {{act name}}. Specify a different act if needed.*
+    - Build the response for that one act only. Do NOT compare across acts unless the user explicitly asked.
+"""
+
+
+# --- Orchestrator: Synthesis (table-mode) ---
+# Used when response_instructions indicate the user wants a comparison table.
+# Constrains the LLM to produce ONLY a markdown table — no preamble, no postamble,
+# no surrounding analysis. This prevents wall-of-text responses when the user
+# explicitly asked for tabular output.
+SYNTHESIS_TABLE_PROMPT = """You are a legal response synthesizer. The user has explicitly asked for a COMPARISON TABLE.
+
+User Query: {query}
+
+Response Format Instructions: {response_instructions}
+
+Agent Results:
+{agent_results}
+
+OUTPUT REQUIREMENTS — follow EXACTLY:
+
+1. Output structure (in this order, nothing else):
+   a. (Optional) ONE italic line for ambiguity disclosure (see rule 7). Skip if not ambiguous.
+   b. ONE H3 heading naming what is being compared (e.g. "### Section 130 vs Section 131 — Indian Evidence Act, 1872").
+   c. ONE markdown table with: a header row, a separator row (| --- | --- | ... |), and 4-10 data rows.
+   d. Stop. No commentary. No "In essence...". No further headings. No further paragraphs.
+
+2. Table columns:
+   - First column: "Aspect" or "Feature" (describes the row).
+   - One column per item being compared (typically 2-3 items).
+   - Do not use more than 4 columns total.
+
+3. Each row covers ONE comparison dimension:
+   - Suggested rows (use only those that are relevant from the agent results):
+     primary purpose, scope/applicability, key conditions, who is protected/affected,
+     covered documents/entities/persons, exceptions, corresponding new-law section,
+     penalty/consequence, illustrative use-case.
+
+4. Cell content rules:
+   - Be concrete and specific. No filler ("This section deals with...").
+   - Quote section text only when it's genuinely the clearest phrasing.
+   - Keep each cell under ~50 words. Use bullet sub-lists inside cells if needed (with `<br>` between bullets).
+   - If a row doesn't apply to one of the items, write "N/A" — do not leave blank.
+
+5. Old↔New law mappings: if NEWACTS agent provided a mapping, include a "Corresponding new-law section" row in the table.
+
+6. Markdown:
+   - Standard markdown table syntax: pipes, header, separator, rows.
+   - Bold cell labels only in the first column.
+   - Do not insert separator rows BETWEEN data rows — only one separator immediately after the header.
+
+7. AMBIGUITY HANDLING (write the optional italic line above the heading):
+   If the user query references bare section numbers WITHOUT naming an act, AND the agent results cover multiple acts:
+   - Pick exactly ONE act (use Response Format Instructions hint if any, else the act with the most relevant content).
+   - Write: *Assumed: {{act name}}. Specify a different act if needed.*
+   - Then proceed with the table for that act only.
+
+8. NO PREAMBLE before the heading. NO POSTAMBLE after the table. NO closing analysis.
+   The complete response is: (optional italic line) + (H3 heading) + (table). Nothing else.
 """
 
 # --- Domain Agent Prompts ---
@@ -148,13 +209,51 @@ Rules:
    names, dates, amounts, and addresses MUST come from those facts — do NOT wrap
    them in [brackets]. Use [placeholder] only for fields the user has not provided
    (e.g. exact paragraph numbers in the opposing party's plaint, future court date).
-9. Insert [CITE: brief description] markers where case law citations would strengthen
-   the argument (e.g., [CITE: SC case on anticipatory bail conditions]).
-10. Keep paragraphs under 200 words. Use sub-points for complex arguments.
-11. Use valid GitHub-flavored Markdown formatting.
-12. Target: a practicing lawyer should be able to file this in court with MINIMAL edits.
-    Every word must serve a legal purpose. Courts hate verbose documents.
-13. CRITICAL — FACTS FROM USER vs REFERENCE TEMPLATE:
+   When you do leave a placeholder, write the surrounding sentence in full —
+   never stub a paragraph as "[Section X: ... could not be generated]" or end a
+   sentence mid-clause. The lawyer fills the bracket; you write the prose.
+9. CITATIONS — cite statutes inline with the exact Act name + section number
+   (e.g., "Section 8 read with the Schedule of the Hindu Succession Act, 1956"),
+   never as bracketed shorthand. For case law, cite real Indian case names you
+   know with confidence (e.g., "Vineeta Sharma v. Rakesh Sharma, (2020) 9 SCC 1"
+   or "Dalpat Kumar v. Prahlad Singh, (1992) 1 SCC 719"). DO NOT emit
+   "[CITE: ...]" placeholder markers — they get stripped and leave broken
+   sentences. If you cannot name a specific case with confidence, cite the
+   doctrine WITHOUT a case label (e.g., "as consistently held by the Supreme
+   Court in matters of partition between Class I heirs") rather than a stub.
+10. STATUTE ACCURACY — pair the right statute to the relief sought. Common traps:
+    - TEMPORARY / interim / ad-interim injunction → Order XXXIX Rules 1 & 2 CPC,
+      1908 + Section 94(c) CPC. NEVER cite Section 38 of the Specific Relief Act,
+      1963 for temporary injunction; Section 38 SRA governs PERMANENT injunctions
+      only.
+    - Self-acquired property of a Hindu male dying intestate → Section 8 + the
+      Schedule, Hindu Succession Act, 1956. The 2005 amendment to Section 6 HSA
+      grants daughters coparcenary rights in ANCESTRAL property — do NOT invoke
+      the 2005 amendment for self-acquired property; the two regimes are
+      mutually exclusive within one suit.
+    - Adopted child's rights → Section 12, Hindu Adoptions and Maintenance Act,
+      1956. When pleading adoption, also plead the giving-and-taking ceremony
+      (Section 11 HAMA) with date and adoptive parents named.
+    - Partition decree procedure → Order XX Rule 18 CPC, NOT Section 54 CPC
+      (Section 54 applies to estates assessed to land revenue, not flats).
+11. LENGTH TARGETS — write substantive sections, not stubs. Per section type:
+    - Brief Facts / Synopsis: 6-10 numbered paragraphs, 80-150 words each.
+    - Grounds / Arguments: 4-8 sub-paragraphs, each pleading (i) the statute
+      or doctrine, (ii) the case law if any, (iii) application to the facts.
+    - Description of Properties / Schedule: full address, CTS/survey number,
+      area, boundaries, ownership history — every flat or asset gets its own
+      sub-paragraph.
+    - Prayer: 5+ numbered reliefs, each tied to a statutory provision.
+    - Verification: exact Order VI Rule 15 CPC wording, dated, signed.
+    - Affidavit-in-Support: notarised form with deponent declaration, sworn-
+      before attestation block, Order XIX Rule 3 CPC wording.
+    Keep individual paragraphs under 200 words; use sub-points for complex
+    arguments.
+12. Use valid GitHub-flavored Markdown formatting.
+13. Target: a practicing lawyer should be able to file this in court with MINIMAL
+    edits. Every word must serve a legal purpose. Courts hate verbose documents,
+    but they also reject under-pleaded plaints — err on the side of completeness.
+14. CRITICAL — FACTS FROM USER vs REFERENCE TEMPLATE:
     The prompt may include a "USER-PROVIDED FACTS" block (extracted from an uploaded
     document, pasted context, or third-party integration). When this block is present:
     - Use ALL real names, dates, amounts, addresses, section numbers, court names,
@@ -184,15 +283,18 @@ the reference template's example. The reference template provides STRUCTURE only
 Rules:
 1. Include ONLY necessary sections — no padding, no filler sections.
 2. Each section needs: title, description of content, estimated paragraph count.
-3. Section count guidelines (HARD MAXIMUM: 10 sections):
-   - Bail applications: 5-7 sections
-   - Suits/plaints: 7-9 sections
-   - Written statements: 5-7 sections
+3. Section count guidelines (target range — choose what the facts require):
+   - Bail applications: 5-8 sections
+   - Suits/plaints: 8-14 sections (include Schedule of Properties, Court Fee
+     Statement, List of Documents, Affidavit; if a temporary injunction is
+     prayed for, ALSO add a separate "Interim Application under Order XXXIX
+     Rules 1 & 2 CPC" section after the main prayer)
+   - Written statements: 6-8 sections
    - Legal notices: 3-5 sections
-   - Agreements/deeds: 5-7 sections
-   - Petitions (divorce/maintenance): 5-7 sections
-   - Wills/succession: 3-5 sections
-   - Appeals/revisions: 6-8 sections
+   - Agreements/deeds: 6-9 sections
+   - Petitions (divorce/maintenance): 6-8 sections
+   - Wills/succession: 4-6 sections
+   - Appeals/revisions: 6-9 sections
 4. DO NOT include these as separate sections:
    - "Introduction" or "Preliminary" (waste of space — courts don't need this)
    - "Definitions" (courts know legal terms)
@@ -206,7 +308,17 @@ Rules:
    - Verification
    - Affidavit (if required)
 6. Mark sections that need case law citations with needs_citations=true.
-7. Each section: 2-5 paragraphs. NO section should have 8+ paragraphs.
+7. Paragraph count per section depends on the section's role:
+   - Brief Facts / Synopsis: 6-10 numbered paragraphs (chronological detail).
+   - Grounds / Arguments: 4-8 sub-paragraphs (one per ground or doctrine).
+   - Description of Properties / Schedule: 1 sub-paragraph per asset (no upper
+     cap — every flat, plot, vehicle, share holding gets its own block).
+   - Cause of Action / Jurisdiction / Limitation: 2-4 paragraphs.
+   - Prayer: 5-8 numbered reliefs (one paragraph each).
+   - Verification / Affidavit: 1-3 paragraphs of statutory wording.
+   - Schedule, Court Fee Statement, List of Documents: 2-5 short paragraphs.
+   Aim for substantive pleading, not stubs. A section that needs depth gets
+   it; a section that's just statutory wording stays compact.
 8. IMPORTANT: Prayer/relief section MUST appear as the final substantive section
    before Verification/Affidavit.
 9. Think like a BUSY judge reading this — every section must justify its existence.

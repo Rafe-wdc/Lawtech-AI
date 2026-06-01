@@ -129,6 +129,15 @@ CHAT_SERVICE_URL = os.getenv("CHAT_SERVICE_URL", "https://test.lawttorney.com/v2
 INTEGRATION_POLL_INTERVAL_SEC: float = 3.0
 INTEGRATION_POLL_TIMEOUT_SEC: float = 60.0
 
+# --- Drafting ---
+# When True, fan out Scenario/Legislation/Judgment alongside Drafting and append
+# a "## REFERENCES & CITATIONS" block to the response. Off by default to keep
+# drafts focused and reduce token spend. Per-request `cite_appendix` field
+# (in SearchRequest / /pyapi/chat form) overrides this default.
+DRAFTING_CITE_APPENDIX_DEFAULT = os.getenv(
+    "DRAFTING_CITE_APPENDIX_DEFAULT", "false",
+).strip().lower() in ("1", "true", "yes", "on")
+
 # --- Redis ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 

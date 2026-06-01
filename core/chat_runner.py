@@ -45,6 +45,7 @@ class ChatRunnerInputs:
     preferred_language: str | None = None       # ISO 639-1 override
     file_context: dict | None = None            # pre-built by /chat caller
     integration_token: str | None = None        # FSD JWT for Google/Notion
+    cite_appendix: bool | None = None           # Drafting: include REFERENCES & CITATIONS block
     enable_cache: bool = True                   # /chat disables for uploads
     enable_quality_scoring: bool = True         # 10% sampling
     skip_thread_id_event: bool = False          # caller already emitted it
@@ -234,6 +235,7 @@ async def run_chat_pipeline(
         i.query, i.thread_id,
         file_context=i.file_context,
         preferred_language=i.preferred_language,
+        cite_appendix=i.cite_appendix,
     )
     if integration_context_dict:
         initial_state["integration_context"] = integration_context_dict

@@ -462,7 +462,10 @@ Perform TWO tasks in one step:
 Identify the PRIMARY legal task type. Choose EXACTLY ONE:
 
 - **Newacts** → ONLY for these 6 acts: BNS/IPC, BNSS/CrPC, BSA/IEA (and their old/new equivalents). NOT for any other acts.
+  - This includes ALL variants and full names: "IPC" / "Indian Penal Code" / "Penal Code"; "CrPC" / "Cr.P.C" / "Code of Criminal Procedure" / "Criminal Procedure Code"; "IEA" / "Indian Evidence Act" / "Evidence Act"; "BNS" / "Bharatiya Nyaya Sanhita"; "BNSS" / "Bharatiya Nagarik Suraksha Sanhita"; "BSA" / "Bharatiya Sakshya Adhiniyam".
+  - Examples: "Section 125 of CrPC" → [Newacts]; "Section 125 of Code of Criminal Procedure 1973" → [Newacts]; "Section 302 IPC" → [Newacts]; "Section 65B Indian Evidence Act" → [Newacts]; "Section 438 BNSS" → [Newacts]. NEVER pair these queries with Legislation -- Newacts already covers both the old and new statute text.
 - **Legislation** → ALL other central/state acts and statutes NOT listed under Newacts.
+  - Examples: "Section 138 NI Act" → [Legislation]; "Section 7 Hindu Marriage Act" → [Legislation]; "Section 482 Companies Act" → [Legislation].
 - **Drafting** → Legal document creation, templates, agreements, contracts, petitions.
 - **Constitution** → Constitutional provisions, fundamental rights/duties, Articles of Constitution.
 - **Scenario** → Situational legal query, real-life legal situation analysis, legal advice.
@@ -837,31 +840,42 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
 # the LLM's plan against keyword signals in the query and adds missing agents.
 # Each rule maps keyword patterns → required agent(s) that should be in the plan.
 
-_PLAN_SIGNALS: list[tuple[tuple[str, ...], str, int]] = [
-    # (keywords, required_agent, max_plan_size_to_add)
-    # — max_plan_size_to_add: only add if plan has ≤ N agents (prevents 4+ agent bloat)
+_PLAN_SIGNALS: list[tuple[tuple[str, ...], str, int, tuple[str, ...]]] = [
+    # (keywords, required_agent, max_plan_size_to_add, agents_to_remove)
+    # — max_plan_size_to_add: only add if plan has ≤ N agents (prevents 4+ agent bloat).
+    # — agents_to_remove: agents that become redundant once required_agent fires
+    #   (e.g. Newacts already covers IPC/CrPC/IEA texts, so Legislation would
+    #   only re-fetch the same content from a less-curated index and trigger
+    #   wasteful web-search fallback). Empty tuple = no veto.
 
     # Judgment signals: "cases", "case law", "precedent", "ruling" → need Judgment
     ((" cases", "case law", "case laws", "precedent", "court decision",
-      "judgments on ", "judgement on ", "rulings on "), "Judgment", 2),
+      "judgments on ", "judgement on ", "rulings on "), "Judgment", 2, ()),
 
     # SCI signals (backup for pre-check): "supreme court", "SC" → need SCI_Judgment
-    (("supreme court", "apex court"), "SCI_Judgment", 2),
+    (("supreme court", "apex court"), "SCI_Judgment", 2, ()),
 
     # GST AAAR signals
     (("advance ruling", "aaar", "appellate authority for advance ruling",
       "gst appeal", "gst appellate", "gst ruling", "gst classification"),
-     "GST_Judgment", 2),
+     "GST_Judgment", 2, ()),
 
-    # Old act names → need Newacts for new equivalents
-    (("ipc", "crpc", "cr.p.c", "cr pc", "iea",
-      "indian penal code", "code of criminal procedure",
-      "indian evidence act", "criminal procedure code"), "Newacts", 3),
+    # Old/new act names for the 6 codes that live in Newacts (BNS/IPC,
+    # BNSS/CrPC, BSA/IEA). Newacts indexes BOTH the old and new statute text,
+    # so we strip Legislation -- otherwise Legislation re-fetches the same
+    # text from a less-curated index and frequently falls back to a 7-second
+    # Google web search for canonical sections (verified on "Section 125 CrPC").
+    (("ipc", "crpc", "cr.p.c", "cr pc", "iea", "bns", "bnss", "bsa",
+      "indian penal code", "penal code",
+      "code of criminal procedure", "criminal procedure code",
+      "indian evidence act", "evidence act",
+      "bharatiya nyaya", "bharatiya nagarik", "bharatiya sakshya"),
+     "Newacts", 3, ("Legislation",)),
 
     # Freshness signals → need Scenario for web-grounded info
     (("latest", "recent changes", "recent amendments", "recent court",
       "recent ruling", "current status", "new changes", "updated",
-      "is it legal", "is cryptocurrency", "is crypto"), "Scenario", 3),
+      "is it legal", "is cryptocurrency", "is crypto"), "Scenario", 3, ()),
 ]
 
 
@@ -871,26 +885,41 @@ def _validate_and_enrich_plan(
     normalized_query: str,
     log,
 ) -> list[str]:
-    """Validate plan against keyword signals and add missing agents.
+    """Validate plan against keyword signals and add (or veto) agents.
 
-    Scans both the original and normalized query for keyword patterns
-    that indicate a specific agent should be in the plan. If the agent
-    is missing and the plan isn't already too large, adds it.
+    Scans both the original and normalized query for keyword patterns. For
+    each matching signal:
+    - adds `required_agent` if missing AND plan is not already too large,
+    - removes any agents listed in `agents_to_remove` (the "veto" list) once
+      the keyword fires, regardless of whether `required_agent` was newly
+      added or already present -- both cases mean the veto'd agent is now
+      redundant.
 
-    Returns the (possibly enriched) plan.
+    Returns the (possibly modified) plan.
     """
     combined = (original_query.lower() + " " + normalized_query.lower())
 
-    for keywords, required_agent, max_size in _PLAN_SIGNALS:
-        if required_agent in tasks_planned:
+    for keywords, required_agent, max_size, also_remove in _PLAN_SIGNALS:
+        if not any(k in combined for k in keywords):
             continue
-        if len(tasks_planned) > max_size:
-            continue
-        if any(k in combined for k in keywords):
+
+        # Add the required agent (if missing AND plan has headroom)
+        if required_agent not in tasks_planned and len(tasks_planned) <= max_size:
             tasks_planned.append(required_agent)
             log.info("Plan enriched by signal validator",
                      added=required_agent, signal_match=True,
                      plan=tasks_planned)
+
+        # Veto: remove agents that would now be redundant. Runs even when
+        # `required_agent` was already in the plan, since the veto'd agent
+        # is wrong either way once this keyword fired.
+        for veto_agent in also_remove:
+            if veto_agent in tasks_planned:
+                tasks_planned.remove(veto_agent)
+                log.info("Plan veto by signal validator",
+                         removed=veto_agent,
+                         reason=f"{required_agent} covers this content",
+                         plan=tasks_planned)
 
     return tasks_planned
 

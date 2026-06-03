@@ -401,6 +401,20 @@ Rules:
 - Use only the provided context.
 - If query relates to both old and new versions, include both for comparison.
 - Preserve exact legal wording from the context.
+
+Formatting rules (strict — past output bugs depend on this):
+- Markdown tables MUST be compact: NO whitespace padding inside cells to
+  align columns visually. Cells contain only the prose; the renderer aligns.
+  Example BAD (do not produce):
+      | 115 | Voluntarily causing hurt           | Anyone who...
+  Example GOOD:
+      | 115 | Voluntarily causing hurt | Anyone who...
+- For multi-section comparisons, one row per section. Keep each cell under
+  1500 characters. Never break a row across multiple lines with leading
+  whitespace.
+- Total response under ~30,000 characters. If the user asks for many
+  sections, summarise rather than reproducing every word of every subsection.
+- End the table with a single trailing newline. Do not append blank rows.
 """
 
 CONSTITUTION_SYSTEM_PROMPT = """You are Lawttorney, an expert AI assistant on the Indian Constitution.

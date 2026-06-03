@@ -65,7 +65,13 @@ _COARSE_SEMANTIC_FLOOR = float(
     os.environ.get("RETRIEVAL_GATE_COARSE_FLOOR", "0.15")
 )
 _RELEVANCE_CHUNK_CHARS = 1200       # Per-chunk text window shown to the judge
-_RELEVANCE_TOP_N = 3                # Number of top hits the judge sees
+# Number of top hits the judge sees. Raised from 3 to 10: a multi-section
+# query ("compare BNS 115, 118, 189, 190, 191, 351, 352") produces 7+ hits
+# and the judge was rejecting them because it only saw the first 3
+# (sections 115, 118, 189) and concluded the others were "missing". Newacts
+# now also short-circuits the gate entirely on exact-filter queries, but
+# bumping the cap is defense in depth for Legislation / Constitution / Maxim.
+_RELEVANCE_TOP_N = 10
 _RELEVANCE_CONFIDENCE_MIN = int(
     os.environ.get("RETRIEVAL_GATE_MIN_CONFIDENCE", "60")
 )

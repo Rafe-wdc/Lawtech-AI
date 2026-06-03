@@ -263,7 +263,15 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
         }
 
     # Non-hybrid: exact filter search
-    log.debug("Building exact filter query", filters_count=len(filters))
+    # Size adapts to the number of sections requested -- a multi-section query
+    # ("compare BNS 115, 118, 189, 190, 191, 351, 352") would silently lose
+    # hits if we capped at 10. Floor of 10 preserves prior behaviour for
+    # single-section queries; cap at 50 so a stray very-large list cannot
+    # blow up the response.
+    size = max(10, min(50, len(metadata.section_number) * 2)) if metadata.section_number else 10
+    log.debug("Building exact filter query",
+              filters_count=len(filters), size=size,
+              sections=len(metadata.section_number or []))
     return {
         "query": {
             "bool": {
@@ -271,9 +279,28 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
                 "filter": filters,
             }
         },
-        "size": 10,
+        "size": size,
         "sort": [{"section_number.keyword": {"order": "asc"}}],
     }
+
+
+def _is_exact_filter_query(metadata: ActQueryMetadata) -> bool:
+    """True when the ES query was an exact filter (act + section, no BM25).
+
+    The relevance gate exists to catch false positives from keyword/vector
+    retrieval (e.g. "BNS Section 318" returning another act's Section 318
+    because of keyword overlap). When the query is an exact filter on
+    `source.keyword == act_path` AND `section_number.keyword IN [...]`,
+    every hit is by construction a section of the requested act -- the gate
+    cannot improve precision, but it CAN reject perfectly good hits when
+    the judge only sees the top-N chunks (Sec 125 CrPC / BNS 115-352
+    incidents). Skipping the gate in this mode prevents that false negative.
+    """
+    return (
+        not metadata.hybrid_search
+        and bool(metadata.section_number)
+        and bool(metadata.act_name)
+    )
 
 
 # --- Agent Node ---
@@ -617,7 +644,20 @@ async def newacts_node(state: LegalAgentState) -> dict:
         # Step 4.5: Relevance gate — reject section-number-collision matches
         # (e.g. query for BNS Section 318 returning a different act's Section
         # 318) and unrelated-act content with shared rare phrases.
-        if hits:
+        #
+        # SKIPPED for exact-filter queries (act source + section_number terms)
+        # because every hit is by construction a section of the requested act.
+        # Running the gate in that mode trades false positives for false
+        # negatives: the judge only sees the top-_RELEVANCE_TOP_N chunks of
+        # what may be a 7+ hit result set, so multi-section comparison queries
+        # ("BNS Sections 115, 118, 189, 190, 191, 351, 352") get rejected
+        # despite all sections being present in the data.
+        if hits and _is_exact_filter_query(metadata):
+            log.info("Relevance gate skipped -- exact filter query",
+                     act=metadata.act_name,
+                     sections=len(metadata.section_number or []))
+
+        if hits and not _is_exact_filter_query(metadata):
             chunks_for_judge = [
                 h["_source"].get("page_content", "") for h in hits
             ]
@@ -651,9 +691,15 @@ async def newacts_node(state: LegalAgentState) -> dict:
         source_file = hits[0]["_source"].get("source", "unknown")
 
         # Step 6: Generate response (with 1 retry on disconnect)
+        # max_output_tokens capped at 8192 (~32k chars) to bound the response.
+        # Default 65535 allowed runaway markdown-column-padding loops on wide
+        # multi-section comparison tables -- one BNS comparison ran 4m46s and
+        # emitted 859k chars of whitespace padding inside a single table cell.
+        # 8k tokens is comfortably above any legitimate provisions lookup
+        # (typical: 2-6k chars per section, 7 sections = ~30k chars).
         progress("newacts", "Generating response...", step="generate")
         with log_time(log, "LLM generation"):
-            llm = get_gemini_flash_full(temperature=0.1)
+            llm = get_gemini_flash_full(temperature=0.1, max_output_tokens=8192)
             prompt = ChatPromptTemplate.from_messages([
                 ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),

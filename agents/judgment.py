@@ -47,6 +47,64 @@ from core.progress import progress
 log = get_logger("Judgment")
 
 
+# --- Exact-section lookup detection -------------------------------------
+#
+# When the user asks "case law on Section 313 CrPC", the metadata extractor
+# fills `acts_or_sections` and the ES search runs against those provisions
+# directly. The Judgment relevance gate then routinely false-positives on
+# results like "Section 302 IPC murder appeal that mentions Section 313
+# procedurally" -- the judge sees a case that's "primarily about Sec 302"
+# and rejects, triggering a 17-second Gemini + Google Search fallback whose
+# sources are web URLs (vertexaisearch.cloud.google.com redirectors)
+# instead of the user's S3-hosted PDF judgments.
+#
+# Fix mirrors the Newacts gate-skip from yesterday: when the user has
+# explicitly named a section AND most retrieved hits' acts_or_sections_invoked
+# metadata cites that same section, the hits are by-construction on-topic.
+# Running the gate cannot improve precision and routinely sends users to
+# the web fallback path.
+
+# Normalisation helpers -- "Section 313 CrPC" vs "s.313 cr.p.c." vs "Sec 313 of the
+# Code of Criminal Procedure" must all reduce to the same comparison token.
+_SECTION_RE = re.compile(r'(?:section|sec|s\.?)\s*(\d+)', flags=re.IGNORECASE)
+
+
+def _section_numbers(text: str) -> set[str]:
+    """Extract every "Section <N>" reference (case-insensitive)."""
+    return set(_SECTION_RE.findall(text or ""))
+
+
+def _is_exact_section_lookup(
+    metadata: "CaseMetadata", sources: list[SourceMetadata],
+    min_match_ratio: float = 0.5,
+) -> bool:
+    """True when the query is an explicit-section lookup AND at least half
+    the retrieved hits cite that section in their `acts_or_sections_invoked`.
+
+    Both conditions must hold:
+      (a) `metadata.acts_or_sections` is non-empty -- the extractor identified
+          one or more named provisions in the user query.
+      (b) >= `min_match_ratio` of `sources` have AT LEAST ONE of the queried
+          section numbers in their `acts_or_sections_invoked` metadata.
+    """
+    if not metadata.acts_or_sections or not sources:
+        return False
+    queried_secs: set[str] = set()
+    for provision in metadata.acts_or_sections:
+        queried_secs |= _section_numbers(provision)
+    if not queried_secs:
+        return False
+    matched = 0
+    for src in sources:
+        hit_secs: set[str] = set()
+        for invoked in (src.acts_or_sections_invoked or []):
+            hit_secs |= _section_numbers(invoked)
+        if hit_secs & queried_secs:
+            matched += 1
+    ratio = matched / len(sources)
+    return ratio >= min_match_ratio
+
+
 # --- Case Metadata Extraction ---
 
 METADATA_EXTRACTION_PROMPT = """You are an expert in legal text parsing and Elasticsearch query formulation.
@@ -383,16 +441,31 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # Step 3.5: Relevance gate — reject keyword-shared-but-subject-different
         # judgments (e.g. same parties named but unrelated dispute, or citation
         # match against a case that decides a different question).
-        progress("judgment", "Verifying retrieval relevance...",
-                 step="relevance_check")
-        is_relevant, judge_telemetry = await check_retrieval_relevance(
-            query, docs_text_parts,
-            source_name=first_title or hits[0].get("source"),
-            agent_name="Judgment",
-        )
-        log.info("Relevance judge verdict",
-                 passed=is_relevant, strategy=strategy,
-                 top_match=first_title[:60], **judge_telemetry)
+        #
+        # SKIPPED for "exact section lookup" queries (the user named a specific
+        # section AND >=50% of hits cite that section in their
+        # acts_or_sections_invoked metadata). Without this skip, the gate
+        # rejects perfectly relevant Sec 302 IPC murder appeals that also
+        # discuss Sec 313 CrPC procedurally, and forces a web-search fallback
+        # whose sources are vertexaisearch.cloud.google.com redirector URLs
+        # instead of the user's S3-hosted PDFs.
+        if _is_exact_section_lookup(metadata, sources):
+            log.info("Relevance gate skipped -- exact section lookup",
+                     sections=metadata.acts_or_sections,
+                     hits=len(sources),
+                     strategy=strategy)
+            is_relevant, judge_telemetry = True, {"reason": "skipped_exact_section"}
+        else:
+            progress("judgment", "Verifying retrieval relevance...",
+                     step="relevance_check")
+            is_relevant, judge_telemetry = await check_retrieval_relevance(
+                query, docs_text_parts,
+                source_name=first_title or hits[0].get("source"),
+                agent_name="Judgment",
+            )
+            log.info("Relevance judge verdict",
+                     passed=is_relevant, strategy=strategy,
+                     top_match=first_title[:60], **judge_telemetry)
 
         if not is_relevant:
             log.warning("Retrieved judgments failed relevance gate — "

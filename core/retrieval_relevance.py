@@ -97,8 +97,14 @@ _DOMAIN_HINTS: dict[str, str] = {
     "Judgment": (
         "These should be court judgments that materially address the "
         "legal question the user is asking about. Judgments that merely "
-        "name the same parties, cite the same provisions, or share "
-        "keywords but decide an unrelated dispute are NOT relevant."
+        "name the same parties or share keywords but decide a completely "
+        "unrelated dispute are NOT relevant. IMPORTANT: a judgment that "
+        "applies or discusses the user's cited section IS relevant, even "
+        "if the case ALSO arose under other provisions -- e.g. a Sec 302 "
+        "IPC murder appeal that contains a substantive Sec 313 CrPC "
+        "discussion is on-topic for a 'Section 313 CrPC case law' query. "
+        "Only reject if the section is incidental boilerplate, not a "
+        "discussed issue."
     ),
     "Newacts": (
         "These should be sections of the new criminal-law codes (BNS, "

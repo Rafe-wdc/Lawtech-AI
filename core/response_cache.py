@@ -31,15 +31,29 @@ class CacheEntry:
 
 
 class ResponseCache:
-    """TTL-based in-memory cache for legal query responses."""
+    """TTL-based in-memory cache for legal query responses.
 
-    def __init__(self, ttl: int = 3600, max_entries: int = 500):
+    Gated by `RESPONSE_CACHE_ENABLED` in core/settings.py. When disabled,
+    `get()` always returns None and `set()` is a no-op. See the setting's
+    docstring for why it ships off by default.
+    """
+
+    def __init__(self, ttl: int = 3600, max_entries: int = 500,
+                 enabled: bool | None = None):
+        # enabled=None -> read from settings (production path). Test code
+        # can force-enable by passing enabled=True without touching the env.
+        if enabled is None:
+            from core.settings import RESPONSE_CACHE_ENABLED
+            enabled = RESPONSE_CACHE_ENABLED
+        self._enabled = enabled
         self._store: dict[str, CacheEntry] = {}
         self._ttl = ttl
         self._max_entries = max_entries
         self._lock = threading.Lock()
         self._hits = 0
         self._misses = 0
+        log.info("Response cache initialised",
+                 enabled=self._enabled, ttl_s=ttl, max_entries=max_entries)
 
     @staticmethod
     def _make_key(query: str, file_fingerprint: str = "") -> str:
@@ -55,7 +69,10 @@ class ResponseCache:
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
     def get(self, query: str, file_fingerprint: str = "") -> CacheEntry | None:
-        """Look up a cached response. Returns None on miss or expiry."""
+        """Look up a cached response. Returns None on miss, expiry, or when
+        the cache is globally disabled via RESPONSE_CACHE_ENABLED."""
+        if not self._enabled:
+            return None
         key = self._make_key(query, file_fingerprint)
         with self._lock:
             entry = self._store.get(key)
@@ -71,7 +88,9 @@ class ResponseCache:
             return entry
 
     def set(self, query: str, entry: CacheEntry, file_fingerprint: str = "") -> None:
-        """Store a response in the cache."""
+        """Store a response in the cache. No-op when the cache is disabled."""
+        if not self._enabled:
+            return
         key = self._make_key(query, file_fingerprint)
         with self._lock:
             # Evict expired entries if at capacity
@@ -97,6 +116,7 @@ class ResponseCache:
     def stats(self) -> dict[str, Any]:
         """Return cache statistics."""
         return {
+            "enabled": self._enabled,
             "size": len(self._store),
             "hits": self._hits,
             "misses": self._misses,

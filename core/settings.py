@@ -138,6 +138,21 @@ DRAFTING_CITE_APPENDIX_DEFAULT = os.getenv(
     "DRAFTING_CITE_APPENDIX_DEFAULT", "false",
 ).strip().lower() in ("1", "true", "yes", "on")
 
+# --- Response Cache ---
+# Off by default. The cache stored the FIRST response to a given query and
+# replayed it on subsequent identical queries. Because the Judgment agent's
+# relevance gate is non-deterministic, the cached entry could be either the
+# "ES hits returned (S3 PDFs)" branch OR the "ES hits rejected, web fallback
+# fired (Google grounding links)" branch -- whichever ran first got pinned
+# for 1 hour. Two users running the same query then saw drastically
+# different source sets. Leaving the cache off is safer until the underlying
+# retrieval is more deterministic. Set RESPONSE_CACHE_ENABLED=true to opt
+# back in (useful for synthetic benchmarks where determinism matters more
+# than freshness).
+RESPONSE_CACHE_ENABLED = os.getenv(
+    "RESPONSE_CACHE_ENABLED", "false",
+).strip().lower() in ("1", "true", "yes", "on")
+
 # --- Redis ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 

@@ -1434,8 +1434,15 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             # of tokens on hidden reasoning while emitting only a handful of visible
             # chars (observed in production logs).
             # Use temperature=0 for table mode (deterministic formatting).
+            # max_output_tokens capped at 12288 (~48k chars) to bound the
+            # synthesis output. Default 65535 allowed runaway markdown-table
+            # column-padding loops that produced 140k-char responses with a
+            # single 125k-char dash-only table separator row (see incident
+            # thread 73a59cc4-fbfa-4d7b-b493-948a974c1496). 12k tokens is
+            # comfortably above any legitimate synthesis of 3 agent outputs.
             llm = get_gemini_flash_full(
                 temperature=0.0 if wants_table else 0.2,
+                max_output_tokens=12288,
                 thinking_budget=0,
             )
             prompt = ChatPromptTemplate.from_template(

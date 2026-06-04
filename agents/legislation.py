@@ -463,7 +463,9 @@ async def legislation_node(state: LegalAgentState) -> dict:
                      substep=True, step="search")
         progress("legislation", "Generating response...", step="generate")
         with log_time(log, "LLM generation"):
-            llm = get_gemini_flash_full(temperature=0.1)
+            # max_output_tokens capped at 8192 (~32k chars) to bound responses
+            # and prevent runaway markdown-table padding loops.
+            llm = get_gemini_flash_full(temperature=0.1, max_output_tokens=8192)
             prompt = ChatPromptTemplate.from_messages([
                 ("system", _system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),

@@ -92,6 +92,29 @@ Primary Task: {task}
 Which agents should handle this query? Return as JSON list.
 """
 
+# Shared formatting rules for ALL prompts that may produce markdown tables.
+# Reuse via f-string interpolation in the individual prompts below. The
+# inline-padding rule is load-bearing -- without it Gemini Flash periodically
+# runs away during column alignment (see incident threads referenced in
+# CLAUDE.md's "Drafting invariants" + Newacts notes).
+_TABLE_FORMATTING_RULES = """Markdown table rules (strict — these prevent
+streaming runaway):
+- ONE pipe per column boundary. NO whitespace padding inside cells to align
+  columns visually. The renderer does the alignment; you write only prose.
+  Example BAD (causes streaming runaway): `| 115 | Hurt                  | ...`
+  Example GOOD:                           `| 115 | Hurt | ... |`
+- Separator row is short and exact: `| --- | --- | --- |`. NEVER pad the
+  separator with extra dashes to align with the header (`| :----- | :--- ... |`
+  becomes a 100k-char runaway under wide cells).
+- Maximum 1500 characters per cell. If a cell needs more, summarise.
+- Maximum 30,000 characters per table total. Beyond that, summarise or split.
+- One separator row, immediately after the header. Never insert separator
+  rows between data rows.
+- Each data line is a single `|`-delimited row. Do not wrap a row across
+  multiple lines.
+"""
+
+
 # --- Orchestrator: Synthesis ---
 SYNTHESIS_PROMPT = """You are a legal response synthesizer. Merge the following agent results into a single, coherent, well-structured response.
 
@@ -116,7 +139,10 @@ Rules:
     - Pick exactly ONE act based on (a) any hint in Response Format Instructions, else (b) the act with the most relevant content in agent results.
     - Begin the response with a single italic line: *Assumed: {{act name}}. Specify a different act if needed.*
     - Build the response for that one act only. Do NOT compare across acts unless the user explicitly asked.
-"""
+11. **Response budget**: total output must stay under ~30,000 characters.
+    If the agent results carry more than that, summarise rather than dumping.
+
+""" + _TABLE_FORMATTING_RULES
 
 
 # --- Orchestrator: Synthesis (table-mode) ---
@@ -173,7 +199,8 @@ OUTPUT REQUIREMENTS — follow EXACTLY:
 
 8. NO PREAMBLE before the heading. NO POSTAMBLE after the table. NO closing analysis.
    The complete response is: (optional italic line) + (H3 heading) + (table). Nothing else.
-"""
+
+""" + _TABLE_FORMATTING_RULES
 
 # --- Domain Agent Prompts ---
 # (Migrated from v1 utils/custom_prompts.py)

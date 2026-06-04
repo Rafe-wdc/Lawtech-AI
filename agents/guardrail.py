@@ -19,6 +19,7 @@ from core.logger import get_logger, log_time
 from core.progress import progress
 from tools.inline.markdown import sanitize_markdown
 from tools.inline.disclaimer import add_disclaimer
+from core.sanitize import sanitize_output
 
 log = get_logger("Guardrail")
 
@@ -27,6 +28,19 @@ log = get_logger("Guardrail")
 
 MAX_QUERY_LENGTH = 200000
 MIN_QUERY_LENGTH = 2
+
+# Hard ceiling on the final response after all sanitization. Even after
+# sanitize_output collapses runaway pad-char runs, an LLM can still emit
+# legitimately diverse prose that runs longer than is useful to display.
+# 60k chars is well above any normal answer (a richly-formatted comparison
+# table for 10 statutes is ~15k chars; a long legal explainer is ~25k).
+# Beyond that we truncate and surface a hint to narrow the query.
+MAX_FINAL_RESPONSE_CHARS = 60_000
+TRUNCATION_SUFFIX = (
+    "\n\n---\n_Response truncated -- the answer was longer than the display "
+    "budget. Try asking a narrower question (specific section / specific act / "
+    "single comparison) for a focused result._\n"
+)
 
 # Allow-list of legal role nouns. If any of these appears within ~8 words after
 # "act as" / "you are now" / "pretend to be", we treat the phrasing as a
@@ -193,8 +207,34 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     log.info("Output sanitization started",
              response_len=len(response), task=task)
 
-    # Sanitize markdown
-    cleaned = sanitize_markdown(response)
+    # Pass 1: structural runaway repair (dash-overflow tables, malformed
+    # separators, repeated blocks). Operates line-by-line so it's O(lines)
+    # not O(chars) -- cheap even on a 140k-char response with one 125k-char
+    # runaway table separator. CRUCIAL ordering: this runs BEFORE
+    # sanitize_markdown because sanitize_markdown short-circuits when input
+    # is >100k chars (tools/inline/markdown.py:29). By shrinking the runaway
+    # first, we let the markdown polish step actually run on the cleaned
+    # output.
+    pre_len = len(response)
+    cleaned = sanitize_output(response)
+    if len(cleaned) < pre_len - 1000:
+        log.warning("Runaway output trimmed",
+                    original_len=pre_len, after_sanitize_output=len(cleaned),
+                    removed=pre_len - len(cleaned))
+
+    # Pass 2: markdown polish (code fences, bullets, headings, etc.)
+    cleaned = sanitize_markdown(cleaned)
+
+    # Pass 3: hard char cap. sanitize_output handles pad-char runaway, but
+    # an LLM can still emit legitimately diverse prose that runs past any
+    # useful display budget. Clamp to MAX_FINAL_RESPONSE_CHARS with a
+    # truncation suffix that nudges the user to narrow the query.
+    if len(cleaned) > MAX_FINAL_RESPONSE_CHARS:
+        keep = MAX_FINAL_RESPONSE_CHARS - len(TRUNCATION_SUFFIX)
+        log.warning("Response exceeded hard char cap -- truncating",
+                    original_len=len(cleaned),
+                    cap=MAX_FINAL_RESPONSE_CHARS)
+        cleaned = cleaned[:keep] + TRUNCATION_SUFFIX
 
     # Add disclaimer
     cleaned = add_disclaimer(cleaned, task or "Other")

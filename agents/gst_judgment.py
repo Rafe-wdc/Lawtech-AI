@@ -97,7 +97,9 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
 
     try:
         progress("gst_judgment", "Preparing GST AAAR search...", step="prepare")
-        llm = get_gemini_flash_full(temperature=0)
+        # max_output_tokens capped at 8192 (~32k chars) to bound responses
+        # and prevent runaway markdown-table padding loops.
+        llm = get_gemini_flash_full(temperature=0, max_output_tokens=8192)
         tools = AGENT_TOOLS["gst_judgment"]
         log.debug("Building ReAct agent", tools_count=len(tools))
 

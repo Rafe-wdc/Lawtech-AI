@@ -38,6 +38,12 @@ def sanitize_output(text: str) -> str:
 
     original_len = len(text)
 
+    # _collapse_runaway_runs FIRST -- it catches the inline-padding pathology
+    # (e.g. a 124k-dash table separator row, or 10k spaces in a single cell)
+    # that earlier passes don't see because they treat the whole line as
+    # opaque. By collapsing those runs upfront, _fix_malformed_tables and
+    # _fix_long_lines see normal-sized lines to work on.
+    text = _collapse_runaway_runs(text)
     text = _fix_dash_overflow(text)
     text = _fix_malformed_tables(text)
     text = _fix_excessive_whitespace(text)
@@ -58,6 +64,69 @@ def sanitize_output(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Individual sanitization passes
 # ---------------------------------------------------------------------------
+
+# Chars that LLMs commonly run away on when "aligning" markdown tables.
+# Any run of >100 of these in a row is collapsed -- legitimate prose never
+# contains 100 identical dashes or spaces in a row.
+_RUNAWAY_CHARS = "-_= *"
+_RUNAWAY_MIN_RUN = 100   # threshold: 100+ identical chars in a row
+_RUNAWAY_KEEP = 8        # what we collapse the run TO (preserves visual hint)
+
+
+def _collapse_runaway_runs(text: str) -> str:
+    """Collapse runs of 100+ identical "padding" characters down to 8.
+
+    Catches LLM markdown-table runaway pathology in two shapes:
+
+      Shape A -- pure separator row:
+          "| :----- | :----- <124,860 dashes> ----- |"
+      Shape B -- intra-cell padding:
+          "| Section 125 | Sub (1)............<6k dots>............ | ..."
+
+    Both are signs the model got stuck "aligning" columns visually and
+    streamed thousands of repeated chars before terminating. The fix is
+    cheap and idempotent: any run of >100 of [-, _, =, space, *] collapses
+    to 8 of the same char so the visual cue remains. Other characters
+    (alphanumerics, normal prose) are never touched.
+
+    O(N) over the input string. No regex backtracking risk -- we walk char
+    by char with a simple state machine.
+    """
+    if not text:
+        return text
+
+    runaway_chars = set(_RUNAWAY_CHARS)
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    total_collapsed = 0
+    runs_fixed = 0
+
+    while i < n:
+        ch = text[i]
+        if ch in runaway_chars:
+            # Walk forward while the same char repeats
+            j = i + 1
+            while j < n and text[j] == ch:
+                j += 1
+            run_len = j - i
+            if run_len >= _RUNAWAY_MIN_RUN:
+                out.append(ch * _RUNAWAY_KEEP)
+                total_collapsed += run_len - _RUNAWAY_KEEP
+                runs_fixed += 1
+            else:
+                out.append(text[i:j])
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+
+    if runs_fixed:
+        log.warning("Collapsed runaway padding runs",
+                    runs_fixed=runs_fixed,
+                    chars_removed=total_collapsed)
+    return "".join(out)
+
 
 def _fix_dash_overflow(text: str) -> str:
     """Remove consecutive dash-only lines (malformed table separators).

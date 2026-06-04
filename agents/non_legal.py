@@ -53,7 +53,9 @@ async def non_legal_node(state: LegalAgentState) -> dict:
     progress("non_legal", "Preparing response...", step="generate")
 
     try:
-        llm = get_gemini_flash_full(temperature=0.4)
+        # Small-talk replies don't need a large output budget; 2048 tokens
+        # (~8k chars) is plenty and prevents accidental runaway.
+        llm = get_gemini_flash_full(temperature=0.4, max_output_tokens=2048)
         prompt = ChatPromptTemplate.from_template(
             localize_prompt(_NON_LEGAL_PROMPT, user_language)
         )

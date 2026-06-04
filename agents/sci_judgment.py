@@ -55,7 +55,9 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
     try:
         # Build ReAct agent with SCI tools
         progress("sci_judgment", "Preparing Supreme Court search...", step="prepare")
-        llm = get_gemini_flash_full(temperature=0)
+        # max_output_tokens capped at 8192 (~32k chars) to bound the ReAct
+        # agent's final response and prevent runaway markdown-table padding.
+        llm = get_gemini_flash_full(temperature=0, max_output_tokens=8192)
         tools = AGENT_TOOLS["sci_judgment"]
         log.debug("Building ReAct agent", tools_count=len(tools))
 

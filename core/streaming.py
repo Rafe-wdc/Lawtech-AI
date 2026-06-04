@@ -23,10 +23,28 @@ from langgraph.config import get_stream_writer
 log = logging.getLogger("Streaming")
 
 # Default timeout for a complete LLM generation.
-# 90s covers large streaming responses (drafts, scenario analysis).
+# 180s covers large streaming responses with max_output_tokens=65535 plus
+# occasional Google Gemini API stream hangs (observed: response_stream.readline()
+# blocking indefinitely on transient network issues). One retry on timeout
+# inside stream_chain_response gives a second chance before surfacing the error.
 # Batch calls (no streaming) use 60s — they're simpler tasks.
-_STREAM_TIMEOUT = 90
+_STREAM_TIMEOUT = 180
 _BATCH_TIMEOUT = 60
+
+# --- Streaming runaway protection ---
+#
+# LLMs sometimes get stuck "aligning" wide markdown tables and stream tens
+# of thousands of repeated padding characters (dashes, spaces, asterisks)
+# in a single cell. The post-stream guardrail catches this at the final
+# response, but during streaming the user watches the dashes scroll past
+# for minutes -- a terrible UX. We track the running tail of padding chars
+# and abort the stream as soon as it crosses a threshold.
+_PAD_CHARS = frozenset("-_= *")
+_STREAM_PAD_RUN_THRESHOLD = 100
+_STREAM_TRUNCATION_NOTICE = (
+    "\n\n... [output truncated -- streaming runaway detected; please try a "
+    "narrower query] ..."
+)
 
 
 async def stream_chain_response(
@@ -71,9 +89,22 @@ async def stream_chain_response(
             _stream_with_writer(chain, inputs, writer), timeout=t
         )
     except asyncio.TimeoutError:
-        log.error("LLM streaming timed out after %ds", t)
+        # Stream hung (often Google Gemini API transient — response_stream.readline()
+        # blocking indefinitely). Retry once before giving up.
+        if not retry:
+            log.error("LLM streaming timed out after %ds", t)
+            writer({"type": "token_reset"})
+            raise
+        log.warning("LLM streaming timed out after %ds, retrying once", t)
         writer({"type": "token_reset"})
-        raise
+        try:
+            return await asyncio.wait_for(
+                _stream_with_writer(chain, inputs, writer), timeout=t
+            )
+        except asyncio.TimeoutError:
+            log.error("LLM streaming timed out after %ds (after retry)", t)
+            writer({"type": "token_reset"})
+            raise
     except Exception as e:
         if not retry:
             raise
@@ -87,15 +118,63 @@ async def stream_chain_response(
 
 
 async def _stream_with_writer(chain, inputs: dict, writer):
-    """Stream chain output token-by-token via the writer."""
+    """Stream chain output token-by-token via the writer.
+
+    Aborts the stream early if the LLM emits >_STREAM_PAD_RUN_THRESHOLD
+    consecutive padding chars (dashes, spaces, asterisks, etc.) -- a
+    near-certain sign of a markdown-table column-alignment runaway. The
+    truncation marker is appended to both the writer (so the client sees
+    the cut-off) and the returned content (so the post-stream guardrail
+    knows the response is intentionally truncated).
+    """
     full = ""
     usage = {}
-    async for chunk in chain.astream(inputs):
-        token = chunk.content or ""
-        if token:
-            full += token
-            writer({"type": "token", "content": token})
-        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
-            usage = chunk.usage_metadata
+    last_ch: str | None = None  # most recent char (for "same-char" run tracking)
+    same_char_run = 0
+    truncated = False
+    stream = chain.astream(inputs)
+    try:
+        async for chunk in stream:
+            token = chunk.content or ""
+            if token:
+                # Walk char-by-char. The runaway pathology is always the
+                # SAME char repeated (e.g. 124k dashes, 10k spaces, never
+                # a mix). Tracking "same char" rather than "any pad char"
+                # avoids false positives like "99 dashes then a space then
+                # prose" -- which is normal output, not a runaway.
+                for ch in token:
+                    if ch == last_ch and ch in _PAD_CHARS:
+                        same_char_run += 1
+                        if same_char_run > _STREAM_PAD_RUN_THRESHOLD:
+                            truncated = True
+                            break
+                    else:
+                        last_ch = ch
+                        same_char_run = 1 if ch in _PAD_CHARS else 0
+                if truncated:
+                    # Do NOT emit this token's pad-char runaway to the
+                    # client; append a clear notice instead and abort.
+                    full += _STREAM_TRUNCATION_NOTICE
+                    writer({"type": "token",
+                            "content": _STREAM_TRUNCATION_NOTICE})
+                    log.warning(
+                        "Stream truncated -- pad-char runaway detected "
+                        "(threshold=%d; emitted so far=%d chars)",
+                        _STREAM_PAD_RUN_THRESHOLD, len(full),
+                    )
+                    break
+                full += token
+                writer({"type": "token", "content": token})
+            if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                usage = chunk.usage_metadata
+    finally:
+        # Close the underlying async generator so the LLM call is cancelled
+        # server-side (saves tokens and latency once we've decided to abort).
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:
+                pass
 
     return SimpleNamespace(content=full, usage_metadata=usage)

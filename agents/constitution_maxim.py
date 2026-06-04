@@ -201,7 +201,9 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
 
     progress(agent_label, "Generating response...", step="generate")
     with log_time(log, "LLM generation", task=task):
-        llm = get_gemini_flash_full(temperature=0.3)
+        # max_output_tokens capped at 8192 (~32k chars) to bound responses
+        # and prevent runaway markdown-table padding loops.
+        llm = get_gemini_flash_full(temperature=0.3, max_output_tokens=8192)
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             MessagesPlaceholder(variable_name="chat_history", optional=True),

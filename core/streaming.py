@@ -133,48 +133,53 @@ async def _stream_with_writer(chain, inputs: dict, writer):
     same_char_run = 0
     truncated = False
     stream = chain.astream(inputs)
-    try:
-        async for chunk in stream:
-            token = chunk.content or ""
-            if token:
-                # Walk char-by-char. The runaway pathology is always the
-                # SAME char repeated (e.g. 124k dashes, 10k spaces, never
-                # a mix). Tracking "same char" rather than "any pad char"
-                # avoids false positives like "99 dashes then a space then
-                # prose" -- which is normal output, not a runaway.
-                for ch in token:
-                    if ch == last_ch and ch in _PAD_CHARS:
-                        same_char_run += 1
-                        if same_char_run > _STREAM_PAD_RUN_THRESHOLD:
-                            truncated = True
-                            break
-                    else:
-                        last_ch = ch
-                        same_char_run = 1 if ch in _PAD_CHARS else 0
-                if truncated:
-                    # Do NOT emit this token's pad-char runaway to the
-                    # client; append a clear notice instead and abort.
-                    full += _STREAM_TRUNCATION_NOTICE
-                    writer({"type": "token",
-                            "content": _STREAM_TRUNCATION_NOTICE})
-                    log.warning(
-                        "Stream truncated -- pad-char runaway detected "
-                        "(threshold=%d; emitted so far=%d chars)",
-                        _STREAM_PAD_RUN_THRESHOLD, len(full),
-                    )
-                    break
-                full += token
-                writer({"type": "token", "content": token})
-            if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
-                usage = chunk.usage_metadata
-    finally:
-        # Close the underlying async generator so the LLM call is cancelled
-        # server-side (saves tokens and latency once we've decided to abort).
-        aclose = getattr(stream, "aclose", None)
-        if aclose is not None:
-            try:
-                await aclose()
-            except Exception:
-                pass
+    async for chunk in stream:
+        token = chunk.content or ""
+        if token:
+            # Walk char-by-char. The runaway pathology is always the
+            # SAME char repeated (e.g. 124k dashes, 10k spaces, never
+            # a mix). Tracking "same char" rather than "any pad char"
+            # avoids false positives like "99 dashes then a space then
+            # prose" -- which is normal output, not a runaway.
+            for ch in token:
+                if ch == last_ch and ch in _PAD_CHARS:
+                    same_char_run += 1
+                    if same_char_run > _STREAM_PAD_RUN_THRESHOLD:
+                        truncated = True
+                        break
+                else:
+                    last_ch = ch
+                    same_char_run = 1 if ch in _PAD_CHARS else 0
+            if truncated:
+                # Do NOT emit this token's pad-char runaway to the
+                # client; append a clear notice instead and abort.
+                full += _STREAM_TRUNCATION_NOTICE
+                writer({"type": "token",
+                        "content": _STREAM_TRUNCATION_NOTICE})
+                log.warning(
+                    "Stream truncated -- pad-char runaway detected "
+                    "(threshold=%d; emitted so far=%d chars)",
+                    _STREAM_PAD_RUN_THRESHOLD, len(full),
+                )
+                # ONLY aclose the underlying stream when we explicitly
+                # truncated -- this cancels the LLM call server-side. On
+                # NORMAL stream completion we must NOT aclose, because
+                # LangChain's astream wraps a network connection that
+                # downstream nodes (synthesize, guardrail) rely on for
+                # the final-event emission. An earlier version of this
+                # code called aclose() unconditionally in a finally
+                # block and broke the SSE `result` event on the
+                # integration test (CI run 26947404618).
+                aclose = getattr(stream, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception:
+                        pass
+                break
+            full += token
+            writer({"type": "token", "content": token})
+        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+            usage = chunk.usage_metadata
 
     return SimpleNamespace(content=full, usage_metadata=usage)

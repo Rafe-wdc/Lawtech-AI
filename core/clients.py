@@ -142,33 +142,90 @@ def get_gpt4o_mini(temperature: float = 0.3):
 # Flash Lite: classification, metadata extraction, query rewrite (fastest, cheapest)
 # Flash:      response generation, synthesis, ReAct agents (balanced quality + speed)
 # Pro:        scenario analysis, complex reasoning (highest quality)
+#
+# Output budget caps (max_output_tokens) are set to the Gemini 2.5 hard ceiling
+# (65,535) by default to prevent silent truncation. Callers can override per-use.
+#
+# `thinking_budget` controls Gemini 2.5's hidden reasoning tokens. CRITICAL:
+# thinking tokens are charged AGAINST max_output_tokens (Google counts them as
+# part of the output budget). For pure-generation tasks (synthesis, drafting,
+# OCR), set thinking_budget=0 to disable thinking and reclaim the full budget
+# for visible output. For tool-use / analytical tasks (ReAct agents, scenario,
+# PDF chat), leave thinking_budget at the default to allow planning.
 
-@lru_cache(maxsize=1)
-def get_gemini_flash_lite(temperature: float = 0.3):
-    """Gemini 2.5 Flash Lite — fastest. For classification, metadata, query rewrite."""
-    return init_chat_model("google_genai:gemini-2.5-flash-lite", temperature=temperature)
+@lru_cache(maxsize=8)
+def get_gemini_flash_lite(temperature: float = 0.3,
+                          max_output_tokens: int = 8192,
+                          thinking_budget: int = 0):
+    """Gemini 2.5 Flash Lite — fastest. For classification, metadata, query rewrite.
+
+    Defaults: 8K tokens cap, no thinking (lite is for fast/cheap, not reasoning).
+    """
+    return init_chat_model(
+        "google_genai:gemini-2.5-flash-lite",
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        thinking_budget=thinking_budget,
+    )
 
 
 # Alias: existing callers use get_gemini_flash() — keep pointing to Flash Lite
 get_gemini_flash = get_gemini_flash_lite
 
 
-@lru_cache(maxsize=1)
-def get_gemini_flash_full(temperature: float = 0.3):
-    """Gemini 2.5 Flash — balanced. For response generation, synthesis, ReAct agents."""
-    return init_chat_model("google_genai:gemini-2.5-flash", temperature=temperature)
+@lru_cache(maxsize=8)
+def get_gemini_flash_full(temperature: float = 0.3,
+                          max_output_tokens: int = 65535,
+                          thinking_budget: int = 0):
+    """Gemini 2.5 Flash — balanced. For response generation, synthesis, ReAct agents.
+
+    Defaults: max output ceiling (65K), thinking disabled (0).
+
+    Pure-generation paths (legislation, judgment, newacts, drafting, synthesis)
+    don't need thinking and tolerate latency poorly — keep the default.
+
+    ReAct agents (SCI/GST/Judgment) that benefit from tool-planning reasoning
+    should explicitly opt in: `get_gemini_flash_full(temperature=0, thinking_budget=2048)`.
+    """
+    return init_chat_model(
+        "google_genai:gemini-2.5-flash",
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        thinking_budget=thinking_budget,
+    )
 
 
-@lru_cache(maxsize=1)
-def get_gemini_pro(temperature: float = 0.5):
-    """Gemini 2.5 Pro — strongest. For scenario analysis, PDF chat, complex reasoning."""
-    return init_chat_model("google_genai:gemini-2.5-pro", temperature=temperature)
+@lru_cache(maxsize=8)
+def get_gemini_pro(temperature: float = 0.5,
+                   max_output_tokens: int = 65535,
+                   thinking_budget: int = 8192):
+    """Gemini 2.5 Pro — strongest. For scenario analysis, PDF chat, complex reasoning.
+
+    Defaults: max output ceiling, generous thinking budget — analytical work
+    benefits from reasoning.
+    """
+    return init_chat_model(
+        "google_genai:gemini-2.5-pro",
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        thinking_budget=thinking_budget,
+    )
 
 
-@lru_cache(maxsize=1)
-def get_drafting_llm():
-    """Gemini 2.5 Flash for legal drafting — fast, high-quality sections."""
-    return init_chat_model("google_genai:gemini-2.5-flash", temperature=0.4)
+@lru_cache(maxsize=8)
+def get_drafting_llm(max_output_tokens: int = 65535,
+                     thinking_budget: int = 0):
+    """Gemini 2.5 Flash for legal drafting — fast, high-quality sections.
+
+    Defaults: max output ceiling, no thinking (format-following beats reasoning
+    for drafts; the drafting prompt is highly structured).
+    """
+    return init_chat_model(
+        "google_genai:gemini-2.5-flash",
+        temperature=0.4,
+        max_output_tokens=max_output_tokens,
+        thinking_budget=thinking_budget,
+    )
 
 
 # --- Google GenAI client (for Gemini with Google Search grounding) ---

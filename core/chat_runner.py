@@ -431,6 +431,14 @@ async def run_chat_pipeline(
         except Exception as e:
             log.error("Failed to save draft continuation", error=str(e))
 
+    # Compute token usage NOW so it's available for both the cache write
+    # and the done event below. Previously this assignment lived AFTER the
+    # cache-set block, which crashed every streaming first-turn request
+    # with UnboundLocalError on `token_usage_dict` (see prod error.log
+    # circa 2026-06-04, plus the chronic flakiness of
+    # tests/integration/test_api.py::test_stream_final_event_has_result).
+    token_usage_dict = token_tracker.to_dict(include_calls=True)
+
     # Cache first-turn responses (skip if files/integration were used to keep
     # cache keys clean and avoid stale-content serving)
     cacheable = (
@@ -454,7 +462,6 @@ async def run_chat_pipeline(
     # token breakdown captured by the request-scoped tracker.
     # The previously-emitted flat `total_tokens` int has been removed in
     # favour of `token_usage.total_tokens`; clients should read that.
-    token_usage_dict = token_tracker.to_dict(include_calls=True)
     yield _sse({
         "type": "done",
         "agents_used": agents_used,

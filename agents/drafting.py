@@ -24,6 +24,7 @@ import os
 import re
 import unicodedata
 from datetime import date
+from functools import lru_cache
 from typing import List
 
 from pydantic import BaseModel, Field
@@ -291,6 +292,7 @@ def _select_best_template(
 async def _generate_outline(
     query: str, template_text: str, user_language: str = "en",
     user_facts: str = "", case_facts: str = "",
+    format_block: str = "",
 ) -> DraftOutline:
     """Generate a structured outline with all sections for the document.
 
@@ -300,6 +302,10 @@ async def _generate_outline(
     non-empty, the outline is tailored to those specific facts so e.g. a
     "Suit For Recovery Of Money" outline knows to include sections referring
     to the actual loan amount and dates.
+
+    `format_block` carries layout/typographic conventions extracted from the
+    chosen template (see _extract_format_spec). Empty string disables the
+    block; the outline still works on template_text alone.
     """
     facts_block = ""
     if case_facts.strip() or user_facts.strip():
@@ -323,7 +329,12 @@ async def _generate_outline(
             ("user",
              "Reference Template (use ONLY for STRUCTURE/section names — "
              "do NOT copy the template's facts/parties/amounts):\n{template}"),
-            ("user", "Current Date: {date}"),
+            # Layout-spec block: distilled visual conventions from the
+            # template, separated from the full template_text so the LLM
+            # sees a clear "imitate these layout patterns" signal divorced
+            # from the fact-isolation warning. Empty string when extraction
+            # failed -- prompt still works on template_text alone.
+            ("user", "{format_block}Current Date: {date}"),
         ])
         chain = prompt | llm
         try:
@@ -332,6 +343,7 @@ async def _generate_outline(
                 "template": template_text,
                 "date": str(date.today()),
                 "facts_block": facts_block,
+                "format_block": format_block,
             })
         except Exception as e:
             log.error("Structured outline generation failed, using fallback",
@@ -869,6 +881,259 @@ def _format_stance_for_section(stance: DoctrinalStance | None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+# --- Step 3.7: Layout/Format extractor (per-template, cached) ---
+#
+# The chosen template_text is a fully-formatted exemplar of an Indian legal
+# document -- it carries layout signals (centered "PRAYER" / "VERIFICATION"
+# labels, right-aligned "______Plaintiff" tags, numbered "That ..." paragraphs,
+# verbatim prayer/verification clauses, signature blocks). The outline + section
+# prompts already pass the full template_text, but they tell the LLM "use it
+# only for structure" because of BUG-02 (the LLM used to copy fake names and
+# placeholder amounts straight from the template into the draft).
+#
+# This extractor distills the LAYOUT separately from the facts: one Flash call
+# reads the template, produces a FormatSpec (alignment, numbering, openers,
+# signature/verification blocks), which is then injected as its own block in
+# the outline + section prompts. The LLM gets a clear "imitate this layout
+# verbatim" signal divorced from the fact-isolation warnings, dramatically
+# improving visual fidelity to real Indian court conventions.
+#
+# Cached per template_source (the ES `source` key) -- one extraction per
+# template ever, then near-zero cost across all subsequent drafts that pick
+# the same template.
+
+class FormatSpec(BaseModel):
+    """Layout/typographic conventions extracted from a template's exemplar.
+
+    All fields are short strings or compact patterns -- never contain actual
+    facts (names, dates, amounts). Placeholders like `[Plaintiff Name]` or
+    `___` are used where the real document would carry case-specific data.
+    """
+    court_header_alignment: str = Field(
+        "centered",
+        description="Alignment of the court name and case-number header. "
+                    "One of 'centered', 'left', 'right'.",
+    )
+    section_label_style: str = Field(
+        "uppercase_centered",
+        description="How section labels like PRAYER / VERIFICATION are styled. "
+                    "Examples: 'uppercase_centered', 'titlecase_left', "
+                    "'bold_left', 'underlined_centered'.",
+    )
+    paragraph_numbering: str = Field(
+        "1., 2., 3.",
+        description="Exact glyph pattern for numbered paragraphs. Examples: "
+                    "'1., 2., 3.' or '(1), (2), (3)' or 'i, ii, iii'.",
+    )
+    paragraph_opener: str = Field(
+        "",
+        description="Verbatim opener that prefixes each numbered paragraph "
+                    "(e.g. 'That '). Empty if no opener.",
+    )
+    sub_point_style: str = Field(
+        "a., b., c.",
+        description="Glyph pattern for sub-points within a paragraph or prayer "
+                    "clause. Examples: 'a., b., c.' or '(a), (b), (c)'.",
+    )
+    party_block_tag_alignment: str = Field(
+        "right",
+        description="Alignment of the '______Plaintiff' / '______Defendant' "
+                    "tags that close each party's block.",
+    )
+    party_block_separator: str = Field(
+        "VERSUS",
+        description="The divider phrase between plaintiff and defendant blocks.",
+    )
+    prayer_opener: str = Field(
+        "",
+        description="Verbatim sentence that opens the Prayer section. Use "
+                    "[Hon'ble Court] etc. placeholders for any names. Example: "
+                    "'It is therefore most humbly prayed that this Hon'ble "
+                    "Court may be pleased to:'",
+    )
+    prayer_section_label: str = Field(
+        "PRAYER",
+        description="Exact label used for the Prayer section header.",
+    )
+    verification_label: str = Field(
+        "VERIFICATION",
+        description="Exact label for the verification section.",
+    )
+    verification_template: str = Field(
+        "",
+        description="1-3 line verification clause skeleton with [Plaintiff Name] "
+                    "placeholders for case-specific data.",
+    )
+    signature_block: str = Field(
+        "",
+        description="Multi-line signature block skeleton (alignment hint may "
+                    "be embedded as `[right-aligned]` etc.).",
+    )
+    place_date_format: str = Field(
+        "PLACE: [City]\nDATE: [Date]",
+        description="Format of the PLACE/DATE footer line(s).",
+    )
+    schedule_notation: str = Field(
+        "",
+        description="How Schedule annexes are referenced (e.g. 'Schedule A: "
+                    "Description of property...'). Empty if not applicable.",
+    )
+    other_conventions: List[str] = Field(
+        default_factory=list,
+        description="Any other notable layout patterns (e.g. 'capitalised "
+                    "RESPECTFULLY SHOWETH: before paragraph 1', 'each prayer "
+                    "clause indented under sub-letter'). Short observations only.",
+    )
+
+
+_FORMAT_EXTRACTOR_SYSTEM = """You are a legal-document layout analyst for
+Indian court filings. Extract ONLY the FORMATTING and LAYOUT conventions
+from the supplied document exemplar.
+
+CRITICAL: Do NOT extract any facts, names, dates, amounts, court locations,
+party details, case numbers, or substantive content -- those belong to a
+DIFFERENT case and would contaminate the user's draft. Where the exemplar
+has specific values, substitute placeholders like `[Plaintiff Name]`,
+`[Court Name]`, `[Date]`, `[Amount]`, `[Address]`.
+
+Capture only the visual / typographic / structural conventions:
+- Alignment patterns (centered / left / right) for headers, party tags,
+  signature blocks
+- Exact glyph pattern for paragraph numbering and sub-points
+- Verbatim opening phrases for paragraphs, prayer, verification (with
+  placeholders for any specific values)
+- Section label styling (caps, alignment, decoration)
+- Signature and PLACE/DATE block format
+- Schedule annexure notation
+- Any other unusual layout patterns
+
+The output will be used to guide the LAYOUT of a NEW draft about a
+DIFFERENT case. Imitable patterns ONLY -- no facts.
+"""
+
+
+@lru_cache(maxsize=256)
+def _format_spec_cache_key(template_source: str, content_fingerprint: str) -> str:
+    """Cache key combining template path + a short content hash so that
+    re-ingesting a template into ES invalidates its cached FormatSpec."""
+    return f"{template_source}::{content_fingerprint}"
+
+
+_FORMAT_SPEC_STORE: dict[str, "FormatSpec | None"] = {}
+
+
+async def _extract_format_spec(
+    template_source: str, template_text: str,
+) -> FormatSpec | None:
+    """One-shot Flash call producing the template's layout conventions.
+
+    Cached per (template_source, content_hash) so re-runs of the same
+    template are free. Returns None on failure -- outline + section gen
+    fall back to format-block-less prompts (same as before this step
+    existed).
+    """
+    if not template_source or not template_text:
+        return None
+
+    import hashlib
+    fp = hashlib.sha256(template_text[:200].encode("utf-8")).hexdigest()[:8]
+    cache_key = _format_spec_cache_key(template_source, fp)
+    if cache_key in _FORMAT_SPEC_STORE:
+        log.debug("Format spec cache hit", source=template_source[-40:])
+        return _FORMAT_SPEC_STORE[cache_key]
+
+    with log_time(log, "Format spec extraction"):
+        try:
+            llm = get_drafting_llm().with_structured_output(
+                FormatSpec, include_raw=True,
+            )
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", _FORMAT_EXTRACTOR_SYSTEM),
+                ("user", "EXEMPLAR (analyse layout only, IGNORE all facts):\n{template}"),
+            ])
+            chain = prompt | llm
+            # Cap the template fed to extractor at 6000 chars -- enough to
+            # see headers + first paragraphs + prayer + verification.
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({"template": template_text[:6000]}),
+                timeout=30,
+            )
+        except Exception as e:
+            log.warning("Format spec extraction failed -- continuing without",
+                        error=str(e)[:200], source=template_source[-40:])
+            _FORMAT_SPEC_STORE[cache_key] = None
+            return None
+
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "format_spec", raw_and_parsed.get("raw"))
+        spec = raw_and_parsed["parsed"]
+        _FORMAT_SPEC_STORE[cache_key] = spec
+        log.info("Format spec extracted",
+                 source=template_source[-40:],
+                 numbering=spec.paragraph_numbering,
+                 opener=spec.paragraph_opener[:30],
+                 prayer_label=spec.prayer_section_label)
+        return spec
+
+
+def _format_layout_block(spec: FormatSpec | None) -> str:
+    """Render the FormatSpec as a compact prompt block for outline + section gen.
+
+    Empty string when spec is None -- callers pass it as a template var so
+    the prompt remains valid even when extraction failed.
+    """
+    if spec is None:
+        return ""
+    lines = [
+        "TEMPLATE LAYOUT CONVENTIONS (use these for visual style only -- "
+        "all facts must come from the USER QUERY / FACTS sections, NEVER "
+        "from the template's example values):",
+        f"- Court header alignment: {spec.court_header_alignment}",
+        f"- Section labels: {spec.section_label_style} "
+        f"(e.g. \"{spec.prayer_section_label}\", \"{spec.verification_label}\")",
+        f"- Numbered paragraphs: {spec.paragraph_numbering}"
+        + (f" -- prefix each with \"{spec.paragraph_opener}\"" if spec.paragraph_opener else ""),
+        f"- Sub-points within paragraphs/prayer: {spec.sub_point_style}",
+        f"- Party-block tag alignment: {spec.party_block_tag_alignment} "
+        f"(divider: \"{spec.party_block_separator}\")",
+    ]
+    if spec.prayer_opener:
+        lines.append(f"- Prayer opener (verbatim): {spec.prayer_opener}")
+    if spec.verification_template:
+        lines.append(f"- Verification skeleton: {spec.verification_template}")
+    if spec.signature_block:
+        # Indent multi-line signature for readability
+        sig_lines = spec.signature_block.split("\n")
+        lines.append(f"- Signature block:")
+        for sl in sig_lines:
+            lines.append(f"    {sl}")
+    if spec.place_date_format:
+        lines.append(f"- Footer (PLACE/DATE) format: {spec.place_date_format}")
+    if spec.schedule_notation:
+        lines.append(f"- Schedule annexure notation: {spec.schedule_notation}")
+    if spec.other_conventions:
+        lines.append("- Other conventions:")
+        for c in spec.other_conventions:
+            lines.append(f"    * {c}")
+    lines.append(
+        "Apply these conventions verbatim where applicable. Substitute "
+        "[placeholders] for any case-specific values."
+    )
+    # IMPORTANT separation: this block governs LAYOUT only. Substantive
+    # depth (paragraph count, detail, statutory citations, case-law
+    # quotes) must follow the per-section targets the system prompt
+    # specifies -- NOT the template's brevity. Real court templates are
+    # terse exemplars; user drafts must be rich pleadings.
+    lines.append(
+        "DEPTH RULE: these conventions govern visual LAYOUT only. Do NOT "
+        "let the template's brevity reduce the substantive depth of your "
+        "pleading -- each section must hit its target paragraph count and "
+        "include the full statutory + factual + case-law analysis the "
+        "system prompt specifies."
+    )
+    return "\n".join(lines) + "\n\n"
+
+
 # --- Step 4: Generate Each Section ---
 
 async def _generate_section(
@@ -882,6 +1147,7 @@ async def _generate_section(
     user_facts: str = "",
     case_facts: str = "",
     stance_block: str = "",
+    format_block: str = "",
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
@@ -941,6 +1207,12 @@ async def _generate_section(
              "names, dates, amounts, addresses, or factual content from the "
              "template into the draft. The template's specifics are illustrative "
              "and UNRELATED to the user's case):\n{template}"),
+            # Layout-spec block: distilled visual conventions from the
+            # template (alignment, numbering glyphs, prayer/verification
+            # openers, signature block). Distinct from the template itself
+            # so the LLM treats it as "imitate this layout verbatim" rather
+            # than getting lost in the warning about template facts.
+            ("user", "{format_block}"),
             ("user",
              "NOW WRITE section {section_num} of {total} IN FULL DETAIL.\n"
              "{facts_reminder}\n\n"
@@ -978,6 +1250,7 @@ async def _generate_section(
             "facts_block": facts_block,
             "facts_reminder": facts_reminder,
             "stance_block": stance_block,
+            "format_block": format_block,
         }), timeout=180)
 
     from core.token_tracker import record as _record_tokens
@@ -1002,6 +1275,7 @@ async def _generate_sections_parallel(
     user_facts: str = "",
     case_facts: str = "",
     stance_block: str = "",
+    format_block: str = "",
 ) -> tuple[list[str], list[int], int]:
     """Generate all sections with bounded parallelism via asyncio.Semaphore.
 
@@ -1043,6 +1317,7 @@ async def _generate_sections_parallel(
                     user_facts=user_facts,
                     case_facts=case_facts,
                     stance_block=stance_block,
+                    format_block=format_block,
                 )
                 results[i] = (text, tokens, None)
                 if writer:
@@ -1510,12 +1785,23 @@ async def drafting_node(state: LegalAgentState) -> dict:
         log.debug("Template loaded",
                   template=selected_source, template_len=len(template_text))
 
+        # Step 3.7: Extract layout/format conventions from the template, in
+        # parallel with outline gen. Cached per template_source so this only
+        # actually fires once per unique template -- afterwards it's an
+        # in-memory lookup. format_block carries alignment, numbering glyphs,
+        # prayer/verification clauses, signature block, etc. Empty string
+        # when extraction fails (silent fallback, outline + sections still
+        # run on template_text alone).
+        format_spec = await _extract_format_spec(selected_source, template_text)
+        format_block = _format_layout_block(format_spec)
+
         # Step 4: Generate document outline (max 12 sections)
         progress("drafting", "Generating document outline...", step="outline")
         outline = await _generate_outline(
             query, template_text, user_language,
             user_facts=user_facts,
             case_facts=case_facts,
+            format_block=format_block,
         )
         progress("drafting", f"Outline ready: {len(outline.sections)} sections", found=len(outline.sections), substep=True, step="outline")
 
@@ -1541,6 +1827,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             user_facts=user_facts,
             case_facts=case_facts,
             stance_block=stance_block,
+            format_block=format_block,
         )
 
         # Emit incomplete event if needed

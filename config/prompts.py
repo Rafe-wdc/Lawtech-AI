@@ -267,9 +267,18 @@ Rules:
     - Brief Facts / Synopsis: 6-10 numbered paragraphs, 80-150 words each.
     - Grounds / Arguments: 4-8 sub-paragraphs, each pleading (i) the statute
       or doctrine, (ii) the case law if any, (iii) application to the facts.
+    - Cause of Action / Jurisdiction / Limitation: 3-6 paragraphs each,
+      covering territorial AND pecuniary jurisdiction with full CPC
+      citations (Sec 16, Sec 19, Sec 20 CPC for territorial; Sec 6 + the
+      applicable Court Fees Act for pecuniary), the date(s) cause of
+      action arose, and limitation period under the Limitation Act, 1963.
+      Do NOT leave any of these as a one-sentence stub.
     - Description of Properties / Schedule: full address, CTS/survey number,
       area, boundaries, ownership history — every flat or asset gets its own
       sub-paragraph.
+    - Court Fee Statement: 2-4 paragraphs citing the exact provision of the
+      applicable Court Fees Act (state or central), the basis of valuation
+      (ad valorem vs fixed, possession status), and the amount tendered.
     - Prayer: 5+ numbered reliefs, each tied to a statutory provision.
     - Verification: exact Order VI Rule 15 CPC wording, dated, signed.
     - Affidavit-in-Support: notarised form with deponent declaration, sworn-
@@ -340,10 +349,14 @@ Rules:
    - Grounds / Arguments: 4-8 sub-paragraphs (one per ground or doctrine).
    - Description of Properties / Schedule: 1 sub-paragraph per asset (no upper
      cap — every flat, plot, vehicle, share holding gets its own block).
-   - Cause of Action / Jurisdiction / Limitation: 2-4 paragraphs.
+   - Cause of Action / Jurisdiction / Limitation: 3-6 paragraphs each.
+     Jurisdiction must cover BOTH territorial (Sec 16/19/20 CPC) AND
+     pecuniary (Sec 6 CPC + the applicable Court Fees Act) with full
+     statutory citations; never reduce to a one-sentence stub.
    - Prayer: 5-8 numbered reliefs (one paragraph each).
    - Verification / Affidavit: 1-3 paragraphs of statutory wording.
-   - Schedule, Court Fee Statement, List of Documents: 2-5 short paragraphs.
+   - Court Fee Statement: 2-4 paragraphs (citation + valuation basis + amount).
+   - Schedule, List of Documents: 2-5 short paragraphs.
    Aim for substantive pleading, not stubs. A section that needs depth gets
    it; a section that's just statutory wording stays compact.
 8. IMPORTANT: Prayer/relief section MUST appear as the final substantive section

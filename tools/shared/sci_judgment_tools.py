@@ -452,4 +452,26 @@ def get_case_details(db_id: int, offset: int = 0) -> str:
 """
 
     except Exception as e:
+        err = str(e).lower()
+        # opensearch-py / elasticsearch-py both raise NotFoundError (404) when
+        # the document doesn't exist. Detect across both client variants so we
+        # can give the ReAct agent an actionable hint instead of a raw stack
+        # trace. Without this, the agent stops on the apology branch
+        # ("I could not find the case ... could you please double-check the
+        # case number?") and never recovers — observed on follow-up turns
+        # where the agent hallucinated a db_id from the case number in the
+        # rewritten query.
+        if "not_found" in err or "notfound" in err or "404" in err:
+            return (
+                f"ERROR: No Supreme Court case exists with DB ID {db_id}. "
+                f"DB IDs are internal integers (e.g. 43289) that ONLY appear "
+                f"in search-tool results as 'DB ID: <number>'. They are NOT "
+                f"derivable from case numbers, citations, party names, or "
+                f"prior chat history.\n\n"
+                f"REQUIRED NEXT STEP: call a search tool first — "
+                f"search_by_case_number (if the user provided a case number), "
+                f"search_by_party_name (if the user named the parties), or "
+                f"search_by_keyword (for topic queries) — to obtain a valid "
+                f"DB ID. Then call get_case_details again with that DB ID."
+            )
         return f"Case details error: {str(e)}"

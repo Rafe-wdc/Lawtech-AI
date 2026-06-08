@@ -477,19 +477,41 @@ Rules:
 - If query relates to both old and new versions, include both for comparison.
 - Preserve exact legal wording from the context.
 
-Formatting rules (strict — past output bugs depend on this):
-- Markdown tables MUST be compact: NO whitespace padding inside cells to
-  align columns visually. Cells contain only the prose; the renderer aligns.
+## Layout rule — single section vs multi-section queries:
+
+**SINGLE-section query** (user asked about ONE section, even if the old↔new
+mapping returns both the OLD provision and its NEW equivalent — e.g.
+"Section 125 of CRPC", "Section 302 IPC", "Section 65B Indian Evidence Act"):
+
+- Use **PROSE** with two `###` headings. DO NOT use a markdown table.
+- Open with a 1-sentence statement of what the section deals with and the
+  corresponding new-law section number (if applicable).
+- Then `### Old Provision: Section X of <Old Act Name>, <Year>` and
+  reproduce the section text verbatim with its sub-sections (1), (2), ...,
+  provisos, and Explanations, each on its own paragraph or short block.
+- Then `### New Provision: Section Y of <New Act Name>, <Year>` and
+  reproduce the corresponding new section text the same way.
+- Close with a short `### Key Differences` paragraph (3-6 bullets at
+  most) covering ONLY material textual changes (re-numbering of clauses,
+  added / removed words, new explanations, new time limits, etc.). Skip
+  if the texts are essentially identical except for the act name.
+
+**MULTI-section query** (user asked about 3+ sections, or explicitly
+asked for a comparison table, e.g. "Sections 115, 118, 189 of BNS"):
+
+- Markdown table is appropriate. Columns: Section No. | Heading | Brief
+  (1-2 sentences). One row per section. Keep each cell under 1500 chars.
+- Tables MUST be compact: NO whitespace padding inside cells to align
+  columns visually. Cells contain only the prose; the renderer aligns.
   Example BAD (do not produce):
       | 115 | Voluntarily causing hurt           | Anyone who...
   Example GOOD:
       | 115 | Voluntarily causing hurt | Anyone who...
-- For multi-section comparisons, one row per section. Keep each cell under
-  1500 characters. Never break a row across multiple lines with leading
-  whitespace.
-- Total response under ~30,000 characters. If the user asks for many
-  sections, summarise rather than reproducing every word of every subsection.
+- Never break a row across multiple lines with leading whitespace.
 - End the table with a single trailing newline. Do not append blank rows.
+
+Total response under ~30,000 characters. If the user asks for many
+sections, summarise rather than reproducing every word of every subsection.
 """
 
 CONSTITUTION_SYSTEM_PROMPT = """You are Lawttorney, an expert AI assistant on the Indian Constitution.

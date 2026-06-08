@@ -40,11 +40,23 @@ _BATCH_TIMEOUT = 60
 # for minutes -- a terrible UX. We track the running tail of padding chars
 # and abort the stream as soon as it crosses a threshold.
 _PAD_CHARS = frozenset("-_= *")
-_STREAM_PAD_RUN_THRESHOLD = 100
-_STREAM_TRUNCATION_NOTICE = (
-    "\n\n... [output truncated -- streaming runaway detected; please try a "
-    "narrower query] ..."
-)
+# Threshold past which a same-char run is treated as a runaway. Bumped from
+# 100 to 400 after the threshold fired on legitimate wide markdown-table
+# header / separator rows (e.g. "Section 125 of CRPC" produced a 3-column
+# comparison table whose separator row was emitted as ~120 dashes in a
+# single cell — a normal LLM output, NOT the pathological 124k-dash loop
+# the killer was designed for). 400 still catches the real runaway with
+# orders-of-magnitude headroom.
+_STREAM_PAD_RUN_THRESHOLD = 400
+# When the run crosses the threshold, we DROP the excess pad chars but keep
+# streaming. The first this-many chars of any run are emitted normally so
+# small / medium tables render cleanly; only the tail above the threshold
+# is silently swallowed. This replaces the previous "abort the entire
+# stream" behaviour, which destroyed responses that had a single overly-
+# padded cell (the user got nothing but the table header + a truncation
+# notice). Post-stream sanitize still collapses anything that slips
+# through to 8 chars per run.
+_STREAM_PAD_RUN_EMIT_CAP = 64
 
 
 async def stream_chain_response(
@@ -120,66 +132,68 @@ async def stream_chain_response(
 async def _stream_with_writer(chain, inputs: dict, writer):
     """Stream chain output token-by-token via the writer.
 
-    Aborts the stream early if the LLM emits >_STREAM_PAD_RUN_THRESHOLD
-    consecutive padding chars (dashes, spaces, asterisks, etc.) -- a
-    near-certain sign of a markdown-table column-alignment runaway. The
-    truncation marker is appended to both the writer (so the client sees
-    the cut-off) and the returned content (so the post-stream guardrail
-    knows the response is intentionally truncated).
+    When the LLM gets stuck emitting a same-char run (the markdown-table
+    column-alignment pathology — historically up to 124k dashes), we DROP
+    the excess pad chars past _STREAM_PAD_RUN_THRESHOLD but keep the
+    stream alive. Up to _STREAM_PAD_RUN_EMIT_CAP same-char pads are
+    emitted per run; everything past that is silently swallowed until
+    the LLM resumes with a different character.
+
+    This replaces the earlier "abort the entire stream" behaviour, which
+    destroyed otherwise-fine responses when a single cell had aggressive
+    column padding (the user got the table header plus a truncation
+    notice and nothing else — reported for "Section 125 of CRPC"). Post-
+    stream sanitize still collapses anything that slips through.
     """
     full = ""
     usage = {}
-    last_ch: str | None = None  # most recent char (for "same-char" run tracking)
+    last_ch: str | None = None  # most recent same-char run anchor
     same_char_run = 0
-    truncated = False
+    runaway_dropped = 0   # for log telemetry
     stream = chain.astream(inputs)
     async for chunk in stream:
         token = chunk.content or ""
-        if token:
-            # Walk char-by-char. The runaway pathology is always the
-            # SAME char repeated (e.g. 124k dashes, 10k spaces, never
-            # a mix). Tracking "same char" rather than "any pad char"
-            # avoids false positives like "99 dashes then a space then
-            # prose" -- which is normal output, not a runaway.
-            for ch in token:
-                if ch == last_ch and ch in _PAD_CHARS:
-                    same_char_run += 1
-                    if same_char_run > _STREAM_PAD_RUN_THRESHOLD:
-                        truncated = True
-                        break
-                else:
-                    last_ch = ch
-                    same_char_run = 1 if ch in _PAD_CHARS else 0
-            if truncated:
-                # Do NOT emit this token's pad-char runaway to the
-                # client; append a clear notice instead and abort.
-                full += _STREAM_TRUNCATION_NOTICE
-                writer({"type": "token",
-                        "content": _STREAM_TRUNCATION_NOTICE})
-                log.warning(
-                    "Stream truncated -- pad-char runaway detected "
-                    "(threshold=%d; emitted so far=%d chars)",
-                    _STREAM_PAD_RUN_THRESHOLD, len(full),
-                )
-                # ONLY aclose the underlying stream when we explicitly
-                # truncated -- this cancels the LLM call server-side. On
-                # NORMAL stream completion we must NOT aclose, because
-                # LangChain's astream wraps a network connection that
-                # downstream nodes (synthesize, guardrail) rely on for
-                # the final-event emission. An earlier version of this
-                # code called aclose() unconditionally in a finally
-                # block and broke the SSE `result` event on the
-                # integration test (CI run 26947404618).
-                aclose = getattr(stream, "aclose", None)
-                if aclose is not None:
-                    try:
-                        await aclose()
-                    except Exception:
-                        pass
-                break
-            full += token
-            writer({"type": "token", "content": token})
+        if not token:
+            continue
+
+        # Per-token output buffer. We walk char-by-char to detect same-char
+        # runs of pad chars (NEVER mixed pad chars — those are normal
+        # output, e.g. "99 dashes then a space" is fine). Pad chars past
+        # _STREAM_PAD_RUN_EMIT_CAP within an active runaway are dropped
+        # from both `full` and the emitted token.
+        out_chars: list[str] = []
+        for ch in token:
+            if ch == last_ch and ch in _PAD_CHARS:
+                same_char_run += 1
+            else:
+                last_ch = ch
+                same_char_run = 1 if ch in _PAD_CHARS else 0
+
+            # Inside the runaway window — drop the char from emission.
+            if same_char_run > _STREAM_PAD_RUN_EMIT_CAP:
+                runaway_dropped += 1
+                # Log once per crossing the (much higher) original
+                # threshold so we can still spot real pathologies in prod.
+                if same_char_run == _STREAM_PAD_RUN_THRESHOLD + 1:
+                    log.warning(
+                        "Pad-char runaway in stream — collapsing "
+                        "(char=%r threshold=%d emit_cap=%d run=%d)",
+                        ch, _STREAM_PAD_RUN_THRESHOLD,
+                        _STREAM_PAD_RUN_EMIT_CAP, same_char_run,
+                    )
+                continue
+            out_chars.append(ch)
+
+        if out_chars:
+            out_token = "".join(out_chars)
+            full += out_token
+            writer({"type": "token", "content": out_token})
+
         if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
             usage = chunk.usage_metadata
+
+    if runaway_dropped:
+        log.info("Stream completed with pad-char runaway suppression",
+                 chars_dropped=runaway_dropped, emitted_chars=len(full))
 
     return SimpleNamespace(content=full, usage_metadata=usage)

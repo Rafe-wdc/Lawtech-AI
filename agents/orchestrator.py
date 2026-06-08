@@ -1472,47 +1472,69 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "tokens_consumed": total_tokens,
             }
 
-    # --- Judgment-Aware Synthesis ---
-    # Mirrors the draft-aware pattern: when Judgment is among multiple agents,
-    # Judgment's response is the primary content. JUDGMENT_SYSTEM_PROMPT shapes
-    # that response with a specific structure (direct answer first → "I think
-    # this information will help you more" → Key Legal Issues → Detailed
-    # Narrative → As per the High Court). If we feed it through the generic
-    # SYNTHESIS_PROMPT, the synthesizer LLM reorganises everything by legal
-    # argument and the user-facing structure is lost.
+    # --- Primary-Task-Aware Synthesis ---
+    # The agent matching the LLM's primary task is the PRIMARY content; other
+    # agents' content is appended under labelled headings. This replaces the
+    # earlier judgment-only special case, which hijacked Scenario-primary
+    # queries (e.g. "Prepare a cross-examination strategy for NDPS case")
+    # by making Judgment's 5-case-summary template the main response — 80%
+    # of the output was bail-case narratives, ~10% was the tactical content
+    # the user actually asked for. Each agent's system prompt shapes its own
+    # response (JUDGMENT_SYSTEM_PROMPT, SCI_JUDGMENT_SYSTEM_PROMPT,
+    # SCENARIO_SYSTEM_PROMPT, NEWACTS_SYSTEM_PROMPT, etc), so letting the
+    # primary task's agent own the layout preserves the structure the user
+    # expects for THAT kind of query.
     #
-    # Append-only: emit Judgment verbatim, then append each supporting agent's
-    # content under a labelled heading. No LLM rewrite, no token cost.
+    # Append-only: emit primary verbatim, then append each supporting agent's
+    # content. No LLM rewrite, no token cost.
     #
-    # Skip if the user asked for a comparison table (SYNTHESIS_TABLE_PROMPT
-    # owns the layout there) or if there is unprocessed file context that only
-    # the synthesizer LLM will read.
-    _wants_table_judgment = _wants_table_format(response_instructions, query)
+    # Skip when the user asked for a comparison table (SYNTHESIS_TABLE_PROMPT
+    # owns layout) or when unprocessed file context needs the LLM synthesizer.
+    _PRIMARY_AGENT_FOR_TASK: dict[str, str] = {
+        "Scenario":       "Scenario",
+        "Judgment":       "Judgment",
+        "SCI_Judgment":   "SCI_Judgment",
+        "Newacts":        "Newacts",
+        "Legislation":    "Legislation",
+        "Constitution":   "Constitution",
+        "Maxim":          "Maxim",
+        "GST_Judgment":   "GST_Judgment",
+        "Legal_Concepts": "Legal_Concepts",
+        "Other":          "Scenario",   # fallback per planner contract
+    }
+    _SUPPORTING_HEADINGS: dict[str, str] = {
+        "Newacts":      "## Statutory Provisions Referenced",
+        "Legislation":  "## Statutory Provisions Referenced",
+        "Judgment":     "## Supporting Case Authority",
+        "SCI_Judgment": "## Related Supreme Court Authority",
+        "Constitution": "## Constitutional Provisions Referenced",
+        "Maxim":        "## Legal Maxims & Doctrines Referenced",
+        "Scenario":     "## Additional Analysis",
+        "Document":     "## From Your Uploaded Document",
+        "GST_Judgment": "## Related GST/AAAR Authority",
+    }
+
+    primary_task_state = state.get("task")
+    primary_agent_name = _PRIMARY_AGENT_FOR_TASK.get(primary_task_state or "")
+    _wants_table_primary = _wants_table_format(response_instructions, query)
+
     if (
-        "Judgment" in valid_results
+        primary_agent_name
+        and primary_agent_name in valid_results
         and not has_unprocessed_file
-        and not _wants_table_judgment
+        and not _wants_table_primary
     ):
-        judgment_result = valid_results.pop("Judgment")
+        primary_result = valid_results.pop(primary_agent_name)
         supporting_results = valid_results
 
-        log.info("Judgment-aware synthesis starting",
-                 primary_len=len(judgment_result.content),
+        log.info("Primary-task-aware synthesis starting",
+                 task=primary_task_state, primary_agent=primary_agent_name,
+                 primary_len=len(primary_result.content),
                  supporting_agents=list(supporting_results.keys()))
 
-        _SUPPORTING_HEADINGS = {
-            "Newacts": "## Statutory Provisions Referenced",
-            "Legislation": "## Statutory Provisions Referenced",
-            "SCI_Judgment": "## Related Supreme Court Authority",
-            "Constitution": "## Constitutional Provisions Referenced",
-            "Maxim": "## Legal Maxims & Doctrines Referenced",
-            "Scenario": "## Additional Analysis",
-            "Document": "## From Your Uploaded Document",
-        }
-
-        primary = judgment_result.content.rstrip()
-        all_serialized_sources = _serialize_sources(judgment_result)
-        total_tokens = judgment_result.tokens_consumed
+        primary = primary_result.content.rstrip()
+        all_serialized_sources = _serialize_sources(primary_result)
+        total_tokens = primary_result.tokens_consumed
         appendix_parts: list[str] = []
 
         for name, result in supporting_results.items():
@@ -1525,7 +1547,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 
         final_response = primary + "".join(appendix_parts)
 
-        log.info("Judgment-aware synthesis completed (append-only)",
+        log.info("Primary-task-aware synthesis completed (append-only)",
+                 task=primary_task_state, primary_agent=primary_agent_name,
                  final_len=len(final_response),
                  supporting_agents=list(supporting_results.keys()),
                  total_tokens=total_tokens)

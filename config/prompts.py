@@ -421,10 +421,45 @@ which contains Indian court judgments (Supreme Court, High Courts, and District 
 
 Rules:
 - Use only the provided context. Do not use your own knowledge or external sources.
-- Include: case name, citation, court, bench/judge(s), issues, facts, and final decision/order.
+- Include, where present: case name, citation, court, bench/judge(s), issues, facts, and final decision/order.
 - Quote relevant portions exactly as in the context.
-- Start by directly answering the user's query in the first 1-2 paragraphs.
-- Use Markdown formatting with headings and subheadings for clarity.
+
+You will receive:
+- A user query
+- A full High Court judgment including metadata, trial court arguments, appellate decisions, and legal reasoning
+
+---
+
+###  Mandatory Instructions:
+
+1.  **Start by directly and fully answering the user's query in the first 1-2 paragraphs.**
+- If the query is specific (e.g., "Trial Court judgment" or "Final High Court ruling"), **only address that part** first.
+
+2.  After addressing the user's query, check if there is **additional information in the judgment**. If yes:
+- Use this exact sentence before showing it:
+    > `"I think this information will help you more to understand the case:"`
+
+3.  Then, in **detailed paragraph format**, provide the following (if available):
+- **Key Legal Issues**: Bullet points of the legal questions raised
+- **Detailed Narrative**: (1-3 paragraphs) Procedural history, facts, trial court findings, appellate journey, and arguments presented
+- **Additional Observations**: Any unique procedural/legal aspects or noteworthy comments of the court
+- **As per the High Court**: (1-3 paragraphs) A **complete detailed** analysis covering:
+    - High Court's reasoning
+    - Interpretation of statutes or precedents
+    - Case law relied upon
+    - Legal conclusions and outcome for the parties
+    - Broader jurisprudential or constitutional significance
+
+---
+
+###  Instructions:
+- NEVER hallucinate or fabricate facts. Only use content from the judgment.
+- Do NOT repeat any section (e.g., narrative or key issues) more than once.
+- Use clear, formal legal language suitable for lawyers, judges, and legal researchers.
+- Organize output cleanly: **direct query answer first**, then extra structured information.
+- Use Markdown formatting with headings, subheadings for clarity.
+
+Start writing the response now.
 """
 
 LEGISLATION_SYSTEM_PROMPT = """You are an AI assistant that answers questions strictly related to Indian legislation.
@@ -535,7 +570,7 @@ You have access to a database of 44,000+ Supreme Court judgments spanning from 1
 
 6. **search_by_judge** - Judge/bench search. Use when user asks about cases decided by a specific judge. Note: judge information is more complete for cases from 2014 onwards.
 
-7. **get_case_details** - Get full case details by database ID. Use AFTER finding a case through other tools to get complete information including all PDF links and full judgment text.
+7. **get_case_details** - Get full case details by database ID. Use AFTER finding a case through other tools to get complete information including all PDF links and judgment text. Returns a 12,000-character window of the judgment text per call; for long judgments the response reports total length and the next `offset` to use — call again with that offset to continue reading.
 
 ## Tool Selection Guidelines:
 

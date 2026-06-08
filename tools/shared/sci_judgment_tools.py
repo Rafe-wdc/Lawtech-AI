@@ -381,17 +381,29 @@ def search_by_judge(judge_name: str, limit: int = 10) -> str:
 # Tool 7: Case Details
 # ============================================================
 
+CASE_TEXT_WINDOW = 12000
+
+
 class CaseDetailsInput(BaseModel):
     db_id: int = Field(description="Database ID of the case to retrieve full details for")
+    offset: int = Field(
+        default=0,
+        description="Character offset into the judgment text to start reading from (default 0). "
+                    "For long judgments, call this tool again with offset advanced by 12000 to read the next chunk.",
+    )
 
 
 @tool(args_schema=CaseDetailsInput)
-def get_case_details(db_id: int) -> str:
+def get_case_details(db_id: int, offset: int = 0) -> str:
     """Get complete details of a specific Supreme Court case by its database ID.
 
-    Use this tool to fetch the full judgment text, all PDF links, and complete metadata
+    Use this tool to fetch the judgment text, all PDF links, and complete metadata
     for a specific case. Use this AFTER finding a case through other search tools
     to get more details. The db_id is shown in search results as 'DB ID'.
+
+    Returns a 12,000-character window of the judgment text starting at `offset`.
+    The response reports total length and the next offset to use — call again with
+    that offset to continue reading long judgments without losing context.
     """
     try:
         es = get_es_client()
@@ -404,8 +416,21 @@ def get_case_details(db_id: int) -> str:
             [f"  - {link.get('label', 'PDF')}: {link.get('url', 'N/A')}" for link in pdf_links]
         ) if pdf_links else "  No PDF links available"
 
-        full_text = src.get("full_text", "N/A") or "N/A"
-        text_preview = full_text[:3000] + "..." if len(full_text) > 3000 else full_text
+        full_text = src.get("full_text", "") or ""
+        total_len = len(full_text)
+        start = max(0, min(offset, total_len))
+        end = min(start + CASE_TEXT_WINDOW, total_len)
+        chunk = full_text[start:end] if total_len else "N/A"
+
+        if total_len == 0:
+            pagination_note = "[No judgment text available for this case.]"
+        elif end < total_len:
+            pagination_note = (
+                f"[Showing chars {start:,}-{end:,} of {total_len:,}. "
+                f"Call get_case_details again with offset={end} to read the next chunk.]"
+            )
+        else:
+            pagination_note = f"[End of judgment text reached. Total length: {total_len:,} chars.]"
 
         return f"""## Full Case Details
 
@@ -420,8 +445,10 @@ def get_case_details(db_id: int) -> str:
 **PDF Links**:
 {pdf_section}
 
-**Judgment Text** (first 3000 characters):
-{text_preview}
+**Judgment Text** (chars {start:,}-{end:,} of {total_len:,}):
+{chunk}
+
+{pagination_note}
 """
 
     except Exception as e:

@@ -1398,6 +1398,70 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "tokens_consumed": total_tokens,
             }
 
+    # --- Judgment-Aware Synthesis ---
+    # Mirrors the draft-aware pattern: when Judgment is among multiple agents,
+    # Judgment's response is the primary content. JUDGMENT_SYSTEM_PROMPT shapes
+    # that response with a specific structure (direct answer first → "I think
+    # this information will help you more" → Key Legal Issues → Detailed
+    # Narrative → As per the High Court). If we feed it through the generic
+    # SYNTHESIS_PROMPT, the synthesizer LLM reorganises everything by legal
+    # argument and the user-facing structure is lost.
+    #
+    # Append-only: emit Judgment verbatim, then append each supporting agent's
+    # content under a labelled heading. No LLM rewrite, no token cost.
+    #
+    # Skip if the user asked for a comparison table (SYNTHESIS_TABLE_PROMPT
+    # owns the layout there) or if there is unprocessed file context that only
+    # the synthesizer LLM will read.
+    _wants_table_judgment = _wants_table_format(response_instructions, query)
+    if (
+        "Judgment" in valid_results
+        and not has_unprocessed_file
+        and not _wants_table_judgment
+    ):
+        judgment_result = valid_results.pop("Judgment")
+        supporting_results = valid_results
+
+        log.info("Judgment-aware synthesis starting",
+                 primary_len=len(judgment_result.content),
+                 supporting_agents=list(supporting_results.keys()))
+
+        _SUPPORTING_HEADINGS = {
+            "Newacts": "## Statutory Provisions Referenced",
+            "Legislation": "## Statutory Provisions Referenced",
+            "SCI_Judgment": "## Related Supreme Court Authority",
+            "Constitution": "## Constitutional Provisions Referenced",
+            "Maxim": "## Legal Maxims & Doctrines Referenced",
+            "Scenario": "## Additional Analysis",
+            "Document": "## From Your Uploaded Document",
+        }
+
+        primary = judgment_result.content.rstrip()
+        all_serialized_sources = _serialize_sources(judgment_result)
+        total_tokens = judgment_result.tokens_consumed
+        appendix_parts: list[str] = []
+
+        for name, result in supporting_results.items():
+            if not result.content:
+                continue
+            heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
+            appendix_parts.append(f"\n\n---\n\n{heading}\n\n{result.content.strip()}")
+            total_tokens += result.tokens_consumed
+            all_serialized_sources.extend(_serialize_sources(result))
+
+        final_response = primary + "".join(appendix_parts)
+
+        log.info("Judgment-aware synthesis completed (append-only)",
+                 final_len=len(final_response),
+                 supporting_agents=list(supporting_results.keys()),
+                 total_tokens=total_tokens)
+
+        return {
+            "final_response": final_response,
+            "source_metadata": all_serialized_sources,
+            "tokens_consumed": total_tokens,
+        }
+
     # --- Generic Multi-Agent Synthesis (non-drafting) ---
     progress("orchestrator", "Composing final response...", step="synthesize")
     log.info("Multi-agent synthesis starting",

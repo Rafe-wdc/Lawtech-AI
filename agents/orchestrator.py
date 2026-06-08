@@ -348,7 +348,16 @@ def _classify_task_regex_fallback(query: str) -> str:
         "exemption", "hsn", "notification",
     ))):
         return "GST_Judgment"
-    if any(k in q for k in ("draft", "agreement", "notice", "plaint", "petition", "template", "format")):
+    # Drafting detection: defer to the shared `_wants_drafting` helper which
+    # already has explicit-verb + verb-noun + format-noun patterns with a Q&A
+    # negative regex. The previous naive substring check ("notice", "plaint",
+    # "petition", "format", "agreement") false-positively routed pure-Q&A
+    # queries like "What is the format of a written statement?",
+    # "Section 80 CPC notice requirements", or "Discuss the petition under
+    # Article 32" to Drafting whenever the LLM classifier had to fall back
+    # (timeout / rate-limit). _wants_drafting requires intent, not just a
+    # document-noun substring.
+    if _wants_drafting(query):
         return "Drafting"
     if any(k in q for k in ("bns", "bnss", "bsa", "ipc", "crpc", "iea",
                               "bharatiya nyaya", "bharatiya nagarik", "bharatiya sakshya",
@@ -422,7 +431,7 @@ Available agents:
 - Legislation: Central/state law sections and provisions (all acts EXCEPT the 6 below)
 - Judgment: Court case laws, citations, precedents (general / High Court / unspecified courts)
 - Newacts: ONLY these 6 acts: BNS/IPC, BNSS/CrPC, BSA/IEA
-- Drafting: Legal document templates and drafting
+- Drafting: ONLY when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document (verbs: draft, write, prepare, create, generate, compose, draw up, "give me a [doc]", "I need a [doc]"). NEVER for questions ABOUT documents (format, structure, essential elements, requirements, how to file, when to use, difference between X and Y) — those go to Legal_Concepts / Legislation / Scenario.
 - Scenario: Situational analysis, legal advice, remedies, web search
 - Constitution: Constitutional provisions, fundamental rights, Articles
 - Maxim: Legal maxims and doctrines (Latin phrases like res judicata, audi alteram partem, estoppel)
@@ -444,7 +453,7 @@ Rules:
    - Example: "My landlord locked me out. Arguments with citations and relevant IPC sections" → [Scenario, Judgment, Newacts]
 4. When a query mentions BOTH a constitutional concept AND a legal maxim/doctrine → [Constitution, Maxim]
 5. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
-6. For drafting requests: ONLY include Drafting when the user explicitly asks to draft/write/prepare a legal document. "What legal options" or "how can I" is NOT a drafting request.
+6. For drafting requests: ONLY include Drafting when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document. Questions ABOUT documents (format, structure, essential elements, ingredients, requirements, how to file, when to use, difference between X and Y) are NOT drafting requests — route those to Legal_Concepts, Legislation, or Scenario. "What legal options" or "how can I" is NOT drafting.
 7. Never use more than 3 agents.
 8. "Other" always maps to Scenario.
 
@@ -466,7 +475,23 @@ Identify the PRIMARY legal task type. Choose EXACTLY ONE:
   - Examples: "Section 125 of CrPC" → [Newacts]; "Section 125 of Code of Criminal Procedure 1973" → [Newacts]; "Section 302 IPC" → [Newacts]; "Section 65B Indian Evidence Act" → [Newacts]; "Section 438 BNSS" → [Newacts]. NEVER pair these queries with Legislation -- Newacts already covers both the old and new statute text.
 - **Legislation** → ALL other central/state acts and statutes NOT listed under Newacts.
   - Examples: "Section 138 NI Act" → [Legislation]; "Section 7 Hindu Marriage Act" → [Legislation]; "Section 482 Companies Act" → [Legislation].
-- **Drafting** → Legal document creation, templates, agreements, contracts, petitions.
+- **Drafting** → User explicitly asks the AI to **CREATE a standalone legal document** that could be filed in court or signed by parties: plaints, petitions, written statements, bail applications, affidavits, legal notices, agreements, contracts, deeds, MOUs, wills, divorce petitions, etc. Trigger only on explicit production verbs: "draft", "write", "prepare", "create", "generate", "compose", "draw up", "redraft", "give me a [document]", "I need a [document]" — **paired with a court-filing-ready document noun**. DO NOT trigger on questions ABOUT documents (format, structure, essential elements, ingredients, requirements, how to file, when to use, difference between X and Y). DO NOT trigger on tactical / strategic outputs like cross-examination questions, arguments, defences, strategies, analyses, opinions, briefs of advice — those go to **Scenario** (situational legal analysis), even when the user uses the words "draft" or "prepare".
+  - DO Drafting: "Draft a plaint for partition", "Prepare a bail application", "Give me a sample MOU", "Write a legal notice for property dispute", "Generate a divorce petition".
+  - DO NOT route to Drafting (route elsewhere):
+    - "Essential elements of a partnership agreement" → Legal_Concepts (theory)
+    - "What is the format of a bail application?" → Legal_Concepts (structural explanation)
+    - "How to file a writ petition under Article 32?" → Scenario (procedure)
+    - "Discuss petition under Article 32" → Constitution (concept)
+    - "Notice under Section 138 NI Act — requirements" → Legislation (statutory rule)
+    - "Section 80 CPC notice requirements" → Legislation
+    - "Plaint requirements under Order VII CPC" → Legislation
+    - "Difference between agreement and contract" → Legal_Concepts
+    - "What is a written statement?" → Legal_Concepts
+    - "Prepare a cross-examination strategy for an NDPS case" → Scenario (tactical output)
+    - "Draft arguments for the accused / for the prosecution" → Scenario (advocacy strategy)
+    - "Give me cross-examination questions for the IO" → Scenario (litigation prep)
+    - "Prepare a brief on bail under Section 37 NDPS" → Scenario (legal analysis)
+    - "What defences are available against Section 498A IPC" → Scenario (situational advice)
 - **Constitution** → Constitutional provisions, fundamental rights/duties, Articles of Constitution.
 - **Scenario** → Situational legal query, real-life legal situation analysis, legal advice.
 - **Judgment** → Case law, court decisions, precedents (general / High Court / unspecified courts).
@@ -491,7 +516,7 @@ Rules:
    - Scenario + Judgment + Legislation/Newacts as appropriate
 4. When a query mentions BOTH constitutional concept AND legal maxim → [Constitution, Maxim]
 5. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
-6. For drafting requests: ONLY include Drafting when user explicitly asks to draft/write/prepare a document.
+6. For drafting requests: ONLY include Drafting when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document. Questions ABOUT documents (format, structure, essential elements, requirements, how to file, difference between X and Y) are NOT drafting — route to Legal_Concepts / Legislation / Scenario.
 7. Never use more than 3 agents.
 8. "Other" task always maps to Scenario agent.
 9. For Non_legal: agents should be ["Non_legal"].
@@ -528,15 +553,32 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
         if not agents:
             agents = [task]
 
+        # Telemetry: cross-check LLM's Drafting decision against the regex
+        # helper. If the LLM picked Drafting but _wants_drafting disagrees,
+        # that's the exact misroute pattern we're hunting — surface it as a
+        # WARN so prod logs are greppable for future investigations. (We do
+        # NOT override the LLM here — only observe; overriding would risk
+        # breaking legitimate edge cases the regex doesn't know about.)
+        drafting_disagreement = (
+            (task == "Drafting" or "Drafting" in agents)
+            and not _wants_drafting(query)
+        )
+        if drafting_disagreement:
+            log.warning("Classify+plan picked Drafting but intent regex disagrees",
+                        task=task, agents=agents,
+                        query=query[:120],
+                        reasoning=result.reasoning[:160])
+
         log.info("Classify+plan completed",
                  task=task, agents=agents,
+                 source="llm",
                  reasoning=result.reasoning[:120])
         return task, agents
 
     except Exception as e:
         fallback_task = _classify_task_regex_fallback(query)
         log.warning("Classify+plan LLM failed, using regex fallback",
-                    error=str(e), fallback=fallback_task)
+                    error=str(e), fallback=fallback_task, source="regex_fallback")
         return fallback_task, [fallback_task]
 
 
@@ -602,11 +644,21 @@ def _detect_multi_intent(query: str, task: str) -> list[str]:
         "advice", "advise",
     ))
 
-    # Detect drafting intent
-    wants_draft = any(k in q for k in (
-        "draft", "prepare", "write a", "template", "format of",
-        "application for", "petition for", "notice for",
-    ))
+    # Detect drafting intent. Use the strict verb+document-noun patterns so we
+    # only add Drafting when the user actually asks for a court-filing-ready
+    # document to be produced — plaint, petition, affidavit, bail application,
+    # MOU, deed, etc. The previous naive substring check ("draft", "prepare",
+    # "application for") false-positively added Drafting on tactical-output
+    # queries like "Prepare a cross-examination strategy and draft arguments"
+    # which should be served by Scenario. The downstream cite-appendix-OFF
+    # logic strips all non-drafting agents once Drafting is in the plan, so
+    # this false-positive completely hijacked Scenario/Newacts/Judgment
+    # primary routings.
+    wants_draft = bool(
+        _DRAFTING_INTENT_RE.search(query)
+        or _DRAFTING_FORMAT_RE.search(query)
+        or _DRAFTING_OF_RE.search(query)
+    )
 
     # Add missing agents based on detected intents
     if wants_cases and task not in ("Judgment", "SCI_Judgment"):
@@ -1102,6 +1154,9 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                             error=str(results[1]), task=task)
             else:
                 task, tasks_planned = results[1]
+                # NOTE: Drafting false-positive strip lives downstream — after
+                # _detect_multi_intent runs — so both the LLM-added and
+                # safety-net-added Drafting cases are caught in one spot.
 
         # Handle non-legal with file context
         if task == "Non_legal" and fc and fc.has_content:
@@ -1146,6 +1201,25 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         if extra:
             log.info("Multi-intent detection added agents",
                      extra=extra, all_agents=tasks_planned)
+
+    # Drafting false-positive strip (post multi-intent): if the primary task
+    # is not Drafting but Drafting ended up in tasks_planned (either from the
+    # LLM planner or from _detect_multi_intent's safety net), drop it. The
+    # cite-appendix-OFF logic below otherwise strips ALL non-drafting agents
+    # the moment Drafting is in the plan, which silently hijacks the primary
+    # task agent's execution. Trust the LLM's primary task. The file-attached
+    # drafting path (line ~1198) re-injects Drafting if the user explicitly
+    # asked to draft from an attached document, so that flow is preserved.
+    if (
+        task != "Drafting"
+        and "Drafting" in tasks_planned
+        and not (fc and fc.has_content and _wants_drafting(_original_query))
+    ):
+        tasks_planned = [a for a in tasks_planned if a != "Drafting"]
+        if not tasks_planned:
+            tasks_planned = [task]
+        log.info("Drafting stripped (post multi-intent) — primary task is non-drafting",
+                 task=task, agents=tasks_planned)
 
     # Drafting citation agents
     # Phase 1: gated behind cite_appendix flag (per-request) + env default.

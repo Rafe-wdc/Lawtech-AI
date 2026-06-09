@@ -1,0 +1,34 @@
+[Unit]
+Description=Lawttorney ChromaDB Server (PDF vector store, multi-process safe)
+Documentation=file:///root/Lawtech-AI/docs/scale_50_concurrent_users_plan.md
+After=network-online.target
+Wants=network-online.target
+
+# NOTE: This unit is provisioned in Phase 1 but only *activated* in Phase 5,
+# when call sites switch from Chroma(persist_directory=...) to
+# chromadb.HttpClient(...). Leaving it disabled until then is intentional.
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Lawtech-AI
+EnvironmentFile=/root/Lawtech-AI/.env
+
+ExecStart=/root/Lawtech-AI/venv/bin/chroma run \
+    --path /root/Lawtech-AI/chroma_store \
+    --host 127.0.0.1 \
+    --port 8000
+
+Restart=on-failure
+RestartSec=5
+
+LimitNOFILE=16384
+MemoryHigh=2G
+MemoryMax=3G
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawttorney-chroma
+
+[Install]
+WantedBy=multi-user.target

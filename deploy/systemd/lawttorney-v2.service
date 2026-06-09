@@ -1,0 +1,40 @@
+[Unit]
+Description=Lawttorney v2 API (gunicorn + uvicorn workers, multi-worker)
+Documentation=file:///root/Lawtech-AI/docs/scale_50_concurrent_users_plan.md
+After=network-online.target postgresql.service lawttorney-embed.service
+Wants=network-online.target
+Requires=lawttorney-embed.service
+# Phase 5 will add: Requires=lawttorney-chroma.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Lawtech-AI
+EnvironmentFile=/root/Lawtech-AI/.env
+ExecStart=/root/Lawtech-AI/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app
+# Graceful reload (SIGHUP) — gunicorn rotates workers without dropping connections.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart on crash, with backoff to avoid tight loops.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# File-descriptor limit — 6 workers × 50 active SSE streams × ~3 sockets per
+# request (client + ES + LLM) = ~900 baseline; 65536 leaves room for bursts.
+LimitNOFILE=65536
+
+# Memory cap to surface leaks (workers also rotate via gunicorn max_requests).
+# 32 GB box - other services - generous slack = leave ~22 GB for the API.
+MemoryHigh=20G
+MemoryMax=24G
+
+# stdout/stderr → journald (rotated by systemd). Per-line structured logs in
+# agent.log are still rotated by Python RotatingFileHandler.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawttorney-v2
+
+[Install]
+WantedBy=multi-user.target

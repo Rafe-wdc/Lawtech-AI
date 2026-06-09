@@ -1,0 +1,36 @@
+[Unit]
+Description=Lawttorney Embedding Service (BGE-large + MiniLM, HTTP)
+Documentation=file:///root/Lawtech-AI/services/embedding_service.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Lawtech-AI
+EnvironmentFile=/root/Lawtech-AI/.env
+
+# Externalised embedding so each gunicorn worker doesn't reload 1.3 GB of
+# BGE-large. EMBEDDING_SERVICE_WORKERS=2 gives true parallelism for embed
+# requests (sentence-transformers encode is sync).
+Environment=EMBEDDING_SERVICE_PORT=5100
+Environment=EMBEDDING_SERVICE_WORKERS=2
+Environment=EMBEDDING_SERVICE_KEEPALIVE=60
+
+ExecStart=/root/Lawtech-AI/venv/bin/python -m services.embedding_service
+
+Restart=on-failure
+RestartSec=5
+
+# Each worker holds ~1.3 GB resident; 2 workers ≈ 2.6 GB. Cap at 4 GB to
+# absorb peak working-set + tokenizer overhead.
+LimitNOFILE=8192
+MemoryHigh=3500M
+MemoryMax=4G
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawttorney-embed
+
+[Install]
+WantedBy=multi-user.target

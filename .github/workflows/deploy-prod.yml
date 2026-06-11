@@ -122,49 +122,60 @@ jobs:
       - name: Deploy via systemd + verify health
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" << 'ENDSSH'
-            set -e
-            APP_DIR=/root/Lawtech-AI
+            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+            'bash -s' << 'ENDSSH'
+          set -e
+          APP_DIR=/root/Lawtech-AI
 
-            echo "=== Extract new code (preserves .env, models/, chroma_store/, data/) ==="
-            sudo tar -xzf /tmp/lawtech_deploy.tar.gz -C $APP_DIR
-            sudo rm /tmp/lawtech_deploy.tar.gz
+          echo "=== Extract new code (preserves .env, models/, chroma_store/, data/) ==="
+          sudo tar -xzf /tmp/lawtech_deploy.tar.gz -C $APP_DIR
+          sudo rm /tmp/lawtech_deploy.tar.gz
 
-            echo "=== Strip CRLF from any shipped scripts (Windows author artifacts) ==="
-            sudo find $APP_DIR/deploy -type f \( -name "*.sh" -o -name "*.conf" -o -name "*.service" \) \
-              -exec sed -i 's/\r$//' {} +
-            sudo sed -i 's/\r$//' $APP_DIR/gunicorn.conf.py 2>/dev/null || true
+          echo "=== Strip CRLF from any shipped scripts (Windows author artifacts) ==="
+          sudo find $APP_DIR/deploy -type f \( -name "*.sh" -o -name "*.conf" -o -name "*.service" \) \
+            -exec sed -i 's/\r$//' {} +
+          sudo sed -i 's/\r$//' $APP_DIR/gunicorn.conf.py 2>/dev/null || true
 
-            echo "=== Install any new Python dependencies ==="
-            sudo $APP_DIR/venv/bin/pip install --quiet -r $APP_DIR/requirements.txt
+          echo "=== Install any new Python dependencies ==="
+          sudo $APP_DIR/venv/bin/pip install --quiet -r $APP_DIR/requirements.txt
 
-            echo "=== Restart v2 via systemd (clean import of new code) ==="
-            sudo systemctl restart lawttorney-v2
+          echo "=== Restart v2 via systemd (clean import of new code) ==="
+          sudo systemctl restart lawttorney-v2
 
-            echo "=== Wait for v2 health (3 consecutive 200s, max 120s) ==="
-            CONSECUTIVE_OK=0
-            NEEDED=3
-            for i in $(seq 1 24); do
-              sleep 5
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-                       --max-time 5 http://localhost:5001/pyapi/health || echo "000")
-              if [ "$STATUS" = "200" ]; then
-                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
-                if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
-                  echo "Stable: $NEEDED consecutive 200s. Settling for 10s before exit."
-                  sleep 10
-                  exit 0
-                fi
-                echo "Healthy ($STATUS), $CONSECUTIVE_OK/$NEEDED consecutive..."
-              else
-                CONSECUTIVE_OK=0
-                echo "Waiting... attempt $i/24 (HTTP $STATUS)"
+          echo "=== Wait for v2 health (3 consecutive 200s, max 120s) ==="
+          CONSECUTIVE_OK=0
+          NEEDED=3
+          HEALTHY=0
+          for i in $(seq 1 24); do
+            sleep 5
+            # Capture curl exit code separately so a curl failure doesn't
+            # pollute the status string ("%{http_code}" already prints 000
+            # on failure — no need for an `|| echo` fallback that would
+            # concatenate and yield "000000").
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                     --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                echo "  Stable. Settling 10s for any remaining worker startup..."
+                sleep 10
+                HEALTHY=1
+                break
               fi
-            done
+            else
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/24 (HTTP $STATUS)"
+            fi
+          done
 
-            echo "ERROR: no 3-consecutive 200 within 120s. journalctl tail:"
+          if [ "$HEALTHY" = "1" ]; then
+            echo "DEPLOY OK"
+          else
+            echo "ERROR: no $NEEDED consecutive 200s within 120s. journalctl tail:"
             sudo journalctl -u lawttorney-v2 -n 50 --no-pager
             exit 1
+          fi
           ENDSSH
 
       - name: Clean up SSH key

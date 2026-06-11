@@ -17,11 +17,8 @@ from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from core.clients import get_qa_embeddings
-from core.settings import CHROMA_STORE_ROOT
+from core.clients import get_qa_embeddings, get_chroma_client
 from core.logger import get_logger
-
-import chromadb
 
 log = get_logger("VectorDB")
 
@@ -63,13 +60,10 @@ def search_pdf_collection(unique_string: str, query: str) -> dict:
     """
     _validate_collection_name(unique_string)
     embeddings = get_qa_embeddings()
-    persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
-
-    chromadb.api.client.SharedSystemClient.clear_system_cache()
 
     vectordb = Chroma(
+        client=get_chroma_client(),
         collection_name=unique_string,
-        persist_directory=persist_dir,
         embedding_function=embeddings,
     )
 
@@ -120,13 +114,10 @@ def store_pdf_chunks(unique_string: str, text: str, file_name: str) -> dict:
     ]
 
     embeddings = get_qa_embeddings()
-    persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
-
-    chromadb.api.client.SharedSystemClient.clear_system_cache()
 
     vectordb = Chroma(
+        client=get_chroma_client(),
         collection_name=unique_string,
-        persist_directory=persist_dir,
         embedding_function=embeddings,
     )
     vectordb.add_documents(documents)

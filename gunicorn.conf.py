@@ -1,12 +1,41 @@
-workers = 16
+# =============================================================================
+# Gunicorn config — OPTIONAL deployment path.
+#
+# The canonical prod runner is uvicorn (see start.sh / DEPLOYMENT.md). This
+# file exists so that a multi-worker gunicorn deploy can reuse the
+# post_worker_init warm-up below (which fixes BUG-02 — case-law summary
+# returned instead of a draft because the first request to a cold worker
+# missed the orchestrator deadline).
+#
+# All paths/counts are env-driven so the file is portable across machines.
+#   GUNICORN_WORKERS     default 1 (matches single-worker uvicorn deploy)
+#   HOST / PORT          server bind  (defaults 0.0.0.0:5001)
+#   GUNICORN_ACCESSLOG   default "-" (stdout) — pipe to systemd / logrotate
+#   GUNICORN_ERRORLOG    default "-" (stderr)
+# =============================================================================
+import os
+
+workers = int(os.getenv("GUNICORN_WORKERS", "1"))
 worker_class = "uvicorn.workers.UvicornWorker"
-bind = "0.0.0.0:5001"
-timeout = 300
+bind = f"{os.getenv('HOST', '0.0.0.0')}:{os.getenv('PORT', '5001')}"
+timeout = int(os.getenv("GUNICORN_TIMEOUT", "300"))
 graceful_timeout = 30
-keepalive = 5
-accesslog = "/root/v2_multi_agent/logs/access.log"
-errorlog = "/root/v2_multi_agent/logs/error.log"
-daemon = True
+# keepalive: idle-connection timeout between requests on a kept-alive
+# socket. Original 5s was too short — SSE streams take 30–120 s and the
+# httpx test client (and real browsers) hold the connection open between
+# turns with 0–3 s think time. 5 s meant the server closed many
+# inter-request connections, forcing reconnects and surfacing as
+# `ConnectError` under sustained load. 75 s safely covers think time plus
+# slack while still freeing dead idle connections.
+keepalive = int(os.getenv("GUNICORN_KEEPALIVE", "75"))
+# Listen backlog: kernel-level queue of pending TCP connections waiting
+# for accept(). Original implicit default of 2048 was the bottleneck
+# under bursty load (kernel dropped SYNs → client `All connection
+# attempts failed`). Bump to match sysctl somaxconn=4096.
+backlog = int(os.getenv("GUNICORN_BACKLOG", "4096"))
+accesslog = os.getenv("GUNICORN_ACCESSLOG", "-")
+errorlog = os.getenv("GUNICORN_ERRORLOG", "-")
+daemon = os.getenv("GUNICORN_DAEMON", "false").lower() in ("1", "true", "yes", "on")
 preload_app = True
 
 
@@ -84,3 +113,22 @@ def post_worker_init(worker):  # pragma: no cover  — gunicorn-only hook
     t.start()
     log.info("[warmup] worker pid=%s warm-up thread launched (non-blocking)",
              worker.pid)
+
+
+# ── Prometheus multiproc cleanup ──────────────────────────────────────────
+# When PROMETHEUS_MULTIPROC_DIR is set, each worker writes its own counter
+# and gauge files into that directory. If a worker dies (crash or rotation),
+# its files would otherwise stick around and corrupt sum/livesum reads from
+# MultiProcessCollector. mark_process_dead() removes the dead worker's files
+# so the next scrape only sees live data.
+def child_exit(server, worker):  # pragma: no cover  — gunicorn-only hook
+    if not os.environ.get("PROMETHEUS_MULTIPROC_DIR", "").strip():
+        return
+    try:
+        from prometheus_client import multiprocess
+        multiprocess.mark_process_dead(worker.pid)
+    except Exception as e:
+        import logging
+        logging.getLogger("gunicorn.error").warning(
+            "prometheus mark_process_dead failed for pid=%s: %s", worker.pid, e
+        )

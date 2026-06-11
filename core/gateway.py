@@ -129,6 +129,10 @@ async def lifespan(app: FastAPI):
     log.info("Startup: initializing checkpointer and compiling agent graph")
     checkpointer, _pg_pool = await create_checkpointer()
     app.state.agent_graph = compile_graph(checkpointer=checkpointer)
+    # Seed the in-flight gate gauges per worker (multiproc-safe — each
+    # worker writes to its own gauge file, MultiProcessCollector sums them).
+    METRICS["inflight_gate_capacity"].set(_MAX_INFLIGHT)
+    METRICS["inflight_gate_available"].set(_MAX_INFLIGHT)
     log.info("Startup complete")
     yield
     # Shutdown
@@ -187,6 +191,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── ProxyHeaders: trust X-Forwarded-For ONLY from configured upstreams ───
+# When the app sits behind nginx (Phase 8 cutover), every request appears to
+# come from 127.0.0.1 unless we honour X-Forwarded-For. That breaks IP-based
+# logging and (for any unauthenticated rate-limited route) makes every client
+# share one bucket. Starlette's ProxyHeadersMiddleware rewrites
+# request.client.host from the rightmost forwarded hop, but ONLY when the
+# immediate TCP peer is in trusted_hosts — preventing spoofing from the
+# public internet.
+#
+# Set TRUSTED_PROXY_IPS to a comma-separated list (e.g. "127.0.0.1") in prod.
+# Leave unset in dev so request.client.host stays accurate.
+_trusted_proxies = os.getenv("TRUSTED_PROXY_IPS", "").strip()
+if _trusted_proxies:
+    from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+    app.add_middleware(
+        ProxyHeadersMiddleware,
+        trusted_hosts=[h.strip() for h in _trusted_proxies.split(",") if h.strip()],
+    )
+
 
 # ── Request ID middleware (must run before metrics so errors include request_id) ─
 
@@ -226,6 +249,69 @@ async def metrics_middleware(request: Request, call_next):
             status_code=str(status_code),
         ).inc()
         METRICS["request_latency_seconds"].labels(endpoint=endpoint).observe(latency)
+
+
+# ── In-flight gate (Phase 3 backpressure) ────────────────────────────────────
+# A single drafting request spawns 10–15 parallel Gemini calls internally.
+# Without a request-entry cap, one user's drafting burst eats all worker
+# slots and starves everyone else. The semaphore here caps concurrent
+# in-flight requests *per worker*. Excess requests fail fast with 503 +
+# Retry-After instead of queueing for minutes.
+#
+# Sized so N_workers × MAX_INFLIGHT_PER_WORKER ≥ target concurrency × 1.2
+# (e.g. 6 × 10 = 60 capacity for a 50-stream target). Tune via env.
+
+_MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT_PER_WORKER", "10"))
+_inflight_sem = asyncio.Semaphore(_MAX_INFLIGHT)
+_INFLIGHT_EXCLUDE_PATHS = {
+    "/", "/pyapi/health", "/pyapi/health/detailed", "/pyapi/metrics",
+}
+_INFLIGHT_RETRY_AFTER_SEC = 5
+
+# NOTE: Gauge seeding happens in the lifespan startup (one per worker).
+# Doing it at module-load time only fires once in the gunicorn master
+# under preload_app=True, which means under PROMETHEUS_MULTIPROC_DIR each
+# worker would have an unset gauge — and `livesum` would return only the
+# master's value (10) instead of N × 10 across all workers.
+
+
+@app.middleware("http")
+async def inflight_gate(request: Request, call_next):
+    """Per-worker backpressure cap. Fails fast with 503 when saturated."""
+    if request.url.path in _INFLIGHT_EXCLUDE_PATHS:
+        return await call_next(request)
+
+    # Non-blocking acquire: if no slot is available within 50 ms, reject.
+    # 50 ms is short enough that callers don't pile up but long enough to
+    # absorb micro-bursts during normal load.
+    try:
+        await asyncio.wait_for(_inflight_sem.acquire(), timeout=0.05)
+    except asyncio.TimeoutError:
+        METRICS["inflight_gate_rejections_total"].labels(
+            endpoint=request.url.path,
+        ).inc()
+        log.warning(
+            "in-flight gate rejected request",
+            path=request.url.path,
+            capacity=_MAX_INFLIGHT,
+            request_id=getattr(request.state, "request_id", ""),
+        )
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": str(_INFLIGHT_RETRY_AFTER_SEC)},
+            content={
+                "error": "server_busy",
+                "message": "Worker at in-flight capacity. Retry shortly.",
+                "request_id": getattr(request.state, "request_id", ""),
+            },
+        )
+
+    METRICS["inflight_gate_available"].dec()
+    try:
+        return await call_next(request)
+    finally:
+        _inflight_sem.release()
+        METRICS["inflight_gate_available"].inc()
 
 
 # --- Frontend UI ---
@@ -642,14 +728,24 @@ async def search_stream(data: SearchRequest, request: Request):
     )
 
     async def event_generator():
-        async for sse_chunk in run_chat_pipeline(
-            pipeline_inputs,
-            build_initial_state=_build_initial_state,
-            followup_suggestions_fn=_generate_followup_suggestions,
-            async_timeout_cm=_async_timeout,
-            node_status_map=_NODE_STATUS,
-        ):
-            yield sse_chunk
+        try:
+            async for sse_chunk in run_chat_pipeline(
+                pipeline_inputs,
+                build_initial_state=_build_initial_state,
+                followup_suggestions_fn=_generate_followup_suggestions,
+                async_timeout_cm=_async_timeout,
+                node_status_map=_NODE_STATUS,
+            ):
+                yield sse_chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client closed the SSE connection mid-stream. Log so prod incidents
+            # are debuggable (high disconnect rates may indicate proxy timeouts
+            # or UX bugs). Re-raise so Starlette completes the cancellation
+            # cleanly — suppressing CancelledError breaks structured concurrency.
+            log.info("SSE client disconnected mid-stream",
+                     endpoint="/pyapi/search/stream",
+                     thread_id=(thread_id or "")[:12])
+            raise
 
     return StreamingResponse(
         event_generator(),
@@ -758,60 +854,70 @@ async def chat_with_files(
         # Process files before invoking the pipeline (they need to be staged
         # into ChromaDB + Gemini Files API, which is /chat-specific).
         file_context_dict = None
-        # First, emit thread_id and file_processing events directly.
-        yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
+        try:
+            # First, emit thread_id and file_processing events directly.
+            yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
 
-        if rejected_files:
-            _names = ", ".join(r["name"] for r in rejected_files)
-            yield f"data: {json.dumps({'type': 'file_processing', 'message': f'{len(rejected_files)} file(s) could not be accepted: {_names}', 'rejected': rejected_files, 'files': []})}\n\n"
+            if rejected_files:
+                _names = ", ".join(r["name"] for r in rejected_files)
+                yield f"data: {json.dumps({'type': 'file_processing', 'message': f'{len(rejected_files)} file(s) could not be accepted: {_names}', 'rejected': rejected_files, 'files': []})}\n\n"
 
-        if file_tuples:
-            yield f"data: {json.dumps({'type': 'file_processing', 'message': 'Processing uploaded files...'})}\n\n"
-            try:
-                fc = await process_files(file_tuples, thread_id)
-                file_context_dict = fc.to_dict()
-                yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"
-                log.info("Files processed for chat",
-                         summary=fc.summary, thread_id=thread_id[:12],
-                         new_file_count=len(fc.file_names))
-            except Exception as e:
-                log.error("File processing failed", error=str(e))
-                yield f"data: {json.dumps({'type': 'file_processing', 'message': f'File processing failed: {e}', 'files': []})}\n\n"
+            if file_tuples:
+                yield f"data: {json.dumps({'type': 'file_processing', 'message': 'Processing uploaded files...'})}\n\n"
+                try:
+                    fc = await process_files(file_tuples, thread_id)
+                    file_context_dict = fc.to_dict()
+                    yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"
+                    log.info("Files processed for chat",
+                             summary=fc.summary, thread_id=thread_id[:12],
+                             new_file_count=len(fc.file_names))
+                except Exception as e:
+                    log.error("File processing failed", error=str(e))
+                    yield f"data: {json.dumps({'type': 'file_processing', 'message': f'File processing failed: {e}', 'files': []})}\n\n"
 
-        # Delegate the rest (integration + agent graph + persistence) to the
-        # shared pipeline. Note that the pipeline emits its own thread_id event,
-        # which is deduplicated by the frontend (same thread_id value).
-        from core.chat_runner import ChatRunnerInputs, run_chat_pipeline
-        pipeline_inputs = ChatRunnerInputs(
-            agent_graph=agent_graph,
-            query=query,
-            thread_id=thread_id,
-            is_first_turn=not globalThreadId,
-            endpoint_name="/pyapi/chat",
-            preferred_language=preferred_language,
-            file_context=file_context_dict,
-            integration_token=integration_token,
-            cite_appendix=cite_appendix,
-            enable_cache=False,   # uploads / integration context make caching unsafe
-            enable_quality_scoring=True,
-            skip_thread_id_event=True,  # /chat already emitted before file processing
-        )
-        async for sse_chunk in run_chat_pipeline(
-            pipeline_inputs,
-            build_initial_state=_build_initial_state,
-            followup_suggestions_fn=_generate_followup_suggestions,
-            async_timeout_cm=_async_timeout,
-            node_status_map=_NODE_STATUS,
-        ):
-            yield sse_chunk
-
-        # Cleanup temp files
-        for tp in temp_paths:
-            try:
-                if os.path.exists(tp):
-                    os.remove(tp)
-            except Exception:
-                pass
+            # Delegate the rest (integration + agent graph + persistence) to the
+            # shared pipeline. Note that the pipeline emits its own thread_id event,
+            # which is deduplicated by the frontend (same thread_id value).
+            from core.chat_runner import ChatRunnerInputs, run_chat_pipeline
+            pipeline_inputs = ChatRunnerInputs(
+                agent_graph=agent_graph,
+                query=query,
+                thread_id=thread_id,
+                is_first_turn=not globalThreadId,
+                endpoint_name="/pyapi/chat",
+                preferred_language=preferred_language,
+                file_context=file_context_dict,
+                integration_token=integration_token,
+                cite_appendix=cite_appendix,
+                enable_cache=False,   # uploads / integration context make caching unsafe
+                enable_quality_scoring=True,
+                skip_thread_id_event=True,  # /chat already emitted before file processing
+            )
+            async for sse_chunk in run_chat_pipeline(
+                pipeline_inputs,
+                build_initial_state=_build_initial_state,
+                followup_suggestions_fn=_generate_followup_suggestions,
+                async_timeout_cm=_async_timeout,
+                node_status_map=_NODE_STATUS,
+            ):
+                yield sse_chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client closed the SSE connection mid-stream. Log so prod incidents
+            # are debuggable; re-raise so Starlette completes the cancellation.
+            log.info("SSE client disconnected mid-stream",
+                     endpoint="/pyapi/chat",
+                     thread_id=(thread_id or "")[:12])
+            raise
+        finally:
+            # Cleanup temp files unconditionally — runs even on disconnect so
+            # we don't leak upload temp files when the user closes the tab.
+            for tp in temp_paths:
+                try:
+                    if os.path.exists(tp):
+                        os.remove(tp)
+                except Exception as e:
+                    log.warning("Temp file cleanup failed",
+                                path=tp, error=str(e)[:200])
 
     return StreamingResponse(
         event_generator(),
@@ -1005,6 +1111,14 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
                     if "draft_continuation" in update and update["draft_continuation"]:
                         draft_continuation_data = update["draft_continuation"]
 
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected mid-stream. Log + re-raise so Starlette
+            # completes the cancellation; the post-stream save_turn / sources
+            # / done event are skipped (the client isn't there to receive them).
+            log.info("SSE client disconnected mid-stream",
+                     endpoint="/pyapi/continue_draft",
+                     thread_id=(thread_id or "")[:12])
+            raise
         except Exception as e:
             log.error("Continue draft stream error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
@@ -1070,13 +1184,26 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
 @limiter.limit(_get_limit_for_request)
 async def delete_vectordb(unique_string: str, request: Request):
     """Delete a user's PDF document collection from ChromaDB."""
+    from .clients import get_chroma_client
     persist_dir = _safe_persist_dir(unique_string)
 
-    if not os.path.exists(persist_dir):
+    # Try server-mode delete first; fall through to legacy disk cleanup.
+    client = get_chroma_client()
+    deleted_from_server = False
+    try:
+        client.delete_collection(name=unique_string)
+        deleted_from_server = True
+    except Exception as e:
+        log.debug("Chroma server has no collection",
+                  unique_string=unique_string, error=str(e))
+
+    dir_existed = os.path.exists(persist_dir)
+    if not deleted_from_server and not dir_existed:
         raise HTTPException(status_code=404, detail=f"No vectordb found for {unique_string}")
 
     try:
-        shutil.rmtree(persist_dir)
+        if dir_existed:
+            shutil.rmtree(persist_dir)
 
         # Also delete chat history
         chat_file = os.path.join(CHROMA_STORE_ROOT, "chat_histories", f"{unique_string}_chat.json")
@@ -1138,17 +1265,31 @@ async def delete_thread_files(thread_id: str, request: Request):
             except Exception as e:
                 log.warning("Gemini file deletion failed", name=gname, error=str(e))
 
-    # Delete ChromaDB collections
+    # Delete ChromaDB collections (server-mode + legacy disk cleanup)
+    from .clients import get_chroma_client
+    _chroma_client = get_chroma_client()
     for rec in records:
         coll = rec.get("chromadb_collection", "")
-        if coll:
-            persist_dir = os.path.join(CHROMA_STORE_ROOT, coll)
-            if os.path.exists(persist_dir):
-                try:
-                    shutil.rmtree(persist_dir)
-                    deleted["chromadb_collections"] += 1
-                except Exception as e:
-                    log.warning("ChromaDB deletion failed", collection=coll, error=str(e))
+        if not coll:
+            continue
+        deleted_any = False
+        try:
+            _chroma_client.delete_collection(name=coll)
+            deleted_any = True
+        except Exception as e:
+            log.debug("Chroma server has no collection",
+                      collection=coll, error=str(e))
+        # Legacy persist dir (pre-server-mode collections)
+        persist_dir = os.path.join(CHROMA_STORE_ROOT, coll)
+        if os.path.exists(persist_dir):
+            try:
+                shutil.rmtree(persist_dir)
+                deleted_any = True
+            except Exception as e:
+                log.warning("ChromaDB persist dir deletion failed",
+                            collection=coll, error=str(e))
+        if deleted_any:
+            deleted["chromadb_collections"] += 1
 
     # Delete local upload directory
     upload_dir = os.path.join(UPLOADS_ROOT, safe_tid)
@@ -1327,6 +1468,69 @@ async def health(request: Request):
 
 
 # ============================================================
+# Detailed health: real API pings (admin-only, may incur cost)
+# ============================================================
+
+@app.get("/pyapi/health/detailed", dependencies=[Depends(require_admin_key)])
+async def health_detailed():
+    """Deep readiness probe — actually hits OpenAI and Gemini to validate keys.
+
+    The lightweight /pyapi/health endpoint only checks for env-var presence;
+    this one issues real (tiny) calls so revoked or wrong keys surface before
+    the first user request. Admin-only because it costs a few tokens per call.
+    """
+    from datetime import datetime, timezone
+    from langchain.messages import HumanMessage
+    from .clients import get_gpt4o_mini, get_gemini_flash_lite
+
+    checks: dict[str, dict] = {}
+    overall = "healthy"
+
+    # --- OpenAI live ping ---
+    try:
+        t0 = time.time()
+        llm = get_gpt4o_mini()
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(lambda: llm.invoke([HumanMessage(content="ping")])),
+            timeout=15.0,
+        )
+        checks["openai"] = {
+            "status": "ok",
+            "latency_ms": round((time.time() - t0) * 1000),
+            "preview": (getattr(resp, "content", "") or "")[:40],
+        }
+    except Exception as e:
+        checks["openai"] = {"status": "error", "detail": str(e).splitlines()[0][:200]}
+        overall = "unhealthy"
+
+    # --- Gemini live ping ---
+    try:
+        t0 = time.time()
+        llm = get_gemini_flash_lite()
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(lambda: llm.invoke([HumanMessage(content="ping")])),
+            timeout=15.0,
+        )
+        checks["gemini"] = {
+            "status": "ok",
+            "latency_ms": round((time.time() - t0) * 1000),
+            "preview": (getattr(resp, "content", "") or "")[:40],
+        }
+    except Exception as e:
+        checks["gemini"] = {"status": "error", "detail": str(e).splitlines()[0][:200]}
+        overall = "unhealthy"
+
+    body = {
+        "status": overall,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": checks,
+    }
+    status_code = 503 if overall == "unhealthy" else 200
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content=body, status_code=status_code)
+
+
+# ============================================================
 # Prometheus Metrics Endpoint
 # ============================================================
 
@@ -1334,15 +1538,26 @@ async def health(request: Request):
 async def prometheus_metrics():
     """Expose Prometheus metrics in text format.
 
+    When PROMETHEUS_MULTIPROC_DIR is set (gunicorn multi-worker prod), this
+    aggregates counters and gauges across every live worker process by
+    reading the shared multiproc files. Otherwise it returns the in-process
+    REGISTRY (dev / single-worker).
+
     Scraped by Prometheus every 15 seconds.
-    URL: http://host:5000/pyapi/metrics
     """
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
     from fastapi.responses import Response
-    return Response(
-        content=generate_latest(),
-        media_type=CONTENT_TYPE_LATEST,
-    )
+
+    multiproc_dir = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "").strip()
+    if multiproc_dir:
+        from prometheus_client import multiprocess
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        content = generate_latest(registry)
+    else:
+        content = generate_latest()
+
+    return Response(content=content, media_type=CONTENT_TYPE_LATEST)
 
 
 # ------------------------------------------------------------------

@@ -24,16 +24,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
-from core.clients import get_gemini_pro, get_qa_embeddings
+from core.clients import get_gemini_pro, get_qa_embeddings, get_chroma_client
 from core.settings import CHROMA_STORE_ROOT, TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.progress import progress
-
-import chromadb
-import threading
-
-_chroma_cache_lock = threading.Lock()
 log = get_logger("Document")
 
 _SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
@@ -72,14 +67,10 @@ def _get_or_create_collection(unique_string: str) -> Chroma:
     """Get or create a ChromaDB collection for a user's uploaded documents."""
     _validate_collection_name(unique_string)
     embeddings = get_qa_embeddings()
-    persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
-
-    with _chroma_cache_lock:
-        chromadb.api.client.SharedSystemClient.clear_system_cache()
 
     return Chroma(
+        client=get_chroma_client(),
         collection_name=unique_string,
-        persist_directory=persist_dir,
         embedding_function=embeddings,
     )
 

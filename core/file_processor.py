@@ -42,7 +42,6 @@ from core.gemini_files import (
     GEMINI_SUPPORTED_MIMES,
 )
 
-_chroma_cache_lock = threading.Lock()
 log = get_logger("FileProcessor")
 
 # --- Constants ---
@@ -532,8 +531,9 @@ def _load_ocr_cache(file_hash: str) -> str | None:
             if text.strip():
                 log.info("OCR cache hit", hash=file_hash[:12])
                 return text
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("OCR cache read failed; will re-OCR",
+                        hash=file_hash[:12], error=str(e)[:200])
     return None
 
 
@@ -683,10 +683,9 @@ def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
 
 def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     """Chunk text and store in ChromaDB collection."""
-    import chromadb
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import Chroma
-    from core.clients import get_qa_embeddings
+    from core.clients import get_qa_embeddings, get_chroma_client
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -698,19 +697,14 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     if not chunks:
         raise ValueError("No text chunks produced")
 
-    persist_dir = os.path.join(CHROMA_STORE_ROOT, collection_id)
-    os.makedirs(persist_dir, exist_ok=True)
-
     embeddings = get_qa_embeddings()
-    with _chroma_cache_lock:
-        chromadb.api.client.SharedSystemClient.clear_system_cache()
 
     metadatas = [{"source": filename, "chunk": i} for i in range(len(chunks))]
     Chroma.from_texts(
         texts=chunks,
         embedding=embeddings,
         collection_name=collection_id,
-        persist_directory=persist_dir,
+        client=get_chroma_client(),
         metadatas=metadatas,
     )
     log.info("Stored in ChromaDB", collection=collection_id, chunks=len(chunks))
@@ -748,8 +742,10 @@ async def _background_ocr_and_store(
             await chat_store.update_ocr_status(
                 thread_id, file_id, "failed", str(e)[:500],
             )
-        except Exception:
-            pass  # don't mask the original error
+        except Exception as status_err:
+            # Don't mask the original error — but record that status write failed.
+            log.debug("update_ocr_status failed after OCR failure",
+                      file=filename, status_error=str(status_err)[:200])
         log.error("Background OCR failed", file=filename, error=str(e))
 
 
@@ -1198,15 +1194,17 @@ async def process_files(
             try:
                 text = await asyncio.to_thread(_extract_csv_text, local_path)
                 pf.extracted_text = text
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("CSV inline text extraction failed (Gemini URI still primary)",
+                            file=pf.original_name, error=str(e)[:200])
 
         elif ext in (".txt", ".md") and pf.gemini_uri:
             try:
                 with open(local_path, "r", encoding="utf-8", errors="replace") as f:
                     pf.extracted_text = f.read(MAX_INLINE_TEXT_CHARS)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("txt/md inline read failed (Gemini URI still primary)",
+                            file=pf.original_name, error=str(e)[:200])
 
         # If Gemini upload failed and no text was extracted, mark as error
         if not pf.gemini_uri and not pf.extracted_text and not pf.chromadb_collection and not pf.error:

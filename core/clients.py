@@ -12,6 +12,7 @@ Ref: https://docs.langchain.com/oss/python/langchain/models
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from functools import lru_cache
@@ -166,6 +167,8 @@ def get_gemini_flash_lite(temperature: float = 0.3,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,
+        max_retries=2,
+        timeout=60,
     )
 
 
@@ -192,6 +195,8 @@ def get_gemini_flash_full(temperature: float = 0.3,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,
+        max_retries=2,
+        timeout=120,
     )
 
 
@@ -209,6 +214,8 @@ def get_gemini_pro(temperature: float = 0.5,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,
+        max_retries=2,
+        timeout=180,
     )
 
 
@@ -225,6 +232,8 @@ def get_drafting_llm(max_output_tokens: int = 65535,
         temperature=0.4,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,
+        max_retries=2,
+        timeout=180,
     )
 
 
@@ -236,6 +245,46 @@ def get_genai_client() -> genai.Client:
     return genai.Client(
         http_options={"timeout": 120_000},  # 120s timeout for web-grounded search
     )
+
+
+# --- ChromaDB client (Phase 5 — multi-process safe via server mode) ---
+#
+# Production: CHROMA_SERVER_HOST is set, we connect to the local Chroma
+# server (started by lawttorney-chroma.service). The server serialises
+# writes across all gunicorn workers, eliminating the data-corruption
+# window that PersistentClient has under concurrent PDF uploads.
+#
+# Dev fallback: when CHROMA_SERVER_HOST is unset, PersistentClient still
+# works for a single-process developer setup. Production MUST set this.
+
+_chroma_client = None
+
+
+def get_chroma_client():
+    """Singleton ChromaDB client. HTTP in prod, PersistentClient in dev."""
+    import chromadb
+    global _chroma_client
+    if _chroma_client is None:
+        host = os.getenv("CHROMA_SERVER_HOST", "").strip()
+        port_str = os.getenv("CHROMA_SERVER_PORT", "8000").strip()
+        if host:
+            try:
+                port = int(port_str)
+            except ValueError:
+                port = 8000
+            _chroma_client = chromadb.HttpClient(host=host, port=port)
+            _log.info(
+                "ChromaDB HTTP client initialized",
+                host=host, port=port,
+            )
+        else:
+            from .settings import CHROMA_STORE_ROOT
+            _chroma_client = chromadb.PersistentClient(path=CHROMA_STORE_ROOT)
+            _log.warning(
+                "CHROMA_SERVER_HOST not set — using PersistentClient. "
+                "NOT multi-process safe; set CHROMA_SERVER_HOST=localhost in prod."
+            )
+    return _chroma_client
 
 
 # --- Embedding Models ---

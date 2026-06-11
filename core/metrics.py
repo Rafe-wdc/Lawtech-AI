@@ -90,10 +90,39 @@ METRICS: dict = {
     ),
 
     # --- System ---
+    # NOTE on Gauge multiprocess_mode: when PROMETHEUS_MULTIPROC_DIR is set
+    # (gunicorn multi-worker, see Phase 6 in scale plan), each worker writes
+    # its own value file. `livesum` aggregates by summing across live workers
+    # so the scraped value reflects system-wide truth (e.g. total in-flight
+    # across all workers, not per-pid). `livemostrecent` picks the freshest
+    # value when only one worker tends to update it (rolling-window stats).
+    # When the env var is unset (dev / single-worker), multiprocess_mode is
+    # ignored by prometheus_client and Gauges behave normally.
 
     "active_requests": Gauge(
         "lawtech_active_requests",
         "Number of requests currently being processed",
+        multiprocess_mode="livesum",
+    ),
+
+    # --- Per-worker in-flight gate (Phase 3 backpressure) ---
+
+    "inflight_gate_rejections_total": Counter(
+        "lawtech_inflight_gate_rejections_total",
+        "Requests rejected because the per-worker in-flight cap was hit",
+        ["endpoint"],
+    ),
+
+    "inflight_gate_capacity": Gauge(
+        "lawtech_inflight_gate_capacity",
+        "Total in-flight capacity across all workers (sum of per-worker caps)",
+        multiprocess_mode="livesum",
+    ),
+
+    "inflight_gate_available": Gauge(
+        "lawtech_inflight_gate_available",
+        "Remaining in-flight slots across all workers",
+        multiprocess_mode="livesum",
     ),
 
     # --- L4: Quality Scores (updated after each scored response) ---
@@ -101,16 +130,19 @@ METRICS: dict = {
     "quality_avg_score": Gauge(
         "lawtech_quality_avg_score",
         "Rolling average quality score (last 100 scored responses)",
+        multiprocess_mode="livemostrecent",
     ),
 
     "quality_faithfulness": Gauge(
         "lawtech_quality_faithfulness",
         "Rolling average faithfulness score",
+        multiprocess_mode="livemostrecent",
     ),
 
     "quality_relevance": Gauge(
         "lawtech_quality_relevance",
         "Rolling average relevance score",
+        multiprocess_mode="livemostrecent",
     ),
 
     "quality_low_count": Counter(

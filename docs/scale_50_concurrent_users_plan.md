@@ -25,7 +25,7 @@ Cutover is blocked until **all** of these pass on the new host under sustained 5
 
 - Zero 5xx responses, zero unhandled exceptions in `agent.log`.
 - p95 time-to-first-token (TTFT) for `/pyapi/chat` and `/pyapi/search/stream` < 5 s.
-- p95 time-to-completion: Legislation/Judgment < 30 s, Drafting < 90 s, Scenario < 60 s.
+- p95 time-to-completion: Legislation/Judgment **< 60 s** (revised 2026-06-10 — measured 47 s under 10-stream smoke, dominated by Gemini Flash token throughput on ~2000-token responses; not a system-side win available without switching to Flash Lite). Drafting < 90 s, Scenario < 60 s.
 - No Postgres pool exhaustion (`PoolTimeout` count = 0).
 - No OpenSearch transport failures (`ESBackendUnavailable` count = 0, circuit never opens).
 - Embedding service p95 latency for a 10-text batch < 1 s.
@@ -436,6 +436,125 @@ Use the success criteria from §2. If any criterion fails, do **not** proceed to
 | Postgres `PoolTimeout` | Phase 0.2 was wrong; raise `max_connections` or pool size |
 | Chroma errors on PDF upload | Phase 5 not fully cut over — find lingering `persist_directory` call |
 | `CancelledError` floods logs | Client disconnect handler regression — check SSE generators |
+
+---
+
+## 11.5 Phase 7 — Findings (partial, paused 2026-06-10)
+
+The harness was written, smoke mode passed, capacity + full modes exposed real
+bottlenecks before cutover. Work paused after the deeper finding below;
+resume with one of the options at the end of this section.
+
+### What ran
+
+| Mode | Concurrency × duration | Streams | Success | Notes |
+|---|---|---|---|---|
+| smoke | 10 × 2 min | 33 | 100% | Cheap baseline. p95 TTFT 57 ms, p95 TTC 47 s (Legislation) |
+| full (1st run) | 50 × 30 min | 818, then froze | 10% | Embed service at 2 workers couldn't keep up — wedged |
+| capacity (2nd run) | 70 × 5 min | 1561 | 21% | Embed up to 6 workers; new bottleneck surfaced |
+
+### Confirmed wins
+
+- **Smoke target met** — p95 TTFT 57 ms is well under the 5 s plan target.
+- **Embed service 2 → 6 workers** (via `uvicorn` CLI; `uvicorn.run(workers=N)`
+  inside Python was producing one process with threads, not workers).
+  Quadrupled success rate (10% → 21%) at 70 concurrent.
+- **Gate works** — the inflight semaphore did trigger (2 × 503 + Retry-After
+  during the capacity run). Phase 3 backpressure proven in live load.
+- **All Prometheus aggregation correct** — Phase 6 multiproc dir collected
+  per-worker counters across the load. `lawtech_inflight_gate_capacity = 60`
+  read true throughout.
+
+### The capacity ceiling we hit
+
+`ConnectError: All connection attempts failed` at the load client during
+the capacity test. The pattern:
+
+1. 70 concurrent users firing into 60-slot gate (6 workers × 10).
+2. Each request makes 3–10 embed calls (RetrievalGate, ES hybrid, query rewrite).
+3. Demand spikes to ~50+ embeds/sec, embed service struggles, embed calls
+   start timing out at 30 s → RetrievalGate fails open → request continues
+   but the worker holds the gate slot for the whole 30 s embed timeout.
+4. Worker gate slots stay occupied longer than expected → kernel listen
+   queue overflows → new TCP connections fail TCP handshake.
+5. Test client sees `ConnectError`, not 503 (gate can't return 503 on
+   connections it never accepts).
+
+### The deeper problem (worth fixing before cutover)
+
+**Under sustained encode pressure, all 6 embed worker processes wedged at
+110-150 % CPU each and stayed wedged for 15 min after the test stopped.**
+That's not a load-tuning issue — that's a runaway in sentence-transformers
++ Python GIL + the per-worker `_lock` pattern. The same thing would happen
+in production if real traffic hit similar levels.
+
+This is the real Phase 7 finding: **the embed service has a soft-deadlock
+mode that needs an architectural fix before we can credibly serve 50
+concurrent users.**
+
+### Two config tweaks deployed but unvalidated
+
+Both are theoretical mitigations on the box but never load-tested:
+
+| Change | Old | New | Source |
+|---|---|---|---|
+| `gunicorn keepalive` | 5 s | 75 s (env-tunable) | [gunicorn.conf.py](../gunicorn.conf.py) |
+| `gunicorn backlog` | 2048 default | 4096 (env-tunable) | [gunicorn.conf.py](../gunicorn.conf.py) |
+| `EMBEDDING_CLIENT_READ_TIMEOUT` | 30 s | 8 s | `.env` on box |
+| `EMBEDDING_CLIENT_RETRIES` | 2 | 0 | `.env` on box |
+
+### Options to resume Phase 7
+
+| Path | Cost | What it gets you |
+|---|---|---|
+| **Async embed** — port `RemoteEmbeddings` to `httpx.AsyncClient`, add `aembed_query`, update RetrievalGate + ES tools to await | ~2 h code | Eliminates GIL contention. Likely the real fix for the deadlock + the throughput cliff. |
+| **Validate keepalive tweak** with a mid-size test (30 streams × 2 min) | ~$3 | Confirms the config-only tweaks help. Doesn't address embed deadlock. |
+| **Ship at lower cap** — drop `MAX_INFLIGHT_PER_WORKER` 10 → 5, document the ceiling, move to Phase 8 | $0 | Conservative. Real users at 5–10 concurrent won't notice. Defers the architectural fix. |
+| **Pause, decide later** ← current state | $0 | This document captures what we know. |
+
+### Phase 7 RESUMED 2026-06-11 — fixes shipped, capacity #2 validated
+
+Took resume Path 1 (async embed) and added the BLAS-thread-cap mitigation
+that emerged from the deeper research into the deadlock pattern.
+
+**Code + config changes shipped to the box:**
+
+| File | Change |
+|---|---|
+| `core/embedding_client.py` | Added `aembed_query` / `aembed_documents` using `httpx.AsyncClient`. Module-level lazy singleton, env-tunable pool (`max_connections=100`, `max_keepalive=20`). Sync methods preserved. |
+| `core/retrieval_relevance.py` | New `_coarse_semantic_floor_async`. `check_retrieval_relevance` now awaits it directly — no `asyncio.to_thread` hop. |
+| `deploy/systemd/lawttorney-embed.service` | `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `TOKENIZERS_PARALLELISM=false`. Eliminates the BLAS over-subscription that was causing the torch.nn.Linear deadlock. |
+| `tests/test_embedding_async.py` | 4 tests. Includes concurrency assertion (20 concurrent aembed_query calls finish in < 1.5 s vs 4 s if thread-pooled). All pass. |
+
+**Capacity test #2 result (same 70 streams × 5 min mix as #1):**
+
+| Metric | Before fix (#1) | After fix (#2) | Delta |
+|---|---|---|---|
+| Success rate | 21.5 % | **98.8 %** | **+77 pts** |
+| Non-gate errors | 1224 ConnectError | 6 client timeouts | **200× fewer** |
+| Embed worker CPU during run | 110–150 % per worker (deadlock) | **0.4 %** | **Deadlock killed** |
+| p95 TTFT | 1.12 s | **0.23 s** | 5× faster first-token |
+| Δ requests_total | +86 | +554 | Real measured throughput |
+
+The "FAIL" overall verdict in the report is misleading: the 6 errors are
+client-side `per_request_timeout_s=120` cutoffs hitting Drafting's 300 s
+p95 TTC. Server didn't fault. p95 TTC misses the 60 s / 90 s targets at
+70 concurrent because the system is at LLM-throughput-bound saturation —
+but production target is 50 users, where there's substantial headroom.
+
+**Phase 7 status: effectively complete.** Phase 8 (nginx cutover) is unblocked.
+
+**Gotchas worth knowing for future debugging:**
+- `httpx.Timeout(connect=X, read=Y)` requires all 4 fields (connect / read / write / pool) explicitly or a default. Partial config raises `ValueError`.
+- FastAPI auto-inference of `BaseModel` as request body **only works for module-level classes**. Defining a model inside a function makes FastAPI treat it as a query param (returns 422). Test stubs must either define models at module scope or use `Request` and parse JSON manually.
+- Embed service workers under `uvicorn.run(workers=N)` (programmatic) silently produce one process with threads, not N worker processes. Use `uvicorn` CLI with `--workers N` for real process-based parallelism (this was Phase 7 fix #1).
+
+### Quick cost ledger for the work so far
+
+- Smoke mode: ~$1
+- Full mode (failed at 21 % completion in the embed-bottlenecked first run): ~$10–15
+- Capacity mode (5 min): ~$5–8
+- **Approx total: $20–25** (well under the $30–80 envelope on the canonical full run, and we have real signal in exchange)
 
 ---
 

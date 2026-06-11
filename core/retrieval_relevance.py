@@ -205,7 +205,11 @@ def _build_chunks_block(chunks: list[str]) -> tuple[str, int]:
 
 
 def _coarse_semantic_floor(query: str, chunks: list[str]) -> tuple[bool, float]:
-    """Cheap embedding pre-filter. Fail-open on errors."""
+    """Cheap embedding pre-filter (sync — kept for non-async callers).
+
+    Fail-open on errors. The async path below is preferred when called
+    from an asyncio handler — it skips the executor hop entirely.
+    """
     if not chunks:
         return False, 0.0
     try:
@@ -220,6 +224,38 @@ def _coarse_semantic_floor(query: str, chunks: list[str]) -> tuple[bool, float]:
         return max_sim >= _COARSE_SEMANTIC_FLOOR, max_sim
     except Exception as e:
         log.warning("Coarse semantic floor errored — fail-open",
+                    error=str(e)[:200])
+        return True, 0.0
+
+
+async def _coarse_semantic_floor_async(query: str, chunks: list[str]) -> tuple[bool, float]:
+    """Async coarse embedding pre-filter — uses aembed_query/aembed_documents.
+
+    Phase 7: switching this from `asyncio.to_thread(_coarse_semantic_floor, ...)`
+    to a real async path removes the executor hop. Under 50+ concurrent users
+    the executor was saturating (per-worker thread pool ≈ 12 threads, demand
+    ≈ 50 in-flight embed calls) and the queue depth was the throughput cliff.
+
+    Gracefully falls back to the sync path when the configured embeddings
+    object doesn't implement the async methods (e.g. dev HuggingFaceEmbeddings
+    where the base ABC default would just thread-wrap the sync call anyway).
+    """
+    if not chunks:
+        return False, 0.0
+    try:
+        embeddings = get_retriever_embeddings()
+        non_empty = [(c or "")[:_RELEVANCE_CHUNK_CHARS] for c in chunks if c]
+        if not non_empty:
+            return False, 0.0
+        # If the embeddings object overrides aembed_query (RemoteEmbeddings does),
+        # this is a real async HTTP call. Otherwise the ABC default runs the
+        # sync version in a thread pool — same as before, no regression.
+        q_vec = await embeddings.aembed_query(query)
+        c_vecs = await embeddings.aembed_documents(non_empty[:_RELEVANCE_TOP_N])
+        max_sim = max(sum(a * b for a, b in zip(q_vec, cv)) for cv in c_vecs)
+        return max_sim >= _COARSE_SEMANTIC_FLOOR, max_sim
+    except Exception as e:
+        log.warning("Async coarse semantic floor errored — fail-open",
                     error=str(e)[:200])
         return True, 0.0
 
@@ -263,10 +299,8 @@ async def check_retrieval_relevance(
         telemetry["reason"] = "no chunks"
         return False, telemetry
 
-    # Pass 1: coarse embedding floor (cheap)
-    floor_ok, max_sim = await asyncio.to_thread(
-        _coarse_semantic_floor, query, chunks,
-    )
+    # Pass 1: coarse embedding floor (cheap). Real async — no executor hop.
+    floor_ok, max_sim = await _coarse_semantic_floor_async(query, chunks)
     telemetry["coarse_sim"] = round(max_sim, 4)
     if not floor_ok:
         telemetry["reason"] = f"coarse semantic floor failed ({max_sim:.3f})"

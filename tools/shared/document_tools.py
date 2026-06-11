@@ -21,13 +21,11 @@ import tempfile
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.clients import get_gemini_flash_full, get_qa_embeddings
+from core.clients import get_gemini_flash_full, get_qa_embeddings, get_chroma_client
 from core.logger import get_logger
 from core.settings import CHROMA_STORE_ROOT
 
 log = get_logger("DocumentTools")
-
-import chromadb
 
 
 # --- Constants ---
@@ -366,16 +364,30 @@ def delete_pdf_vectorstore(unique_string: str) -> dict:
     Returns:
         Dict with keys: deleted (bool), reason (str or None)
     """
-    persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
+    # Try server-mode delete first. Collection may live entirely in the
+    # Chroma server (no local persist_dir) under multi-worker config.
+    client = get_chroma_client()
+    deleted_from_server = False
+    try:
+        client.delete_collection(name=unique_string)
+        deleted_from_server = True
+    except Exception as e:
+        # Most common: collection doesn't exist. Fall through to filesystem
+        # check below so legacy on-disk collections still get cleaned up.
+        log.debug(f"[Document] delete_collection({unique_string}) → {e}")
 
-    if not os.path.exists(persist_dir):
+    # Legacy filesystem cleanup (handles pre-server-mode persist dirs and
+    # the chat-history JSON which is not in Chroma).
+    persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
+    dir_existed = os.path.exists(persist_dir)
+    if dir_existed:
+        shutil.rmtree(persist_dir)
+
+    if not deleted_from_server and not dir_existed:
         return {"deleted": False, "reason": f"Collection '{unique_string}' not found"}
 
     try:
-        # Delete the ChromaDB persist directory
-        shutil.rmtree(persist_dir)
-
-        # Delete associated chat history
+        # Delete associated chat history (independent of Chroma storage)
         chat_file = os.path.join(CHROMA_STORE_ROOT, "chat_histories", f"{unique_string}_chat.json")
         if os.path.exists(chat_file):
             os.remove(chat_file)
@@ -401,9 +413,21 @@ def get_collection_metadata(unique_string: str) -> dict:
     Returns:
         Dict with keys: exists (bool), document_count (int), disk_size_mb (float), has_chat_history (bool)
     """
+    # Check existence via Chroma server (collection may not have a local
+    # persist dir under server mode). Fall through to legacy disk check only
+    # for backward compat with pre-server-mode persist dirs.
+    client = get_chroma_client()
     persist_dir = os.path.join(CHROMA_STORE_ROOT, unique_string)
+    server_exists = False
+    doc_count = 0
+    try:
+        collection = client.get_collection(name=unique_string)
+        server_exists = True
+        doc_count = collection.count()
+    except Exception as e:
+        log.debug(f"[Document] get_collection({unique_string}) → {e}")
 
-    if not os.path.exists(persist_dir):
+    if not server_exists and not os.path.exists(persist_dir):
         return {
             "exists": False,
             "document_count": 0,
@@ -411,29 +435,16 @@ def get_collection_metadata(unique_string: str) -> dict:
             "has_chat_history": False,
         }
 
-    # Calculate disk size
-    total_size = 0
-    for dirpath, _, filenames in os.walk(persist_dir):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            total_size += os.path.getsize(fp)
-    size_mb = round(total_size / (1024 * 1024), 2)
-
-    # Get document count from ChromaDB
-    doc_count = 0
-    try:
-        embeddings = get_qa_embeddings()
-        chromadb.api.client.SharedSystemClient.clear_system_cache()
-        from langchain_community.vectorstores import Chroma
-        vectordb = Chroma(
-            collection_name=unique_string,
-            persist_directory=persist_dir,
-            embedding_function=embeddings,
-        )
-        collection = vectordb._collection
-        doc_count = collection.count()
-    except Exception as e:
-        log.error(f"[Document] Failed to get doc count for {unique_string}: {e}")
+    # Disk size: only meaningful for legacy local persist dirs. Under server
+    # mode the data lives in the shared chroma_store/, not per-collection.
+    size_mb = 0.0
+    if os.path.exists(persist_dir):
+        total_size = 0
+        for dirpath, _, filenames in os.walk(persist_dir):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                total_size += os.path.getsize(fp)
+        size_mb = round(total_size / (1024 * 1024), 2)
 
     # Check chat history
     chat_file = os.path.join(CHROMA_STORE_ROOT, "chat_histories", f"{unique_string}_chat.json")

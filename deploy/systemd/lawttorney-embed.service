@@ -11,22 +11,47 @@ WorkingDirectory=/root/Lawtech-AI
 EnvironmentFile=/root/Lawtech-AI/.env
 
 # Externalised embedding so each gunicorn worker doesn't reload 1.3 GB of
-# BGE-large. EMBEDDING_SERVICE_WORKERS=2 gives true parallelism for embed
-# requests (sentence-transformers encode is sync).
+# BGE-large per process. Each embed worker also loads the full model
+# (~1.3 GB resident) — sized at 6 to match the v2 worker count so we can
+# absorb ~50 concurrent users (Phase 7 finding: 2 workers wedged at ~10
+# concurrent because sentence-transformers encode is sync + per-worker
+# _lock serialised throughput). RAM: 6 × 1.3 GB ≈ 8 GB, well within budget.
 Environment=EMBEDDING_SERVICE_PORT=5100
-Environment=EMBEDDING_SERVICE_WORKERS=2
+Environment=EMBEDDING_SERVICE_WORKERS=6
 Environment=EMBEDDING_SERVICE_KEEPALIVE=60
 
-ExecStart=/root/Lawtech-AI/venv/bin/python -m services.embedding_service
+# Phase 7 mitigation for the torch.nn.Linear deadlock observed under
+# sustained encode pressure (all 6 workers wedged at 110-150% CPU for
+# 15 min after load stopped). Cap BLAS/OpenMP threads per process so
+# sentence-transformers + PyTorch don't oversubscribe — each worker
+# does one matmul thread at a time, and we get true parallelism from
+# the 6 worker PROCESSES, not from intra-process thread fan-out.
+# References:
+#   - github.com/explosion/spaCy/discussions/12746 (FastAPI deadlock)
+#   - sentence-transformers concurrency limitations
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=TOKENIZERS_PARALLELISM=false
+
+# Use uvicorn CLI directly so --workers N actually spawns N processes.
+# Running `python -m services.embedding_service` with uvicorn.run(workers=6)
+# was producing one process with many threads, not 6 worker processes —
+# explaining the Phase 7 stall at ~10 concurrent (single-process bottleneck).
+ExecStart=/root/Lawtech-AI/venv/bin/uvicorn services.embedding_service:app \
+    --host 0.0.0.0 \
+    --port ${EMBEDDING_SERVICE_PORT} \
+    --workers ${EMBEDDING_SERVICE_WORKERS} \
+    --timeout-keep-alive ${EMBEDDING_SERVICE_KEEPALIVE}
 
 Restart=on-failure
 RestartSec=5
 
-# Each worker holds ~1.3 GB resident; 2 workers ≈ 2.6 GB. Cap at 4 GB to
-# absorb peak working-set + tokenizer overhead.
-LimitNOFILE=8192
-MemoryHigh=3500M
-MemoryMax=4G
+# Each worker holds ~1.3 GB resident; 6 workers ≈ 8 GB. Cap at 12 GB to
+# absorb peak working-set + tokenizer overhead. Box has 30 GiB total.
+LimitNOFILE=16384
+MemoryHigh=10G
+MemoryMax=12G
 
 StandardOutput=journal
 StandardError=journal

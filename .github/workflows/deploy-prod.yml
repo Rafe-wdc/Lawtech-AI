@@ -18,9 +18,16 @@ name: Deploy to Production (main → AWS)
 #   PROD_INTEGRATION_ADMIN_KEY (secret)
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:        # manual trigger from Actions UI
+  # Manual trigger ONLY — no auto-deploy on push to main. GitHub Free
+  # private repos can't add "Required reviewers" to the production
+  # environment, so we use the explicit "Run workflow" button as the
+  # human gate instead. Go to Actions → "Deploy to Production" → click
+  # "Run workflow" → pick main → green button.
+  #
+  # Environment-secret access + the branch-restriction rule on the
+  # `production` environment still apply, so even a workflow_dispatch
+  # from a wrong branch will be denied.
+  workflow_dispatch:
 
 jobs:
   # ── Job 1: Syntax + import check (same as dev, no external deps) ──────

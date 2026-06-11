@@ -1,0 +1,201 @@
+name: Deploy to Production (main → AWS)
+
+# Ships main to the AWS production box (52.66.246.103). Gated by the
+# `production` GitHub Environment, which requires a human approver before
+# the deploy job runs. Configure that gate in:
+#   GitHub → Settings → Environments → New environment "production"
+#     • Required reviewers: <your handle>
+#     • Deployment branches: restrict to `main`
+#
+# Required secrets:
+#   SSH_PRIVATE_KEY_PROD  contents of mainserver/lawtech-ai-v2-key.pem
+#   SERVER_HOST_PROD      52.66.246.103
+#   SERVER_USER_PROD      ubuntu
+#
+# Required vars (optional, for the integration test job):
+#   PROD_INTEGRATION_URL    https://api.lawttorney.com  (once Certbot is done)
+#   PROD_INTEGRATION_API_KEY (secret)
+#   PROD_INTEGRATION_ADMIN_KEY (secret)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # manual trigger from Actions UI
+
+jobs:
+  # ── Job 1: Syntax + import check (same as dev, no external deps) ──────
+  test:
+    name: Syntax & Import Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lightweight dependencies
+        run: |
+          pip install --quiet \
+            fastapi pydantic python-dotenv structlog \
+            langgraph langchain langchain-core langchain-openai \
+            langchain-google-genai slowapi uvicorn gunicorn \
+            psycopg psutil prometheus-client httpx
+
+      - name: Check Python syntax
+        run: |
+          find . -name "*.py" \
+            -not -path "./.git/*" \
+            -not -path "./venv/*" \
+            -not -path "./.venv/*" \
+            | xargs python -m py_compile
+          echo "Syntax OK"
+
+      - name: Check critical module imports
+        env:
+          OPENAI_API_KEY: sk-dummy
+          GOOGLE_API_KEY: AIza-dummy
+          API_KEYS: test-key
+          ADMIN_API_KEY: test-admin-key
+        run: |
+          python -c "from core.settings import HOST, PORT; print('settings OK')"
+          python -c "from core.auth import require_user_key, require_admin_key; print('auth OK')"
+          python -c "from core.checkpointer import create_checkpointer; print('checkpointer OK')"
+          python -c "from core.embedding_client import RemoteEmbeddings; print('embedding_client OK')"
+          python -c "from core.metrics import METRICS; print('metrics OK')"
+
+  # ── Job 2: Deploy to AWS prod box ─────────────────────────────────────
+  # The `environment: production` line enables the GitHub Environment gate.
+  # The job will appear in the Actions UI as "Waiting for approval" until a
+  # reviewer clicks Approve. Rejecting cancels the deploy.
+  deploy:
+    name: Deploy to prod (AWS)
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package application (exclude heavy/secret dirs)
+        run: |
+          tar --exclude='.git' \
+              --exclude='venv' \
+              --exclude='.venv' \
+              --exclude='data' \
+              --exclude='logs' \
+              --exclude='models' \
+              --exclude='chroma_store' \
+              --exclude='uploads' \
+              --exclude='*.pyc' \
+              --exclude='__pycache__' \
+              --exclude='.env' \
+              --exclude='mainserver' \
+              -czf /tmp/lawtech_deploy.tar.gz .
+          echo "Package size: $(du -sh /tmp/lawtech_deploy.tar.gz | cut -f1)"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Upload package to server
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            /tmp/lawtech_deploy.tar.gz \
+            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}:/tmp/lawtech_deploy.tar.gz"
+
+      - name: Deploy via systemd + verify health
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" << 'ENDSSH'
+            set -e
+            APP_DIR=/root/Lawtech-AI
+
+            echo "=== Extract new code (preserves .env, models/, chroma_store/, data/) ==="
+            sudo tar -xzf /tmp/lawtech_deploy.tar.gz -C $APP_DIR
+            sudo rm /tmp/lawtech_deploy.tar.gz
+
+            echo "=== Strip CRLF from any shipped scripts (Windows author artifacts) ==="
+            sudo find $APP_DIR/deploy -type f \( -name "*.sh" -o -name "*.conf" -o -name "*.service" \) \
+              -exec sed -i 's/\r$//' {} +
+            sudo sed -i 's/\r$//' $APP_DIR/gunicorn.conf.py 2>/dev/null || true
+
+            echo "=== Install any new Python dependencies ==="
+            sudo $APP_DIR/venv/bin/pip install --quiet -r $APP_DIR/requirements.txt
+
+            echo "=== Restart v2 via systemd (clean import of new code) ==="
+            sudo systemctl restart lawttorney-v2
+
+            echo "=== Wait for v2 health (3 consecutive 200s, max 120s) ==="
+            CONSECUTIVE_OK=0
+            NEEDED=3
+            for i in $(seq 1 24); do
+              sleep 5
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                       --max-time 5 http://localhost:5001/pyapi/health || echo "000")
+              if [ "$STATUS" = "200" ]; then
+                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+                if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                  echo "Stable: $NEEDED consecutive 200s. Settling for 10s before exit."
+                  sleep 10
+                  exit 0
+                fi
+                echo "Healthy ($STATUS), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              else
+                CONSECUTIVE_OK=0
+                echo "Waiting... attempt $i/24 (HTTP $STATUS)"
+              fi
+            done
+
+            echo "ERROR: no 3-consecutive 200 within 120s. journalctl tail:"
+            sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+            exit 1
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  # ── Job 3: Optional integration tests against public URL ──────────────
+  # Gated on PROD_INTEGRATION_URL being set as a repo variable (not secret).
+  # Hits the public api.lawttorney.com once Certbot is done — until then,
+  # don't set the variable and this job will be skipped.
+  integration:
+    name: Integration Tests (prod)
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: vars.PROD_INTEGRATION_URL != ''
+    continue-on-error: true   # informational; doesn't roll back the deploy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install --quiet pytest requests pytest-timeout pytest-rerunfailures
+
+      - name: Run integration tests
+        env:
+          API_URL:    ${{ vars.PROD_INTEGRATION_URL }}
+          API_PREFIX: /pyapi
+          API_KEY:    ${{ secrets.PROD_INTEGRATION_API_KEY }}
+          ADMIN_KEY:  ${{ secrets.PROD_INTEGRATION_ADMIN_KEY }}
+        run: |
+          pytest tests/integration/test_api.py -v \
+            --tb=short \
+            --timeout=60 \
+            --reruns 2 --reruns-delay 5 \
+            -x

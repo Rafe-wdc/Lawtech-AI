@@ -1,10 +1,15 @@
-name: Test & Deploy
+name: Test & Deploy (dev → Vultr)
+
+# Deploys the dev branch to the Vultr test box. Use this branch for
+# pre-production validation; once dev is stable, merge to main and the
+# deploy-prod.yml workflow ships to the AWS production box (with manual
+# approval). Phase 2-8 scaling rollout, 2026-06-12.
 
 on:
   push:
-    branches: [master]
+    branches: [dev]
   pull_request:
-    branches: [master]
+    branches: [dev]
 
 jobs:
   # ── Job 1: Fast syntax + import check ─────────────────────────────────────
@@ -55,16 +60,17 @@ jobs:
           echo "All imports OK"
 
   # ── Job 2: Integration tests against live server (optional) ──────────────
-  # Runs only when INTEGRATION_TEST_URL secret is set.
-  # Add these secrets in GitHub → Settings → Secrets:
-  #   INTEGRATION_TEST_URL  https://tool.lawttorney.com
-  #   INTEGRATION_API_KEY   a valid user API key
-  #   INTEGRATION_ADMIN_KEY a valid admin API key
+  # Runs only when INTEGRATION_TEST_URL repo variable is set. Hits the dev
+  # box (Vultr) via /pyapiv2 prefix. Production integration runs are in
+  # deploy-prod.yml against api.lawttorney.com.
+  #   vars.INTEGRATION_TEST_URL    https://tool.lawttorney.com
+  #   secrets.INTEGRATION_API_KEY  a valid user API key
+  #   secrets.INTEGRATION_ADMIN_KEY a valid admin API key
   integration:
-    name: Integration Tests
+    name: Integration Tests (dev)
     # Wait for deploy to finish before testing. Running in parallel causes
     # flaky 502s when gunicorn is mid-restart. deploy only runs on push to
-    # master, so on PRs we fall back to just the syntax check.
+    # dev, so on PRs we fall back to just the syntax check.
     needs: [test, deploy]
     runs-on: ubuntu-latest
     # Gate: set INTEGRATION_TEST_URL as a repository variable (not secret)
@@ -103,12 +109,12 @@ jobs:
             --reruns 2 --reruns-delay 5 \
             -x
 
-  # ── Job 3: Deploy to production server (master only) ──────────────────────
+  # ── Job 3: Deploy to Vultr dev box (dev only) ────────────────────────────
   deploy:
-    name: Deploy to Server
+    name: Deploy to dev (Vultr)
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4

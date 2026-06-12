@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import re
 import time
 from dataclasses import dataclass
 from typing import AsyncIterator
@@ -60,6 +61,31 @@ def _fire_and_forget(coro) -> asyncio.Task:
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
+
+
+# Defense-in-depth HTML stripper for final response. The drafting validator
+# already strips HTML from drafting outputs, but ANY agent (Legislation,
+# Judgment, Scenario, Constitution/Maxim, etc.) could in principle emit
+# HTML the frontend renders as literal text. This is the last line of
+# defense between the LLM and the user. Converts <br>/<hr> to markdown
+# equivalents, then strips every remaining HTML-shaped tag while keeping
+# the inner content. Idempotent: safe to apply to already-clean text.
+_FINAL_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
+_FINAL_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
+_FINAL_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
+
+
+def _strip_html_from_response(text: str) -> str:
+    """Strip HTML tags from a final response. See module-level comment."""
+    if not text or "<" not in text:
+        return text
+    out = _FINAL_BR_RE.sub("\n", text)
+    out = _FINAL_HR_RE.sub("\n---\n", out)
+    out, n = _FINAL_TAG_RE.subn("", out)
+    if n:
+        log.warning("Final-response HTML strip", tags_removed=n,
+                    preview=text[:200])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +394,10 @@ async def run_chat_pipeline(
         yield _sse({"type": "error", "data": str(e)})
 
     # --- Final events ------------------------------------------------------
+    # Strip any HTML before delivery. validate_draft already runs in the
+    # drafting agent, but this catches HTML from any other agent path too.
+    final_response = _strip_html_from_response(final_response)
+
     if final_response:
         yield _sse({"type": "response", "content": final_response})
 

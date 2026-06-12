@@ -231,6 +231,106 @@ class TestValidator:
         _, warnings = validate_draft(draft, stance)
         assert any("non-applicable" in w for w in warnings)
 
+    # ── HTML stripping (locked-in contract) ──────────────────────────────
+    # The frontend renders markdown only — raw HTML shows up as literal
+    # text. validate_draft must strip every HTML-shaped tag while keeping
+    # the inner content. If any of these regress, real users see ugly
+    # `<p align="center">FOO</p>` strings in the document.
+
+    def test_strips_p_align_center(self):
+        draft = '<p align="center">PARTNERSHIP DEED</p>\nThis is the body.'
+        cleaned, warnings = validate_draft(draft)
+        assert "<p" not in cleaned and "</p>" not in cleaned
+        assert "PARTNERSHIP DEED" in cleaned
+        assert "This is the body." in cleaned
+        assert any("HTML" in w for w in warnings)
+
+    def test_strips_p_align_right_and_keeps_content(self):
+        draft = '<p align="right">Party of the First Part</p>'
+        cleaned, _ = validate_draft(draft)
+        assert "<p" not in cleaned
+        assert "Party of the First Part" in cleaned
+
+    def test_br_becomes_newline(self):
+        draft = "Line one<br>Line two<br />Line three<br/>"
+        cleaned, _ = validate_draft(draft)
+        assert "<br" not in cleaned
+        # Three line breaks added
+        assert cleaned.count("\n") >= 3
+
+    def test_hr_becomes_markdown_separator(self):
+        draft = "Above<hr>Below"
+        cleaned, _ = validate_draft(draft)
+        assert "<hr" not in cleaned
+        assert "---" in cleaned
+
+    def test_div_span_center_all_stripped(self):
+        draft = (
+            '<div class="x"><span style="color:red">A</span></div>'
+            "<center>Centered</center>"
+        )
+        cleaned, _ = validate_draft(draft)
+        assert "<" not in cleaned and ">" not in cleaned
+        assert "A" in cleaned
+        assert "Centered" in cleaned
+
+    def test_pure_markdown_unchanged(self):
+        # Sanity: markdown with NO HTML must not be touched.
+        draft = (
+            "## Section 1\n\n"
+            "1. **Bold** statement with _italic_ and a [link](http://x).\n"
+            "2. Another point.\n\n"
+            "| col | val |\n| --- | --- |\n| a | 1 |\n"
+        )
+        cleaned, warnings = validate_draft(draft)
+        assert cleaned == draft  # byte-identical
+        assert not any("HTML" in w for w in warnings)
+
+    def test_html_strip_is_idempotent(self):
+        # If validate_draft runs twice, second pass should be a no-op.
+        draft = '<p align="center">Title</p>\nBody'
+        once, _ = validate_draft(draft)
+        twice, _ = validate_draft(once)
+        assert once == twice
+
+    def test_html_count_in_warning(self):
+        # Multiple tags collapse into one warning that names the count.
+        draft = "<p>A</p><div>B</div><span>C</span>"
+        cleaned, warnings = validate_draft(draft)
+        html_warnings = [w for w in warnings if "HTML" in w]
+        assert len(html_warnings) == 1
+        assert "6" in html_warnings[0]  # 3 opening + 3 closing = 6 tags
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# chat_runner final-response sanitizer (defense-in-depth layer)
+# ───────────────────────────────────────────────────────────────────────────
+
+class TestFinalResponseSanitizer:
+    """The chat_runner._strip_html_from_response is the last line of defense
+    between LLM output and the user. Tests below lock the contract."""
+
+    def _strip(self, s: str) -> str:
+        from core.chat_runner import _strip_html_from_response
+        return _strip_html_from_response(s)
+
+    def test_strips_p_align_attributes(self):
+        out = self._strip('<p align="center">Hello</p>')
+        assert "<" not in out and ">" not in out
+        assert "Hello" in out
+
+    def test_empty_input_returns_empty(self):
+        assert self._strip("") == ""
+
+    def test_no_html_returns_same_object(self):
+        s = "Just plain markdown. No tags here. **bold** *italic*."
+        assert self._strip(s) == s
+
+    def test_br_to_newline(self):
+        out = self._strip("Top<br>Mid<br/>Bot")
+        assert "<br" not in out
+        assert out.count("\n") >= 2
+
 
 # ---------------------------------------------------------------------------
 # Phase 1 -- agent fanout gating (unit-level smoke)

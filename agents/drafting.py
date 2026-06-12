@@ -439,6 +439,16 @@ _TRAILING_PREP_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
+# HTML tag cleanup. Gemini occasionally tries to fake centering/alignment in
+# legal drafts by emitting <p align="center">TITLE</p>, <p align="right">...,
+# or wrapping content in <div>/<span>/<center>. Our frontend renders markdown
+# only — raw HTML shows up as ugly literal text. Strip every HTML-looking
+# tag while preserving the inner content. Structural tags (<br>, <hr>) get
+# converted to the markdown equivalent first so we don't lose line breaks.
+_HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
+_HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
+_HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
+
 # Forbidden statute pairings: (statute_pattern, banned_context_pattern, message).
 _STATUTE_TRAPS: list[tuple[re.Pattern, re.Pattern, str]] = [
     (
@@ -495,6 +505,22 @@ def validate_draft(
     if fixed_count:
         log.info("Validator: mojibake auto-fixed (substring fallback)",
                  patterns_fixed=fixed_count)
+
+    # --- Auto-fix: strip HTML tags (frontend doesn't render raw HTML) ---
+    # Order matters: convert <br>/<hr> to markdown equivalents first so we
+    # don't lose line breaks, then strip any remaining tag (e.g. <p>, <div>,
+    # <span>, <center>, attributes like align="center"/"right" that the LLM
+    # uses to fake centering markdown can't produce). Inner text is always
+    # preserved -- we never drop content, only the tag scaffolding.
+    cleaned = _HTML_BR_RE.sub("\n", cleaned)
+    cleaned = _HTML_HR_RE.sub("\n---\n", cleaned)
+    cleaned, html_strip_count = _HTML_ANY_TAG_RE.subn("", cleaned)
+    if html_strip_count:
+        warnings.append(
+            f"Stripped {html_strip_count} HTML tag(s) from draft. The "
+            "section prompt forbids HTML -- if this keeps happening, the "
+            "LLM is drifting; tighten Rule 12 in DRAFTING_SYSTEM_PROMPT."
+        )
 
     # --- Auto-fix: strip [CITE: ...] markers + log if any survived ---
     cite_hits = _CITE_PLACEHOLDER_RE.findall(cleaned)
@@ -1888,6 +1914,10 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 template_type=template_display,
             )],
             tokens_consumed=total_tokens,
+            meta=(
+                {"draft_warnings": draft_warnings}
+                if draft_warnings else {}
+            ),
         )
 
         # Store continuation metadata for incomplete drafts

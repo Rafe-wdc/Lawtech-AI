@@ -158,3 +158,36 @@ def test_sync_embed_query_still_works():
     assert callable(emb.embed_documents)
     assert callable(emb.aembed_query)
     assert callable(emb.aembed_documents)
+
+
+def test_aembed_query_raises_clear_error_on_empty_vectors():
+    """If the embed service responds with an empty `vectors` list,
+    aembed_query must raise a clear ValueError instead of an opaque
+    IndexError from `vecs[0]`. Locks the defensive guard added to the
+    Phase 7 async path."""
+    async def _body():
+        app = FastAPI()
+
+        @app.post("/embed")
+        async def embed(request: Request):
+            # Pathological response: empty vectors list.
+            return {"vectors": [], "model": "retriever", "count": 0}
+
+        emb = _client_against(app)
+        try:
+            try:
+                await emb.aembed_query("anything")
+            except ValueError as e:
+                msg = str(e)
+                assert "empty" in msg.lower()
+                assert "vectors" in msg.lower()
+                return  # PASS
+            except IndexError:
+                raise AssertionError(
+                    "aembed_query raised IndexError -- defensive guard missing"
+                )
+            raise AssertionError("aembed_query should have raised ValueError")
+        finally:
+            _reset_client()
+
+    asyncio.run(_body())

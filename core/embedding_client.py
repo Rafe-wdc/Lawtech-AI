@@ -176,6 +176,18 @@ class RemoteEmbeddings(Embeddings):
         return all_vectors
 
     async def aembed_query(self, text: str) -> List[float]:
-        """Async single-query embed. Use from async handlers."""
+        """Async single-query embed. Use from async handlers.
+
+        Defensive: aembed_documents([text]) MUST return one vector for one
+        input, but if the embed service responds with an empty vectors list
+        (or some transport edge case strips it), `vecs[0]` would raise an
+        opaque IndexError. Raise a clear ValueError instead so the caller
+        (e.g. retrieval_relevance fail-open path) sees the real signal.
+        """
         vecs = await self.aembed_documents([text])
+        if not vecs:
+            raise ValueError(
+                f"Embed service returned empty vectors list "
+                f"(query length {len(text)} chars)"
+            )
         return vecs[0]

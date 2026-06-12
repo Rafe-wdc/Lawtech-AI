@@ -7,6 +7,19 @@ Migrated from: v1 retrievers/legislation_retriever.py (extract_section_info_from
 
 import re
 
+# Year-like 4-digit numbers (1800-2099). The parser used to read "Section 9 of
+# the Code of Civil Procedure 1908" and extract sections=['9', '1908'], which
+# caused ES to retrieve docs about "Section 1908" (nonexistent) and dragged
+# in unrelated Section 7 docs that cross-reference Section 9. Filter these
+# out as a defensive layer even after the "of <act>" cut-off below.
+_YEAR_RE = re.compile(r"^(?:1[89]\d{2}|20\d{2})$")
+
+# When extracting section numbers from a query, stop scanning at the first
+# act-name indicator ("of", "in", "under") -- numbers AFTER that are almost
+# always part of the act name (year of enactment) or unrelated context, not
+# additional section numbers.
+_SECTION_LIST_BOUNDARY_RE = re.compile(r"\b(?:of|in|under)\b", flags=re.IGNORECASE)
+
 SECTION_TYPES = [
     'section', 'rule', 'rules', 'order', 'regulation', 'scheme', 'procedure',
     'policy', 'article', 'condition', 'statute', 'ordinance', 'standing',
@@ -96,12 +109,19 @@ def parse_multi_section_info(query: str) -> dict | None:
     # Get the text after the section type keyword for number extraction
     after_type = query_lower[type_match.end() - 1:]  # include trailing space
 
+    # Truncate `after_type` at the first "of/in/under" boundary so that the
+    # act name (and its year) cannot leak into the section-number scan. This
+    # is the primary fix for the "1908 parsed as Section 1908" bug. We still
+    # apply a defensive year filter below as a safety net.
+    boundary = _SECTION_LIST_BOUNDARY_RE.search(after_type)
+    scan_zone = after_type[:boundary.start()] if boundary else after_type
+
     # --- Step 2: Extract all section numbers ---
     section_numbers = []
     subsections: dict[str, str] = {}
 
     # Check for range pattern: "10 to 15" or "10-15"
-    range_match = re.search(r'(\d+)\s+to\s+(\d+)', after_type)
+    range_match = re.search(r'(\d+)\s+to\s+(\d+)', scan_zone)
     if range_match:
         start, end = int(range_match.group(1)), int(range_match.group(2))
         # Hard cap at 20 — prevents DoS via "Sections 1 to 10000" expanding
@@ -116,22 +136,27 @@ def parse_multi_section_info(query: str) -> dict | None:
         # First capture all number+optional-subsection patterns
         num_with_sub = re.findall(
             r'(\d+[a-z]*)\s*(?:\((\w+)\))?',
-            after_type
+            scan_zone,
         )
 
         for num, sub in num_with_sub:
-            if num and num not in section_numbers:
+            # Defensive: reject 4-digit years even if the boundary cut-off
+            # somehow let them through (e.g. weird query phrasing without
+            # an "of/in/under").
+            if num and num not in section_numbers and not _YEAR_RE.match(num):
                 section_numbers.append(num)
                 if sub:
                     subsections[num] = sub
 
-    # If no numbers found via list/range, fall back to basic regex
+    # If no numbers found via list/range, fall back to basic regex over the
+    # FULL query (not scan_zone) to maintain backward compat. Year filter
+    # still applies.
     if not section_numbers:
         basic_matches = re.findall(
             rf'({_SECTION_PATTERN})\s+{number_pattern}', query_lower
         )
         for _, num in basic_matches:
-            if num not in section_numbers:
+            if num not in section_numbers and not _YEAR_RE.match(num):
                 section_numbers.append(num)
 
     if not section_numbers:

@@ -245,12 +245,15 @@ async def web_search_fallback(
     except Exception as e:
         log.error("Web search fallback failed",
                   agent=agent_name, error=str(e), exc_info=True)
+        # Sanitize: take first line only (no stack trace) and cap to 200 chars
+        # so the field can never leak internal paths or full Python tracebacks.
+        sanitized = str(e).splitlines()[0][:200] if str(e) else "unknown error"
         return AgentResult(
             agent_name=agent_name,
             content="I was unable to retrieve information on this topic at the moment. Please try rephrasing your question.",
             sources=[],
             tokens_consumed=0,
-            error=f"Web search fallback failed: {e}",
+            error=f"Web search fallback failed: {sanitized}",
             fallback_used=True,
         )
 

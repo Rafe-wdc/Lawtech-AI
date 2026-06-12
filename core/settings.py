@@ -62,8 +62,10 @@ MODELS = {
 }
 
 # --- Elasticsearch / OpenSearch ---
-_ES_DEFAULT = "http://139.84.219.174:9200"
-# ES_URL is the preferred env var; fall back to ELASTICSEARCH_URL for backward compat
+# ES_URL is the preferred env var; fall back to ELASTICSEARCH_URL for backward compat.
+# Dev default points at localhost so a missing env var fails visibly instead of silently
+# routing traffic to a hardcoded production IP.
+_ES_DEFAULT = "http://localhost:9200"
 ELASTICSEARCH_URL = (
     os.getenv("ES_URL")
     or os.getenv("ELASTICSEARCH_URL")
@@ -72,7 +74,7 @@ ELASTICSEARCH_URL = (
 if ELASTICSEARCH_URL == _ES_DEFAULT and not os.getenv("ES_URL") and not os.getenv("ELASTICSEARCH_URL"):
     import logging as _logging
     _logging.getLogger("Settings").warning(
-        "ES_URL / ELASTICSEARCH_URL not set — using hardcoded default %s. "
+        "ES_URL / ELASTICSEARCH_URL not set — falling back to %s. "
         "Set ES_URL env var for production.", _ES_DEFAULT
     )
 

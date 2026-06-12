@@ -78,32 +78,60 @@ def sanitize_markdown(content: str) -> str:
         fixed_lines.append(line)
     text = '\n'.join(fixed_lines)
 
-    # 7. Fix broken tables
+    # 7. Fix broken tables — insert a separator row after the HEADER row only
+    # if missing. A table is a contiguous block of pipe-containing lines. The
+    # header is the FIRST such line. If line 2 of the block isn't a separator
+    # row, insert one. Subsequent data rows must NOT trigger insertion (earlier
+    # versions of this sanitizer inserted `|---|---|---|` between every pair of
+    # data rows because they always have pipes too).
+    _SEP_RE = re.compile(r'^[\s|:\-]+$')
     lines = text.split('\n')
     fixed_lines = []
     in_fence = False
+    prev_was_pipe = False  # was the previous emitted line part of a pipe block?
     i = 0
     while i < len(lines):
         line = lines[i]
-        if line.strip().startswith('```'):
+        stripped = line.strip()
+        if stripped.startswith('```'):
             in_fence = not in_fence
             fixed_lines.append(line)
+            prev_was_pipe = False
             i += 1
             continue
-        if not in_fence and '|' in line:
+        is_pipe_line = (not in_fence) and ('|' in line)
+        if is_pipe_line:
+            is_separator = bool(stripped) and bool(_SEP_RE.match(stripped))
             cells = [c.strip() for c in line.split('|')]
             cell_count = len([c for c in cells if c])
-            if cell_count >= 2:
-                fixed_lines.append(line)
-                next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
-                if next_line and '|' in next_line and re.match(r'^[\s|:\-]+$', next_line):
-                    pass
-                elif next_line and '|' in next_line:
+            # A markdown table header MUST start with `|` (after stripping). This
+            # rejects prose like "Either | this | or | that." which happens to
+            # contain pipes but isn't a table.
+            line_starts_with_pipe = stripped.startswith('|')
+            # A header also requires a following pipe row (data or separator).
+            # A single isolated pipe line is not a table.
+            next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            next_is_pipe = bool(next_line) and ('|' in next_line)
+            is_header_candidate = (
+                (not prev_was_pipe)
+                and (cell_count >= 2)
+                and not is_separator
+                and line_starts_with_pipe
+                and next_is_pipe
+            )
+            fixed_lines.append(line)
+            if is_header_candidate:
+                already_has_sep = next_is_pipe and bool(_SEP_RE.match(next_line))
+                if not already_has_sep:
                     sep = '|'.join(['---' if c else '' for c in cells])
                     fixed_lines.append(sep)
-                i += 1
-                continue
+            # Track "previous was pipe" only when this line is unambiguously part
+            # of a table (starts with `|`); pipe-containing prose resets the chain.
+            prev_was_pipe = line_starts_with_pipe
+            i += 1
+            continue
         fixed_lines.append(line)
+        prev_was_pipe = False
         i += 1
     text = '\n'.join(fixed_lines)
 

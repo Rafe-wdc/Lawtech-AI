@@ -112,9 +112,19 @@ def health():
 if __name__ == "__main__":
     import os
     port = int(os.getenv("EMBEDDING_SERVICE_PORT", "5100"))
+    # Worker count — default 1 because each worker process loads its own copy
+    # of the BGE-large model (~1.3 GB). Set EMBEDDING_SERVICE_WORKERS>1 only on
+    # a host with enough RAM to fit N copies. The inside-worker bottleneck is
+    # CPU (sentence-transformers encode is sync), which `_lock` serialises;
+    # raising workers >1 gives true concurrency at the cost of memory.
+    workers = int(os.getenv("EMBEDDING_SERVICE_WORKERS", "1"))
     uvicorn.run(
         "services.embedding_service:app",
         host="0.0.0.0",
         port=port,
-        workers=1,  # Single process — models loaded once
+        workers=workers,
+        # Generous timeout: cold-start embed of a 100-doc batch can take 20s+
+        # on CPU. The HTTP client (core/embedding_client.py) sets its own
+        # request timeout — this is the worker-level keep-alive.
+        timeout_keep_alive=int(os.getenv("EMBEDDING_SERVICE_KEEPALIVE", "60")),
     )

@@ -78,6 +78,9 @@ class AgentResult:
     error: str | None = None
     retry_attempted: bool = False
     fallback_used: bool = False
+    # Diagnostic side-channel surfaced to the response payload — drafting validator
+    # warnings (mojibake fixes, statute traps), search-fallback notes, etc. Free-form.
+    meta: dict = field(default_factory=dict)
 
 
 def _merge_agent_results(existing: dict, new: dict) -> dict:

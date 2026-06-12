@@ -92,20 +92,67 @@ def _validate_index_name(index_name: str) -> bool:
     return index_name in _ALLOWED_ES_INDICES
 
 
+class ESBackendUnavailable(RuntimeError):
+    """Raised when the ES backend is unreachable or the circuit is open.
+
+    Distinct from per-query failures (bad parse, no hits, 4xx user error) so
+    call sites can re-raise transport failures up to the agent's web-fallback
+    path instead of silently returning "no results found".
+    """
+
+
+# Exception-class names that indicate a transport-layer failure (network, timeout,
+# 5xx) rather than a per-query/user issue. Sourced from both opensearch-py 3.x and
+# elasticsearch-py 9.x exception hierarchies — we match by class name string so we
+# don't have to import both backends at module scope.
+#   opensearch-py / elasticsearch-py 8+:
+#       TransportError ← ConnectionError ← ConnectionTimeout
+#   elasticsearch-py 8+ also exposes ApiError → AuthenticationException, etc.
+# We treat 5xx as transport (server down / overloaded) and 4xx as per-query.
+_TRANSPORT_EXC_NAMES: frozenset[str] = frozenset({
+    "ConnectionError",       # opensearch-py + elasticsearch-py
+    "ConnectionTimeout",     # opensearch-py + elasticsearch-py
+    "TransportError",        # opensearch-py + elasticsearch-py base
+    "SSLError",              # underlying urllib3
+    "ImproperlyConfigured",  # opensearch-py
+})
+
+
+def _is_transport_failure(exc: BaseException) -> bool:
+    """True if `exc` indicates ES is unreachable (vs. a per-query failure).
+
+    Matches by class name to stay compatible with both opensearch-py and
+    elasticsearch-py without importing either at module scope. A 5xx
+    status (HTTP server error) is also treated as transport-class.
+    """
+    if isinstance(exc, ESBackendUnavailable):
+        return True
+    if type(exc).__name__ in _TRANSPORT_EXC_NAMES:
+        return True
+    # Some ES clients expose .status_code; 5xx = backend trouble, not user
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if isinstance(status, int) and 500 <= status < 600:
+        return True
+    return False
+
+
 def _es_search(index: str, body: dict) -> dict:
     """Execute an ES search with circuit breaker protection.
 
-    - If circuit is open (ES recently failed 3+ times), raises immediately
-      so agents skip to web fallback without waiting for a timeout.
+    - If circuit is open (ES recently failed 3+ times), raises ESBackendUnavailable
+      immediately so agents skip to web fallback without waiting for a timeout.
     - On success: resets failure counter.
-    - On failure: increments failure counter, may open circuit.
+    - On transport failure: increments failure counter, raises ESBackendUnavailable
+      so call sites can distinguish it from per-query parse errors.
+    - On non-transport failure (4xx, malformed query): re-raises the raw exception
+      so call sites can swallow it for the offending query variation only.
 
     Raises:
-        RuntimeError: when circuit is open (fast-fail).
-        elasticsearch.exceptions.*: on actual ES errors.
+        ESBackendUnavailable: circuit open OR transport-class failure.
+        Exception: per-query failures (bad parse, 4xx).
     """
     if not is_es_available():
-        raise RuntimeError(
+        raise ESBackendUnavailable(
             "Elasticsearch circuit open — skipping to fallback. "
             "ES will be retried in up to 60 seconds."
         )
@@ -114,10 +161,14 @@ def _es_search(index: str, body: dict) -> dict:
         result = _client.search(index=index, body=body, request_timeout=30)
         record_es_success()
         return result
-    except RuntimeError:
+    except ESBackendUnavailable:
         raise  # re-raise circuit-open error as-is
     except Exception as exc:
         record_es_failure()
+        if _is_transport_failure(exc):
+            raise ESBackendUnavailable(
+                f"Elasticsearch transport failure: {type(exc).__name__}: {str(exc)[:200]}"
+            ) from exc
         raise
 
 
@@ -215,8 +266,13 @@ def search_legislation(query: str) -> dict:
 
             if len(current_hits) > 5 and any(h["_score"] > 5.0 for h in current_hits):
                 break
+        except ESBackendUnavailable:
+            # Backend is down — don't iterate further variations. Propagate so the
+            # agent's web-search fallback path engages instead of returning "no
+            # results found" (which the user would read as "no such law exists").
+            raise
         except Exception as e:
-            log.error(f"[ES:Legislation] Search failed for '{query_text}': {e}")
+            log.warning(f"[ES:Legislation] Per-query search failed for '{query_text}': {e}")
             continue
 
     if not sources_counter:
@@ -523,6 +579,9 @@ def _search_legislation_multi_section(
                     all_hits.append(hit_dict)
                     section_hits.append(hit_dict)
             hits_by_section[sec_num] = section_hits
+        except ESBackendUnavailable:
+            # Don't keep iterating sections if the backend is gone.
+            raise
         except Exception as e:
             log.warning("Per-section ES retrieval failed", section=sec_num, error=str(e))
             hits_by_section[sec_num] = []
@@ -1330,6 +1389,10 @@ def translate_draft(draft: str, target_language: str) -> dict:
             "tokens_consumed": tokens,
         }
 
+    except ESBackendUnavailable:
+        # ES translation glossary unavailable — propagate so caller can fall back
+        # to the no-glossary translation path instead of silently returning empty.
+        raise
     except Exception as e:
         log.error(f"[Drafting] Translation failed: {e}")
         return {"translated": "", "language": target_language, "tokens_consumed": 0}

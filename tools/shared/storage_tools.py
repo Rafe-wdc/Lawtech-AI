@@ -24,19 +24,31 @@ log = get_logger("Storage")
 
 # --- S3 Existence Check (cached per server lifetime) ---
 
+@lru_cache(maxsize=1)
+def _get_s3_client():
+    """Lazy S3 client with explicit connect/read timeouts so head_object can't hang."""
+    import boto3
+    from botocore.config import Config
+    return boto3.client(
+        "s3",
+        config=Config(
+            connect_timeout=5,
+            read_timeout=5,
+            retries={"max_attempts": 2, "mode": "standard"},
+        ),
+    )
+
+
 @lru_cache(maxsize=2048)
 def _s3_key_exists(bucket: str, key: str) -> bool:
     """Return True if the S3 object exists, False only on a confirmed 404/NoSuchKey.
 
-    On any other error (403, no credentials, network failure) returns True so
-    that callers get a URL rather than silently dropping the link.
+    On any other error (403, no credentials, network failure, timeout) returns
+    True so callers get a URL rather than silently dropping the link.
     Results are memoized so each key is only checked once per process lifetime.
     """
     try:
-        import boto3
-        from botocore.exceptions import ClientError
-
-        boto3.client("s3").head_object(Bucket=bucket, Key=key)
+        _get_s3_client().head_object(Bucket=bucket, Key=key)
         return True
     except Exception as e:
         # Extract error code if this is a botocore ClientError
@@ -45,7 +57,9 @@ def _s3_key_exists(bucket: str, key: str) -> bool:
             code = response.get("Error", {}).get("Code", "")
             if code in ("404", "NoSuchKey"):
                 return False
-        # 403 / missing credentials / network error — assume exists
+        # 403 / missing credentials / network error / timeout — assume exists
+        log.debug("S3 head_object error treated as exists",
+                  bucket=bucket, key=key[:80], error=str(e)[:200])
         return True
 
 
@@ -109,8 +123,16 @@ def load_chat_history_from_api(thread_id: str) -> dict:
                 messages.append({"role": "user", "content": turn["user_query"]})
                 messages.append({"role": "assistant", "content": turn["ai_response"]})
             return {"messages": messages[-10:], "summary_text": result.summary_text}
-    except Exception:
-        pass
+    except Exception as e:
+        # History load failures must NOT be silent — caller gets a fresh-start payload,
+        # which means the user loses chat context. Log so prod incidents are debuggable.
+        from core.logger import get_logger
+        get_logger("StorageTools").warning(
+            "Chat history load failed; returning fresh-start payload",
+            thread_id=thread_id,
+            error=str(e)[:200],
+            exc_info=True,
+        )
 
     # No legacy API — return fresh start
     return {

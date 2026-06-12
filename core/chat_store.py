@@ -368,8 +368,11 @@ class _SqliteChatHistoryStore:
                 conn.commit()
                 log.debug("Turn saved",
                           thread_id=thread_id[:12], turn=new_turn)
-            except Exception:
+            except Exception as e:
                 conn.rollback()
+                log.error("save_turn failed; rolled back",
+                          thread_id=thread_id[:12], error=str(e)[:200],
+                          exc_info=True)
                 raise
             finally:
                 conn.close()
@@ -497,8 +500,11 @@ class _SqliteChatHistoryStore:
                         created_at = datetime('now')
                 """, (thread_id, json.dumps(versioned)))
                 conn.commit()
-            except Exception:
+            except Exception as e:
                 conn.rollback()
+                log.error("save_draft_continuation failed; rolled back",
+                          thread_id=thread_id[:12], error=str(e)[:200],
+                          exc_info=True)
                 raise
             finally:
                 conn.close()
@@ -552,8 +558,11 @@ class _SqliteChatHistoryStore:
                     (thread_id,),
                 )
                 conn.commit()
-            except Exception:
+            except Exception as e:
                 conn.rollback()
+                log.error("clear_draft_continuation failed; rolled back",
+                          thread_id=thread_id[:12], error=str(e)[:200],
+                          exc_info=True)
                 raise
             finally:
                 conn.close()
@@ -2738,9 +2747,23 @@ class _PostgresChatHistoryStore:
 # Module-level singleton
 # ------------------------------------------------------------------
 
+_REQUIRE_POSTGRES = os.getenv("REQUIRE_POSTGRES", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+
 if POSTGRES_URL:
     chat_store: "_PostgresChatHistoryStore | _SqliteChatHistoryStore" = _PostgresChatHistoryStore(POSTGRES_URL)
     log.info("Chat store: PostgreSQL backend", url=POSTGRES_URL[:30] + "...")
+elif _REQUIRE_POSTGRES:
+    # Fail fast in production: SQLite + multiple workers = `database is locked`
+    # errors under concurrent writes. The deploy contract is "REQUIRE_POSTGRES=true
+    # means POSTGRES_URL is mandatory". This raise happens at module import time
+    # so the server never accepts traffic with an unsafe backend.
+    raise RuntimeError(
+        "REQUIRE_POSTGRES=true but POSTGRES_URL is unset. "
+        "Set POSTGRES_URL=postgresql://user:pass@host:port/dbname in .env, "
+        "or remove REQUIRE_POSTGRES to allow the SQLite fallback (dev only)."
+    )
 else:
     chat_store = _SqliteChatHistoryStore(CHAT_HISTORY_DB_PATH)
     log.warning(

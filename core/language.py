@@ -107,8 +107,11 @@ def detect_language(text: str) -> str:
     try:
         from langdetect import detect, LangDetectException  # lazy import
         detected = detect(text)
-    except Exception:
-        pass  # langdetect not installed or failed — use heuristic only
+    except Exception as e:
+        # langdetect not installed or detection failed — heuristic still runs.
+        # Debug-level: this happens on very short or ambiguous inputs and is normal.
+        log.debug("langdetect failed; using Romanized heuristic",
+                  error=str(e)[:120])
 
     # langdetect sometimes returns "zh-cn", "pt" etc. for short Indian texts
     # Normalise: strip region suffix ("zh-cn" → "zh"), keep only known codes

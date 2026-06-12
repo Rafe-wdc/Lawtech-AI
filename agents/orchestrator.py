@@ -22,6 +22,7 @@ from core.logger import get_logger, log_time
 from core.progress import progress
 from config.prompts import (
     TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT, SYNTHESIS_TABLE_PROMPT,
+    wrap_untrusted,
     DRAFT_SYNTHESIS_PROMPT, DRAFT_CITATION_PROMPT,
 )
 
@@ -401,7 +402,13 @@ def _classify_task(query: str, chat_summary: str | None = None) -> str:
             llm = get_gemini_flash(temperature=0.1).with_structured_output(
                 IdentifyTaskSchema, include_raw=True,
             )
-            formatted = prompt.format(query=query, chat_summary=chat_summary or "")
+            # Wrap untrusted inputs in spotlighting delimiters — defense against
+            # prompt injection. Combined with the preamble baked into the prompt
+            # template, this is the OWASP-recommended layered defense.
+            formatted = prompt.format(
+                query=wrap_untrusted(query),
+                chat_summary=wrap_untrusted(chat_summary or ""),
+            )
             raw_and_parsed = llm.invoke(formatted)
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "classify_task", raw_and_parsed.get("raw"))

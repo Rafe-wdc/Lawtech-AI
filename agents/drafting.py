@@ -1298,37 +1298,84 @@ async def _generate_sections_parallel(
 
 # --- Step 6: Assemble Document ---
 #
-# The English footer block is assembled deterministically. When the user
-# wants the draft in a non-English language, the self-refine critic
-# (`core/self_refine.self_refine`) sees that the footer is still in English
-# and the refiner rewrites it to the target language, preserving the
-# `[Place]` / `[Date]` placeholders. No per-language label dict — adding a
-# new supported language requires zero footer code edits.
-
-
-def _english_footer_block() -> str:
-    """Court-filing footer in English. Localization is delegated to
-    self_refine when the user wants the draft in another language."""
-    return (
-        "**Place:** [Place]\n\n"
-        "**Date:** [Date]\n\n"
-        "**Signature of the Petitioner/Applicant**\n\n"
-        "Through Counsel:\n\n"
-        "**[Name of Advocate]**\n"
-        "[Enrollment No.]\n"
-        "[Address of Advocate]"
-    )
+# Footer label translations for the 10 P1/P2 Indian languages. This is
+# prompt-side translation data, not routing logic — the labels are
+# scaffolding the LLM is asked to render in the target language. Removing
+# the dict and trusting the self-refine critic to translate the footer
+# caused a measurable Marathi WS regression (English "Place:/Date:" leaked
+# all the way to the user-visible final response). Per-language footer
+# labels are higher-leverage than paragraph numerals for refinement
+# because they appear once and the critic is more likely to under-prioritise
+# them. The dict stays. Adding a new language is one entry.
+_FOOTER_LABELS: dict[str, dict[str, str]] = {
+    "hi": {
+        "place": "स्थान",
+        "date": "दिनांक",
+        "signature": "याचिकाकर्ता/आवेदक के हस्ताक्षर",
+        "through_counsel": "अधिवक्ता के माध्यम से",
+    },
+    "bn": {
+        "place": "স্থান",
+        "date": "তারিখ",
+        "signature": "আবেদনকারীর স্বাক্ষর",
+        "through_counsel": "আইনজীবীর মাধ্যমে",
+    },
+    "ta": {
+        "place": "இடம்",
+        "date": "தேதி",
+        "signature": "மனுதாரர்/விண்ணப்பதாரர் கையொப்பம்",
+        "through_counsel": "வழக்கறிஞர் மூலம்",
+    },
+    "te": {
+        "place": "స్థలం",
+        "date": "తేదీ",
+        "signature": "పిటిషనర్/దరఖాస్తుదారు సంతకం",
+        "through_counsel": "న్యాయవాది ద్వారా",
+    },
+    "mr": {
+        "place": "ठिकाण",
+        "date": "दिनांक",
+        "signature": "याचिकाकर्ता/अर्जदाराच्या सह्या",
+        "through_counsel": "वकिलांमार्फत",
+    },
+    "kn": {
+        "place": "ಸ್ಥಳ",
+        "date": "ದಿನಾಂಕ",
+        "signature": "ಅರ್ಜಿದಾರ/ಅರ್ಜಿದಾರರ ಸಹಿ",
+        "through_counsel": "ವಕೀಲರ ಮೂಲಕ",
+    },
+    "ml": {
+        "place": "സ്ഥലം",
+        "date": "തീയതി",
+        "signature": "ഹർജിക്കാരന്റെ/അപേക്ഷകന്റെ ഒപ്പ്",
+        "through_counsel": "അഭിഭാഷകൻ വഴി",
+    },
+    "gu": {
+        "place": "સ્થળ",
+        "date": "તારીખ",
+        "signature": "અરજદાર/અરજકર્તાની સહી",
+        "through_counsel": "વકીલ મારફત",
+    },
+    "pa": {
+        "place": "ਸਥਾਨ",
+        "date": "ਮਿਤੀ",
+        "signature": "ਅਰਜ਼ੀਕਰਤਾ ਦੇ ਦਸਤਖਤ",
+        "through_counsel": "ਵਕੀਲ ਰਾਹੀਂ",
+    },
+    "ur": {
+        "place": "جگہ",
+        "date": "تاریخ",
+        "signature": "درخواست گزار کے دستخط",
+        "through_counsel": "وکیل کے ذریعے",
+    },
+}
 
 
 def _assemble_document(outline: DraftOutline, sections: list[str], user_language: str = "en") -> str:
     """Combine all sections into the final document with proper structure.
 
     Ensures each section has a heading (injects from outline if LLM omitted it).
-    Appends an English footer; non-English drafts get the footer translated
-    by the downstream self-refine pass which has full intent context.
-
-    `user_language` is kept in the signature for backward compatibility but
-    is no longer read here — localization is the critic's job.
+    Adds a court filing footer with labels translated for the user's language.
     """
     parts = [
         f"# {outline.document_title}",
@@ -1342,8 +1389,22 @@ def _assemble_document(outline: DraftOutline, sections: list[str], user_language
             text = f"## {i + 1}. {section_plan.title}\n\n{text}"
         parts.append(text)
 
+    labels = _FOOTER_LABELS.get(user_language, {})
+    place_label = labels.get("place", "Place")
+    date_label = labels.get("date", "Date")
+    signature_label = labels.get("signature", "Signature of the Petitioner/Applicant")
+    through_counsel_label = labels.get("through_counsel", "Through Counsel")
+
     parts.append("---")
-    parts.append(_english_footer_block())
+    parts.append(
+        f"**{place_label}:** [Place]\n\n"
+        f"**{date_label}:** [Date]\n\n"
+        f"**{signature_label}**\n\n"
+        f"{through_counsel_label}:\n\n"
+        "**[Name of Advocate]**\n"
+        "[Enrollment No.]\n"
+        "[Address of Advocate]"
+    )
 
     return "\n\n".join(parts)
 

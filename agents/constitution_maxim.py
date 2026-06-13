@@ -121,24 +121,28 @@ def _retrieve_from_es(task: str, query: str) -> list[Document]:
 # --- Task Handlers ---
 
 async def _handle_legal_concepts(query: str, chat_history: list,
-                                   user_language: str = "en") -> AgentResult:
+                                   user_language: str = "en",
+                                   user_intent=None) -> AgentResult:
     """Handle Legal_Concepts task — web-grounded AI response for comprehensive coverage."""
     from core.agent_fallback import web_search_fallback
     progress("legal_concepts", "Researching legal concept...", step="research")
     log.info("Legal concepts using web search for comprehensive response")
     result = await web_search_fallback(
-        query, "Legal_Concepts", localize_prompt(LEGAL_CONCEPTS_PROMPT, user_language)
+        query, "Legal_Concepts",
+        localize_prompt(LEGAL_CONCEPTS_PROMPT, user_language, user_intent),
     )
     progress("legal_concepts", "Generating explanation...", step="generate")
     return result
 
 
 async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list,
-                                         user_language: str = "en") -> AgentResult:
+                                         user_language: str = "en",
+                                         user_intent=None) -> AgentResult:
     """Handle Constitution or Maxim task — ES retrieval + web enrichment + LLM generation."""
     system_prompt = localize_prompt(
         CONSTITUTION_SYSTEM_PROMPT if task == "Constitution" else MAXIM_SYSTEM_PROMPT,
         user_language,
+        user_intent,
     )
 
     # Run ES retrieval and web enrichment in parallel
@@ -290,7 +294,7 @@ async def constitution_node(state: LegalAgentState) -> dict:
 
     try:
         result = await _handle_constitution_or_maxim("Constitution", gen_query, chat_history,
-                                                      user_language)
+                                                      user_language, state.get("user_intent"))
     except Exception as e:
         log.error("Constitution agent failed", error=str(e), exc_info=True)
         result = AgentResult(
@@ -322,7 +326,7 @@ async def maxim_node(state: LegalAgentState) -> dict:
 
     try:
         result = await _handle_constitution_or_maxim("Maxim", gen_query, chat_history,
-                                                      user_language)
+                                                      user_language, state.get("user_intent"))
     except Exception as e:
         log.error("Maxim agent failed", error=str(e), exc_info=True)
         result = AgentResult(
@@ -350,7 +354,7 @@ async def legal_concepts_node(state: LegalAgentState) -> dict:
     gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
 
     try:
-        result = await _handle_legal_concepts(gen_query, chat_history, user_language)
+        result = await _handle_legal_concepts(gen_query, chat_history, user_language, state.get("user_intent"))
     except Exception as e:
         log.error("Legal Concepts agent failed", error=str(e), exc_info=True)
         result = AgentResult(

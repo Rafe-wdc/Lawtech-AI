@@ -27,7 +27,6 @@ from config.prompts import (
     DRAFT_SYNTHESIS_PROMPT, DRAFT_CITATION_PROMPT,
 )
 from config.intent import UserIntent, default_intent
-from core.settings import INTENT_EXTRACTOR_V2
 
 log = get_logger("Orchestrator")
 
@@ -72,37 +71,12 @@ _INTERNAL_CITE_MARKER_RE = re.compile(
 )
 
 
-# --- Table-format intent detection ---
-# When the user's response_instructions or query indicate they want a comparison
-# table (not a prose explanation), the synth node switches to SYNTHESIS_TABLE_PROMPT
-# which constrains the LLM to produce ONLY a table — no preamble, no postamble.
-_TABLE_INTENT_RE = re.compile(
-    r"\b("
-    r"table\s+format|format\s+of\s+(a\s+)?table|"
-    r"in\s+a\s+table|as\s+a\s+table|"
-    r"comparison\s+table|comparative\s+table|"
-    r"tabular(?:ly|\s+(?:form|format|comparison))?|"
-    r"side[- ]by[- ]side|"
-    r"compare(?:\s+and\s+contrast)?(?:\s+the\s+\w+){0,3}\s+in\s+(?:a\s+)?(?:table|tabular|tabulated)|"
-    r"differences?\s+between\s+.*\bin\s+(?:a\s+)?table"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
-def _wants_table_format(response_instructions: str, query: str = "") -> bool:
-    """Return True iff the user has explicitly asked for tabular output.
-
-    Checks response_instructions first (extracted by the query analyzer) and
-    falls back to the raw query. Be conservative — the synth_table prompt is
-    strict (table only), so a false positive produces a worse result than a
-    false negative.
-    """
-    if response_instructions and _TABLE_INTENT_RE.search(response_instructions):
-        return True
-    if query and _TABLE_INTENT_RE.search(query):
-        return True
-    return False
+# Table-format intent detection and the QUERY_NORMALIZE_PROMPT legacy
+# pipeline that produced free-form `response_instructions: str` were removed
+# in Phase 4 of the intent layer rollout. The structured user-intent
+# extractor (`_extract_user_intent`) is now the single source of truth —
+# downstream consumers read `state["user_intent"].wants_table` via
+# `_resolve_wants_table`. See docs/intent_layer_implementation_plan.md.
 
 
 def _strip_internal_cite_markers(text: str) -> str:
@@ -793,74 +767,15 @@ class AgentQueries(BaseModel):
     )
 
 
-# --- User Expectation Extraction + Query Normalization ---
-
-QUERY_NORMALIZE_PROMPT = """You are a legal query analyzer. Analyze the user's query and extract two things:
-
-1. **Normalized Query** (in English): Rewrite the user's query into clear, professional English.
-   - If the query is in any Indian language (Hindi, Bengali, Tamil, Telugu, Marathi, Kannada, Malayalam, Gujarati, Punjabi, Urdu, Odia, Assamese, etc.) or in Romanized/transliterated form (Hinglish, "kaise", "batao", etc.), translate it to English.
-   - Preserve all legal details verbatim: section numbers, act names (IPC, BNS, CrPC, BNSS, IEA, BSA), party names, case numbers, dates.
-   - Do NOT translate proper nouns: court names, party names, act abbreviations.
-   - Add explicit mention of what the user is asking for.
-
-2. **Response Instructions**: Extract what FORMAT and TYPE of response the user expects. Look for:
-   - Output type: draft/document, explanation, advice/opinion, comparison table, list, summary, step-by-step guide
-   - Specific format requests: table format, bullet points, numbered list, formal legal language
-   - Specific expectations: "on behalf of plaintiff", "with case laws", "with sections", "arguments and counter-arguments"
-   - Relief/remedy focus: compensation, bail, injunction, etc.
-
-If the user has no special format preference, return "Standard legal response with proper citations and markdown formatting."
-
-User Query: {query}
-
-Return JSON:
-{{"normalized_query": "...", "response_instructions": "..."}}"""
-
-
-class QueryAnalysis(BaseModel):
-    normalized_query: str = Field(..., description="Query rewritten in clear English with expectations embedded")
-    response_instructions: str = Field(..., description="What format/type of response the user expects")
-
-
-def _analyze_and_normalize_query(query: str) -> tuple[str, str]:
-    """Analyze user query: translate to English + extract response expectations.
-
-    Returns (normalized_query, response_instructions).
-    """
-    try:
-        with log_time(log, "Query analysis & normalization"):
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(
-                QueryAnalysis, include_raw=True,
-            )
-            prompt = ChatPromptTemplate.from_template(QUERY_NORMALIZE_PROMPT)
-            chain = prompt | llm
-            raw_and_parsed = chain.invoke({"query": query})
-        from core.token_tracker import record as _record_tokens
-        _record_tokens("Orchestrator", "normalize_query", raw_and_parsed.get("raw"))
-        result = raw_and_parsed["parsed"]
-
-        log.info("Query normalized",
-                 original_len=len(query),
-                 normalized_len=len(result.normalized_query),
-                 instructions_len=len(result.response_instructions))
-        return result.normalized_query, _sanitize_response_instructions(result.response_instructions)
-
-    except Exception as e:
-        log.warning("Query normalization failed, using original",
-                    error=str(e))
-        return query, ""
-
-
 # =============================================================================
-# Phase 1 of intent layer rollout — structured UserIntent extractor.
-# See docs/intent_layer_implementation_plan.md for the full plan.
+# Structured UserIntent extractor (intent layer rollout — Phase 4 final state).
+# See docs/intent_layer_implementation_plan.md.
 #
-# This runs ALONGSIDE _analyze_and_normalize_query when INTENT_EXTRACTOR_V2=true.
-# Phase 1 is telemetry-only: both code paths produce results, downstream code
-# still reads the legacy `response_instructions: str`, and we log how often
-# the new extractor agrees with the legacy regex (`_TABLE_INTENT_RE`).
-#
-# Cut-over happens in Phase 2 once telemetry shows ≥95% agreement.
+# Single LLM call (Gemini Flash Lite) parses the user's query + chat summary
+# into a typed UserIntent + normalized English query. Always-on as of Phase 4.
+# Replaces the legacy QUERY_NORMALIZE_PROMPT + free-form
+# `response_instructions: str` + regex picker pipeline that was retired in
+# Phase 4 — see git history for the deleted code.
 # =============================================================================
 
 class QueryAnalysisV2(BaseModel):
@@ -982,73 +897,30 @@ def _legacy_response_instructions(intent: UserIntent) -> str:
     return ". ".join(p.strip() for p in parts) + "."
 
 
-def _emit_intent_telemetry(
-    intent: UserIntent | None,
-    legacy_response_instructions: str,
-    query: str,
-) -> None:
-    """Log a single comparison line per request — the migration signal.
-
-    This is the metric that gates Phase 2 cutover: we want ≥95% agreement on
-    "do they agree about whether the user wants a table?" before we wire the
-    pickers to read `intent.wants_table` instead of `_TABLE_INTENT_RE`.
-    """
-    regex_match = _wants_table_format(legacy_response_instructions, query)
-    if intent is None:
-        log.info("Intent telemetry",
-                 phase=1, extractor_ok=False,
-                 regex_wants_table=regex_match,
-                 intent_wants_table=None,
-                 agreement_wants_table=None,
-                 confidence=None,
-                 query_preview=query[:80])
-        return
-    log.info("Intent telemetry",
-             phase=1, extractor_ok=True,
-             regex_wants_table=regex_match,
-             intent_wants_table=intent.wants_table,
-             agreement_wants_table=(regex_match == intent.wants_table),
-             intent_format=intent.response_format.value,
-             format_explicit=intent.format_explicit,
-             intent_language=intent.language,
-             language_explicit=intent.language_explicit,
-             depth=intent.response_depth,
-             confidence=round(intent.confidence, 3),
-             query_preview=query[:80])
-
-
 # =============================================================================
-# Phase 2 of intent layer rollout — synthesis-side resolvers.
+# Phase 2-4 of intent layer rollout — synthesis-side resolvers.
 #
-# These resolvers read state["user_intent"] FIRST and fall back to the legacy
-# `_wants_table_format` regex when intent is missing or low-confidence. They
-# are the single source of truth for "does the user want a table?" and "does
-# the user want a non-English language?" inside the synthesize node.
-#
-# `_TABLE_INTENT_RE` and `_wants_table_format` stay in the codebase as the
-# fallback path; they will be deleted in Phase 4 once telemetry shows the
-# intent extractor is reliable at scale.
+# These resolvers read state["user_intent"] which is populated by the
+# orchestrator's intent extractor (always-on as of Phase 4). The legacy
+# regex fallback was removed in Phase 4 — when extraction fails the
+# fallback is `default_intent()`, which expresses "no preference".
 # =============================================================================
 
 _INTENT_CONFIDENCE_THRESHOLD = 0.7
 
 
-def _resolve_wants_table(
-    state: LegalAgentState,
-    response_instructions: str,
-    query: str,
-) -> bool:
+def _resolve_wants_table(state: LegalAgentState) -> bool:
     """True iff the user wants a markdown table (TABLE or COMPARISON format).
 
-    Reads `state["user_intent"]` if present AND confidence >= threshold.
-    Otherwise falls back to the legacy regex on `response_instructions + query`.
-    Both signals are independent — this is defense in depth during migration.
+    Reads `state["user_intent"]`. Below the confidence threshold OR when
+    intent is missing, returns False (no special table routing) — the
+    LLM still receives the typed intent via the agent prompt directives
+    when present.
     """
     intent: UserIntent | None = state.get("user_intent")
-    if intent is not None and intent.confidence >= _INTENT_CONFIDENCE_THRESHOLD:
-        return intent.wants_table
-    # Low-confidence or missing intent → regex fallback. Either signal counts.
-    return _wants_table_format(response_instructions, query)
+    if intent is None or intent.confidence < _INTENT_CONFIDENCE_THRESHOLD:
+        return False
+    return intent.wants_table
 
 
 def _resolve_explicit_non_english(state: LegalAgentState) -> bool:
@@ -1355,153 +1227,53 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             classify_query = query + file_hint
             log.info("File context hint added for classification", file_names=fc.file_names)
 
-        if skip_normalize:
-            # Normalization skipped. When INTENT_EXTRACTOR_V2 is on, we still
-            # run the intent extractor in parallel with classify+plan — even
-            # for short English queries the extractor catches format/language
-            # directives the regex misses ("give me a table containing X",
-            # "in Hindi", "briefly"). The two LLM calls run concurrently so
-            # latency is governed by the slower one (classify).
-            classify_coro = asyncio.wait_for(
-                asyncio.to_thread(
-                    _classify_and_plan, classify_query,
-                    chat_summary=summary if summary else None,
-                ),
-                timeout=30,
-            )
-            if INTENT_EXTRACTOR_V2:
-                intent_coro_sk = asyncio.wait_for(
-                    asyncio.to_thread(
-                        _extract_user_intent, query, summary or "",
-                    ),
-                    timeout=10,
-                )
-                sk_results = await asyncio.gather(
-                    classify_coro, intent_coro_sk, return_exceptions=True,
-                )
-                # classify result
-                if isinstance(sk_results[0], Exception):
-                    task = _classify_task_regex_fallback(classify_query)
-                    tasks_planned = [task]
-                    log.warning("Classify+plan failed (skip_normalize path), "
-                                "using regex fallback",
-                                error=str(sk_results[0])[:200], task=task)
-                else:
-                    task, tasks_planned = sk_results[0]
-                # intent result
-                if not isinstance(sk_results[1], Exception):
-                    _normalized_v2, extracted_intent = sk_results[1]
-                    # If the extractor produced a high-confidence directive,
-                    # synthesize the legacy response_instructions string so
-                    # SYNTHESIS_TABLE_PROMPT and friends still pick it up.
-                    if extracted_intent.confidence >= 0.7 and (
-                        extracted_intent.format_explicit
-                        or extracted_intent.language_explicit
-                        or extracted_intent.response_depth != "standard"
-                        or extracted_intent.include_case_law
-                    ):
-                        response_instructions = _legacy_response_instructions(
-                            extracted_intent,
-                        )
-                else:
-                    log.warning("Intent extraction failed (skip_normalize path)",
-                                error=str(sk_results[1])[:200])
-                _emit_intent_telemetry(
-                    extracted_intent, response_instructions, query,
-                )
-            else:
-                try:
-                    task, tasks_planned = await classify_coro
-                except asyncio.TimeoutError:
-                    task = _classify_task_regex_fallback(classify_query)
-                    tasks_planned = [task]
-                    log.warning("Classify+plan timed out, using regex fallback",
-                                task=task, query=query[:80])
+        # Phase 4: structured intent extractor is the canonical path. The
+        # legacy _analyze_and_normalize_query and the regex-based
+        # _wants_table_format are gone. The extractor produces both the
+        # normalized query and the typed UserIntent in one LLM call.
+        intent_coro = asyncio.wait_for(
+            asyncio.to_thread(_extract_user_intent, query, summary or ""),
+            timeout=10,
+        )
+        classify_coro = asyncio.wait_for(
+            asyncio.to_thread(
+                _classify_and_plan, classify_query,
+                chat_summary=summary if summary else None,
+            ),
+            timeout=30,
+        )
+        results = await asyncio.gather(
+            intent_coro, classify_coro, return_exceptions=True,
+        )
+
+        # Process intent result first — it gives us normalized_query +
+        # typed UserIntent + the natural-language projection injected into
+        # SYNTHESIS_PROMPT as {response_instructions}.
+        if isinstance(results[0], Exception):
+            log.warning("Intent extraction failed; using default_intent",
+                        error=str(results[0])[:200])
+            extracted_intent = default_intent()
+            response_instructions = ""
+            normalized_query = query
         else:
-            # Run normalization + classify-plan (and intent extraction when
-            # INTENT_EXTRACTOR_V2 is on) in parallel.
-            normalize_coro = asyncio.wait_for(
-                asyncio.to_thread(_analyze_and_normalize_query, query),
-                timeout=10,
-            )
-            classify_coro = asyncio.wait_for(
-                asyncio.to_thread(
-                    _classify_and_plan, classify_query,
-                    chat_summary=summary if summary else None,
-                ),
-                timeout=30,
-            )
-            # Phase 1 of the intent layer: run the new structured-intent
-            # extractor in parallel with the legacy normalizer. Both populate
-            # state; downstream consumers still read response_instructions
-            # this phase. See docs/intent_layer_implementation_plan.md.
-            if INTENT_EXTRACTOR_V2:
-                intent_coro = asyncio.wait_for(
-                    asyncio.to_thread(
-                        _extract_user_intent, query, summary or "",
-                    ),
-                    timeout=10,
-                )
-                results = await asyncio.gather(
-                    normalize_coro, classify_coro, intent_coro,
-                    return_exceptions=True,
-                )
-            else:
-                results = await asyncio.gather(
-                    normalize_coro, classify_coro, return_exceptions=True,
-                )
+            normalized_query, extracted_intent = results[0]
+            if normalized_query and normalized_query != query and not skip_normalize:
+                log.info("Query normalized",
+                         original=query[:80], normalized=normalized_query[:80])
+                query = normalized_query
+            response_instructions = _legacy_response_instructions(extracted_intent)
 
-            # Process normalization result
-            if isinstance(results[0], Exception):
-                log.warning("Query normalization failed/timed out, using original",
-                            error=str(results[0]))
-                response_instructions = ""
-            else:
-                normalized_query, response_instructions = results[0]
-                if normalized_query and normalized_query != query:
-                    log.info("Query normalized",
-                             original=query[:80], normalized=normalized_query[:80])
-                    query = normalized_query
-
-            # Process classify+plan result
-            if isinstance(results[1], Exception):
-                task = _classify_task_regex_fallback(classify_query)
-                tasks_planned = [task]
-                log.warning("Classify+plan failed/timed out, using regex fallback",
-                            error=str(results[1]), task=task)
-            else:
-                task, tasks_planned = results[1]
-                # NOTE: Drafting false-positive strip lives downstream — after
-                # _detect_multi_intent runs — so both the LLM-added and
-                # safety-net-added Drafting cases are caught in one spot.
-
-            # Process intent-extractor result (Phase 1 telemetry-only).
-            # Even if the extractor failed we still emit a telemetry line so
-            # we can track failure rate. The user_intent field is set on the
-            # returned state only when extraction succeeded.
-            # (`extracted_intent` initialized at the top of this function.)
-            if INTENT_EXTRACTOR_V2:
-                if len(results) >= 3 and not isinstance(results[2], Exception):
-                    _normalized_v2, extracted_intent = results[2]
-                    # Phase 2 will switch the downstream picker to read
-                    # state["user_intent"]; for now we ALSO replace the legacy
-                    # `response_instructions` string only if the legacy path
-                    # failed — defense in depth.
-                    if not response_instructions and extracted_intent.confidence >= 0.7:
-                        # Synthesize a legacy-shape string from the structured
-                        # intent so SYNTHESIS_PROMPT placeholders stay populated.
-                        response_instructions = _legacy_response_instructions(
-                            extracted_intent,
-                        )
-                elif len(results) >= 3:
-                    log.warning("Intent extraction failed/timed out",
-                                error=str(results[2])[:200])
-
-                # Telemetry: compare legacy regex vs new structured intent.
-                # Log even when extractor failed so we can spot regressions.
-                _emit_intent_telemetry(
-                    extracted_intent, response_instructions, query,
-                )
+        # Process classify+plan result
+        if isinstance(results[1], Exception):
+            task = _classify_task_regex_fallback(classify_query)
+            tasks_planned = [task]
+            log.warning("Classify+plan failed/timed out, using regex fallback",
+                        error=str(results[1])[:200], task=task)
+        else:
+            task, tasks_planned = results[1]
+            # NOTE: Drafting false-positive strip lives downstream — after
+            # _detect_multi_intent runs — so both the LLM-added and
+            # safety-net-added Drafting cases are caught in one spot.
 
         # Handle non-legal with file context
         if task == "Non_legal" and fc and fc.has_content:
@@ -1753,7 +1525,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # regex when extractor confidence is high. Also force synthesis when the
     # user explicitly named a non-English target language — pass-through skips
     # the localize_prompt step that the synthesis path applies.
-    _wants_table_single = _resolve_wants_table(state, response_instructions, query)
+    _wants_table_single = _resolve_wants_table(state)
     _explicit_lang_override = _resolve_explicit_non_english(state)
     if (
         len(valid_results) == 1
@@ -1895,7 +1667,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     primary_task_state = state.get("task")
     primary_agent_name = _PRIMARY_AGENT_FOR_TASK.get(primary_task_state or "")
     # Phase 2: intent-first resolution; regex fallback at low confidence.
-    _wants_table_primary = _resolve_wants_table(state, response_instructions, query)
+    _wants_table_primary = _resolve_wants_table(state)
 
     if (
         primary_agent_name
@@ -1961,7 +1733,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # else the general synthesis prompt. SYNTHESIS_TABLE_PROMPT constrains output
     # to a single markdown table with no preamble/postamble.
     # Phase 2: intent-first; regex falls back at low confidence or no intent.
-    wants_table = _resolve_wants_table(state, response_instructions, query)
+    wants_table = _resolve_wants_table(state)
     synth_template = SYNTHESIS_TABLE_PROMPT if wants_table else SYNTHESIS_PROMPT
     _intent_for_log = state.get("user_intent")
     log.info("Synthesis prompt selected",
@@ -1992,7 +1764,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 thinking_budget=0,
             )
             prompt = ChatPromptTemplate.from_template(
-                localize_prompt(synth_template, user_language)
+                localize_prompt(synth_template, user_language, state.get("user_intent"))
             )
             chain = prompt | llm
 

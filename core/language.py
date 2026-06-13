@@ -134,28 +134,74 @@ def detect_language(text: str) -> str:
     return detected
 
 
-def localize_prompt(base_prompt: str, lang: str) -> str:
-    """Append a language instruction to any system prompt.
+def _format_intent_directives(intent) -> str:
+    """Render a UserIntent's typed fields into a directive block for agent prompts.
 
-    If lang == "en" the prompt is returned unchanged.
-    Otherwise appends:
-      "Respond in <Language>. All legal citations — case names, section
-       numbers, act titles, court names — must remain in English."
+    Empty string when the intent expresses no explicit preferences — that case
+    must produce a no-op append so backwards-compatible behaviour is preserved
+    for callers that don't pass an intent at all.
 
-    This single line reliably controls Gemini / GPT-4o output language
-    without altering the structure or rules of the base prompt.
+    Typed as `intent: Any` (not `UserIntent`) to avoid a config↔core import
+    cycle; we duck-type on the expected attributes.
+
+    Currently surfaces:
+      - response_depth ("brief" / "detailed") — drives length
+      - additional_instructions (free-text catchall)
+
+    Format and language live in their own layers: synthesis-template picker
+    handles wants_table, localize_prompt itself handles the language block.
+    Adding format here would duplicate the synth layer's directive without
+    benefit.
     """
-    if lang == "en" or lang not in SUPPORTED_LANGUAGES:
-        return base_prompt
-
-    lang_name = SUPPORTED_LANGUAGES[lang]
-    instruction = (
-        f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {lang_name}. "
-        "All legal citations must remain in English — this includes case names, "
-        "section numbers, act titles (e.g. IPC, BNS, CrPC), court names, "
-        "and party names. Do NOT translate these."
+    if intent is None:
+        return ""
+    parts: list[str] = []
+    depth = getattr(intent, "response_depth", "standard")
+    if depth == "brief":
+        parts.append(
+            "USER DEPTH: keep the response under 200 words. Prefer the most "
+            "load-bearing facts. Skip background and elaboration."
+        )
+    elif depth == "detailed":
+        parts.append(
+            "USER DEPTH: comprehensive coverage. Include all relevant "
+            "sub-sections, provisos, explanations, and material context."
+        )
+    extra = getattr(intent, "additional_instructions", "") or ""
+    if extra.strip():
+        # Already capped at 300 chars at extraction; safe to inject verbatim.
+        parts.append(f"USER ADDITIONAL INSTRUCTIONS: {extra.strip()}")
+    if not parts:
+        return ""
+    return "\n\n## USER DIRECTIVES (must be honoured)\n" + "\n".join(
+        f"- {p}" for p in parts
     )
-    return base_prompt + instruction
+
+
+def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
+    """Append a language instruction (and optionally a user-intent directive
+    block) to any agent system prompt.
+
+    - If lang == "en" or unsupported, no language line is appended.
+    - If intent is provided AND has non-default depth or additional_instructions,
+      a "USER DIRECTIVES" block is appended.
+
+    Returning the unchanged prompt when both signals are empty preserves the
+    pre-Phase-3 behaviour for callers that don't pass an intent.
+    """
+    out = base_prompt
+
+    if lang != "en" and lang in SUPPORTED_LANGUAGES:
+        lang_name = SUPPORTED_LANGUAGES[lang]
+        out += (
+            f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {lang_name}. "
+            "All legal citations must remain in English — this includes case names, "
+            "section numbers, act titles (e.g. IPC, BNS, CrPC), court names, "
+            "and party names. Do NOT translate these."
+        )
+
+    out += _format_intent_directives(intent)
+    return out
 
 
 @lru_cache(maxsize=None)

@@ -106,7 +106,11 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
         agent = create_react_agent(
             llm,
             tools,
-            prompt=SystemMessage(content=localize_prompt(GST_JUDGMENT_SYSTEM_PROMPT, user_language)),
+            prompt=SystemMessage(content=localize_prompt(
+                GST_JUDGMENT_SYSTEM_PROMPT,
+                user_language,
+                state.get("user_intent"),
+            )),
         )
 
         progress("gst_judgment", "Running multi-step research (ReAct agent)...", step="react")

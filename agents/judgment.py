@@ -306,7 +306,11 @@ async def judgment_node(state: LegalAgentState) -> dict:
     original_query = state.get("original_query", query)
     user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
-    _system_prompt = localize_prompt(JUDGMENT_SYSTEM_PROMPT, state.get("user_language", "en"))
+    _system_prompt = localize_prompt(
+        JUDGMENT_SYSTEM_PROMPT,
+        state.get("user_language", "en"),
+        state.get("user_intent"),
+    )
     log.info("Agent started", query=query[:100],
              using_agent_query="Judgment" in agent_queries)
 

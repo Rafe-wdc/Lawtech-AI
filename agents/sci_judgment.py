@@ -64,7 +64,11 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         agent = create_react_agent(
             llm,
             tools,
-            prompt=SystemMessage(content=localize_prompt(SCI_JUDGMENT_SYSTEM_PROMPT, user_language)),
+            prompt=SystemMessage(content=localize_prompt(
+                SCI_JUDGMENT_SYSTEM_PROMPT,
+                user_language,
+                state.get("user_intent"),
+            )),
         )
 
         # Invoke the ReAct sub-agent

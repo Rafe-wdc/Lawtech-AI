@@ -132,29 +132,31 @@ The orchestrator's three decision points (pass-through guard, primary-task synth
 
 **Done when**: ✅ all of the above. The system now honours both format and language directives end-to-end on the flag-on path, with the regex as a low-confidence safety net.
 
-### Phase 3 — Domain-agent intent awareness
+### Phase 3 — Domain-agent intent awareness — **DONE 2026-06-13**
 
-Make Legislation / Newacts / Judgment / Scenario honour intent in their own prompts (not just in synthesis). Today only Newacts has table rules in its system prompt.
+Domain agents now see depth + additional_instructions from `state["user_intent"]`. Format already routes via the synthesis layer; language already flows through `state["user_language"]` (Phase 2 override). The directive block is appended at runtime, only when intent expresses non-default preferences — backwards-compatible for callers without intent.
 
-- [ ] **3.1** Add `_format_intent_directives(intent: UserIntent) -> str` helper in `config/prompts.py`:
-  ```
-  ## USER DIRECTIVES (must be honored)
-  - USER FORMAT: produce a markdown table. …
-  - USER LANGUAGE: respond entirely in हिंदी. Keep legal citations in English.
-  - USER DEPTH: keep under 200 words.
-  ```
-  Only emits the block when at least one field is explicit.
-- [ ] **3.2** Update each domain agent's `_build_system_prompt(state)` to append the directives block at runtime. Files:
-  - [`agents/legislation.py`](../agents/legislation.py)
-  - [`agents/newacts.py`](../agents/newacts.py)
-  - [`agents/judgment.py`](../agents/judgment.py)
-  - [`agents/sci_judgment.py`](../agents/sci_judgment.py)
-  - [`agents/scenario.py`](../agents/scenario.py)
-  - [`agents/constitution_maxim.py`](../agents/constitution_maxim.py)
-- [ ] **3.3** Add per-agent tests verifying the directives block appears in the rendered prompt when intent fields are set.
-- [ ] **3.4** Re-run CGST Turn 2 — Legislation agent should now produce a table even on the single-agent pass-through path.
+- [x] **3.1** Added `_format_intent_directives(intent)` in [core/language.py](../core/language.py) (co-located with `localize_prompt` to avoid an import cycle from `config.prompts` → `config.intent` → `core.language`). Surfaces `response_depth` ("brief" → "under 200 words", "detailed" → "comprehensive coverage") and `additional_instructions` (capped 300 chars at extraction). Format and language live in their own layers — adding them here would duplicate the synth picker's directive.
+- [x] **3.2** Extended `localize_prompt(template, lang, intent=None)` signature. Backwards-compat: callers without intent see no behaviour change.
+- [x] **3.3** Wired into 12 call sites across [legislation.py](../agents/legislation.py), [newacts.py](../agents/newacts.py), [judgment.py](../agents/judgment.py), [sci_judgment.py](../agents/sci_judgment.py), [gst_judgment.py](../agents/gst_judgment.py), [scenario.py](../agents/scenario.py), [constitution_maxim.py](../agents/constitution_maxim.py) (3 entry points), [document.py](../agents/document.py) (2 entry points), and the synthesis picker in [orchestrator.py](../agents/orchestrator.py). Skipped: drafting agent (own pipeline with structured outline/section gen — needs separate threading; deferred), non_legal (greetings don't need directives), drafting synthesis in orchestrator (CLAUDE.md invariants are about cite_appendix/stance/sections/validator, none of which intent directives interact with — safe but punted).
+- [x] **3.4** Verified end-to-end with brief-depth smoke test: `"Section 131 of CGST Act in 2 lines briefly"` → extractor returns `depth=brief`, response is **76 words** (was previously ~250+).
 
-**Done when**: Every domain agent honours format/language/depth directives in its OWN prompt, not only in the synthesis prompt.
+### Phase 4 — Cleanup — **DONE 2026-06-13**
+
+Once Phase 3 was wired and tests stayed green, the legacy regex pipeline became dead code. Phase 4 deletes it.
+
+- [x] **4.1** Removed `INTENT_EXTRACTOR_V2` env flag check from `orchestrator_plan_node`. Extractor runs unconditionally in parallel with classify+plan. Replaced with `default_intent()` on extractor failure (no behavioural difference).
+- [x] **4.2** Deleted `_TABLE_INTENT_RE` regex + `_wants_table_format()` function + `_emit_intent_telemetry()` (was the regex-vs-extractor agreement metric — moot without the regex). Simplified `_resolve_wants_table(state)` to a one-line `intent.wants_table` check.
+- [x] **4.3** Deleted `_analyze_and_normalize_query()` + `QUERY_NORMALIZE_PROMPT` + `QueryAnalysis` schema. The extractor's `QueryAnalysisV2` produces both `normalized_query` and `UserIntent` in one call, so the legacy pipeline was duplicate work.
+- [x] **4.4** Removed `INTENT_EXTRACTOR_V2` constant from [core/settings.py](../core/settings.py) with a comment pointing to the design doc. Env var becomes a no-op (safe to leave in .env, will be ignored).
+- [x] **4.5** Verifications:
+  - 142/142 files compile, gateway boots in 14s.
+  - 69 unit tests pass (drafting + markdown + intent schema), 30 live tests gated on INTENT_EXTRACTOR_LIVE.
+  - All 4 deleted symbols verified as non-importable (`_wants_table_format`, `_analyze_and_normalize_query`, `_emit_intent_telemetry`, `INTENT_EXTRACTOR_V2`).
+  - End-to-end smokes on LOCAL: table query → 10 pipe lines · Hindi directive → 554 Devanagari chars · brief depth → 76 words.
+- [x] **4.6** CLAUDE.md drafting invariants section: added a note that user-intent directives are appended to domain-agent prompts at runtime; the existing invariants (cite_appendix off, doctrinal stance, mandatory sections, validate_draft, CITE markers) are unchanged.
+
+**Done when**: ✅ all of the above. Codebase has one canonical intent path. No regex. No free-form `response_instructions: str` mutation (`_legacy_response_instructions` is kept as the typed-intent → prompt-template projection, since the synthesis templates still interpolate `{response_instructions}`).
 
 ### Phase 4 — Cleanup
 

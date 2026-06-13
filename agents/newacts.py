@@ -327,7 +327,11 @@ async def newacts_node(state: LegalAgentState) -> dict:
     # Prefer agent-specific query > normalized English query > original (for multilingual support)
     query = agent_queries.get("Newacts", state.get("query", state.get("original_query", "")))
     user_context = state.get("user_context", "")
-    _system_prompt = localize_prompt(NEWACTS_SYSTEM_PROMPT, state.get("user_language", "en"))
+    _system_prompt = localize_prompt(
+        NEWACTS_SYSTEM_PROMPT,
+        state.get("user_language", "en"),
+        state.get("user_intent"),
+    )
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
              using_agent_query="Newacts" in agent_queries)

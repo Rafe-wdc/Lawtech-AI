@@ -290,7 +290,11 @@ async def legislation_node(state: LegalAgentState) -> dict:
     query = agent_queries.get("Legislation", state.get("query", state.get("original_query", "")))
     user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
-    _system_prompt = localize_prompt(LEGISLATION_SYSTEM_PROMPT, state.get("user_language", "en"))
+    _system_prompt = localize_prompt(
+        LEGISLATION_SYSTEM_PROMPT,
+        state.get("user_language", "en"),
+        state.get("user_intent"),
+    )
     log.info("Agent started", query=query[:100],
              using_agent_query="Legislation" in agent_queries)
 

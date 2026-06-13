@@ -286,6 +286,7 @@ async def document_node(state: LegalAgentState) -> dict:
                         "5. NEVER generate fake case names, case numbers, or court details "
                         "that are not visible in the uploaded file.",
                         user_language,
+                        state.get("user_intent"),
                     )
                     messages = [("system", _doc_system)]
                     history_text = _format_chat_history(chat_history)
@@ -345,6 +346,7 @@ async def document_node(state: LegalAgentState) -> dict:
                             "parties, dates, and legal provisions. If it is not a legal document, "
                             "describe the actual content accurately.",
                             user_language,
+                            state.get("user_intent"),
                         )),
                     ]
                     if history_text:

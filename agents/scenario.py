@@ -78,8 +78,12 @@ async def scenario_node(state: LegalAgentState) -> dict:
     try:
         async with _AGENT_SEMAPHORE:
             progress("scenario", "Analyzing legal scenario...", step="analyze")
-            # Build prompt dynamically so we can inject language instruction
-            system_prompt = localize_prompt(SCENARIO_SYSTEM_PROMPT, user_language)
+            # Build prompt dynamically so we can inject language + intent directives
+            system_prompt = localize_prompt(
+                SCENARIO_SYSTEM_PROMPT,
+                user_language,
+                state.get("user_intent"),
+            )
             template = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
                 MessagesPlaceholder("chat_history", optional=True),

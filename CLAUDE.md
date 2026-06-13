@@ -122,6 +122,33 @@ The orchestrator classifies queries into tasks:
 - **Non_legal** - Non-legal query detection
 - **Other** - Fallback
 
+## User intent layer (canonical, always on)
+
+The orchestrator extracts a typed `config.intent.UserIntent` per request via
+a single Gemini Flash Lite call (`_extract_user_intent` in
+`agents/orchestrator.py`). The intent flows through `state["user_intent"]`
+and drives every downstream decision:
+
+- **Synthesis-template picker** reads `intent.wants_table` (no regex).
+- **Pass-through guard** bypasses when `intent.format_explicit` or
+  `intent.language_explicit and intent.language != "en"`.
+- **`state["user_language"]`** is overridden from `intent.language` when the
+  user explicitly named a target language (e.g. "Section 131 in Hindi"
+  typed in Latin script — langdetect says English, but the extractor catches
+  the directive). All domain agents pick up the right language.
+- **Domain-agent system prompts** receive an appended `## USER DIRECTIVES`
+  block from `core.language._format_intent_directives` covering
+  `response_depth` ("brief" / "detailed") and `additional_instructions`.
+  Format and language live in their own layers (synth picker + localize_prompt).
+
+The legacy `_TABLE_INTENT_RE` regex, `_wants_table_format`,
+`_analyze_and_normalize_query`, `QUERY_NORMALIZE_PROMPT`, and the
+`INTENT_EXTRACTOR_V2` env flag were removed in Phase 4 (2026-06-13). The
+free-form `response_instructions: str` field is still used as a synthesis
+prompt-template variable; `_legacy_response_instructions(intent)` projects
+the typed intent into that string. See
+`docs/intent_layer_implementation_plan.md`.
+
 ## Drafting invariants (do not regress)
 
 The Drafting pipeline has guard rails that protect file-readiness and token

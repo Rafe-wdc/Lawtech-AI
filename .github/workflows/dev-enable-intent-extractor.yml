@@ -1,0 +1,109 @@
+name: Dev — enable intent extractor (one-off)
+
+# Single-purpose rollout helper for the Phase 0-2 intent layer
+# (docs/intent_layer_implementation_plan.md). Triggers on demand via
+# the "Run workflow" button, SSHs to the Vultr dev box, appends
+# INTENT_EXTRACTOR_V2=true to .env (idempotent — skips if already set),
+# restarts gunicorn, and waits for stable health. Delete this file
+# after the rollout is validated. Reuses the existing
+# SSH_PRIVATE_KEY / SERVER_HOST / SERVER_USER secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      value:
+        description: 'INTENT_EXTRACTOR_V2 value (true or false)'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  flip:
+    name: Flip flag on dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Set flag + restart gunicorn + verify health
+        env:
+          FLAG_VALUE: ${{ inputs.value }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
+            FLAG_VALUE="$FLAG_VALUE" bash <<'ENDSSH'
+            set -e
+
+            APP_DIR=/root/v2_multi_agent
+            cd $APP_DIR
+            ENV_FILE="$APP_DIR/.env"
+
+            echo "=== Current .env state ==="
+            grep -E "^INTENT_EXTRACTOR_V2=" "$ENV_FILE" || echo "(flag not yet set)"
+
+            # Idempotent: replace existing line if present, append otherwise.
+            if grep -qE "^INTENT_EXTRACTOR_V2=" "$ENV_FILE"; then
+              sed -i.bak -E "s/^INTENT_EXTRACTOR_V2=.*/INTENT_EXTRACTOR_V2=${FLAG_VALUE}/" "$ENV_FILE"
+              echo "Updated existing flag line"
+            else
+              echo "INTENT_EXTRACTOR_V2=${FLAG_VALUE}" >> "$ENV_FILE"
+              echo "Appended new flag line"
+            fi
+
+            echo "=== New .env state ==="
+            grep -E "^INTENT_EXTRACTOR_V2=" "$ENV_FILE"
+
+            # Restart gunicorn — same pattern as deploy.yml. preload_app=True
+            # means workers need fresh master process to pick up the new env.
+            MASTER_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "0")
+            if [ "$MASTER_PID" -gt "0" ] 2>/dev/null; then
+              echo "Stopping gunicorn master (PID $MASTER_PID)..."
+              kill -TERM "$MASTER_PID"
+              for j in $(seq 1 10); do
+                kill -0 "$MASTER_PID" 2>/dev/null || break
+                sleep 1
+              done
+              echo "Gunicorn stopped"
+            fi
+
+            nohup $APP_DIR/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app \
+              > /dev/null 2>&1 &
+            NEW_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "?")
+            echo "Gunicorn started fresh (master PID: $NEW_PID)"
+
+            # Wait for stable health (3 consecutive 200/503).
+            CONSECUTIVE_OK=0
+            NEEDED=3
+            for i in $(seq 1 24); do
+              sleep 5
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/pyapi/health || echo "000")
+              if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
+                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+                if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                  echo "Stable health: $NEEDED consecutive checks at HTTP $STATUS"
+                  sleep 5
+                  exit 0
+                fi
+                echo "Healthy (HTTP $STATUS), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              else
+                CONSECUTIVE_OK=0
+                echo "Waiting... attempt $i/24 (HTTP $STATUS)"
+              fi
+            done
+            echo "ERROR: did not see $NEEDED consecutive healthy checks within 120s"
+            tail -50 /root/v2_multi_agent/logs/error.log
+            exit 1
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

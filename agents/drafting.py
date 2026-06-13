@@ -42,6 +42,7 @@ from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.progress import progress
 from config.prompts import DRAFTING_SYSTEM_PROMPT, DRAFT_OUTLINE_PROMPT
+from core.self_refine import self_refine
 
 log = get_logger("Drafting")
 
@@ -1686,6 +1687,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
     query = agent_queries.get("Drafting") or state.get("query") or state.get("original_query", "")
     user_context = state.get("user_context", "")
     user_language = state.get("user_language", "en")
+    intent_obj = state.get("user_intent")
     integration_ctx = IntegrationContextData.from_state(state)
     fc = FileContextData.from_state(state)
 
@@ -1900,6 +1902,33 @@ async def drafting_node(state: LegalAgentState) -> dict:
             except Exception as ref_err:
                 log.warning("Statute reference injection skipped",
                             error=str(ref_err))
+
+        # Step 8: Dynamic self-refine — critic audits the assembled draft
+        # against the typed UserIntent (strict_language, response_depth,
+        # additional_instructions, etc.) and the refiner rewrites on
+        # violations. Skips trivial intents internally; cheap when there's
+        # nothing to fix. This is what catches Hindi/Marathi WS drafts
+        # leaking Latin numerals or English clauses without bespoke
+        # numeral substitution code.
+        if full_draft and not failed_indices and intent_obj is not None:
+            try:
+                progress("drafting", "Auditing draft against your directives...", step="self_refine")
+                refined_draft, refine_history = await self_refine(
+                    full_draft,
+                    user_query=query,
+                    intent=intent_obj,
+                )
+                if refined_draft != full_draft:
+                    log.info(
+                        "Self-refine altered draft",
+                        iterations=len(refine_history),
+                        original_len=len(full_draft),
+                        refined_len=len(refined_draft),
+                    )
+                    full_draft = refined_draft
+            except Exception as refine_err:
+                log.warning("Self-refine skipped due to error",
+                            error=str(refine_err))
 
         template_display = os.path.splitext(os.path.basename(selected_source))[0]
         result = AgentResult(

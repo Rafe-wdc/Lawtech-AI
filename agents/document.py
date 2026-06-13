@@ -40,22 +40,26 @@ from config.prompts import (
     OPENING_STATEMENT_PROMPT,
     CLOSING_ARGUMENT_PROMPT,
 )
+from core.self_refine import self_refine
 log = get_logger("Document")
 
 
 # ---------------------------------------------------------------------------
-# Specialized-artifact dispatch (Phase A — cross_examination only).
+# Specialized-artifact dispatch.
 #
-# When `intent.legal_artifact == CROSS_EXAMINATION`, the document agent:
-#   1. Picks CROSS_EXAMINATION_PROMPT instead of the generic file-Q&A prompt.
+# When `intent.legal_artifact != NONE`, the document agent:
+#   1. Picks the specialized prompt (e.g. CROSS_EXAMINATION_PROMPT) instead
+#      of the generic file-Q&A prompt.
 #   2. Configures Gemini 2.5 Pro with a thinking budget (planning helps for
 #      strategic legal output) and a larger output cap.
-#   3. After generation, applies a quality gate (min 600 words AND min 20
-#      numbered questions). If the gate fails, retries ONCE with a stronger
-#      preamble injected before the original query.
+#   3. After generation, runs the dynamic self-refine loop
+#      (core.self_refine.self_refine) which critiques the response against
+#      the typed UserIntent and refines on violations — no hardcoded
+#      thresholds or retry preambles.
 #
-# Adding a new artifact = add a branch in _pick_specialized_prompt + an entry
-# in _QUALITY_THRESHOLDS + (optional) a custom retry preamble.
+# Adding a new artifact = add an enum + an entry in _SPECIALIZED_PROMPTS.
+# No quality-gate edits needed; the critic derives the rules from the
+# intent fields themselves.
 # ---------------------------------------------------------------------------
 
 # Per-artifact specialized prompt — the picker reads this map. Add a new
@@ -71,95 +75,16 @@ _SPECIALIZED_PROMPTS: dict = {
     LegalArtifact.CLOSING_ARGUMENT:    CLOSING_ARGUMENT_PROMPT,
 }
 
-# Per-artifact quality gate. Calibrated to each artifact's expected shape:
-#   - min_words: floor on overall response length
-#   - min_numbered_questions: floor on numbered list items (e.g. "1. ..."),
-#     mainly relevant to artifacts that produce numbered question lists.
-# Artifacts not in this map skip the quality gate entirely.
-_QUALITY_THRESHOLDS: dict = {
-    LegalArtifact.CROSS_EXAMINATION:   {"min_words": 600, "min_numbered_questions": 20},
-    LegalArtifact.DEPOSITION_SUMMARY:  {"min_words": 300, "min_numbered_questions": 0},
-    LegalArtifact.CONTRACT_ANALYSIS:   {"min_words": 500, "min_numbered_questions": 0},
-    LegalArtifact.LEGAL_NOTICE_DRAFT:  {"min_words": 400, "min_numbered_questions": 6},
-    LegalArtifact.COMPLAINT_DRAFT:     {"min_words": 500, "min_numbered_questions": 12},
-    LegalArtifact.WITNESS_PREP:        {"min_words": 500, "min_numbered_questions": 15},
-    LegalArtifact.OPENING_STATEMENT:   {"min_words": 350, "min_numbered_questions": 0},
-    LegalArtifact.CLOSING_ARGUMENT:    {"min_words": 500, "min_numbered_questions": 0},
-}
-
-# Per-artifact retry preamble. Used when the first attempt falls below the
-# quality gate. The preamble is concatenated in front of the original user
-# query and the LLM is re-invoked once.
-_RETRY_PREAMBLE: dict = {
-    LegalArtifact.CROSS_EXAMINATION: (
-        "The previous attempt fell short of the required output. You MUST "
-        "produce a comprehensive cross-examination kit: a Legal Analysis "
-        "section, a Strategic Objectives bullet list, and AT LEAST 30 "
-        "numbered cross-examination questions organised into 5-7 strategic "
-        "PARTS. Use formal Indian courtroom language including 'I put it to "
-        "you that...', 'Is it not a fact that...', 'Do you deny that...'. "
-        "Extract only facts visible in the attached document.\n\nOriginal "
-        "question:\n"
-    ),
-    LegalArtifact.DEPOSITION_SUMMARY: (
-        "The previous attempt was too brief. Produce a complete structured "
-        "summary with ALL six sections: Case Identification, Witness "
-        "Identification, Substantive Testimony (numbered chronological "
-        "bullets), Key Claims, Contradictions/Omissions/Improvements, and "
-        "Exhibits Referenced. Extract every relevant detail visible in the "
-        "attached deposition.\n\nOriginal question:\n"
-    ),
-    LegalArtifact.CONTRACT_ANALYSIS: (
-        "The previous attempt was too thin. Produce a comprehensive analysis "
-        "covering: Identification, Parties, Key Commercial Terms, Critical "
-        "Clauses (analyse each clause individually with rights/risks/red "
-        "flags), Risk Flags (prioritised HIGH/MEDIUM/LOW), Compliance & "
-        "Statutory Hooks, and Recommended Amendments. Identify at least 5 "
-        "specific clauses or risks.\n\nOriginal question:\n"
-    ),
-    LegalArtifact.LEGAL_NOTICE_DRAFT: (
-        "The previous attempt was incomplete. Produce a complete Indian "
-        "legal notice with: letterhead block, date, addressee, subject, "
-        "salutation, 6-12 numbered factual paragraphs, a 'TAKE NOTICE THAT' "
-        "demand block citing the correct statute, a compliance period, "
-        "consequences of default, and the advocate's signature block. Use "
-        "facts from the attached document.\n\nOriginal question:\n"
-    ),
-    LegalArtifact.COMPLAINT_DRAFT: (
-        "The previous attempt was too brief. Produce a complete complaint / "
-        "petition with: correct court header, case-title block (parties + "
-        "addresses), 12-25 numbered factual paragraphs, an explicit Cause of "
-        "Action block, a numbered Prayer for relief, and a Verification "
-        "block. Cite the correct statute and section.\n\nOriginal "
-        "question:\n"
-    ),
-    LegalArtifact.WITNESS_PREP: (
-        "The previous attempt was too brief. Produce a full witness "
-        "preparation kit with: Witness Profile, Themes for Direct, AT LEAST "
-        "15 open-ended Direct Examination Questions grouped by theme, "
-        "Documents to Authenticate, Anticipated Cross-Examination "
-        "Vulnerabilities (3-7 attack lines), Prepared Responses & "
-        "Supporting Documents, and Practical Coaching Points. Direct "
-        "questions must be OPEN-ENDED (not leading).\n\nOriginal "
-        "question:\n"
-    ),
-    LegalArtifact.OPENING_STATEMENT: (
-        "The previous attempt was too brief. Produce a complete opening "
-        "statement with: a one-line Theme, a Statement of Facts (4-8 "
-        "paragraphs), a Roadmap of witnesses, Documentary Evidence list, "
-        "Legal Framework / charges, and the findings the Court will be "
-        "asked to record. Use facts from the attached case papers.\n\n"
-        "Original question:\n"
-    ),
-    LegalArtifact.CLOSING_ARGUMENT: (
-        "The previous attempt was too brief. Produce a complete closing "
-        "argument with: Theme Reprise, Issue-by-Issue Evidence Summary "
-        "(with `**Issue: <name>**` subsections citing PW/DW numbers and "
-        "exhibits), numbered Answer to opposite-side arguments, Statutory "
-        "& Precedential Authority, and a clean Prayer / Relief Sought "
-        "block.\n\nOriginal question:\n"
-    ),
-}
+# NOTE: Removed in the self-refine cutover. The mechanical quality gates
+# (`_QUALITY_THRESHOLDS`) and hardcoded per-artifact retry preambles
+# (`_RETRY_PREAMBLE`) used to live here. They have been replaced with a
+# dynamic LLM-driven self-refine loop — see `core.self_refine.self_refine`.
+#
+# The new loop reads the typed `UserIntent` (the same object that picked
+# the specialized prompt below) and derives the quality checks from the
+# intent fields themselves. Adding a new artifact / language / depth
+# directive no longer requires touching a thresholds dict or writing a
+# bespoke retry preamble — the critic figures it out.
 
 
 def _pick_specialized_prompt(intent, generic_prompt: str) -> str:
@@ -192,41 +117,6 @@ def _llm_config_for_artifact(intent) -> dict:
         }
     return {"temperature": 0.3}
 
-
-def _passes_quality_gate(intent, content: str) -> tuple[bool, str]:
-    """Return (passed, reason). When passed=False the caller retries once.
-
-    Generic intents (artifact=NONE) always pass — quality gating is only
-    applied to specialized artifacts with explicit thresholds.
-    """
-    if intent is None:
-        return True, ""
-    artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
-    thresholds = _QUALITY_THRESHOLDS.get(artifact)
-    if not thresholds:
-        return True, ""
-    words = len(content.split())
-    numbered = len(re.findall(r"(?:^|\n)\s*\d+\.\s+", content))
-    if words < thresholds["min_words"]:
-        return False, f"word_count_low ({words} < {thresholds['min_words']})"
-    if numbered < thresholds["min_numbered_questions"]:
-        return False, (
-            f"numbered_questions_low ({numbered} < "
-            f"{thresholds['min_numbered_questions']})"
-        )
-    return True, ""
-
-
-def _retry_question(intent, original_query: str) -> str:
-    """Build a stronger query for a quality-gate retry."""
-    if intent is None:
-        return original_query
-    preamble = _RETRY_PREAMBLE.get(
-        getattr(intent, "legal_artifact", LegalArtifact.NONE), ""
-    )
-    if not preamble:
-        return original_query
-    return preamble + original_query
 
 _SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
 
@@ -507,28 +397,24 @@ async def document_node(state: LegalAgentState) -> dict:
 
                     response = llm.invoke(_build_messages(query))
 
-                    # Quality gate: when intent requested a specialized
-                    # legal artifact, verify the output meets minimum word /
-                    # numbered-question counts. Retry ONCE with a stronger
-                    # preamble if the first attempt fell short.
-                    passed, reason = _passes_quality_gate(intent_obj, response.content)
-                    if not passed:
-                        log.warning(
-                            "Specialized artifact output below quality gate; retrying once",
-                            artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
-                            reason=reason,
-                            first_attempt_len=len(response.content),
-                        )
-                        retry_query = _retry_question(intent_obj, query)
-                        response = llm.invoke(_build_messages(retry_query))
-                        passed_after, reason_after = _passes_quality_gate(intent_obj, response.content)
-                        log.info(
-                            "Quality-gate retry result",
-                            artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
-                            passed_after_retry=passed_after,
-                            reason=reason_after or "ok",
-                            final_len=len(response.content),
-                        )
+                # Self-refine: dynamic LLM-driven critic + refiner loop.
+                # Reads the typed UserIntent, surfaces violations, rewrites.
+                # Skips trivial intents internally (no directives / low conf).
+                # Replaces _passes_quality_gate + hardcoded retry preambles.
+                refined_content, refine_history = await self_refine(
+                    response.content,
+                    user_query=query,
+                    intent=intent_obj,
+                )
+                if refined_content != response.content:
+                    log.info(
+                        "Self-refine altered response",
+                        artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
+                        iterations=len(refine_history),
+                        original_len=len(response.content),
+                        refined_len=len(refined_content),
+                    )
+                    response.content = refined_content
 
                 from core.token_tracker import record as _record_tokens
                 tokens = _record_tokens("Document", "qa_gemini_files", response)
@@ -608,16 +494,21 @@ async def document_node(state: LegalAgentState) -> dict:
 
                     response = _run(query)
 
-                    # Quality gate (same pattern as the Gemini-Files path).
-                    passed, reason = _passes_quality_gate(intent_obj, response.content)
-                    if not passed:
-                        log.warning(
-                            "Inline document QA fell below quality gate; retrying once",
-                            artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
-                            reason=reason,
-                            first_attempt_len=len(response.content),
-                        )
-                        response = _run(_retry_question(intent_obj, query))
+                # Self-refine: same pattern as the Gemini-Files path above.
+                refined_content, refine_history = await self_refine(
+                    response.content,
+                    user_query=query,
+                    intent=intent_obj,
+                )
+                if refined_content != response.content:
+                    log.info(
+                        "Self-refine altered response",
+                        artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
+                        iterations=len(refine_history),
+                        original_len=len(response.content),
+                        refined_len=len(refined_content),
+                    )
+                    response.content = refined_content
 
                 from core.token_tracker import record as _record_tokens
                 tokens = _record_tokens("Document", "qa_inline_text", response)

@@ -197,6 +197,105 @@ Rules:
 """ + _TABLE_FORMATTING_RULES
 
 
+# =============================================================================
+# Intent extractor (Phase 1 of the intent layer rollout — see
+# docs/intent_layer_implementation_plan.md). One LLM call (Gemini Flash Lite)
+# parses the user's query + chat summary into the typed `config.intent.UserIntent`
+# object. Replaces the legacy regex-based `_TABLE_INTENT_RE` + free-form
+# `response_instructions: str` pattern.
+#
+# Wrapped with INJECTION_GUARD_PREAMBLE because the user-supplied `{query}` and
+# `{chat_summary}` flow directly into this LLM call. The orchestrator MUST call
+# wrap_untrusted() on both fields before formatting this template.
+# =============================================================================
+
+USER_INTENT_EXTRACTION_PROMPT = INJECTION_GUARD_PREAMBLE + """You are a query intent extractor for an Indian legal AI.
+
+Given the user's query and the recent conversation summary, produce:
+
+1. A **normalized English version** of the query (translate from any Indian
+   language, expand abbreviations, preserve all legal details verbatim:
+   section numbers, act names, party names, case numbers, dates, courts).
+
+2. A **structured intent object** with these typed fields:
+
+   response_format — what SHAPE does the user want the answer in?
+       "prose"            paragraphs + optional ## headings (DEFAULT)
+       "bullet_list"      explicit "- " list, one item per line
+       "numbered_list"    explicit "1. " list
+       "table"            ONE markdown table. Triggers: "give me a table",
+                          "show as table", "tabulate", "table of X",
+                          "table containing X", "table for X", "in table
+                          format", any Indian-language equivalent (e.g.
+                          "तक्ता", "टेबल", "table banaao", "tabulu chey").
+       "comparison_table" multi-column side-by-side comparison. Triggers:
+                          "compare X and Y in a table", "side by side",
+                          "differences in tabular form", "X vs Y as table".
+       "outline"          nested ## / ### structure without body prose
+       "draft"            user wants a full legal document drafted
+       "json"             machine-readable / API-style output
+
+   format_explicit — TRUE iff the user named the format explicitly. FALSE
+       iff you defaulted to "prose" because no directive was given.
+
+   language — ISO 639-1 code of the language the user wants the ANSWER in.
+       Use this priority order:
+         (1) If the user EXPLICITLY named a target language ("in Hindi",
+             "हिंदी में", "Hindi mein bata", "मराठीत द्या", "in Marathi",
+             "answer in Tamil", "तमिल में दो", "respond in English"), use
+             that language's ISO code.
+         (2) Otherwise, INFER the response language from the script the
+             user typed in: a query in Devanagari Hindi script → "hi"; in
+             Marathi script → "mr"; in Tamil script → "ta"; etc. Indian
+             legal users typing in their native script overwhelmingly want
+             the answer back in that language.
+         (3) Otherwise (English script, no language directive) → "en".
+       Supported codes: en, hi, bn, te, mr, ta, kn, ml, gu, pa, ur, or, as, sa.
+
+       Romanized / transliterated cases ("Hindi mein samjhao",
+       "Marathi madhe sanga", "Tamil-il sollu") count as explicit naming —
+       use the named language, not English.
+
+   language_explicit — TRUE iff the user explicitly NAMED a target language
+       (case (1) above, including Romanized "in Hindi" / "Hindi mein").
+       FALSE if you inferred the language from the query script (case (2))
+       or defaulted to English (case (3)). Downstream code uses this flag
+       to decide whether a server-level language override may apply.
+
+   response_depth — overall length preference:
+       "brief"     user said "in 2-3 lines / briefly / TL;DR / short"
+       "detailed"  user said "in detail / thoroughly / comprehensive / full"
+       "standard"  default
+
+   include_citations — default TRUE. Set FALSE only if user said "no citations".
+   include_examples  — TRUE iff user asked for examples / illustrations.
+   include_case_law  — TRUE iff user asked for case laws / precedents.
+   arguments_for_party — for drafting: "plaintiff" / "defendant" / "both" / "none".
+
+   additional_instructions — anything format/style-related the user said that
+       doesn't fit the typed fields above. Keep under 300 characters. Examples:
+       "use formal legal tone", "include the section heading verbatim",
+       "put my client's name in the body". Leave empty if nothing extra.
+
+   confidence — 0.0 to 1.0. How sure are you about response_format and language?
+       Use < 0.7 when the user's directive is ambiguous (e.g. "show me 131 and
+       132" with no format hint and no chat history clarification). The system
+       will use legacy heuristics as a backup when confidence is low.
+
+3. table_columns — if response_format is "table" or "comparison_table", and the
+   user hinted at columns, list them. Examples:
+       "compare 131 and 132 by punishment, scope, bailable status"
+           → ["Aspect", "Section 131", "Section 132"]
+   Leave null otherwise.
+
+Conversation summary (untrusted, may be empty):
+{chat_summary}
+
+User query (untrusted):
+{query}
+"""
+
+
 # --- Orchestrator: Synthesis (table-mode) ---
 # Used when response_instructions indicate the user wants a comparison table.
 # Constrains the LLM to produce ONLY a markdown table — no preamble, no postamble,

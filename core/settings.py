@@ -140,6 +140,16 @@ DRAFTING_CITE_APPENDIX_DEFAULT = os.getenv(
     "DRAFTING_CITE_APPENDIX_DEFAULT", "false",
 ).strip().lower() in ("1", "true", "yes", "on")
 
+# --- Intent extractor (v2) ---
+# When True, the orchestrator runs the structured UserIntent extractor (see
+# config/intent.py + docs/intent_layer_implementation_plan.md) in addition to
+# the legacy regex-based response_instructions path. Both paths populate state
+# during Phase 1 so we can compare via telemetry before cutting over (Phase 2).
+# Default False until telemetry shows ≥95% agreement on a week of traffic.
+INTENT_EXTRACTOR_V2 = os.getenv(
+    "INTENT_EXTRACTOR_V2", "false",
+).strip().lower() in ("1", "true", "yes", "on")
+
 # --- Response Cache ---
 # Off by default. The cache stored the FIRST response to a given query and
 # replayed it on subsequent identical queries. Because the Judgment agent's

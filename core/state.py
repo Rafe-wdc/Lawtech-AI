@@ -125,6 +125,15 @@ class LegalAgentState(MessagesState):
     tasks_planned: list[str]
     agent_queries: dict[str, str]   # per-agent rewritten queries
     response_instructions: str      # user's expected output format/language/style
+                                    # (legacy free-form text — superseded by
+                                    # user_intent in Phase 2; kept until Phase 4)
+
+    # Structured user-intent extracted by the intent extractor (Phase 1+).
+    # When INTENT_EXTRACTOR_V2 is False, this stays None and downstream
+    # consumers fall back to response_instructions + the legacy regex
+    # heuristics. See docs/intent_layer_implementation_plan.md.
+    user_intent: Any  # config.intent.UserIntent | None — typed as Any to avoid
+                     # an import cycle (state.py is imported very early)
 
     # Conversation context
     chat_history: list[BaseMessage]

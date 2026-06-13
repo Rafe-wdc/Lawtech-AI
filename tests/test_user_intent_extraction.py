@@ -28,6 +28,7 @@ import pytest
 
 from config.intent import (
     LANG_NAMES,
+    LegalArtifact,
     ResponseFormat,
     UserIntent,
     default_intent,
@@ -143,6 +144,21 @@ class TestUserIntentSchema:
         """schema_version must default to 1 — tooling depends on it."""
         assert default_intent().schema_version == 1
 
+    def test_legal_artifact_defaults_to_none(self):
+        """The default intent expresses no specialized-artifact request."""
+        assert default_intent().legal_artifact == LegalArtifact.NONE
+
+    def test_legal_artifact_enum_values(self):
+        """Phase A ships only NONE + CROSS_EXAMINATION. Adding more is a
+        deliberate schema bump — this test pins the surface so we notice."""
+        assert {a.value for a in LegalArtifact} == {"none", "cross_examination"}
+
+    def test_legal_artifact_round_trip(self):
+        i = UserIntent(legal_artifact=LegalArtifact.CROSS_EXAMINATION,
+                       confidence=0.9)
+        restored = UserIntent.model_validate_json(i.model_dump_json())
+        assert restored.legal_artifact == LegalArtifact.CROSS_EXAMINATION
+
 
 class TestLanguageRegistry:
     def test_lang_names_matches_supported_languages(self):
@@ -242,6 +258,33 @@ _LANGUAGE_AMBIGUOUS_QUERIES = {
 }
 
 
+# Phase A — cross-examination artifact detection. Each row is (query,
+# expected_artifact). Negative cases assert NONE so we catch over-eager
+# detection (e.g. "examine this contract" should NOT be cross_examination).
+LEGAL_ARTIFACT_CASES = [
+    # Positives — cross_examination
+    ("From this witness deposition, prepare detailed cross-examination questions",
+     LegalArtifact.CROSS_EXAMINATION),
+    ("Draft cross examination questions for the PW-1 based on the attached statement",
+     LegalArtifact.CROSS_EXAMINATION),
+    ("Give me cross-examination questions in courtroom language for the witness in this FIR",
+     LegalArtifact.CROSS_EXAMINATION),
+    ("Extract relevant info and provide cross examination questions according to court room language",
+     LegalArtifact.CROSS_EXAMINATION),
+    ("Prepare cross for this witness statement",
+     LegalArtifact.CROSS_EXAMINATION),
+    ("I want cross examination questions to impeach the witness",
+     LegalArtifact.CROSS_EXAMINATION),
+    # Negatives — must stay NONE
+    ("Summarize this deposition",                                 LegalArtifact.NONE),
+    ("What are the key dates in this FIR?",                       LegalArtifact.NONE),
+    ("Explain the difference between cross-examination and re-examination",
+     LegalArtifact.NONE),  # asking ABOUT cross-exam, not FOR it
+    ("Analyze this contract for compliance issues",               LegalArtifact.NONE),
+    ("What is Section 138 NI Act",                                LegalArtifact.NONE),
+]
+
+
 @pytest.mark.skipif(
     not (LIVE_ENABLED and HAS_GOOGLE_KEY),
     reason="set INTENT_EXTRACTOR_LIVE=1 + GOOGLE_API_KEY to run live extractor",
@@ -331,6 +374,23 @@ def test_extractor_live(query, expected_format, expected_language):
 
 @pytest.mark.skipif(
     not (LIVE_ENABLED and HAS_GOOGLE_KEY),
+    reason="set INTENT_EXTRACTOR_LIVE=1 + GOOGLE_API_KEY to run live extractor",
+)
+@pytest.mark.parametrize("query,expected_artifact", LEGAL_ARTIFACT_CASES)
+def test_extractor_detects_legal_artifact(query, expected_artifact):
+    """Verify the extractor surfaces `legal_artifact=CROSS_EXAMINATION` for
+    queries asking to draft cross-exam questions, and NONE for everything
+    else (including queries that mention cross-exam in passing)."""
+    from agents.orchestrator import _extract_user_intent
+    _, intent = _extract_user_intent(query)
+    assert intent.legal_artifact == expected_artifact, (
+        f"expected legal_artifact={expected_artifact.value} for {query!r}, "
+        f"got {intent.legal_artifact.value} (confidence={intent.confidence:.2f})"
+    )
+
+
+@pytest.mark.skipif(
+    not (LIVE_ENABLED and HAS_GOOGLE_KEY),
     reason="set INTENT_EXTRACTOR_LIVE=1 + GOOGLE_API_KEY to run",
 )
 class TestExtractorRobustness:
@@ -338,10 +398,16 @@ class TestExtractorRobustness:
 
     def test_empty_query_returns_safe_default(self):
         from agents.orchestrator import _extract_user_intent
-        # An empty query shouldn't crash; should return SOMETHING — even if
-        # confidence is low, the orchestrator pipeline must keep moving.
+        # An empty query shouldn't crash; the orchestrator pipeline must keep
+        # moving with a usable intent. We don't constrain confidence — Gemini
+        # legitimately reports "no directives detected" with high confidence,
+        # which is correct for empty input.
         _, intent = _extract_user_intent("")
-        assert intent.confidence <= 0.7  # low confidence on empty input
+        assert isinstance(intent, UserIntent)
+        assert intent.response_format == ResponseFormat.PROSE
+        assert intent.legal_artifact == LegalArtifact.NONE
+        assert not intent.format_explicit
+        assert not intent.language_explicit
 
     def test_injection_attempt_is_contained(self):
         """The extraction prompt wraps both inputs in UNTRUSTED_BEGIN/END

@@ -54,6 +54,42 @@ class ResponseFormat(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Legal artifact type — specialized output kinds that need dedicated prompts.
+#
+# When `legal_artifact != NONE` the consuming agent should:
+#   1. Use a tailored system prompt (CROSS_EXAMINATION_PROMPT, etc.) instead of
+#      the generic Document/Drafting prompt.
+#   2. Upgrade the model to Gemini 2.5 Pro with a sensible thinking budget for
+#      strategic legal output.
+#   3. Apply a post-generation quality gate (minimum word/question counts) and
+#      retry once on under-quality outputs.
+#
+# Adding a new artifact = add an enum value + an entry in the agent's
+# specialized-prompt picker + an entry in the quality-gate threshold table.
+# No regex changes, no orchestrator changes.
+# ---------------------------------------------------------------------------
+
+class LegalArtifact(str, Enum):
+    """Specialized legal-output kinds that warrant a dedicated handling path.
+
+    NONE is the default — the agent produces generic Q&A or draft output
+    based on its standard system prompt. Any other value tells the agent to
+    pick a tailored prompt designed for that specific legal artifact.
+    """
+
+    NONE                = "none"                # generic — no specialized handling
+    CROSS_EXAMINATION   = "cross_examination"   # generate cross-exam questions for a witness/document
+    # Reserved for future phases (Phase B+) — not yet wired into any agent:
+    #   DEPOSITION_SUMMARY  = "deposition_summary"
+    #   CONTRACT_ANALYSIS   = "contract_analysis"
+    #   LEGAL_NOTICE_DRAFT  = "legal_notice"
+    #   COMPLAINT_DRAFT     = "complaint_draft"
+    #   WITNESS_PREP        = "witness_prep"
+    #   OPENING_STATEMENT   = "opening_statement"
+    #   CLOSING_ARGUMENT    = "closing_argument"
+
+
+# ---------------------------------------------------------------------------
 # Language registry — ISO 639-1 → display name
 #
 # Kept in sync with core/language.SUPPORTED_LANGUAGES. Import-time check below
@@ -191,6 +227,17 @@ class UserIntent(BaseModel):
         "none",
         description="If user asked to draft/argue 'on behalf of <party>', who? "
                     "Used by the Drafting agent's stance generator.",
+    )
+
+    # — Specialized legal artifact request (drives prompt selection in
+    #   Document / Drafting agents). Default NONE = generic Q&A.
+    legal_artifact: LegalArtifact = Field(
+        LegalArtifact.NONE,
+        description="When the user requests a specific legal artifact (e.g. "
+                    "cross-examination questions), the consuming agent picks "
+                    "a tailored system prompt + upgrades the model + runs a "
+                    "post-generation quality gate. Default NONE = generic "
+                    "Q&A or draft output.",
     )
 
     # — Catchall for things outside the typed schema

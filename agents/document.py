@@ -29,7 +29,113 @@ from core.settings import CHROMA_STORE_ROOT, TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.progress import progress
+from config.intent import LegalArtifact, UserIntent
+from config.prompts import CROSS_EXAMINATION_PROMPT
 log = get_logger("Document")
+
+
+# ---------------------------------------------------------------------------
+# Specialized-artifact dispatch (Phase A — cross_examination only).
+#
+# When `intent.legal_artifact == CROSS_EXAMINATION`, the document agent:
+#   1. Picks CROSS_EXAMINATION_PROMPT instead of the generic file-Q&A prompt.
+#   2. Configures Gemini 2.5 Pro with a thinking budget (planning helps for
+#      strategic legal output) and a larger output cap.
+#   3. After generation, applies a quality gate (min 600 words AND min 20
+#      numbered questions). If the gate fails, retries ONCE with a stronger
+#      preamble injected before the original query.
+#
+# Adding a new artifact = add a branch in _pick_specialized_prompt + an entry
+# in _QUALITY_THRESHOLDS + (optional) a custom retry preamble.
+# ---------------------------------------------------------------------------
+
+_QUALITY_THRESHOLDS: dict = {
+    LegalArtifact.CROSS_EXAMINATION: {
+        "min_words": 600,
+        "min_numbered_questions": 20,
+    },
+}
+
+_RETRY_PREAMBLE: dict = {
+    LegalArtifact.CROSS_EXAMINATION: (
+        "The previous attempt fell short of the required output. You MUST "
+        "produce a comprehensive cross-examination kit: a Legal Analysis "
+        "section, a Strategic Objectives bullet list, and AT LEAST 30 "
+        "numbered cross-examination questions organised into 5-7 strategic "
+        "PARTS. Use formal Indian courtroom language including 'I put it to "
+        "you that...', 'Is it not a fact that...', 'Do you deny that...'. "
+        "Extract only facts visible in the attached document.\n\nOriginal "
+        "question:\n"
+    ),
+}
+
+
+def _pick_specialized_prompt(intent, generic_prompt: str) -> str:
+    """Return CROSS_EXAMINATION_PROMPT (or another specialized prompt) when
+    intent surfaces a legal_artifact request; otherwise return the generic
+    prompt unchanged.
+    """
+    if intent is None:
+        return generic_prompt
+    artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
+    if artifact == LegalArtifact.CROSS_EXAMINATION:
+        return CROSS_EXAMINATION_PROMPT
+    return generic_prompt
+
+
+def _llm_config_for_artifact(intent) -> dict:
+    """Return Gemini Pro kwargs tuned for the requested artifact.
+
+    Generic Q&A: temperature=0.3, no thinking budget, 12K max output.
+    Specialized (cross_examination): temperature=0.4, thinking_budget=4096
+    (strategic planning helps), 20K max output (long structured outputs).
+    """
+    if intent is None:
+        return {"temperature": 0.3}
+    artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
+    if artifact == LegalArtifact.CROSS_EXAMINATION:
+        return {
+            "temperature": 0.4,
+            "max_output_tokens": 20000,
+            "thinking_budget": 4096,
+        }
+    return {"temperature": 0.3}
+
+
+def _passes_quality_gate(intent, content: str) -> tuple[bool, str]:
+    """Return (passed, reason). When passed=False the caller retries once.
+
+    Generic intents (artifact=NONE) always pass — quality gating is only
+    applied to specialized artifacts with explicit thresholds.
+    """
+    if intent is None:
+        return True, ""
+    artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
+    thresholds = _QUALITY_THRESHOLDS.get(artifact)
+    if not thresholds:
+        return True, ""
+    words = len(content.split())
+    numbered = len(re.findall(r"(?:^|\n)\s*\d+\.\s+", content))
+    if words < thresholds["min_words"]:
+        return False, f"word_count_low ({words} < {thresholds['min_words']})"
+    if numbered < thresholds["min_numbered_questions"]:
+        return False, (
+            f"numbered_questions_low ({numbered} < "
+            f"{thresholds['min_numbered_questions']})"
+        )
+    return True, ""
+
+
+def _retry_question(intent, original_query: str) -> str:
+    """Build a stronger query for a quality-gate retry."""
+    if intent is None:
+        return original_query
+    preamble = _RETRY_PREAMBLE.get(
+        getattr(intent, "legal_artifact", LegalArtifact.NONE), ""
+    )
+    if not preamble:
+        return original_query
+    return preamble + original_query
 
 _SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
 
@@ -238,7 +344,9 @@ async def document_node(state: LegalAgentState) -> dict:
                      parts=len(parts), files=fc.file_names)
             try:
                 with log_time(log, "Gemini file parts document QA"):
-                    llm = get_gemini_pro(temperature=0.3)
+                    intent_obj = state.get("user_intent")
+                    artifact = getattr(intent_obj, "legal_artifact", LegalArtifact.NONE) if intent_obj else LegalArtifact.NONE
+                    llm = get_gemini_pro(**_llm_config_for_artifact(intent_obj))
 
                     # Build content list: file parts + question text.
                     # Translate the internal {"file_data": {...}, "name": ...}
@@ -246,63 +354,97 @@ async def document_node(state: LegalAgentState) -> dict:
                     # Gemini-shaped dicts have no "type" key, so langchain-google-genai
                     # logs "Unrecognized message part format" and stringifies them,
                     # which silently drops the PDF and lets Gemini hallucinate.
-                    user_content: list = []
-                    for part in parts:
-                        if "file_data" in part:
-                            fd = part["file_data"]
-                            user_content.append({
-                                "type": "media",
-                                "file_uri": fd["file_uri"],
-                                "mime_type": fd.get("mime_type", "application/octet-stream"),
-                            })
-                        elif "inline_data" in part:
-                            # Legacy base64 — pass as image_url for LangChain
-                            d = part["inline_data"]
-                            user_content.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{d['mime_type']};base64,{d['data']}"
-                                },
-                            })
-                    user_content.append({
-                        "type": "text",
-                        "text": f"Current Date: {date.today()}\n\nQuestion: {query}",
-                    })
+                    def _build_user_content(active_query: str) -> list:
+                        uc: list = []
+                        for part in parts:
+                            if "file_data" in part:
+                                fd = part["file_data"]
+                                uc.append({
+                                    "type": "media",
+                                    "file_uri": fd["file_uri"],
+                                    "mime_type": fd.get("mime_type", "application/octet-stream"),
+                                })
+                            elif "inline_data" in part:
+                                d = part["inline_data"]
+                                uc.append({
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{d['mime_type']};base64,{d['data']}"
+                                    },
+                                })
+                        uc.append({
+                            "type": "text",
+                            "text": f"Current Date: {date.today()}\n\nQuestion: {active_query}",
+                        })
+                        return uc
 
+                    # Pick the system prompt: specialized one (e.g.
+                    # CROSS_EXAMINATION_PROMPT) when intent surfaced a
+                    # legal_artifact, otherwise the generic file-Q&A prompt.
                     _doc_system = localize_prompt(
-                        "You are Lawttorney, a legal AI assistant. Analyze the uploaded "
-                        "file(s) carefully based on what you ACTUALLY SEE in them.\n\n"
-                        "CRITICAL RULES:\n"
-                        "1. Describe ONLY what is visible in the uploaded file. Do NOT "
-                        "fabricate or hallucinate content that is not there.\n"
-                        "2. If the file is a legal document (FIR, judgment, petition, "
-                        "agreement, notice), extract: names, dates, section numbers, "
-                        "case numbers, court names, and legal provisions.\n"
-                        "3. If the file is NOT a legal document (e.g., a photo, diagram, "
-                        "receipt, letter, screenshot), describe what you see accurately "
-                        "and answer the user's question based on the actual content.\n"
-                        "4. If the file content does not match the user's question, say so "
-                        "clearly. Do NOT force a legal interpretation on non-legal content.\n"
-                        "5. NEVER generate fake case names, case numbers, or court details "
-                        "that are not visible in the uploaded file.",
+                        _pick_specialized_prompt(
+                            intent_obj,
+                            "You are Lawttorney, a legal AI assistant. Analyze the uploaded "
+                            "file(s) carefully based on what you ACTUALLY SEE in them.\n\n"
+                            "CRITICAL RULES:\n"
+                            "1. Describe ONLY what is visible in the uploaded file. Do NOT "
+                            "fabricate or hallucinate content that is not there.\n"
+                            "2. If the file is a legal document (FIR, judgment, petition, "
+                            "agreement, notice), extract: names, dates, section numbers, "
+                            "case numbers, court names, and legal provisions.\n"
+                            "3. If the file is NOT a legal document (e.g., a photo, diagram, "
+                            "receipt, letter, screenshot), describe what you see accurately "
+                            "and answer the user's question based on the actual content.\n"
+                            "4. If the file content does not match the user's question, say so "
+                            "clearly. Do NOT force a legal interpretation on non-legal content.\n"
+                            "5. NEVER generate fake case names, case numbers, or court details "
+                            "that are not visible in the uploaded file.",
+                        ),
                         user_language,
-                        state.get("user_intent"),
+                        intent_obj,
                     )
-                    messages = [("system", _doc_system)]
                     history_text = _format_chat_history(chat_history)
-                    if history_text:
-                        messages.append(("user", f"Previous conversation:\n{history_text}"))
-                    if fc.inline_text:
-                        messages.append(("user", f"Additional document text:\n{fc.inline_text[:40000]}"))
-                    messages.append(("user", user_content))
 
-                    response = llm.invoke(messages)
+                    def _build_messages(active_query: str) -> list:
+                        m: list = [("system", _doc_system)]
+                        if history_text:
+                            m.append(("user", f"Previous conversation:\n{history_text}"))
+                        if fc.inline_text:
+                            m.append(("user", f"Additional document text:\n{fc.inline_text[:40000]}"))
+                        m.append(("user", _build_user_content(active_query)))
+                        return m
+
+                    response = llm.invoke(_build_messages(query))
+
+                    # Quality gate: when intent requested a specialized
+                    # legal artifact, verify the output meets minimum word /
+                    # numbered-question counts. Retry ONCE with a stronger
+                    # preamble if the first attempt fell short.
+                    passed, reason = _passes_quality_gate(intent_obj, response.content)
+                    if not passed:
+                        log.warning(
+                            "Specialized artifact output below quality gate; retrying once",
+                            artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
+                            reason=reason,
+                            first_attempt_len=len(response.content),
+                        )
+                        retry_query = _retry_question(intent_obj, query)
+                        response = llm.invoke(_build_messages(retry_query))
+                        passed_after, reason_after = _passes_quality_gate(intent_obj, response.content)
+                        log.info(
+                            "Quality-gate retry result",
+                            artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
+                            passed_after_retry=passed_after,
+                            reason=reason_after or "ok",
+                            final_len=len(response.content),
+                        )
 
                 from core.token_tracker import record as _record_tokens
                 tokens = _record_tokens("Document", "qa_gemini_files", response)
 
                 log.info("Gemini file parts document QA completed",
-                         response_len=len(response.content), tokens=tokens)
+                         response_len=len(response.content), tokens=tokens,
+                         legal_artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact))
 
                 sources = [SourceMetadata(
                     source_type="document",
@@ -335,20 +477,24 @@ async def document_node(state: LegalAgentState) -> dict:
                      inline_chars=len(fc.inline_text), files=fc.file_names)
             try:
                 with log_time(log, "Inline document QA"):
-                    llm = get_gemini_pro(temperature=0.3)
+                    intent_obj = state.get("user_intent")
+                    artifact = getattr(intent_obj, "legal_artifact", LegalArtifact.NONE) if intent_obj else LegalArtifact.NONE
+                    llm = get_gemini_pro(**_llm_config_for_artifact(intent_obj))
                     history_text = _format_chat_history(chat_history)
-                    prompt_messages = [
-                        ("system", localize_prompt(
+                    system_prompt = localize_prompt(
+                        _pick_specialized_prompt(
+                            intent_obj,
                             "You are Lawttorney, a legal AI assistant. Answer questions about "
                             "the uploaded document(s) using ONLY the provided content. "
                             "Do NOT fabricate any information not present in the document. "
                             "If the content is a legal document, cite specific sections, clauses, "
                             "parties, dates, and legal provisions. If it is not a legal document, "
                             "describe the actual content accurately.",
-                            user_language,
-                            state.get("user_intent"),
-                        )),
-                    ]
+                        ),
+                        user_language,
+                        intent_obj,
+                    )
+                    prompt_messages = [("system", system_prompt)]
                     if history_text:
                         prompt_messages.append(("user", "Previous conversation:\n{history}"))
                     prompt_messages.extend([
@@ -358,20 +504,36 @@ async def document_node(state: LegalAgentState) -> dict:
                     ])
                     prompt = ChatPromptTemplate.from_messages(prompt_messages)
                     chain = prompt | llm
-                    invoke_args = {
-                        "query": query,
-                        "docs": fc.inline_text[:80000],
-                        "date": str(date.today()),
-                    }
-                    if history_text:
-                        invoke_args["history"] = history_text
-                    response = chain.invoke(invoke_args)
+
+                    def _run(active_query: str):
+                        args = {
+                            "query": active_query,
+                            "docs": fc.inline_text[:80000],
+                            "date": str(date.today()),
+                        }
+                        if history_text:
+                            args["history"] = history_text
+                        return chain.invoke(args)
+
+                    response = _run(query)
+
+                    # Quality gate (same pattern as the Gemini-Files path).
+                    passed, reason = _passes_quality_gate(intent_obj, response.content)
+                    if not passed:
+                        log.warning(
+                            "Inline document QA fell below quality gate; retrying once",
+                            artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
+                            reason=reason,
+                            first_attempt_len=len(response.content),
+                        )
+                        response = _run(_retry_question(intent_obj, query))
 
                 from core.token_tracker import record as _record_tokens
                 tokens = _record_tokens("Document", "qa_inline_text", response)
 
                 log.info("Inline document QA completed",
-                         response_len=len(response.content), tokens=tokens)
+                         response_len=len(response.content), tokens=tokens,
+                         legal_artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact))
 
                 sources = [SourceMetadata(
                     source_type="document",

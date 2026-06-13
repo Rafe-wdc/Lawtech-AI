@@ -5,17 +5,16 @@ name: Prod — toggle intent extractor (manual)
 # dev-enable-intent-extractor.yml. workflow_dispatch ONLY — no auto-trigger.
 #
 # Idempotent: replaces an existing INTENT_EXTRACTOR_V2 line in .env,
-# appends if missing. Restarts gunicorn the same way deploy-prod.yml does
-# (TERM master, wait, fresh nohup) and waits for 3 consecutive healthy
-# /pyapi/health responses before declaring success.
+# appends if missing. Restarts via `sudo systemctl restart lawttorney-v2`
+# matching the deploy-prod.yml pattern, then waits for 3 consecutive
+# healthy /pyapi/health responses on port 5001.
 #
-# Uses the same SSH secrets configured for deploy-prod.yml:
-#   SSH_PRIVATE_KEY_PROD
-#   SERVER_HOST_PROD
-#   SERVER_USER_PROD
+# Uses the prod SSH secrets:
+#   SSH_PRIVATE_KEY_PROD, SERVER_HOST_PROD, SERVER_USER_PROD (ubuntu).
+# Prod APP_DIR is /root/Lawtech-AI (root-owned; needs sudo).
 #
-# Delete this file along with dev-enable-intent-extractor.yml once
-# Phase 4 makes the flag unconditional.
+# Delete along with dev-enable-intent-extractor.yml once Phase 4 makes
+# the flag unconditional.
 
 on:
   workflow_dispatch:
@@ -33,7 +32,7 @@ jobs:
   flip:
     name: Flip flag on prod
     runs-on: ubuntu-latest
-    environment: production    # same gate as deploy-prod.yml
+    environment: production
     timeout-minutes: 5
 
     steps:
@@ -44,118 +43,65 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
 
-      - name: Set flag + restart gunicorn + verify health
+      - name: Set flag + systemctl restart + verify health
         env:
           FLAG_VALUE: ${{ inputs.value }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
-            FLAG_VALUE="$FLAG_VALUE" bash <<'ENDSSH'
-            set -e
+            FLAG_VALUE="$FLAG_VALUE" 'bash -s' << 'ENDSSH'
+          set -e
+          APP_DIR=/root/Lawtech-AI
+          ENV_FILE="$APP_DIR/.env"
 
-            # Locate the app dir — deploy-prod.yml uses /home/ubuntu/Lawtech-AI
-            # per the AWS setup. Try a couple of likely paths so this script
-            # works against both naming conventions.
-            for candidate in \
-              /home/ubuntu/Lawtech-AI \
-              /root/Lawtech-AI \
-              /root/v2_multi_agent \
-              /opt/Lawtech-AI; do
-              if [ -d "$candidate" ] && [ -f "$candidate/.env" ]; then
-                APP_DIR="$candidate"
+          echo "=== Current INTENT_EXTRACTOR_V2 state ==="
+          sudo grep -E '^INTENT_EXTRACTOR_V2=' "$ENV_FILE" || echo "(not set)"
+
+          # Idempotent: replace existing line if present, append otherwise.
+          if sudo grep -qE '^INTENT_EXTRACTOR_V2=' "$ENV_FILE"; then
+            sudo sed -i.bak -E "s/^INTENT_EXTRACTOR_V2=.*/INTENT_EXTRACTOR_V2=${FLAG_VALUE}/" "$ENV_FILE"
+            echo "Replaced existing line"
+          else
+            echo "INTENT_EXTRACTOR_V2=${FLAG_VALUE}" | sudo tee -a "$ENV_FILE" >/dev/null
+            echo "Appended new line"
+          fi
+
+          echo "=== After change ==="
+          sudo grep -E '^INTENT_EXTRACTOR_V2=' "$ENV_FILE"
+
+          echo "=== Restart v2 via systemd (matches deploy-prod.yml) ==="
+          sudo systemctl restart lawttorney-v2
+
+          echo "=== Wait for v2 health (3 consecutive 200s, max 120s) ==="
+          CONSECUTIVE_OK=0
+          NEEDED=3
+          HEALTHY=0
+          for i in $(seq 1 24); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                     --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                echo "  Stable. Settling 10s for any remaining worker startup..."
+                sleep 10
+                HEALTHY=1
                 break
               fi
-            done
-            if [ -z "$APP_DIR" ]; then
-              echo "ERROR: could not locate APP_DIR containing .env"
-              exit 1
-            fi
-            echo "Using APP_DIR=$APP_DIR"
-            cd "$APP_DIR"
-            ENV_FILE="$APP_DIR/.env"
-
-            echo "=== Current INTENT_EXTRACTOR_V2 state ==="
-            grep -E '^INTENT_EXTRACTOR_V2=' "$ENV_FILE" || echo "(not set)"
-
-            if grep -qE '^INTENT_EXTRACTOR_V2=' "$ENV_FILE"; then
-              sed -i.bak -E "s/^INTENT_EXTRACTOR_V2=.*/INTENT_EXTRACTOR_V2=${FLAG_VALUE}/" "$ENV_FILE"
-              echo "Replaced existing line"
             else
-              echo "INTENT_EXTRACTOR_V2=${FLAG_VALUE}" >> "$ENV_FILE"
-              echo "Appended new line"
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/24 (HTTP $STATUS)"
             fi
+          done
 
-            echo "=== After change ==="
-            grep -E '^INTENT_EXTRACTOR_V2=' "$ENV_FILE"
-
-            # Restart gunicorn — same pattern as deploy.yml/deploy-prod.yml.
-            # preload_app=True means workers need a fresh master to pick up
-            # the new env var.
-            MASTER_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "0")
-            if [ "$MASTER_PID" -gt "0" ] 2>/dev/null; then
-              echo "Stopping gunicorn master (PID $MASTER_PID)..."
-              kill -TERM "$MASTER_PID"
-              for j in $(seq 1 10); do
-                kill -0 "$MASTER_PID" 2>/dev/null || break
-                sleep 1
-              done
-              echo "Gunicorn stopped"
-            fi
-
-            # Some prod boxes run via systemd. Try systemctl first, fall
-            # back to a manual nohup if there's no service. The deploy
-            # script logs the actual restart pattern — we mirror it here.
-            if systemctl list-unit-files 2>/dev/null | grep -qE '^lawtech.*\.service'; then
-              SERVICE=$(systemctl list-unit-files 2>/dev/null | awk '/^lawtech.*\.service/{print $1; exit}')
-              echo "Restarting systemd service: $SERVICE"
-              systemctl restart "$SERVICE"
-            else
-              echo "Starting gunicorn via nohup (no systemd unit found)"
-              cd "$APP_DIR"
-              nohup "$APP_DIR/venv/bin/gunicorn" -c gunicorn.conf.py core.gateway:app \
-                > /dev/null 2>&1 &
-            fi
-
-            sleep 2
-            NEW_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "?")
-            echo "Gunicorn master PID after restart: $NEW_PID"
-
-            # Detect port — deploy-prod.yml uses 5001 in some setups; the
-            # AWS prod box may use 5000 or 8000 fronted by nginx. We probe
-            # a few common ones.
-            for PORT in 5001 5000 8000 8080; do
-              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$PORT/pyapi/health 2>/dev/null || echo "000")
-              if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
-                APP_PORT=$PORT
-                echo "Detected app port: $APP_PORT (initial $STATUS)"
-                break
-              fi
-            done
-            if [ -z "$APP_PORT" ]; then
-              echo "ERROR: no app port responded — check service logs"
-              exit 1
-            fi
-
-            # Stable-health gate (3 consecutive 200/503)
-            CONSECUTIVE_OK=0
-            NEEDED=3
-            for i in $(seq 1 24); do
-              sleep 5
-              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$APP_PORT/pyapi/health || echo "000")
-              if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
-                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
-                if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
-                  echo "Stable health: $NEEDED consecutive checks at HTTP $STATUS"
-                  exit 0
-                fi
-                echo "Healthy (HTTP $STATUS), $CONSECUTIVE_OK/$NEEDED..."
-              else
-                CONSECUTIVE_OK=0
-                echo "Waiting attempt $i/24 (HTTP $STATUS)"
-              fi
-            done
-            echo "ERROR: timeout waiting for stable health"
+          if [ "$HEALTHY" = "1" ]; then
+            echo "FLAG FLIP OK"
+          else
+            echo "ERROR: no $NEEDED consecutive 200s within 120s. journalctl tail:"
+            sudo journalctl -u lawttorney-v2 -n 50 --no-pager
             exit 1
+          fi
           ENDSSH
 
       - name: Clean up SSH key

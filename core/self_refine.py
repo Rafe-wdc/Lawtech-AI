@@ -248,6 +248,59 @@ describing it. If multiple intent fields are violated, list them all.
   passes = True  iff  there are no critical AND no major violations.
                  Minor violations may exist alongside passes=True.
 
+## Drafting-specific categories (only when task_intent='draft' OR the
+##                                  response is clearly a legal draft)
+
+When the response is a court-filing-ready legal document (plaint,
+petition, written statement, bail application, affidavit, legal notice,
+agreement, contract, deed, MOU, will), ALSO audit for these MAJOR
+violations specific to Indian drafting practice:
+
+  forbidden_statute_pair — when the draft cites a statute that does not
+    apply to the lane chosen. The most common traps:
+       Section 38 Specific Relief Act, 1963 paired with "temporary
+       injunction" / "ad-interim relief" / "interim relief" —
+       Section 38 SRA grants permanent injunction only. Temporary
+       injunction is under Order XXXIX Rules 1 & 2 CPC. MAJOR.
+       Section 54 CPC paired with "partition of flat / apartment /
+       residential" — Section 54 applies only to estates assessed
+       to land revenue. Order XX Rule 18 CPC governs residential
+       partition. MAJOR.
+       Any other statute the user's typed intent / chat history
+       indicates is the wrong authority for the relief sought.
+
+  placeholder_marker — surviving `[CITE: ...]` brackets, "(citation
+    needed)", "{section number}", "<insert party>", "TBD", "FILL IN".
+    The drafting prompt forbids these; if they survive, MAJOR.
+
+  orphan_citation_tail — sentences ending with "as held in.", "the
+    Supreme Court in.", "the Hon'ble Court in." — the LLM started a
+    case citation, never finished. MAJOR.
+
+  trailing_preposition — paragraph ends with a bare "in.", "of.",
+    "by.", "to.", "under." — a citation sentence was truncated. MAJOR.
+
+  missing_procedural_section — when the draft is a civil suit / plaint
+    / writ / appeal and one or more of these mandatory blocks is
+    absent: Schedule of Properties, Valuation and Court Fee, List of
+    Documents (Order VII Rule 14 / Order XI Rule 14 CPC), Verification
+    (Order VI Rule 15 CPC), Affidavit in Support (Order XIX Rule 3 CPC),
+    or a separate Interim Application under Order XXXIX Rules 1 & 2
+    CPC when a temporary injunction is prayed for. MAJOR.
+
+  raw_html — `<p>`, `<div>`, `<span>`, `<center>`, `align="center"`,
+    `align="right"` attributes inside the body. The frontend renders
+    markdown only; raw HTML shows up as literal text. MAJOR.
+
+For each, the suggested_fix should be concrete:
+  - "Replace 'Section 38 SRA' with 'Order XXXIX Rules 1 & 2 CPC' in
+     para 4.2 and re-state the three-fold injunction test."
+  - "Append the Schedule of Properties block describing the suit
+     property with CTS number, area, boundaries before the prayer."
+  - "Complete the truncated citation 'as held by the Supreme Court in.'
+     in para 3.1 — either with a real case name + citation or remove
+     the citation lead-in entirely."
+
 ## What NOT to do
 
   - Do NOT propose new rules the intent doesn't specify.
@@ -259,6 +312,9 @@ describing it. If multiple intent fields are violated, list them all.
   - Do NOT flag English text inside literal case names like
     "Kesavananda Bharati v. State of Kerala" even in strict-language
     mode. Case names are proper nouns.
+  - Do NOT flag missing procedural sections on responses that are
+    Q&A, explanations, or analyses (not legal drafts). The
+    procedural-completeness rule applies ONLY to actual draft output.
 
 ## Inputs
 

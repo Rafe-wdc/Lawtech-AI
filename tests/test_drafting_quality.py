@@ -25,11 +25,10 @@ import pytest
 from agents.drafting import (
     DoctrinalStance,
     DoctrinalCase,
+    ProceduralSectionPlan,
     SectionPlan,
     DraftOutline,
-    _detect_doc_type,
-    _wants_temporary_injunction,
-    _inject_mandatory_sections,
+    _inject_procedural_sections,
     _format_stance_for_section,
     validate_draft,
     _MAX_SECTIONS,
@@ -37,53 +36,28 @@ from agents.drafting import (
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 -- doc-type detection + mandatory section injection
+# Procedural-section injection (driven by DoctrinalStance, no regex).
+#
+# Replaces the prior `_detect_doc_type` + `_wants_temporary_injunction` +
+# `_inject_mandatory_sections` + `_MANDATORY_PACKS` tests. The doctrinal
+# stance LLM call now enumerates which procedural sections the pleading
+# must carry; `_inject_procedural_sections` appends any that the outline
+# missed. No keyword classifier, no hardcoded pack.
 # ---------------------------------------------------------------------------
 
-class TestDocTypeDetection:
-    def test_civil_suit_keywords(self):
-        assert _detect_doc_type("Draft a partition suit", "SUIT FOR PARTITION") == "civil_suit"
-        assert _detect_doc_type("plaint for recovery of money", "Money Recovery Suit") == "civil_suit"
-        assert _detect_doc_type("declaration and permanent injunction", "Declaratory Suit") == "civil_suit"
-
-    def test_bail(self):
-        assert _detect_doc_type("Draft a bail application", "Anticipatory Bail") == "bail"
-
-    def test_writ(self):
-        assert _detect_doc_type("file a writ petition under Article 226", "Writ Petition") == "writ"
-
-    def test_notice(self):
-        assert _detect_doc_type("legal notice under section 138", "Demand Notice") == "notice"
-
-    def test_unknown_falls_back_to_other(self):
-        assert _detect_doc_type("random text", "Some Title") == "other"
-
-
-class TestWantsTemporaryInjunction:
-    def _outline(self, *titles):
-        return DraftOutline(
-            document_title="X", court_details="Y",
-            sections=[SectionPlan(title=t, description="") for t in titles],
+class TestProceduralSectionInjection:
+    def _stance(self, sections):
+        return DoctrinalStance(
+            procedural_sections=[
+                ProceduralSectionPlan(
+                    title=t, description=d,
+                    estimated_paragraphs=p, needs_citations=c,
+                )
+                for (t, d, p, c) in sections
+            ],
         )
 
-    def test_explicit_temporary(self):
-        assert _wants_temporary_injunction(
-            "prayer for temporary injunction", self._outline("Prayer"),
-        )
-
-    def test_interim_relief(self):
-        assert _wants_temporary_injunction(
-            "interim relief during pendency", self._outline("Grounds"),
-        )
-
-    def test_no_injunction(self):
-        assert not _wants_temporary_injunction(
-            "draft a sale deed", self._outline("Recitals", "Consideration"),
-        )
-
-
-class TestMandatorySectionInjection:
-    def test_civil_suit_pack_appended_when_missing(self):
+    def test_appends_missing_sections(self):
         outline = DraftOutline(
             document_title="Suit for Partition",
             court_details="Civil Court",
@@ -92,29 +66,34 @@ class TestMandatorySectionInjection:
                 SectionPlan(title="Prayer", description=""),
             ],
         )
-        result = _inject_mandatory_sections(outline, "draft a civil suit for partition")
+        stance = self._stance([
+            ("Schedule of Properties", "Property details", 3, False),
+            ("Valuation and Court Fee", "Suit value", 2, False),
+            ("Verification", "Order VI Rule 15 CPC", 1, False),
+        ])
+        result = _inject_procedural_sections(outline, stance)
         titles = [s.title for s in result]
         assert "Schedule of Properties" in titles
         assert "Valuation and Court Fee" in titles
-        assert "List of Documents" in titles
         assert "Verification" in titles
-        assert "Affidavit in Support" in titles
 
     def test_existing_section_not_duplicated(self):
         outline = DraftOutline(
             document_title="Suit", court_details="X",
             sections=[
                 SectionPlan(title="Brief Facts", description=""),
-                SectionPlan(title="Schedule of Properties", description=""),  # already present
+                SectionPlan(title="Schedule of Properties", description=""),
                 SectionPlan(title="Prayer", description=""),
             ],
         )
-        result = _inject_mandatory_sections(outline, "civil suit partition")
-        # Only one "Schedule" section even after injection
+        stance = self._stance([
+            ("Schedule of Properties", "Property details", 3, False),
+        ])
+        result = _inject_procedural_sections(outline, stance)
         schedule_count = sum(1 for s in result if "schedule" in s.title.lower())
         assert schedule_count == 1
 
-    def test_ti_injection_when_requested(self):
+    def test_ia_section_added_when_stance_says_so(self):
         outline = DraftOutline(
             document_title="Suit", court_details="X",
             sections=[
@@ -122,21 +101,35 @@ class TestMandatorySectionInjection:
                 SectionPlan(title="Prayer", description=""),
             ],
         )
-        result = _inject_mandatory_sections(
-            outline, "civil suit with prayer for temporary injunction",
-        )
+        stance = self._stance([
+            ("Interim Application under Order XXXIX Rules 1 & 2 CPC",
+             "Three-fold test", 5, True),
+        ])
+        result = _inject_procedural_sections(outline, stance)
         ia_titles = [s.title for s in result if "interim" in s.title.lower()]
         assert len(ia_titles) == 1
         assert "Order XXXIX" in ia_titles[0]
 
-    def test_ti_not_injected_when_not_requested(self):
+    def test_none_stance_returns_outline_unchanged(self):
         outline = DraftOutline(
-            document_title="Suit", court_details="X",
-            sections=[SectionPlan(title="Brief Facts", description="")],
+            document_title="Sale Deed",
+            court_details="N/A",
+            sections=[SectionPlan(title="Recitals", description="")],
         )
-        result = _inject_mandatory_sections(outline, "draft a sale deed")
-        ia_titles = [s.title for s in result if "interim" in s.title.lower()]
-        assert len(ia_titles) == 0
+        result = _inject_procedural_sections(outline, None)
+        assert len(result) == 1
+        assert result[0].title == "Recitals"
+
+    def test_empty_procedural_list_returns_outline_unchanged(self):
+        outline = DraftOutline(
+            document_title="Legal Notice",
+            court_details="N/A",
+            sections=[SectionPlan(title="Subject", description="")],
+        )
+        stance = DoctrinalStance(procedural_sections=[])
+        result = _inject_procedural_sections(outline, stance)
+        assert len(result) == 1
+        assert result[0].title == "Subject"
 
 
 # ---------------------------------------------------------------------------
@@ -196,40 +189,15 @@ class TestValidator:
         assert "–" in cleaned
         assert "â€" not in cleaned
 
-    def test_flags_sec_38_sra_near_temporary_injunction(self):
-        draft = (
-            "The plaintiff prays for a temporary injunction under "
-            "Section 38 of the Specific Relief Act, 1963."
-        )
-        _, warnings = validate_draft(draft)
-        assert any("Section 38 SRA" in w and "temporary" in w for w in warnings)
-
-    def test_no_warning_when_sec_38_used_for_permanent_injunction(self):
-        draft = (
-            "Para 1: The plaintiff prays for a permanent injunction under "
-            "Section 38 of the Specific Relief Act, 1963.\n\n"
-            "Para 2: A temporary injunction is also sought under Order XXXIX "
-            "Rules 1 and 2 of the Code of Civil Procedure, 1908."
-        )
-        _, warnings = validate_draft(draft)
-        # Two paragraphs are separated; the Sec 38 paragraph mentions permanent,
-        # not temporary, so no trap warning.
-        sec38_warnings = [w for w in warnings if "Section 38 SRA" in w]
-        assert len(sec38_warnings) == 0
-
-    def test_strips_orphan_citation_tails(self):
-        draft = "This principle was reaffirmed by the Supreme Court in."
-        cleaned, warnings = validate_draft(draft)
-        assert "Supreme Court in." not in cleaned
-        assert any("orphan citation" in w for w in warnings)
-
-    def test_stance_violation_warning(self):
-        stance = DoctrinalStance(
-            non_applicable_statutes=["Section 38 Specific Relief Act"],
-        )
-        draft = "The plaintiff cites Section 38 Specific Relief Act."
-        _, warnings = validate_draft(draft, stance)
-        assert any("non-applicable" in w for w in warnings)
+    # NOTE: tests for forbidden statute pairings (Sec 38 SRA + temp
+    # injunction; Sec 54 CPC + residential partition), orphan citation
+    # tails ("Supreme Court in."), and stance compliance violations
+    # were retired. Those checks now live in `core/self_refine.self_refine`
+    # which runs at request time against the typed DoctrinalStance +
+    # UserIntent. Unit-testing the LLM critic would require mocking
+    # Gemini Flash with structured output; we cover the critic schema
+    # in `tests/test_self_refine.py` and the end-to-end behaviour in
+    # the partition-suit E2E gated below (DRAFTING_QUALITY_E2E=1).
 
     # ── HTML stripping (locked-in contract) ──────────────────────────────
     # The frontend renders markdown only — raw HTML shows up as literal

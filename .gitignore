@@ -117,3 +117,43 @@ tests/partnership_draft_events.txt
 prompt_*.txt
 prod_chat_*.json
 test_image/
+
+# Windows shell residue (cmd `> NUL` redirects, etc.)
+NUL
+
+# Stray broken-name artifacts (e.g. when CWD got concatenated into a filename)
+agentic_projLawtech-AI*
+
+# Auto-generated test reports + result dumps (any prefix).
+# Keep test source .py files tracked — only ignore the JSON/MD output blobs.
+tests/*_report.md
+tests/*_report.json
+tests/*_results.json
+tests/*_answer.md
+tests/*_eval.json
+tests/*responses*.txt
+
+# Specific one-off captures (named outside the *_report / *_results convention)
+tests/bns_triability_*
+tests/injunction_draft*
+tests/1prompt2responses.txt
+
+# One-off investigation / repro / simulation scripts.
+# Convention: real tests use `test_*.py`; reusable drivers stay tracked
+# individually. Everything matching the patterns below is treated as scratch.
+tests/investigate_*.py
+tests/dump_*.py
+tests/verify_*.py
+tests/simulate_*.py
+tests/live_*.py
+tests/run_bns_*.py
+tests/run_prompt_*.py
+
+# Workspace policy: tests and docs are not part of the production-code
+# commit stream. NEW files added under tests/test_*.py, tests/run_*.py,
+# or docs/*.md are suppressed from `git status`. Already-tracked files
+# in these dirs stay tracked; gitignore only affects untracked files.
+# To track a new test/doc explicitly: `git add -f <path>`.
+tests/test_*.py
+tests/run_*.py
+docs/*.md

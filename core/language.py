@@ -183,25 +183,14 @@ def _is_strict_language(intent) -> bool:
     return bool(getattr(intent, "strict_language", False)) if intent is not None else False
 
 
-# Native-script numeral hints for the strict-language instruction.
-# Mapping from ISO 639-1 → "<digit examples> (script name)" string.
-# Empty entry means we don't have a strong opinion on numerals for that
-# language and the LLM will pick its convention.
-_NATIVE_NUMERAL_HINTS: dict[str, str] = {
-    "hi": "Devanagari numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९)",
-    "mr": "Devanagari numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९)",
-    "sa": "Devanagari numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९)",
-    "bn": "Bengali numerals (০, ১, ২, ৩, ৪, ৫, ৬, ৭, ৮, ৯)",
-    "as": "Bengali-Assamese numerals (০, ১, ২, ৩, ৪, ৫, ৬, ৭, ৮, ৯)",
-    "or": "Odia numerals (୦, ୧, ୨, ୩, ୪, ୫, ୬, ୭, ୮, ୯)",
-    "te": "Telugu numerals (౦, ౧, ౨, ౩, ౪, ౫, ౬, ౭, ౮, ౯)",
-    "ta": "Tamil numerals (௦, ௧, ௨, ௩, ௪, ௫, ௬, ௭, ௮, ௯)",
-    "kn": "Kannada numerals (೦, ೧, ೨, ೩, ೪, ೫, ೬, ೭, ೮, ೯)",
-    "ml": "Malayalam numerals (൦, ൧, ൨, ൩, ൪, ൫, ൬, ൭, ൮, ൯)",
-    "gu": "Gujarati numerals (૦, ૧, ૨, ૩, ૪, ૫, ૬, ૭, ૮, ૯)",
-    "pa": "Gurmukhi numerals (੦, ੧, ੨, ੩, ੪, ੫, ੬, ੭, ੮, ੯)",
-    "ur": "Eastern Arabic numerals (۰, ۱, ۲, ۳, ۴, ۵, ۶, ۷, ۸, ۹)",
-}
+# Numeral-hint dict retired. The strict-language directive now tells the
+# LLM to "use the native-script numerals of {lang_name}" — modern Gemini
+# models know which script each Indian language uses (Devanagari for
+# Hindi/Marathi/Sanskrit, Tamil script for Tamil, Bengali script for
+# Bengali/Assamese, etc.) and pick the correct glyphs. Adding a new
+# supported language is a one-line LANG_NAMES edit, not a numeral-table
+# extension. The self-refine critic catches any Latin-digit slippage and
+# the refiner replaces them.
 
 
 def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
@@ -226,11 +215,12 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
     if lang != "en" and lang in SUPPORTED_LANGUAGES:
         lang_name = SUPPORTED_LANGUAGES[lang]
         if _is_strict_language(intent):
-            numeral_hint = _NATIVE_NUMERAL_HINTS.get(lang)
             numeral_line = (
-                f"Use {numeral_hint} for ALL numbers — paragraph numbers, "
-                f"dates, years, amounts, list items. "
-            ) if numeral_hint else ""
+                f"Use {lang_name}'s native-script numerals for ALL numbers — "
+                f"paragraph numbers, dates, years, amounts, list items. "
+                f"You know the correct script for {lang_name}; use those "
+                f"digit glyphs, not Latin 0-9. "
+            )
             # NB: Phrasing matters. Earlier drafts used "keep X, Y, Z in
             # English" which the LLM read as a green light to keep
             # citations in English wholesale. The phrasing below frames

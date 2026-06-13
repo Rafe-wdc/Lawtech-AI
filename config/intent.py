@@ -204,6 +204,19 @@ class UserIntent(BaseModel):
                     "directive overrides per-server defaults.",
     )
 
+    strict_language: bool = Field(
+        False,
+        description="True iff the user demanded a strict / pure language mode "
+                    "('only in Marathi', 'purely in Hindi', 'fakta marathit', "
+                    "'मराठीतच', 'सिर्फ हिंदी में'). When True AND language is "
+                    "non-English, downstream localize_prompt emits a stronger "
+                    "instruction: use native-script numerals (१, २, ३ instead "
+                    "of 1, 2, 3), translate act names + placeholder labels to "
+                    "the target language, and keep ONLY case names and section "
+                    "numbers in English (proper-noun identifiers). Default "
+                    "False preserves the legal-citation-in-English convention.",
+    )
+
     # — Depth / length
     response_depth: Literal["brief", "standard", "detailed"] = Field(
         "standard",

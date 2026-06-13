@@ -262,6 +262,18 @@ Given the user's query and the recent conversation summary, produce:
        or defaulted to English (case (3)). Downstream code uses this flag
        to decide whether a server-level language override may apply.
 
+   strict_language — TRUE iff the user demanded the response be PURELY in
+       the target language, with NO English mixing for citations or
+       numerals. Triggers (case-insensitive):
+         - "only in <lang>", "purely in <lang>", "strictly in <lang>",
+           "entirely in <lang>", "completely in <lang>"
+         - Native equivalents: "मराठीतच", "फक्त मराठीत", "सिर्फ हिंदी में",
+           "केवल हिंदी में", "Marathi madhe fakta", "Hindi mein hi"
+         - Implicit when user says "only marathi" / "only hindi" / etc.
+       FALSE for plain "in <lang>" requests — those keep the standard
+       legal-citations-in-English convention. strict_language ONLY makes
+       sense when language is non-English; ignore it for language="en".
+
    response_depth — overall length preference:
        "brief"     user said "in 2-3 lines / briefly / TL;DR / short"
        "detailed"  user said "in detail / thoroughly / comprehensive / full"

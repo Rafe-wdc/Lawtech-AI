@@ -169,6 +169,18 @@ class TestUserIntentSchema:
         restored = UserIntent.model_validate_json(i.model_dump_json())
         assert restored.legal_artifact == LegalArtifact.CROSS_EXAMINATION
 
+    def test_strict_language_defaults_to_false(self):
+        """Strict-language mode is opt-in — the default preserves the
+        legal-citations-in-English convention."""
+        assert default_intent().strict_language is False
+
+    def test_strict_language_round_trip(self):
+        i = UserIntent(language="mr", language_explicit=True,
+                       strict_language=True, confidence=0.95)
+        restored = UserIntent.model_validate_json(i.model_dump_json())
+        assert restored.strict_language is True
+        assert restored.language == "mr"
+
 
 class TestLanguageRegistry:
     def test_lang_names_matches_supported_languages(self):
@@ -266,6 +278,25 @@ _LANGUAGE_AMBIGUOUS_QUERIES = {
     # ("131 aur 132 ka dikhao") reliably picks hi.
     "section 131 ka table banao": {"en", "hi"},
 }
+
+
+# Strict-language detection — when the user demands PURE Marathi/Hindi/etc.
+# with no English mixing. Each row is (query, expected_strict_language).
+STRICT_LANGUAGE_CASES = [
+    # Positives — strict mode should fire
+    ("draft a Written statement only in marathi",                 True),
+    ("section 138 explanation purely in Hindi",                   True),
+    ("respond entirely in Tamil — no English at all",             True),
+    ("मराठीतच लेखी निवेदन तयार करा",                                True),  # Marathi: "in Marathi only"
+    ("Marathi madhe fakta draft kara",                            True),
+    # Negatives — plain "in <lang>" must stay False (preserves
+    # legal-citation-in-English convention)
+    ("draft a Written statement in marathi",                      False),
+    ("Section 138 NI Act in Hindi",                               False),
+    ("explain Article 21 in Tamil",                               False),
+    # English requests are not "strict" anything
+    ("draft a Written statement in English",                      False),
+]
 
 
 # Phase A + B — legal artifact detection. Each row is (query, expected_artifact).
@@ -408,6 +439,24 @@ def test_extractor_live(query, expected_format, expected_language):
 
     # Normalized query is non-empty (extractor must always produce one)
     assert normalized, f"normalized_query was empty for {query!r}"
+
+
+@pytest.mark.skipif(
+    not (LIVE_ENABLED and HAS_GOOGLE_KEY),
+    reason="set INTENT_EXTRACTOR_LIVE=1 + GOOGLE_API_KEY to run live extractor",
+)
+@pytest.mark.parametrize("query,expected_strict", STRICT_LANGUAGE_CASES)
+def test_extractor_detects_strict_language(query, expected_strict):
+    """Verify the extractor sets strict_language=True for 'only in <lang>' /
+    'purely in <lang>' / native equivalents, and False for plain 'in <lang>'."""
+    from agents.orchestrator import _extract_user_intent
+    _, intent = _extract_user_intent(query)
+    assert intent.strict_language == expected_strict, (
+        f"expected strict_language={expected_strict} for {query!r}, "
+        f"got {intent.strict_language} "
+        f"(language={intent.language}, explicit={intent.language_explicit}, "
+        f"confidence={intent.confidence:.2f})"
+    )
 
 
 @pytest.mark.skipif(

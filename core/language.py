@@ -178,13 +178,45 @@ def _format_intent_directives(intent) -> str:
     )
 
 
+def _is_strict_language(intent) -> bool:
+    """Duck-typed read of `intent.strict_language` for the lazy-import path."""
+    return bool(getattr(intent, "strict_language", False)) if intent is not None else False
+
+
+# Native-script numeral hints for the strict-language instruction.
+# Mapping from ISO 639-1 → "<digit examples> (script name)" string.
+# Empty entry means we don't have a strong opinion on numerals for that
+# language and the LLM will pick its convention.
+_NATIVE_NUMERAL_HINTS: dict[str, str] = {
+    "hi": "Devanagari numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९)",
+    "mr": "Devanagari numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९)",
+    "sa": "Devanagari numerals (०, १, २, ३, ४, ५, ६, ७, ८, ९)",
+    "bn": "Bengali numerals (০, ১, ২, ৩, ৪, ৫, ৬, ৭, ৮, ৯)",
+    "as": "Bengali-Assamese numerals (০, ১, ২, ৩, ৪, ৫, ৬, ৭, ৮, ৯)",
+    "or": "Odia numerals (୦, ୧, ୨, ୩, ୪, ୫, ୬, ୭, ୮, ୯)",
+    "te": "Telugu numerals (౦, ౧, ౨, ౩, ౪, ౫, ౬, ౭, ౮, ౯)",
+    "ta": "Tamil numerals (௦, ௧, ௨, ௩, ௪, ௫, ௬, ௭, ௮, ௯)",
+    "kn": "Kannada numerals (೦, ೧, ೨, ೩, ೪, ೫, ೬, ೭, ೮, ೯)",
+    "ml": "Malayalam numerals (൦, ൧, ൨, ൩, ൪, ൫, ൬, ൭, ൮, ൯)",
+    "gu": "Gujarati numerals (૦, ૧, ૨, ૩, ૪, ૫, ૬, ૭, ૮, ૯)",
+    "pa": "Gurmukhi numerals (੦, ੧, ੨, ੩, ੪, ੫, ੬, ੭, ੮, ੯)",
+    "ur": "Eastern Arabic numerals (۰, ۱, ۲, ۳, ۴, ۵, ۶, ۷, ۸, ۹)",
+}
+
+
 def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
     """Append a language instruction (and optionally a user-intent directive
     block) to any agent system prompt.
 
     - If lang == "en" or unsupported, no language line is appended.
-    - If intent is provided AND has non-default depth or additional_instructions,
-      a "USER DIRECTIVES" block is appended.
+    - If intent.strict_language is True AND lang != "en", emit a STRICTER
+      instruction: native-script numerals, translated act names + placeholder
+      labels, only case names + section/article numbers kept in English.
+    - Otherwise, emit the standard instruction: respond in <lang>, keep all
+      legal citations in English. (Preserves the existing convention for
+      callers that haven't opted in to strict mode.)
+    - If intent has non-default depth or additional_instructions, also append
+      a "USER DIRECTIVES" block.
 
     Returning the unchanged prompt when both signals are empty preserves the
     pre-Phase-3 behaviour for callers that don't pass an intent.
@@ -193,12 +225,42 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
 
     if lang != "en" and lang in SUPPORTED_LANGUAGES:
         lang_name = SUPPORTED_LANGUAGES[lang]
-        out += (
-            f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {lang_name}. "
-            "All legal citations must remain in English — this includes case names, "
-            "section numbers, act titles (e.g. IPC, BNS, CrPC), court names, "
-            "and party names. Do NOT translate these."
-        )
+        if _is_strict_language(intent):
+            numeral_hint = _NATIVE_NUMERAL_HINTS.get(lang)
+            numeral_line = (
+                f"Use {numeral_hint} for ALL numbers — paragraph numbers, "
+                f"dates, years, amounts, list items. "
+            ) if numeral_hint else ""
+            # NB: Phrasing matters. Earlier drafts used "keep X, Y, Z in
+            # English" which the LLM read as a green light to keep
+            # citations in English wholesale. The phrasing below frames
+            # English as a NARROW exception ("only verbatim case names")
+            # so the model treats Marathi/Hindi/etc. as the default for
+            # everything else.
+            out += (
+                f"\n\nLANGUAGE INSTRUCTION (STRICT): The user demanded PURE "
+                f"{lang_name}. Do NOT mix in English words, phrases, or "
+                f"clauses anywhere in the response. {numeral_line}"
+                f"Translate act/code titles ('Civil Procedure Code, 1908' "
+                f"→ 'दिवाणी प्रक्रिया संहिता, १९०८'), section labels "
+                f"('Section 138' → 'कलम १३८'), placeholder brackets "
+                f"('[Place]' → '[ठिकाण]'), and signature labels into "
+                f"{lang_name}.\n\n"
+                f"The ONLY narrow exception: when citing a specific "
+                f"case-law decision (e.g. 'Kesavananda Bharati v. State of "
+                f"Kerala'), preserve the case name as printed — case names "
+                f"are proper nouns. Even then, the surrounding clause "
+                f"(\"In the case of …, the court held …\") must be in "
+                f"{lang_name}.\n\n"
+                f"Do NOT pad or duplicate content to appear comprehensive."
+            )
+        else:
+            out += (
+                f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {lang_name}. "
+                "All legal citations must remain in English — this includes case names, "
+                "section numbers, act titles (e.g. IPC, BNS, CrPC), court names, "
+                "and party names. Do NOT translate these."
+            )
 
     out += _format_intent_directives(intent)
     return out

@@ -158,9 +158,27 @@ Examples of how intent fields translate to checks:
       citations may appear if strict_language=False.
 
   strict_language=True with language!='en'
-    → No English clauses, no English placeholder labels. Numerals must
-      be in the target script (Devanagari for hi/mr/sa; Tamil for ta;
-      etc.). Only verbatim case names may be in English.
+    → STRICT MODE. Audit ALL of the following — each is a MAJOR violation:
+       (a) Any English sentence, clause, or phrase OTHER than verbatim
+           case names (e.g. "Kesavananda Bharati v. State of Kerala").
+           Statute titles, act names, section labels, and placeholder
+           brackets ("[Place]", "[Date]") must be in the target script.
+       (b) Any digit-prefixed numbered-list start using Latin digits.
+           Examples of MAJOR violations in Marathi (mr) / Hindi (hi) /
+           Sanskrit (sa) strict mode:
+              "1. दाव्यातील..."   ← MAJOR. Must be "१. दाव्यातील..."
+              "2. परिच्छेद..."    ← MAJOR. Must be "२. परिच्छेद..."
+              "(3) सदर..."        ← MAJOR. Must be "(३) सदर..."
+           The same applies to other Indic scripts (Bengali ০-৯, Tamil
+           ௦-௯, Telugu ౦-౯, Kannada ೦-೯, Malayalam ൦-൯, Gujarati ૦-૯,
+           Gurmukhi ੦-੯, Odia ୦-୯, Eastern Arabic for Urdu ۰-۹).
+       (c) Latin digits in dates, amounts, years, paragraph numbers
+           ("Section 138", "para 2", "Rs. 50000") — every one is a MAJOR
+           violation in strict mode and must be in the target script.
+       (d) Even ONE Latin-digit numbered-list start is enough to set
+           passes=False. Do NOT pass the response if any survive.
+      Only narrow exception: case names ("ABC v. XYZ"), which are proper
+      nouns and stay in English. Surrounding clause stays in target lang.
 
   response_format=TABLE / COMPARISON
     → Response must contain a real `|`-delimited markdown table with a
@@ -279,6 +297,15 @@ EACH violation — and changes nothing else.
    revised version", no postscript like "Let me know if you need
    changes"). The response should drop in cleanly where the original
    was.
+6. When a violation requires native-script numerals (strict_language
+   mode), rewrite EVERY Latin digit in the response — paragraph
+   numbers, date components, year, monetary amounts, section numbers
+   inside running prose, list-item prefixes ("1.", "(2)", "3)" →
+   "१.", "(२)", "३)" for Devanagari; analogous for other Indic
+   scripts). Do a clean pass. Do not leave any "1.", "2.", "3.",
+   "(4)", etc. anywhere in the body. The ONLY Latin digits that may
+   remain are inside English-language verbatim case citations
+   (e.g. "Kesavananda Bharati v. State of Kerala, AIR 1973 SC 1461").
 
 ## Inputs
 

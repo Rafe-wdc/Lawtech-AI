@@ -96,126 +96,25 @@ def _strip_internal_cite_markers(text: str) -> str:
     return cleaned.strip()
 
 
-# --- Drafting Intent Detection ---
-# Used to decide whether to add the Drafting agent to the plan when a file is
-# attached. Matches only when the user *explicitly* asks for a document to be
-# produced — never on bare document-noun mentions like "what's in this plaint?"
-# or substring collisions like "plaint" inside "plaintiff".
-
-# Document-type nouns that name a kind of legal document.
-_DOC_NOUN_PATTERN = (
-    r"plaint|petition|affidavit|notice|legal\s+notice|agreement|contract|"
-    r"m\.?o\.?u\.?|deed|bail\s+application|written\s+statement|application|"
-    r"complaint|response|reply|rejoinder|caveat|counter|writ|appeal|memo|"
-    r"will|power\s+of\s+attorney|partnership\s+deed|sale\s+deed|gift\s+deed|"
-    r"lease\s+deed|rental\s+agreement|nda|non[\s-]disclosure|"
-    r"settlement\s+deed|divorce\s+petition|legal\s+document|"
-    r"plea|pleading|brief|summons|subpoena|injunction\s+application"
-)
-
-# (1) Strong drafting verbs in any form — almost always indicate drafting intent
-# in a legal-AI chat context (e.g. "Draft a plaint", "Drafting an affidavit").
-_DRAFTING_VERB_RE = re.compile(
-    r"\b(draft|drafts|drafted|drafting|redraft|redrafts|redrafted|redrafting)\b",
-    re.IGNORECASE,
-)
-
-# (2) Verb + (article + optional adjective) + document-noun = drafting intent
-# e.g. "write a plaint", "prepare a bail application", "compose an MOU",
-# "give me a written statement", "I need a notice for property dispute",
-# "give me a sample plaint" (article + adjective + doc-noun).
-_DRAFTING_INTENT_RE = re.compile(
-    r"\b(?:write|prepare|create|generate|compose|draw\s+up|"
-    r"give\s+me|i\s+(?:need|want|require)|need|want|provide|build|produce|"
-    r"craft|formulate|put\s+together|help\s+me\s+(?:write|prepare|create|make)|"
-    r"could\s+you\s+(?:write|prepare|draft|make|create))\s+"
-    r"(?:a|an|the|me\s+a|me\s+an|us\s+a|us\s+an|one|some|"
-    r"(?:a|an|the)\s+\w+(?:\s+\w+)?)"
-    r"\s+"  # whitespace between article (group) and document noun
-    r"(?:" + _DOC_NOUN_PATTERN + r")\b",
-    re.IGNORECASE,
-)
-
-# (3) Format / sample / template requests
-# e.g. "format of bail application", "sample affidavit", "template for plaint".
-_DRAFTING_FORMAT_RE = re.compile(
-    r"\b(?:format|sample|specimen|template|model|standard\s+form|proforma)"
-    r"(?:\s+(?:of|for|to|to\s+make))?\s+"
-    r"(?:a|an|the)?\s*"
-    r"(?:" + _DOC_NOUN_PATTERN + r")\b",
-    re.IGNORECASE,
-)
-
-# (4) "Drafting/preparation of X"
-_DRAFTING_OF_RE = re.compile(
-    r"\b(?:drafting|preparation|preparing)\s+(?:of\s+)?(?:a|an|the)?\s*"
-    r"(?:" + _DOC_NOUN_PATTERN + r")\b",
-    re.IGNORECASE,
-)
-
-# (5) Negative signals — Q&A intent that should NEVER trigger drafting even
-# when paired with document nouns. Used to short-circuit before regex checks.
-_QA_INTENT_RE = re.compile(
-    r"\b(?:summari[sz]e|summary\s+of|explain|describe|what\s+is|what\s+are|"
-    r"what\s+does|what's|whats|who\s+is|who\s+are|when\s+(?:is|was|did)|"
-    r"why\s+(?:is|did|does)|how\s+(?:is|does|did|much|many)|where\s+(?:is|was)|"
-    r"which|tell\s+me\s+about|analy[sz]e|review|critique|extract|"
-    r"list\s+(?:the|all|out)|find|identify|cite|enumerate|"
-    r"is\s+the\s+(?:suit|case|claim|petition|plaint)|"
-    r"are\s+the|does\s+the|did\s+the|can\s+(?:i|you|the))\b",
-    re.IGNORECASE,
-)
+# --- Drafting Intent Detection (intent-driven, no regex) ---
+# The original verb+noun regex bank is gone. Drafting intent now reads
+# `UserIntent.task_intent == "draft"` populated by the always-on extractor
+# (`_extract_user_intent`). The extractor handles native-language verbs,
+# polite/passive phrasings, and conservative defaults (when ambiguous between
+# "draft" and "explain", it picks "explain") — exactly the cases the regex
+# bank could not cover without continuous keyword maintenance.
 
 
-def _wants_drafting(query: str) -> bool:
-    """Return True iff the query *explicitly* asks for a legal document to be drafted.
+def _wants_drafting(intent: UserIntent | None) -> bool:
+    """True iff the user wants the AI to PRODUCE a legal document.
 
-    This must NEVER trigger on:
-      - Bare document-noun mentions ("what's in this plaint?")
-      - Substring collisions ("plaintiff", "complaint", "explaining")
-      - Q&A about an existing document ("who wrote the petition?")
-      - Reference to a draft ("review my draft")  — handled by Q&A short-circuit
-
-    Triggers when the query contains:
-      (1) An explicit drafting verb: "draft", "drafting", "redraft" (any tense)
-      (2) Verb + document-noun pattern: "write a plaint", "prepare an affidavit"
-      (3) Format / sample / template request: "format of bail application"
-      (4) "Drafting of X" / "preparation of X"
+    Reads the typed task_intent from the structured extractor. Conservative
+    fallback when intent is missing or low-confidence: False (don't
+    spuriously add Drafting; rely on the LLM planner).
     """
-    q = (query or "").strip()
-    if not q:
+    if intent is None or intent.confidence < 0.5:
         return False
-
-    has_explicit_draft_verb = bool(_DRAFTING_VERB_RE.search(q))
-    has_format_request = (
-        bool(_DRAFTING_FORMAT_RE.search(q))
-        or bool(_DRAFTING_OF_RE.search(q))
-    )
-    has_qa_framing = bool(_QA_INTENT_RE.search(q))
-
-    # Format/template/sample requests are inherently drafting requests, even
-    # when phrased as a question (e.g. "What is the format of a bail
-    # application?", "Show me a sample plaint"). Override Q&A short-circuit.
-    if has_format_request:
-        return True
-
-    # Explicit drafting verb wins over everything else.
-    # ("Draft this", "Please draft a notice", "Drafting needed".)
-    if has_explicit_draft_verb:
-        return True
-
-    # Pure Q&A framing without any drafting signal — never trigger drafting.
-    # Catches "who is the plaintiff?", "summarize the plaint", "what's in
-    # this petition?" etc. The document-noun substring is incidental.
-    if has_qa_framing:
-        return False
-
-    # Verb + article + document-noun = drafting intent.
-    # ("write a plaint", "prepare a bail application", "compose an MOU".)
-    if _DRAFTING_INTENT_RE.search(q):
-        return True
-
-    return False
+    return intent.task_intent == "draft"
 
 
 # --- Long Query Extraction ---
@@ -307,63 +206,54 @@ class ClassifyAndPlan(BaseModel):
 
 
 def _classify_task_regex_fallback(query: str) -> str:
-    """Keyword-based task classification fallback when LLM is unavailable."""
-    q = query.lower().strip()
-    # Greeting / non-legal short-circuit (check before any legal keywords)
-    _greeting_tokens = {"hello", "hi", "hey", "hii", "helo", "hola", "namaste", "namaskar",
-                        "good morning", "good afternoon", "good evening", "good night",
-                        "how are you", "how r u", "what's up", "whats up", "sup",
-                        "who are you", "what are you", "what can you do"}
-    if q in _greeting_tokens or any(q.startswith(g) for g in _greeting_tokens):
+    """Minimal task-classification fallback when the LLM call fails.
+
+    The 50-line keyword cascade that used to live here was retired. Any
+    keyword-based routing is now derived from the typed UserIntent (read
+    via `_classify_task_from_intent`). On a hard LLM failure with no
+    intent available, default to Legal_Concepts — the safest catch-all,
+    since its agent runs a web-search-grounded explanation that gives
+    the user *something* useful regardless of topic.
+
+    Kept for back-compat with the call site in `_classify_task` where
+    no intent has been extracted yet (the extractor runs in parallel
+    with classification).
+    """
+    return "Legal_Concepts"
+
+
+def _classify_task_from_intent(intent: UserIntent | None) -> str | None:
+    """Derive a primary task from a typed UserIntent, when available.
+
+    Used as the failure-time mapping inside `orchestrator_plan_node`: when
+    classify+plan times out or errors AND we did extract an intent, we
+    project the intent's typed fields into a single task name. Returns
+    None when intent is missing or no field strongly identifies a task —
+    caller falls back to `_classify_task_regex_fallback`.
+    """
+    if intent is None or intent.confidence < 0.5:
+        return None
+    ti = intent.task_intent
+    if ti == "chat":
         return "Non_legal"
-    # GST AAAR short-circuit (must run BEFORE generic act/section keywords so
-    # queries like "GST advance ruling on Section 17(5)" don't fall into Legislation)
-    if any(k in q for k in (
-        "advance ruling", "aaar", " aar ", "appellate authority for advance ruling",
-        "gst appeal", "gst appellate", "gst ruling", "gst classification",
-    )) or (("gst" in q or "cgst" in q or "sgst" in q or "igst" in q) and any(k in q for k in (
-        "appeal", "ruling", "classification", "itc", "input tax credit", "valuation",
-        "exemption", "hsn", "notification",
-    ))):
-        return "GST_Judgment"
-    # Drafting detection: defer to the shared `_wants_drafting` helper which
-    # already has explicit-verb + verb-noun + format-noun patterns with a Q&A
-    # negative regex. The previous naive substring check ("notice", "plaint",
-    # "petition", "format", "agreement") false-positively routed pure-Q&A
-    # queries like "What is the format of a written statement?",
-    # "Section 80 CPC notice requirements", or "Discuss the petition under
-    # Article 32" to Drafting whenever the LLM classifier had to fall back
-    # (timeout / rate-limit). _wants_drafting requires intent, not just a
-    # document-noun substring.
-    if _wants_drafting(query):
+    if ti == "ask_about_file":
+        return "Document"
+    if ti == "draft":
         return "Drafting"
-    if any(k in q for k in ("bns", "bnss", "bsa", "ipc", "crpc", "iea",
-                              "bharatiya nyaya", "bharatiya nagarik", "bharatiya sakshya",
-                              "penal code", "criminal procedure", "evidence act")):
-        return "Newacts"
-    if any(k in q for k in ("judgment", "judgement", "case law", "citation", "held that",
-                              "vs.", " v. ", "high court", "hc", "bench")):
-        return "Judgment"
-    if any(k in q for k in ("supreme court", "sc judgment", "sc case", "sc ruling",
-                              "hon'ble sc", "apex court", "article 136",
-                              "puttaswamy", "maneka gandhi", "kesavananda",
-                              "navtej", "vishaka", "indra sawhney")):
-        return "SCI_Judgment"
-    if any(k in q for k in ("article ", "fundamental right", "directive principle",
-                              "constitution", "constitutional")):
-        return "Constitution"
-    if any(k in q for k in ("maxim", "audi alteram", "res judicata", "estoppel",
-                              "nemo judex", "caveat emptor", "actus reus", "mens rea")):
-        return "Maxim"
-    if any(k in q for k in ("scenario", "situation", "what happens if", "can i",
-                              "what should", "legal opinion", "advise", "rights")):
+    if ti == "analyze":
         return "Scenario"
-    if any(k in q for k in ("section ", "act ", "rule ", "regulation", "provision",
-                              "statute", "law ", " act,", " act.")):
-        # Avoid misclassifying constitutional queries that mention "section"
-        if not any(k in q for k in ("constitution", "constitutional", "article ",
-                                     "fundamental right", "directive principle")):
-            return "Legislation"
+    if intent.wants_supreme_court:
+        return "SCI_Judgment"
+    if intent.wants_gst_rulings:
+        return "GST_Judgment"
+    if intent.wants_constitution:
+        return "Constitution"
+    if intent.wants_maxim:
+        return "Maxim"
+    if intent.include_case_law:
+        return "Judgment"
+    if intent.wants_statute_text:
+        return "Legislation"
     return "Legal_Concepts"
 
 
@@ -537,21 +427,10 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
         if not agents:
             agents = [task]
 
-        # Telemetry: cross-check LLM's Drafting decision against the regex
-        # helper. If the LLM picked Drafting but _wants_drafting disagrees,
-        # that's the exact misroute pattern we're hunting — surface it as a
-        # WARN so prod logs are greppable for future investigations. (We do
-        # NOT override the LLM here — only observe; overriding would risk
-        # breaking legitimate edge cases the regex doesn't know about.)
-        drafting_disagreement = (
-            (task == "Drafting" or "Drafting" in agents)
-            and not _wants_drafting(query)
-        )
-        if drafting_disagreement:
-            log.warning("Classify+plan picked Drafting but intent regex disagrees",
-                        task=task, agents=agents,
-                        query=query[:120],
-                        reasoning=result.reasoning[:160])
+        # Telemetry cross-check (Drafting agreement) was retired with the
+        # regex bank. The planner's Drafting decision is now validated
+        # downstream against `extracted_intent.task_intent` in
+        # `orchestrator_plan_node`.
 
         log.info("Classify+plan completed",
                  task=task, agents=agents,
@@ -566,166 +445,69 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
         return fallback_task, [fallback_task]
 
 
-def _select_citation_agents(query: str) -> list[str]:
-    """Select which agents should provide citations for a draft.
+def _select_citation_agents(intent: UserIntent | None) -> list[str]:
+    """Select which agents should produce the citation appendix for a draft.
 
-    Always returns at least [Judgment, Legislation/Newacts].
+    Reads typed UserIntent. Falls back to a sensible default
+    [Judgment, Legislation] when intent is missing or no specific signal
+    points to Newacts / SCI_Judgment.
     """
-    agents = ["Judgment"]  # always include general case laws
-    query_lower = query.lower()
-
-    # Check for specific acts in Newacts scope (BNS/BNSS/BSA/IPC/CrPC/IEA)
-    newacts_keywords = [
-        "bns", "bnss", "bsa", "ipc", "crpc", "iea",
-        "penal code", "criminal procedure", "evidence act",
-        "bharatiya nyaya", "bharatiya nagarik", "bharatiya sakshya",
-    ]
-    if any(kw in query_lower for kw in newacts_keywords):
-        agents.append("Newacts")
+    agents = ["Judgment"]
+    if intent is not None and intent.wants_supreme_court:
+        agents.append("SCI_Judgment")
+    if intent is not None and intent.wants_gst_rulings:
+        agents.append("GST_Judgment")
+    # Newacts vs Legislation: extractor knows the corpus split. Default
+    # Legislation when neither signal is set.
+    if intent is not None and intent.task_intent == "lookup":
+        # When user is looking up codified Indian criminal codes (BNS/IPC,
+        # BNSS/CrPC, BSA/IEA) we route to Newacts; otherwise Legislation.
+        # The extractor's `wants_statute_text` already marks statute intent;
+        # we still need to know WHICH index. We rely on the planner LLM to
+        # pick the right one — `_select_citation_agents` is only the
+        # default. So: prefer Newacts if it's already in the running plan,
+        # else Legislation.
+        agents.append("Legislation")
     else:
         agents.append("Legislation")
-
-    # Check for Supreme Court references
-    sci_keywords = [
-        "supreme court", " sc ", "puttaswamy", "maneka gandhi",
-        "kesavananda", "vishaka", "navtej", "mohd. ahmed khan",
-    ]
-    if any(kw in query_lower for kw in sci_keywords):
-        agents.append("SCI_Judgment")
-
-    return agents
+    # Dedup while preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for a in agents:
+        if a not in seen:
+            seen.add(a)
+            out.append(a)
+    return out
 
 
-def _detect_multi_intent(query: str, task: str) -> list[str]:
-    """Keyword-based multi-intent detection as safety net.
+def _detect_multi_intent(intent: UserIntent | None, task: str) -> list[str]:
+    """Intent-driven multi-agent enrichment.
 
-    Ensures complex queries that mention citations, arguments, provisions etc.
-    get routed to multiple agents even if the LLM planner returns only one.
-    Returns additional agents to add (may be empty).
+    Reads typed UserIntent fields populated by the extractor and surfaces
+    additional agents the planner should add. Replaces the previous
+    keyword-scan safety net.
     """
-    q = query.lower()
-    extra = []
-
-    # Detect requests for case laws / citations / judgments
-    wants_cases = any(k in q for k in (
-        "case law", "case laws", "citation", "citations", "judgment", "judgement",
-        "precedent", "precedents", "court decision", "landmark case",
-        "relevant case", "supporting case", "judicial",
-    ))
-
-    # Detect requests for statutory provisions / sections / acts
-    wants_statutes = any(k in q for k in (
-        "section", "provision", "provisions", "statutory", "statute",
-        "act ", " act,", " act.", "legal provision", "under which law",
-        "applicable law", "relevant law", "penal", "ipc", "bns", "crpc", "bnss",
-    ))
-
-    # Detect requests for arguments / defences / remedies (scenario analysis)
-    wants_analysis = any(k in q for k in (
-        "argument", "arguments", "defence", "defense", "remedy", "remedies",
-        "legal option", "legal options", "on behalf of", "what can",
-        "how to fight", "how to defend", "legal recourse", "legal action",
-        "advice", "advise",
-    ))
-
-    # Detect drafting intent. Use the strict verb+document-noun patterns so we
-    # only add Drafting when the user actually asks for a court-filing-ready
-    # document to be produced — plaint, petition, affidavit, bail application,
-    # MOU, deed, etc. The previous naive substring check ("draft", "prepare",
-    # "application for") false-positively added Drafting on tactical-output
-    # queries like "Prepare a cross-examination strategy and draft arguments"
-    # which should be served by Scenario. The downstream cite-appendix-OFF
-    # logic strips all non-drafting agents once Drafting is in the plan, so
-    # this false-positive completely hijacked Scenario/Newacts/Judgment
-    # primary routings.
-    wants_draft = bool(
-        _DRAFTING_INTENT_RE.search(query)
-        or _DRAFTING_FORMAT_RE.search(query)
-        or _DRAFTING_OF_RE.search(query)
-    )
-
-    # Add missing agents based on detected intents
-    if wants_cases and task not in ("Judgment", "SCI_Judgment"):
-        extra.append("Judgment")
-    if wants_statutes and task not in ("Legislation", "Newacts"):
-        # Decide between Legislation and Newacts
-        newacts_acts = ("bns", "bnss", "bsa", "ipc", "crpc", "iea",
-                        "penal code", "criminal procedure", "evidence act")
-        if any(a in q for a in newacts_acts):
-            extra.append("Newacts")
-        else:
-            extra.append("Legislation")
-    if wants_analysis and task not in ("Scenario",):
+    if intent is None or intent.confidence < 0.5:
+        return []
+    extra: list[str] = []
+    if intent.include_case_law and task not in ("Judgment", "SCI_Judgment"):
+        # SCI takes priority when the user names the apex court.
+        extra.append("SCI_Judgment" if intent.wants_supreme_court else "Judgment")
+    if intent.wants_statute_text and task not in ("Legislation", "Newacts"):
+        extra.append("Legislation")
+    if intent.wants_constitution and task != "Constitution":
+        extra.append("Constitution")
+    if intent.wants_maxim and task != "Maxim":
+        extra.append("Maxim")
+    if intent.wants_scenario_analysis and task != "Scenario":
         extra.append("Scenario")
-    if wants_draft and task not in ("Drafting",):
+    if intent.wants_supreme_court and task != "SCI_Judgment" and "SCI_Judgment" not in extra:
+        extra.append("SCI_Judgment")
+    if intent.wants_gst_rulings and task != "GST_Judgment":
+        extra.append("GST_Judgment")
+    if intent.task_intent == "draft" and task != "Drafting":
         extra.append("Drafting")
-
     return extra
-
-
-def _plan_agents(query: str, task: str) -> list[str]:
-    """Determine which domain agents to invoke for this query.
-
-    For simple queries: returns just the primary task agent.
-    For complex queries: returns multiple agents to run in parallel.
-    For Drafting: always adds citation agents (Judgment + Legislation/Newacts).
-    """
-    # Short-circuit for simple task types
-    if task == "Non_legal":
-        log.debug("Routing to non_legal agent", task=task)
-        return ["Non_legal"]
-
-    # "Other" always maps to Scenario (as per PLAN_PROMPT contract)
-    if task == "Other":
-        log.debug("Mapping 'Other' task to Scenario")
-        task = "Scenario"
-
-    # Try multi-agent planning with LLM
-    try:
-        with log_time(log, "Multi-agent planning"):
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(
-                AgentPlan, include_raw=True,
-            )
-            prompt = ChatPromptTemplate.from_template(PLAN_PROMPT)
-            chain = prompt | llm
-            raw_and_parsed = chain.invoke({"query": query, "task": task})
-        from core.token_tracker import record as _record_tokens
-        _record_tokens("Orchestrator", "plan_agents", raw_and_parsed.get("raw"))
-        plan = raw_and_parsed["parsed"]
-        agents = plan.agents[:3]  # max 3 agents
-        log.info("Agent plan created",
-                 agents=agents, reasoning=plan.reasoning[:120])
-        agents = agents if agents else [task]
-    except Exception as e:
-        log.error("Planning failed, falling back to single agent",
-                  error=str(e), fallback=task)
-        agents = [task]
-
-    # Safety net: keyword-based multi-intent detection
-    extra = _detect_multi_intent(query, task)
-    for agent in extra:
-        if agent not in agents:
-            agents.append(agent)
-    if extra:
-        log.info("Multi-intent detection added agents",
-                 extra=extra, all_agents=agents)
-
-    # For Drafting: ALWAYS add citation agents for court-filing quality
-    has_drafting = task == "Drafting" or "Drafting" in agents
-    if has_drafting:
-        if "Drafting" not in agents:
-            agents.insert(0, "Drafting")
-        citation_agents = _select_citation_agents(query)
-        for ca in citation_agents:
-            if ca not in agents:
-                agents.append(ca)
-        agents = agents[:4]  # allow up to 4 agents for drafting
-        log.info("Drafting citation agents added",
-                 agents=agents, citation_agents=citation_agents)
-    else:
-        agents = agents[:3]  # cap at 3 agents for non-drafting
-
-    return agents
 
 
 # --- Per-Agent Query Rewriting ---
@@ -1006,91 +788,55 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
         return {}
 
 
-# --- Signal-Based Plan Validation ---
-# Instead of scattered keyword pre-checks, this single function validates
-# the LLM's plan against keyword signals in the query and adds missing agents.
-# Each rule maps keyword patterns → required agent(s) that should be in the plan.
-
-_PLAN_SIGNALS: list[tuple[tuple[str, ...], str, int, tuple[str, ...]]] = [
-    # (keywords, required_agent, max_plan_size_to_add, agents_to_remove)
-    # — max_plan_size_to_add: only add if plan has ≤ N agents (prevents 4+ agent bloat).
-    # — agents_to_remove: agents that become redundant once required_agent fires
-    #   (e.g. Newacts already covers IPC/CrPC/IEA texts, so Legislation would
-    #   only re-fetch the same content from a less-curated index and trigger
-    #   wasteful web-search fallback). Empty tuple = no veto.
-
-    # Judgment signals: "cases", "case law", "precedent", "ruling" → need Judgment
-    ((" cases", "case law", "case laws", "precedent", "court decision",
-      "judgments on ", "judgement on ", "rulings on "), "Judgment", 2, ()),
-
-    # SCI signals (backup for pre-check): "supreme court", "SC" → need SCI_Judgment
-    (("supreme court", "apex court"), "SCI_Judgment", 2, ()),
-
-    # GST AAAR signals
-    (("advance ruling", "aaar", "appellate authority for advance ruling",
-      "gst appeal", "gst appellate", "gst ruling", "gst classification"),
-     "GST_Judgment", 2, ()),
-
-    # Old/new act names for the 6 codes that live in Newacts (BNS/IPC,
-    # BNSS/CrPC, BSA/IEA). Newacts indexes BOTH the old and new statute text,
-    # so we strip Legislation -- otherwise Legislation re-fetches the same
-    # text from a less-curated index and frequently falls back to a 7-second
-    # Google web search for canonical sections (verified on "Section 125 CrPC").
-    (("ipc", "crpc", "cr.p.c", "cr pc", "iea", "bns", "bnss", "bsa",
-      "indian penal code", "penal code",
-      "code of criminal procedure", "criminal procedure code",
-      "indian evidence act", "evidence act",
-      "bharatiya nyaya", "bharatiya nagarik", "bharatiya sakshya"),
-     "Newacts", 3, ("Legislation",)),
-
-    # Freshness signals → need Scenario for web-grounded info
-    (("latest", "recent changes", "recent amendments", "recent court",
-      "recent ruling", "current status", "new changes", "updated",
-      "is it legal", "is cryptocurrency", "is crypto"), "Scenario", 3, ()),
-]
+# --- Intent-Driven Plan Validation ---
+# The keyword-table safety net (_PLAN_SIGNALS + _validate_and_enrich_plan)
+# was retired. Plan validation now reads typed UserIntent fields
+# (`include_case_law`, `wants_statute_text`, `wants_constitution`,
+# `wants_maxim`, `wants_supreme_court`, `wants_gst_rulings`,
+# `wants_scenario_analysis`) via `_detect_multi_intent`, and the Newacts
+# veto over Legislation is a typed-field decision instead of a keyword
+# scan. Adding a new corpus = add a field to UserIntent + a branch in
+# _detect_multi_intent. No keyword maintenance.
 
 
 def _validate_and_enrich_plan(
     tasks_planned: list[str],
-    original_query: str,
-    normalized_query: str,
+    intent: UserIntent | None,
     log,
 ) -> list[str]:
-    """Validate plan against keyword signals and add (or veto) agents.
+    """Apply intent-driven enrichment + Newacts/Legislation veto.
 
-    Scans both the original and normalized query for keyword patterns. For
-    each matching signal:
-    - adds `required_agent` if missing AND plan is not already too large,
-    - removes any agents listed in `agents_to_remove` (the "veto" list) once
-      the keyword fires, regardless of whether `required_agent` was newly
-      added or already present -- both cases mean the veto'd agent is now
-      redundant.
-
-    Returns the (possibly modified) plan.
+    Replaces the prior keyword-scan validator. Reasons over typed
+    UserIntent fields populated by `_extract_user_intent`. When intent
+    is missing or low-confidence, leaves the plan as-is.
     """
-    combined = (original_query.lower() + " " + normalized_query.lower())
+    if intent is None or intent.confidence < 0.5:
+        return tasks_planned
 
-    for keywords, required_agent, max_size, also_remove in _PLAN_SIGNALS:
-        if not any(k in combined for k in keywords):
-            continue
+    # Newacts covers BOTH old and new criminal-code texts. When the user is
+    # clearly asking about one of those codes, Legislation is redundant.
+    # The extractor flags the act/code in `wants_statute_text` and the
+    # planner LLM is asked to route IPC/BNS/CrPC/etc. queries to Newacts.
+    # If the planner picked both, prefer Newacts and veto Legislation.
+    if "Newacts" in tasks_planned and "Legislation" in tasks_planned:
+        tasks_planned = [a for a in tasks_planned if a != "Legislation"]
+        log.info("Plan veto: Newacts covers Legislation content",
+                 plan=tasks_planned)
 
-        # Add the required agent (if missing AND plan has headroom)
-        if required_agent not in tasks_planned and len(tasks_planned) <= max_size:
-            tasks_planned.append(required_agent)
-            log.info("Plan enriched by signal validator",
-                     added=required_agent, signal_match=True,
+    # When the user named the Supreme Court / a famous landmark case, prefer
+    # SCI_Judgment over general Judgment (or in addition, if both are valid).
+    if intent.wants_supreme_court and "SCI_Judgment" not in tasks_planned:
+        if len(tasks_planned) < 3:
+            tasks_planned.append("SCI_Judgment")
+            log.info("Plan enriched: wants_supreme_court → SCI_Judgment",
                      plan=tasks_planned)
 
-        # Veto: remove agents that would now be redundant. Runs even when
-        # `required_agent` was already in the plan, since the veto'd agent
-        # is wrong either way once this keyword fired.
-        for veto_agent in also_remove:
-            if veto_agent in tasks_planned:
-                tasks_planned.remove(veto_agent)
-                log.info("Plan veto by signal validator",
-                         removed=veto_agent,
-                         reason=f"{required_agent} covers this content",
-                         plan=tasks_planned)
+    # GST routing trumps general statute lookups.
+    if intent.wants_gst_rulings and "GST_Judgment" not in tasks_planned:
+        if len(tasks_planned) < 3:
+            tasks_planned.append("GST_Judgment")
+            log.info("Plan enriched: wants_gst_rulings → GST_Judgment",
+                     plan=tasks_planned)
 
     return tasks_planned
 
@@ -1265,10 +1011,16 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
 
         # Process classify+plan result
         if isinstance(results[1], Exception):
-            task = _classify_task_regex_fallback(classify_query)
+            # LLM-failure fallback: derive task from the typed intent when
+            # available; otherwise the safest catch-all (Legal_Concepts).
+            task = (
+                _classify_task_from_intent(extracted_intent)
+                or _classify_task_regex_fallback(classify_query)
+            )
             tasks_planned = [task]
-            log.warning("Classify+plan failed/timed out, using regex fallback",
-                        error=str(results[1])[:200], task=task)
+            log.warning("Classify+plan failed/timed out, using intent fallback",
+                        error=str(results[1])[:200], task=task,
+                        source="intent" if extracted_intent and extracted_intent.confidence >= 0.5 else "default")
         else:
             task, tasks_planned = results[1]
             # NOTE: Drafting false-positive strip lives downstream — after
@@ -1295,13 +1047,9 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
 
     # Draft + file detection: if user wants to DRAFT from an uploaded document,
     # route through Drafting pipeline (not just Document Q&A).
-    # Inject file content into Drafting agent's query for context.
-    #
-    # IMPORTANT: must use intent detection (verb + document noun, or explicit
-    # drafting verb), NOT raw substring matching. A naive substring approach
-    # mis-routes pure Q&A queries — e.g. "summarize the attached plaint" or
-    # "who is the plaintiff?" both contain "plaint" but neither asks for a draft.
-    if fc and fc.has_content and _wants_drafting(_original_query):
+    # Reads typed UserIntent.task_intent="draft" (handles native-language
+    # verbs, polite phrasings, conservative defaults) instead of regex.
+    if fc and fc.has_content and _wants_drafting(extracted_intent):
         if "Drafting" not in tasks_planned:
             tasks_planned.insert(0, "Drafting")
             log.info("Draft-from-file detected — adding Drafting agent",
@@ -1309,28 +1057,29 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
 
     progress("orchestrator", f"Identified: {', '.join(tasks_planned)}", substep=True, detail=task, step="classify")
 
-    # Post-processing: multi-intent detection safety net
+    # Multi-intent enrichment driven by typed UserIntent. Replaces the
+    # keyword-scan safety net. When the extractor is confident, the
+    # plan reflects exactly what the user asked for; when confidence
+    # is low, nothing is added (we trust the planner LLM).
     if task not in ("Non_legal", "Document"):
-        extra = _detect_multi_intent(query, task)
+        extra = _detect_multi_intent(extracted_intent, task)
         for agent in extra:
             if agent not in tasks_planned:
                 tasks_planned.append(agent)
         if extra:
-            log.info("Multi-intent detection added agents",
+            log.info("Multi-intent enrichment via UserIntent",
                      extra=extra, all_agents=tasks_planned)
 
     # Drafting false-positive strip (post multi-intent): if the primary task
-    # is not Drafting but Drafting ended up in tasks_planned (either from the
-    # LLM planner or from _detect_multi_intent's safety net), drop it. The
-    # cite-appendix-OFF logic below otherwise strips ALL non-drafting agents
-    # the moment Drafting is in the plan, which silently hijacks the primary
-    # task agent's execution. Trust the LLM's primary task. The file-attached
-    # drafting path (line ~1198) re-injects Drafting if the user explicitly
-    # asked to draft from an attached document, so that flow is preserved.
+    # is not Drafting but Drafting ended up in tasks_planned, drop it unless
+    # the user explicitly requested a draft (task_intent="draft") with a
+    # file context (file-attached drafting flow). The cite-appendix-OFF
+    # logic below otherwise strips ALL non-drafting agents the moment
+    # Drafting is in the plan, which silently hijacks primary execution.
     if (
         task != "Drafting"
         and "Drafting" in tasks_planned
-        and not (fc and fc.has_content and _wants_drafting(_original_query))
+        and not (fc and fc.has_content and _wants_drafting(extracted_intent))
     ):
         tasks_planned = [a for a in tasks_planned if a != "Drafting"]
         if not tasks_planned:
@@ -1351,7 +1100,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         _flag = state.get("cite_appendix")
         cite_appendix_on = _flag if _flag is not None else DRAFTING_CITE_APPENDIX_DEFAULT
         if cite_appendix_on:
-            citation_agents = _select_citation_agents(query)
+            citation_agents = _select_citation_agents(extracted_intent)
             for ca in citation_agents:
                 if ca not in tasks_planned:
                     tasks_planned.append(ca)
@@ -1366,9 +1115,9 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     else:
         tasks_planned = tasks_planned[:3]
 
-    # Signal-based plan validation
+    # Intent-driven plan validation (Newacts/Legislation veto + SCI/GST enrich)
     tasks_planned = _validate_and_enrich_plan(
-        tasks_planned, _original_query, query, log,
+        tasks_planned, extracted_intent, log,
     )
 
     # Step 4: Per-agent query rewriting (only for multi-agent plans)

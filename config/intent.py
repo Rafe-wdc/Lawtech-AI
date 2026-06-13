@@ -260,6 +260,99 @@ class UserIntent(BaseModel):
                     "Q&A or draft output.",
     )
 
+    # — Routing intent: what the user wants the system TO DO with the query.
+    #   Read by the orchestrator's planner to decide which agents to invoke.
+    #   Replaces the regex-based `_wants_drafting`, the keyword-based
+    #   `_detect_multi_intent` scans, and the `_PLAN_SIGNALS` veto table.
+    task_intent: Literal[
+        "draft",            # produce a court-filing-ready document (plaint,
+                            # affidavit, notice, agreement, deed, ...) — verbs
+                            # like "draft / prepare / write / give me a <doc>".
+                            # NOT for tactical outputs (cross-exam questions,
+                            # arguments, briefs of advice — those are "analyze").
+        "analyze",          # situational legal analysis, arguments, defences,
+                            # remedies, advice, "what should I do", tactical
+                            # output. Maps to Scenario.
+        "lookup",           # the user wants the text / explanation of a
+                            # specific statute, section, article, judgment,
+                            # maxim, or constitutional provision. The corpus
+                            # is decided by other typed fields (wants_statute_text,
+                            # wants_case_law, wants_constitution, wants_maxim).
+        "explain",          # conceptual / definitional / theoretical question
+                            # ("what is X", "format of Y", "essential elements
+                            # of Z", "difference between A and B"). Maps to
+                            # Legal_Concepts.
+        "ask_about_file",   # the user uploaded a file and is asking about its
+                            # contents (extract, summarize, identify parties,
+                            # cite sections in the file). Maps to Document.
+        "chat",             # greetings, identity questions, casual
+                            # acknowledgments. Maps to Non_legal.
+        "other",            # default when nothing clearly applies.
+    ] = Field(
+        "other",
+        description="Primary routing intent — what the user wants done with "
+                    "the query. The orchestrator reads this to decide which "
+                    "agents to invoke. CONSERVATIVE defaults: when in doubt "
+                    "between 'draft' and 'explain', pick 'explain'. When the "
+                    "user attaches a file and asks any question that's not a "
+                    "draft request, prefer 'ask_about_file'.",
+    )
+
+    # — Content corpus directives. Each is TRUE iff the user explicitly asked
+    #   for that kind of supporting content alongside the primary task.
+    #   Replace the keyword-list dispatch in `_detect_multi_intent` /
+    #   `_select_citation_agents` / `_PLAN_SIGNALS`.
+
+    wants_statute_text: bool = Field(
+        False,
+        description="TRUE iff the user wants statutory text / specific section "
+                    "/ specific act provisions surfaced. Triggers: 'section X', "
+                    "'provision under Y', 'what does <act> say about', "
+                    "'applicable law', 'relevant statute', explicit act/code "
+                    "names (IPC, BNS, CrPC, BNSS, IEA, BSA, NI Act, Companies "
+                    "Act, etc. in ANY language/script). Drives Legislation / "
+                    "Newacts routing.",
+    )
+    wants_scenario_analysis: bool = Field(
+        False,
+        description="TRUE iff the user wants a situational analysis on TOP of "
+                    "their primary ask — arguments, defences, remedies, "
+                    "tactical recommendations, 'on behalf of <party>', 'what "
+                    "are my options'. Drives Scenario agent inclusion. "
+                    "Different from task_intent='analyze' (that is the "
+                    "primary task); this field is the secondary signal that "
+                    "Scenario should ALSO run for a non-analyze primary task.",
+    )
+    wants_constitution: bool = Field(
+        False,
+        description="TRUE iff the user references constitutional provisions / "
+                    "Articles / fundamental rights / directive principles. "
+                    "Drives Constitution agent inclusion.",
+    )
+    wants_maxim: bool = Field(
+        False,
+        description="TRUE iff the user references a legal maxim / Latin "
+                    "doctrine (res judicata, audi alteram partem, estoppel, "
+                    "nemo judex, caveat emptor, etc.). Drives Maxim agent "
+                    "inclusion.",
+    )
+    wants_supreme_court: bool = Field(
+        False,
+        description="TRUE iff the user explicitly names the Supreme Court / "
+                    "SC / apex court / a famous SC landmark case "
+                    "(Kesavananda Bharati, Maneka Gandhi, Puttaswamy, "
+                    "Vishaka, Navtej, etc.) or asks for SC-only precedents. "
+                    "Drives SCI_Judgment routing instead of (or in addition "
+                    "to) general Judgment.",
+    )
+    wants_gst_rulings: bool = Field(
+        False,
+        description="TRUE iff the query is about GST/CGST/SGST/IGST advance "
+                    "rulings (AAR/AAAR), GST classification appeals, GST "
+                    "ITC disputes, GST valuation rulings, HSN classification. "
+                    "Drives GST_Judgment routing.",
+    )
+
     # — Catchall for things outside the typed schema
     additional_instructions: str = Field(
         "",

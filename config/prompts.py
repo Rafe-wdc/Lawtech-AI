@@ -348,6 +348,104 @@ Given the user's query and the recent conversation summary, produce:
        "create", "write me", "produce", "make" combined with the artifact
        noun should trigger non-NONE.
 
+   task_intent — what the user wants the system TO DO with the query. Choose
+       the BEST single match:
+
+       "draft"            user wants the AI to PRODUCE a court-filing-ready
+                          legal document (plaint, petition, written statement,
+                          bail application, affidavit, legal notice, agreement,
+                          contract, deed, MOU, will, divorce petition, complaint,
+                          rejoinder, etc.) — paired with an EXPLICIT production
+                          verb: "draft", "write", "prepare", "create",
+                          "generate", "compose", "draw up", "give me a <doc>",
+                          "I need a <doc>", "prepare a <doc>", and ANY native-
+                          language equivalents ("बनवा / तयार कर / लिखो /
+                          draft kar do / banao"). The verb-noun pairing must be
+                          there. "What's in this plaint?" is NOT a draft
+                          request. "Format of an affidavit" is NOT a draft
+                          request. "Cross-examination questions" is NOT a draft
+                          request (those are tactical/analytical — use
+                          "analyze").
+       "analyze"          tactical / situational legal analysis: arguments,
+                          defences, remedies, recommendations, "what should I
+                          do", "what are my options", "what defences are
+                          available", "draft arguments for <party>" (the word
+                          "draft" here is tactical advocacy, NOT a document),
+                          cross-examination strategy, brief of advice,
+                          litigation prep.
+       "lookup"           user wants the actual text / details of a specific
+                          statute, section, article, judgment, maxim, or
+                          constitutional provision they named. "Section 138 NI
+                          Act", "Article 21", "Kesavananda Bharati v. State of
+                          Kerala", "res judicata", "what does Section 482
+                          CrPC say".
+       "explain"          conceptual / definitional / theoretical question:
+                          "what is X", "explain Y", "format of Z" (when not
+                          asking for a sample), "essential elements of A",
+                          "difference between B and C", "how does D work in
+                          theory". Distinguish from "lookup": lookup wants the
+                          authoritative source text; explain wants a teacher-
+                          style overview.
+       "ask_about_file"   the user has attached a file and the query is about
+                          its contents: "summarize this document", "who is the
+                          plaintiff in this petition", "extract the key dates",
+                          "what sections are cited in this judgment". If the
+                          user attached a file AND said "draft <document> based
+                          on this", that is still "draft" (the file is the
+                          source material). If they attached a file AND said
+                          "prepare cross-examination questions", that is still
+                          "analyze".
+       "chat"             greetings, identity questions, casual acknowledgment:
+                          "hello", "who are you", "thanks", "what can you do".
+       "other"            default — none of the above clearly applies.
+
+       Be CONSERVATIVE: when in doubt between "draft" and "explain", pick
+       "explain". When in doubt between "analyze" and "lookup", pick "lookup".
+
+   wants_statute_text — TRUE iff the user wants statutory text / a specific
+       section / specific act provisions surfaced. Triggers (any language):
+         - explicit section / article / rule / order references: "section 138",
+           "Article 21", "Order VII Rule 11", "धारा १३८"
+         - act / code names: "IPC", "BNS", "CrPC", "BNSS", "IEA", "BSA",
+           "NI Act", "Companies Act", "Hindu Marriage Act", "GST Act",
+           "Specific Relief Act", and their full / native equivalents
+         - "applicable law", "relevant statute", "under which law",
+           "statutory provision"
+       FALSE for pure factual scenario queries that don't reference any
+       specific statute.
+
+   wants_scenario_analysis — TRUE iff, in addition to the primary task, the
+       user wants situational analysis bolted on. Triggers: "argument(s)",
+       "defence(s)", "remedy / remedies", "options", "advise / advice",
+       "on behalf of <party>", "what can I do", "how to fight / defend",
+       "legal recourse". Different from task_intent='analyze' — that's the
+       primary task. This field signals "Scenario should ALSO run" even when
+       primary is Drafting / Legislation / Newacts / Judgment.
+       Conservative default: FALSE.
+
+   wants_constitution — TRUE iff the query references constitutional
+       provisions / Articles of the Constitution / fundamental rights /
+       directive principles / Preamble. Examples: "Article 21", "Article 32",
+       "fundamental right to privacy", "DPSP". FALSE otherwise.
+
+   wants_maxim — TRUE iff the query names a legal maxim or Latin doctrine
+       (res judicata, audi alteram partem, estoppel, nemo judex, caveat
+       emptor, actus reus, mens rea, ubi jus ibi remedium, etc.). FALSE
+       otherwise.
+
+   wants_supreme_court — TRUE iff the user explicitly names the Supreme Court
+       / "SC" / "apex court" / "Hon'ble SC" OR names a famous SC landmark
+       case (Kesavananda Bharati, Maneka Gandhi, Puttaswamy, Vishaka, Navtej,
+       Indra Sawhney, Mohd. Ahmed Khan, etc.) OR asks for SC-only precedents
+       / Article 32 / Article 136. FALSE for generic "case law / judgment"
+       references (those default to general Judgment routing).
+
+   wants_gst_rulings — TRUE iff the query is about GST/CGST/SGST/IGST advance
+       rulings, AAR / AAAR orders, GST classification appeals, GST input tax
+       credit (ITC) disputes, GST valuation rulings, HSN classification, or
+       state-level GST appellate decisions. FALSE for generic statutory
+       questions about GST that don't reference rulings.
+
    additional_instructions — anything format/style-related the user said that
        doesn't fit the typed fields above. Keep under 300 characters. Examples:
        "use formal legal tone", "include the section heading verbatim",

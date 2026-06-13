@@ -74,19 +74,26 @@ class LegalArtifact(str, Enum):
 
     NONE is the default — the agent produces generic Q&A or draft output
     based on its standard system prompt. Any other value tells the agent to
-    pick a tailored prompt designed for that specific legal artifact.
+    pick a tailored prompt designed for that specific legal artifact, use
+    an artifact-tuned model config, and enforce a post-generation quality
+    gate with retry-on-fail.
+
+    Phase A shipped CROSS_EXAMINATION; Phase B adds the rest below.
+    Adding a new artifact = add an enum value + update the extraction prompt
+    to detect it + add a specialized system prompt + add a row in
+    _QUALITY_THRESHOLDS and _RETRY_PREAMBLE in agents/document.py +
+    parametrized test cases.
     """
 
     NONE                = "none"                # generic — no specialized handling
-    CROSS_EXAMINATION   = "cross_examination"   # generate cross-exam questions for a witness/document
-    # Reserved for future phases (Phase B+) — not yet wired into any agent:
-    #   DEPOSITION_SUMMARY  = "deposition_summary"
-    #   CONTRACT_ANALYSIS   = "contract_analysis"
-    #   LEGAL_NOTICE_DRAFT  = "legal_notice"
-    #   COMPLAINT_DRAFT     = "complaint_draft"
-    #   WITNESS_PREP        = "witness_prep"
-    #   OPENING_STATEMENT   = "opening_statement"
-    #   CLOSING_ARGUMENT    = "closing_argument"
+    CROSS_EXAMINATION   = "cross_examination"   # cross-exam questions for a witness/document
+    DEPOSITION_SUMMARY  = "deposition_summary"  # structured summary of a deposition / examination-in-chief
+    CONTRACT_ANALYSIS   = "contract_analysis"   # risks + clauses + compliance review of a contract
+    LEGAL_NOTICE_DRAFT  = "legal_notice"        # formal Indian-style legal notice draft
+    COMPLAINT_DRAFT     = "complaint_draft"     # complaint / petition draft based on attached facts
+    WITNESS_PREP        = "witness_prep"        # prep YOUR witness for direct + anticipated cross
+    OPENING_STATEMENT   = "opening_statement"   # opening statement for trial
+    CLOSING_ARGUMENT    = "closing_argument"    # closing argument for trial
 
 
 # ---------------------------------------------------------------------------

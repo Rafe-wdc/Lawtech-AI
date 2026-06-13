@@ -30,7 +30,16 @@ from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.progress import progress
 from config.intent import LegalArtifact, UserIntent
-from config.prompts import CROSS_EXAMINATION_PROMPT
+from config.prompts import (
+    CROSS_EXAMINATION_PROMPT,
+    DEPOSITION_SUMMARY_PROMPT,
+    CONTRACT_ANALYSIS_PROMPT,
+    LEGAL_NOTICE_DRAFT_PROMPT,
+    COMPLAINT_DRAFT_PROMPT,
+    WITNESS_PREP_PROMPT,
+    OPENING_STATEMENT_PROMPT,
+    CLOSING_ARGUMENT_PROMPT,
+)
 log = get_logger("Document")
 
 
@@ -49,13 +58,38 @@ log = get_logger("Document")
 # in _QUALITY_THRESHOLDS + (optional) a custom retry preamble.
 # ---------------------------------------------------------------------------
 
-_QUALITY_THRESHOLDS: dict = {
-    LegalArtifact.CROSS_EXAMINATION: {
-        "min_words": 600,
-        "min_numbered_questions": 20,
-    },
+# Per-artifact specialized prompt — the picker reads this map. Add a new
+# entry to extend; no other code needs to change.
+_SPECIALIZED_PROMPTS: dict = {
+    LegalArtifact.CROSS_EXAMINATION:   CROSS_EXAMINATION_PROMPT,
+    LegalArtifact.DEPOSITION_SUMMARY:  DEPOSITION_SUMMARY_PROMPT,
+    LegalArtifact.CONTRACT_ANALYSIS:   CONTRACT_ANALYSIS_PROMPT,
+    LegalArtifact.LEGAL_NOTICE_DRAFT:  LEGAL_NOTICE_DRAFT_PROMPT,
+    LegalArtifact.COMPLAINT_DRAFT:     COMPLAINT_DRAFT_PROMPT,
+    LegalArtifact.WITNESS_PREP:        WITNESS_PREP_PROMPT,
+    LegalArtifact.OPENING_STATEMENT:   OPENING_STATEMENT_PROMPT,
+    LegalArtifact.CLOSING_ARGUMENT:    CLOSING_ARGUMENT_PROMPT,
 }
 
+# Per-artifact quality gate. Calibrated to each artifact's expected shape:
+#   - min_words: floor on overall response length
+#   - min_numbered_questions: floor on numbered list items (e.g. "1. ..."),
+#     mainly relevant to artifacts that produce numbered question lists.
+# Artifacts not in this map skip the quality gate entirely.
+_QUALITY_THRESHOLDS: dict = {
+    LegalArtifact.CROSS_EXAMINATION:   {"min_words": 600, "min_numbered_questions": 20},
+    LegalArtifact.DEPOSITION_SUMMARY:  {"min_words": 300, "min_numbered_questions": 0},
+    LegalArtifact.CONTRACT_ANALYSIS:   {"min_words": 500, "min_numbered_questions": 0},
+    LegalArtifact.LEGAL_NOTICE_DRAFT:  {"min_words": 400, "min_numbered_questions": 6},
+    LegalArtifact.COMPLAINT_DRAFT:     {"min_words": 500, "min_numbered_questions": 12},
+    LegalArtifact.WITNESS_PREP:        {"min_words": 500, "min_numbered_questions": 15},
+    LegalArtifact.OPENING_STATEMENT:   {"min_words": 350, "min_numbered_questions": 0},
+    LegalArtifact.CLOSING_ARGUMENT:    {"min_words": 500, "min_numbered_questions": 0},
+}
+
+# Per-artifact retry preamble. Used when the first attempt falls below the
+# quality gate. The preamble is concatenated in front of the original user
+# query and the LLM is re-invoked once.
 _RETRY_PREAMBLE: dict = {
     LegalArtifact.CROSS_EXAMINATION: (
         "The previous attempt fell short of the required output. You MUST "
@@ -67,33 +101,90 @@ _RETRY_PREAMBLE: dict = {
         "Extract only facts visible in the attached document.\n\nOriginal "
         "question:\n"
     ),
+    LegalArtifact.DEPOSITION_SUMMARY: (
+        "The previous attempt was too brief. Produce a complete structured "
+        "summary with ALL six sections: Case Identification, Witness "
+        "Identification, Substantive Testimony (numbered chronological "
+        "bullets), Key Claims, Contradictions/Omissions/Improvements, and "
+        "Exhibits Referenced. Extract every relevant detail visible in the "
+        "attached deposition.\n\nOriginal question:\n"
+    ),
+    LegalArtifact.CONTRACT_ANALYSIS: (
+        "The previous attempt was too thin. Produce a comprehensive analysis "
+        "covering: Identification, Parties, Key Commercial Terms, Critical "
+        "Clauses (analyse each clause individually with rights/risks/red "
+        "flags), Risk Flags (prioritised HIGH/MEDIUM/LOW), Compliance & "
+        "Statutory Hooks, and Recommended Amendments. Identify at least 5 "
+        "specific clauses or risks.\n\nOriginal question:\n"
+    ),
+    LegalArtifact.LEGAL_NOTICE_DRAFT: (
+        "The previous attempt was incomplete. Produce a complete Indian "
+        "legal notice with: letterhead block, date, addressee, subject, "
+        "salutation, 6-12 numbered factual paragraphs, a 'TAKE NOTICE THAT' "
+        "demand block citing the correct statute, a compliance period, "
+        "consequences of default, and the advocate's signature block. Use "
+        "facts from the attached document.\n\nOriginal question:\n"
+    ),
+    LegalArtifact.COMPLAINT_DRAFT: (
+        "The previous attempt was too brief. Produce a complete complaint / "
+        "petition with: correct court header, case-title block (parties + "
+        "addresses), 12-25 numbered factual paragraphs, an explicit Cause of "
+        "Action block, a numbered Prayer for relief, and a Verification "
+        "block. Cite the correct statute and section.\n\nOriginal "
+        "question:\n"
+    ),
+    LegalArtifact.WITNESS_PREP: (
+        "The previous attempt was too brief. Produce a full witness "
+        "preparation kit with: Witness Profile, Themes for Direct, AT LEAST "
+        "15 open-ended Direct Examination Questions grouped by theme, "
+        "Documents to Authenticate, Anticipated Cross-Examination "
+        "Vulnerabilities (3-7 attack lines), Prepared Responses & "
+        "Supporting Documents, and Practical Coaching Points. Direct "
+        "questions must be OPEN-ENDED (not leading).\n\nOriginal "
+        "question:\n"
+    ),
+    LegalArtifact.OPENING_STATEMENT: (
+        "The previous attempt was too brief. Produce a complete opening "
+        "statement with: a one-line Theme, a Statement of Facts (4-8 "
+        "paragraphs), a Roadmap of witnesses, Documentary Evidence list, "
+        "Legal Framework / charges, and the findings the Court will be "
+        "asked to record. Use facts from the attached case papers.\n\n"
+        "Original question:\n"
+    ),
+    LegalArtifact.CLOSING_ARGUMENT: (
+        "The previous attempt was too brief. Produce a complete closing "
+        "argument with: Theme Reprise, Issue-by-Issue Evidence Summary "
+        "(with `**Issue: <name>**` subsections citing PW/DW numbers and "
+        "exhibits), numbered Answer to opposite-side arguments, Statutory "
+        "& Precedential Authority, and a clean Prayer / Relief Sought "
+        "block.\n\nOriginal question:\n"
+    ),
 }
 
 
 def _pick_specialized_prompt(intent, generic_prompt: str) -> str:
-    """Return CROSS_EXAMINATION_PROMPT (or another specialized prompt) when
-    intent surfaces a legal_artifact request; otherwise return the generic
-    prompt unchanged.
+    """Return the specialized prompt registered for `intent.legal_artifact`,
+    or the generic prompt when intent is None / artifact is NONE / artifact
+    is not in the registry.
     """
     if intent is None:
         return generic_prompt
     artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
-    if artifact == LegalArtifact.CROSS_EXAMINATION:
-        return CROSS_EXAMINATION_PROMPT
-    return generic_prompt
+    return _SPECIALIZED_PROMPTS.get(artifact, generic_prompt)
 
 
 def _llm_config_for_artifact(intent) -> dict:
     """Return Gemini Pro kwargs tuned for the requested artifact.
 
-    Generic Q&A: temperature=0.3, no thinking budget, 12K max output.
-    Specialized (cross_examination): temperature=0.4, thinking_budget=4096
-    (strategic planning helps), 20K max output (long structured outputs).
+    Generic (artifact=NONE): temperature=0.3, default output budget.
+    Specialized artifacts: temperature=0.4, thinking_budget=4096 (strategic
+    planning helps for structured legal output), 20K max output tokens
+    (long structured outputs).
     """
     if intent is None:
         return {"temperature": 0.3}
     artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
-    if artifact == LegalArtifact.CROSS_EXAMINATION:
+    if artifact != LegalArtifact.NONE and artifact in _SPECIALIZED_PROMPTS:
         return {
             "temperature": 0.4,
             "max_output_tokens": 20000,

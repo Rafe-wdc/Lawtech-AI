@@ -279,6 +279,16 @@ Given the user's query and the recent conversation summary, produce:
        "detailed"  user said "in detail / thoroughly / comprehensive / full"
        "standard"  default
 
+   target_word_count — specific word count the user named, parsed as an
+       integer. Examples:
+         "in 100 words"            → 100
+         "in 50 words or less"     → 50
+         "give me a 500-word summary" → 500
+         "in 2-3 lines"            → null (use response_depth=brief instead)
+         "briefly" / "in detail"   → null
+       Range 10-5000. NULL when the user didn't give a number.
+       Downstream: critic checks response is within ±25% of this target.
+
    include_citations — default TRUE. Set FALSE only if user said "no citations".
    include_examples  — TRUE iff user asked for examples / illustrations.
    include_case_law  — TRUE iff user asked for case laws / precedents.
@@ -564,6 +574,13 @@ Rules:
    When you do leave a placeholder, write the surrounding sentence in full —
    never stub a paragraph as "[Section X: ... could not be generated]" or end a
    sentence mid-clause. The lawyer fills the bracket; you write the prose.
+   PLACEHOLDER CONSISTENCY — pick ONE convention per draft and stick to it.
+   If you start with "[Date of Cheque]" / "[Cheque Number]" placeholders,
+   ALL dates and numbers in the same draft must use the same bracket style.
+   Do NOT mix specific dates (e.g. "2026-06-13", "2023-01-15") with bracket
+   placeholders in the same document — that produces a half-filled draft
+   that looks broken to the lawyer. If the user provided real facts, use
+   them everywhere; otherwise use placeholders everywhere. Never both.
 9. CITATIONS — cite statutes inline with the exact Act name + section number
    (e.g., "Section 8 read with the Schedule of the Hindu Succession Act, 1956"),
    never as bracketed shorthand. For case law, cite real Indian case names you

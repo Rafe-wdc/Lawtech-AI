@@ -169,12 +169,30 @@ Examples of how intent fields translate to checks:
               "1. दाव्यातील..."   ← MAJOR. Must be "१. दाव्यातील..."
               "2. परिच्छेद..."    ← MAJOR. Must be "२. परिच्छेद..."
               "(3) सदर..."        ← MAJOR. Must be "(३) सदर..."
+           Sub-section numbering ALSO must be in target script:
+              "2.1. वादीने..."    ← MAJOR. Must be "२.१. वादीने..."
+              "(a) कारण..."       ← MAJOR. Must be "(अ) कारण..." (or appropriate native alphabetic ordinal)
+              "(i) पुरावा..."     ← MAJOR. Must be appropriate native ordinal
            The same applies to other Indic scripts (Bengali ০-৯, Tamil
            ௦-௯, Telugu ౦-౯, Kannada ೦-೯, Malayalam ൦-൯, Gujarati ૦-૯,
            Gurmukhi ੦-੯, Odia ୦-୯, Eastern Arabic for Urdu ۰-۹).
        (c) Latin digits in dates, amounts, years, paragraph numbers
            ("Section 138", "para 2", "Rs. 50000") — every one is a MAJOR
            violation in strict mode and must be in the target script.
+           Inline statute references must be FULLY translated. Common
+           leak patterns in Marathi/Hindi drafts the critic MUST catch:
+              "..., as per the provisions of the Indian Contract Act, 1872."
+                ← MAJOR. Must be: ", भारतीय करार अधिनियम, १८७२ च्या तरतुदींनुसार."
+              "..., as per Section 10 of the Specific Relief Act, 1963."
+                ← MAJOR. Must be: ", विशिष्ट अनुतोष अधिनियम, १९६३ च्या कलम १० नुसार."
+              "..., as per the Hindu Succession Act, 1956"
+                ← MAJOR. Must be the native-script equivalent.
+              "Limitation Act, 1963 च्या कलम 54 नुसार"
+                ← MAJOR. Mixed Latin+Devanagari. Must be either fully
+                English OR fully Marathi (preferred in strict mode):
+                "मुदत अधिनियम, १९६३ च्या कलम ५४ नुसार".
+           Any "as per <English act name + year + section>" pattern is a
+           MAJOR violation. The refiner must translate the full reference.
        (d) Even ONE Latin-digit numbered-list start is enough to set
            passes=False. Do NOT pass the response if any survive.
       Only narrow exception: case names ("ABC v. XYZ"), which are proper
@@ -192,6 +210,16 @@ Examples of how intent fields translate to checks:
   response_depth='detailed'
     → Response should comprehensively cover the topic; thin responses
       are a violation.
+
+  target_word_count is not null (user named a specific number, e.g. 100)
+    → Count words in the response BODY (excluding system-added Disclaimer
+      and any "## Sources" appendix). Tolerance is ±25%. Examples:
+        target=100: acceptable range 75-125 words. 145 words = MAJOR.
+        target=500: acceptable range 375-625 words.
+        target=50:  acceptable range 38-63 words. Over 100 words = CRITICAL.
+      The suggested_fix should be specific: "Trim to ~100 words by removing
+      the elaboration on <subsection>." or "Expand to ~500 words by adding
+      the <missing aspect> the user implicitly asked for."
 
   legal_artifact='cross_examination'
     → Response must have a Legal Analysis section, Strategic Objectives
@@ -291,6 +319,32 @@ violations specific to Indian drafting practice:
   raw_html — `<p>`, `<div>`, `<span>`, `<center>`, `align="center"`,
     `align="right"` attributes inside the body. The frontend renders
     markdown only; raw HTML shows up as literal text. MAJOR.
+
+  fabricated_citation — a case name + citation that does not exist OR
+    that is NOT in the doctrinal stance's `key_cases` whitelist. The
+    drafting agent generates a stance JSON with vetted cases before
+    section generation; sections should cite ONLY those, or omit the
+    citation entirely. Any case appearing in the draft that is NOT in
+    `stance.key_cases` is suspect — flag MAJOR and ask the refiner
+    to either replace with a stance case or remove the citation lead-in.
+
+  date_placeholder_inconsistency — the same draft mixes specific dates
+    ("2026-06-13", "2023-01-15") AND placeholder forms ("[Date]",
+    "[Date of Cheque]"). A real draft uses ONE convention throughout:
+    placeholders when facts are unknown, specific dates when facts are
+    given. Mixed = MAJOR. The refiner picks one convention and rewrites.
+
+  paragraph_numbering_break — section heading numbers don't match
+    paragraph numbers, OR paragraphs restart numbering inside each
+    section, OR section numbers skip ("## 1." → "## TRANSACTION
+    DETAILS" → "## 3."). A real legal draft has continuous paragraph
+    numbering across the whole document. MAJOR.
+
+  wrong_footer_for_artifact — a court-filing footer ("Place: / Date: /
+    Signature of the Petitioner/Applicant / Through Counsel:") appears
+    on a non-court-filing draft (legal notice, agreement, MOU, will,
+    deed). Legal notices are signed by counsel directly; agreements
+    have parties' signatures. The court-filing footer is wrong. MAJOR.
 
 For each, the suggested_fix should be concrete:
   - "Replace 'Section 38 SRA' with 'Order XXXIX Rules 1 & 2 CPC' in

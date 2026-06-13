@@ -225,6 +225,18 @@ class UserIntent(BaseModel):
                     "subsections / explanations.",
     )
 
+    target_word_count: int | None = Field(
+        None,
+        description="Specific word count the user named (e.g. 'in 100 words', "
+                    "'in 50 words', '500-word summary'). When set, the self-"
+                    "refine critic checks if the response is within ±25% of "
+                    "this target and flags as MAJOR if out of range. NULL when "
+                    "no specific number was given (response_depth alone "
+                    "governs length). Capped at 5000 to bound prompt-injection "
+                    "attacks asking for a 1M-word response.",
+        ge=10, le=5000,
+    )
+
     # — Content directives
     include_citations: bool = Field(
         True,

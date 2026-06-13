@@ -1185,6 +1185,50 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Multi-agent dedup helpers — used by the primary-task-aware synthesis to
+# skip supporting agents whose content substantially overlaps the primary
+# (e.g. Legislation duplicating Constitution's Article 21 explanation).
+# Cheap O(N) token-set comparison; no LLM call.
+# ---------------------------------------------------------------------------
+
+_STOP_WORDS = frozenset((
+    "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
+    "be", "been", "being", "have", "has", "had", "do", "does", "did",
+    "will", "would", "could", "should", "may", "might", "must", "shall",
+    "to", "of", "in", "on", "at", "by", "for", "with", "from", "as",
+    "it", "its", "this", "that", "these", "those", "such", "which",
+    "who", "whom", "what", "when", "where", "how", "why", "than", "then",
+    "if", "any", "all", "no", "not", "also", "into", "under", "over",
+    "between", "among", "where", "while", "however", "therefore", "thus",
+    "i", "we", "you", "he", "she", "they", "them", "us", "our", "your",
+    "their", "his", "her", "my", "its",
+))
+
+
+def _content_token_set(text: str) -> set[str]:
+    """Token bag for overlap comparison. Lowercase, drop stop words, keep
+    legal-meaningful tokens (act names, section numbers, doctrine names).
+    """
+    if not text:
+        return set()
+    tokens = re.findall(r"[A-Za-z]{3,}|\d{3,}", text.lower())
+    return {t for t in tokens if t not in _STOP_WORDS}
+
+
+def _token_overlap_ratio(primary: set[str], supporting: set[str]) -> float:
+    """Fraction of supporting tokens that appear in primary. 0.0-1.0.
+
+    Asymmetric: measures how much of `supporting` is redundant given
+    `primary`. A supporting response that's 50%+ contained in primary
+    is treated as redundant and skipped.
+    """
+    if not supporting:
+        return 0.0
+    overlap = len(supporting & primary)
+    return overlap / len(supporting)
+
+
 async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     """Phase 2 — Merge results from all domain agents into final response.
 
@@ -1436,14 +1480,40 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         all_serialized_sources = _serialize_sources(primary_result)
         total_tokens = primary_result.tokens_consumed
         appendix_parts: list[str] = []
+        skipped_redundant: list[str] = []
+
+        # Token-overlap dedup: if a supporting agent's content shares more
+        # than 50% of its informational tokens with the primary, the
+        # supporting response is mostly a restatement (common when the
+        # planner picks Constitution + Legislation for "Article 21" — both
+        # produce the same Article text + interpretation). Skip the
+        # appendix to keep the response tight. Threshold is conservative;
+        # genuinely complementary supporting content (e.g. Maxim explaining
+        # res judicata alongside Constitution explaining Article 21) shares
+        # <50% tokens and IS preserved.
+        primary_tokens = _content_token_set(primary)
 
         for name, result in supporting_results.items():
             if not result.content:
+                continue
+            supporting_tokens = _content_token_set(result.content)
+            overlap_ratio = _token_overlap_ratio(primary_tokens, supporting_tokens)
+            if overlap_ratio >= 0.5 and len(supporting_tokens) > 50:
+                skipped_redundant.append(f"{name}({overlap_ratio:.0%})")
+                # Still merge the sources — the supporting agent's
+                # citations are valuable even when its prose is redundant.
+                all_serialized_sources.extend(_serialize_sources(result))
+                total_tokens += result.tokens_consumed
                 continue
             heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
             appendix_parts.append(f"\n\n---\n\n{heading}\n\n{result.content.strip()}")
             total_tokens += result.tokens_consumed
             all_serialized_sources.extend(_serialize_sources(result))
+
+        if skipped_redundant:
+            log.info("Dropped redundant supporting agents from synthesis",
+                     skipped=skipped_redundant,
+                     reason="content overlap >= 50% with primary")
 
         final_response = primary + "".join(appendix_parts)
 

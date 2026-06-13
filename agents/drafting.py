@@ -651,6 +651,29 @@ Return a JSON object with these keys:
 - "court_fee_rule" (string): one sentence on the court fee basis (e.g.
   "Section 6(vii) Maharashtra Court Fees Act, 1959 — ad valorem on share's
   market value since plaintiff is dispossessed from one flat").
+- "footer_kind" (string): the footer convention this draft must end with.
+  Pick exactly ONE based on the document type:
+    "court_filing"  → plaints, petitions, written statements, bail
+                      applications, writ petitions, appeals, revisions,
+                      reviews — anything FILED in court. Footer:
+                      Place / Date / Signature of the Petitioner /
+                      Applicant / Through Counsel: [Advocate Name].
+    "legal_notice"  → Section 138 NI notice, demand notice, eviction
+                      notice, statutory notices. NOT filed in court;
+                      sent by registered post. Footer signed by counsel
+                      directly ("Yours sincerely, Sd. [Advocate Name],
+                      [Enrolment No.]"). NO "Petitioner/Applicant" block.
+    "agreement"     → contracts, MOUs, lease deeds, sale deeds, NDAs,
+                      partnership deeds, settlement agreements. Footer:
+                      all parties' signatures + 2 attesting witness
+                      blocks. NO court-filing language.
+    "will"          → wills, codicils. Footer: testator's signature +
+                      2 attesting witness blocks per Section 63 of the
+                      Indian Succession Act, 1925.
+    "none"          → other document types where no automatic footer
+                      should be added (e.g. legal opinion memo).
+  DO NOT default to "court_filing" — a legal notice with a court-filing
+  footer is broken output.
 - "procedural_sections" (list of {{title, description, estimated_paragraphs,
   needs_citations}}): EVERY mandatory procedural section this pleading
   must carry under the Indian Code (CPC / BNSS-CrPC / SRA / Court Fees Act /
@@ -713,6 +736,24 @@ class DoctrinalStance(BaseModel):
                     "Populated by the doctrinal-stance LLM call. The drafting "
                     "pipeline injects any missing section from this list into "
                     "the outline before parallel section generation.",
+    )
+    footer_kind: str = Field(
+        "court_filing",
+        description="What kind of footer this draft needs. One of: "
+                    "'court_filing' (plaints, petitions, written statements, "
+                    "bail applications, appeals, writs — anything filed in "
+                    "court): Place / Date / Signature of the Petitioner / "
+                    "Through Counsel; "
+                    "'legal_notice' (Section 138 notice, demand notice, "
+                    "vacate notice): no court footer; signed by counsel "
+                    "directly with 'Yours sincerely / Sd. / [Advocate Name] / "
+                    "[Enrolment No.]'; "
+                    "'agreement' (contracts, MOUs, leases, sale deeds, NDAs): "
+                    "no court footer; signed by all parties with witness lines; "
+                    "'will' (wills, codicils): testator + 2 attesting witnesses; "
+                    "'none' (other / unknown): no automatic footer. "
+                    "Pick based on the document type — DO NOT default to "
+                    "'court_filing' for a notice or agreement.",
     )
 
 
@@ -1072,6 +1113,7 @@ async def _generate_section(
     case_facts: str = "",
     stance_block: str = "",
     format_block: str = "",
+    start_para_num: int = 1,
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
@@ -1141,6 +1183,12 @@ async def _generate_section(
              "NOW WRITE section {section_num} of {total} IN FULL DETAIL.\n"
              "{facts_reminder}\n\n"
              "## {section_title}\n{section_desc}\n\n"
+             "PARAGRAPH NUMBERING: this section's first numbered paragraph "
+             "MUST be {start_para_num}. Continue from there for each "
+             "subsequent paragraph in this section. DO NOT restart at 1 — "
+             "the document has CONTINUOUS paragraph numbering across ALL "
+             "sections. The next section starts after yours ends; the "
+             "global counter is already advanced before you write.\n\n"
              "Expected paragraphs: {est_paragraphs}\n"
              "Needs case law citations: {needs_citations}"),
         ])
@@ -1164,6 +1212,7 @@ async def _generate_section(
             "total": str(total_sections),
             "section_title": section.title,
             "section_desc": section.description,
+            "start_para_num": str(start_para_num),
             "est_paragraphs": str(section.estimated_paragraphs),
             "needs_citations": (
                 "Yes -- cite real Indian case names + citations inline (e.g., "
@@ -1214,6 +1263,18 @@ async def _generate_sections_parallel(
     results: list[tuple[str | None, int, Exception | None]] = [None] * total
     progress_counter = {"count": 0}
 
+    # Precompute cumulative paragraph offsets so each section knows the
+    # global paragraph number it must start numbering at. Replaces the
+    # prior independent-per-section numbering that produced broken
+    # sequences like "## 3. X" with paragraphs "3., 4.", then "## 4. Y"
+    # with paragraphs "4., 5." (collisions across sections).
+    start_para_offsets: list[int] = [1]
+    running = 1
+    for plan in outline.sections:
+        running += max(1, plan.estimated_paragraphs)
+        start_para_offsets.append(running)
+    # start_para_offsets[i] = first global paragraph number for section i
+
     async def _gen_one(i: int, plan: SectionPlan):
         async with sem:
             progress_counter["count"] += 1
@@ -1242,6 +1303,7 @@ async def _generate_sections_parallel(
                     case_facts=case_facts,
                     stance_block=stance_block,
                     format_block=format_block,
+                    start_para_num=start_para_offsets[i],
                 )
                 results[i] = (text, tokens, None)
                 if writer:
@@ -1371,11 +1433,87 @@ _FOOTER_LABELS: dict[str, dict[str, str]] = {
 }
 
 
-def _assemble_document(outline: DraftOutline, sections: list[str], user_language: str = "en") -> str:
+def _build_footer(footer_kind: str, user_language: str) -> str:
+    """Return the appropriate footer block for a given artifact kind.
+
+    Reads stance.footer_kind ("court_filing" / "legal_notice" / "agreement"
+    / "will" / "none") and picks the right footer template. Labels for
+    "court_filing" come from _FOOTER_LABELS in the requested Indian
+    language; other footer kinds are emitted in English (the self-refine
+    critic translates them when strict_language is set).
+    """
+    if footer_kind == "none":
+        return ""
+    if footer_kind == "legal_notice":
+        # Legal notices are sent by registered post and signed by
+        # counsel; no "Petitioner/Applicant" line, no court filing.
+        return (
+            "Yours sincerely,\n\n"
+            "Sd.\n"
+            "**[Name of Advocate]**\n"
+            "[Enrolment No.]\n"
+            "[Address of Advocate]\n"
+            "[Contact Details]"
+        )
+    if footer_kind == "agreement":
+        return (
+            "**IN WITNESS WHEREOF**, the parties have executed this "
+            "Agreement on the date first written above.\n\n"
+            "**FIRST PARTY:**\n"
+            "Sd. _________________________\n"
+            "[Name of First Party]\n\n"
+            "**SECOND PARTY:**\n"
+            "Sd. _________________________\n"
+            "[Name of Second Party]\n\n"
+            "**WITNESSES:**\n\n"
+            "1. Sd. _________________________\n"
+            "   [Name and Address of Witness 1]\n\n"
+            "2. Sd. _________________________\n"
+            "   [Name and Address of Witness 2]"
+        )
+    if footer_kind == "will":
+        # Indian Succession Act, 1925 Section 63 — testator + 2 witnesses.
+        return (
+            "**IN WITNESS WHEREOF**, I have set my hand to this WILL on "
+            "the date first written above.\n\n"
+            "Sd. _________________________\n"
+            "[Name of Testator]\n\n"
+            "**Signed by the Testator in our presence and signed by us in "
+            "the presence of the Testator and of each other:**\n\n"
+            "1. Sd. _________________________\n"
+            "   [Name and Address of Attesting Witness 1]\n\n"
+            "2. Sd. _________________________\n"
+            "   [Name and Address of Attesting Witness 2]"
+        )
+    # Default: court_filing
+    labels = _FOOTER_LABELS.get(user_language, {})
+    place_label = labels.get("place", "Place")
+    date_label = labels.get("date", "Date")
+    signature_label = labels.get("signature", "Signature of the Petitioner/Applicant")
+    through_counsel_label = labels.get("through_counsel", "Through Counsel")
+    return (
+        f"**{place_label}:** [Place]\n\n"
+        f"**{date_label}:** [Date]\n\n"
+        f"**{signature_label}**\n\n"
+        f"{through_counsel_label}:\n\n"
+        "**[Name of Advocate]**\n"
+        "[Enrollment No.]\n"
+        "[Address of Advocate]"
+    )
+
+
+def _assemble_document(
+    outline: DraftOutline,
+    sections: list[str],
+    user_language: str = "en",
+    stance: "DoctrinalStance | None" = None,
+) -> str:
     """Combine all sections into the final document with proper structure.
 
     Ensures each section has a heading (injects from outline if LLM omitted it).
-    Adds a court filing footer with labels translated for the user's language.
+    Picks the right footer based on `stance.footer_kind` (see `_build_footer`).
+    Falls back to court_filing footer when no stance is available, which
+    preserves the prior default for backward compatibility.
     """
     parts = [
         f"# {outline.document_title}",
@@ -1389,22 +1527,14 @@ def _assemble_document(outline: DraftOutline, sections: list[str], user_language
             text = f"## {i + 1}. {section_plan.title}\n\n{text}"
         parts.append(text)
 
-    labels = _FOOTER_LABELS.get(user_language, {})
-    place_label = labels.get("place", "Place")
-    date_label = labels.get("date", "Date")
-    signature_label = labels.get("signature", "Signature of the Petitioner/Applicant")
-    through_counsel_label = labels.get("through_counsel", "Through Counsel")
+    footer_kind = "court_filing"
+    if stance is not None:
+        footer_kind = getattr(stance, "footer_kind", "court_filing") or "court_filing"
 
-    parts.append("---")
-    parts.append(
-        f"**{place_label}:** [Place]\n\n"
-        f"**{date_label}:** [Date]\n\n"
-        f"**{signature_label}**\n\n"
-        f"{through_counsel_label}:\n\n"
-        "**[Name of Advocate]**\n"
-        "[Enrollment No.]\n"
-        "[Address of Advocate]"
-    )
+    footer_block = _build_footer(footer_kind, user_language)
+    if footer_block:
+        parts.append("---")
+        parts.append(footer_block)
 
     return "\n\n".join(parts)
 
@@ -1784,7 +1914,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
         # Step 6: Assemble complete document
         progress("drafting", "Assembling final document...", step="assemble")
-        full_draft = _assemble_document(outline, sections, user_language)
+        full_draft = _assemble_document(outline, sections, user_language, stance=stance)
 
         # Step 6.5: Validator -- auto-fix mojibake + leftover [CITE: ...], log
         # warnings for statute traps and orphan citation tails. Never raises.

@@ -1284,15 +1284,36 @@ async def _generate_section(
              "NOW WRITE section {section_num} of {total} IN FULL DETAIL.\n"
              "{facts_reminder}\n\n"
              "## {section_title}\n{section_desc}\n\n"
-             "PARAGRAPH NUMBERING (CRITICAL): this section's first numbered "
-             "paragraph MUST be paragraph number {start_para_num} (given here "
-             "as an integer; render it in the response language's native "
-             "script — for a Marathi/Hindi/Sanskrit response use Devanagari, "
-             "for Tamil use Tamil numerals, etc.). Continue from there for "
-             "each subsequent paragraph in this section. DO NOT restart at 1 "
-             "— the document has CONTINUOUS paragraph numbering across ALL "
-             "sections. The next section starts after yours ends; the global "
-             "counter is already advanced before you write.\n\n"
+             "PARAGRAPH NUMBERING — apply ONE of these schemes based on this "
+             "section's role:\n\n"
+             "  (A) **Substantive body sections** — Brief Facts, Statement of "
+             "Facts, Cause of Action, Issues, Grounds, Pleadings, Defences, "
+             "Legal Submissions, Counter-Submissions, Reply on Merits. Use "
+             "the GLOBAL paragraph counter: this section's first numbered "
+             "paragraph MUST be number {start_para_num}, continue from there "
+             "for subsequent paragraphs in this section, DO NOT restart at 1. "
+             "Render the number in the response language's native script "
+             "(Devanagari for Marathi/Hindi/Sanskrit, Tamil for Tamil, etc.).\n\n"
+             "  (B) **Prayer / Relief clause** — use the prayer's OWN scheme: "
+             "fresh numbering starting at (a)/(b)/(c) or (i)/(ii)/(iii) or "
+             "(1)/(2)/(3). NEVER continue the global body counter — the user "
+             "expects clean (a), (b), (c) or (i), (ii), (iii) for relief "
+             "clauses, not (34), (35), (36) carrying over from body paras.\n\n"
+             "  (C) **Verification block** — single declaratory paragraph "
+             "signed by the deponent. NO paragraph number on the verification "
+             "statement itself. The deponent's signature line and place/date "
+             "line are unnumbered too.\n\n"
+             "  (D) **Court Fee Statement, Schedule of Properties, List of "
+             "Documents, Affidavit-in-Support, Memo of Parties, Annexures "
+             "Index** — descriptive procedural blocks. Either use a local "
+             "scheme starting fresh (1, 2, 3 OR A, B, C OR i, ii, iii — "
+             "depending on the section's tradition) OR unnumbered prose. "
+             "DO NOT continue the global body counter into these — the user "
+             "expects 1, 2, 3 fresh per section, not 39, 40, 41 spilling "
+             "over from body paragraphs.\n\n"
+             "Decide which scheme applies based on the section title above. "
+             "When in doubt (e.g. an unfamiliar section name), prefer the "
+             "section's own local scheme starting fresh.\n\n"
              "Expected paragraphs: {est_paragraphs}\n"
              "Needs case law citations: {needs_citations}"),
         ])
@@ -1371,17 +1392,36 @@ async def _generate_sections_parallel(
     results: list[tuple[str | None, int, Exception | None]] = [None] * total
     progress_counter = {"count": 0}
 
-    # Precompute cumulative paragraph offsets so each section knows the
-    # global paragraph number it must start numbering at. Replaces the
-    # prior independent-per-section numbering that produced broken
-    # sequences like "## 3. X" with paragraphs "3., 4.", then "## 4. Y"
-    # with paragraphs "4., 5." (collisions across sections).
-    start_para_offsets: list[int] = [1]
+    # Precompute cumulative paragraph offsets so each substantive body
+    # section knows the global paragraph number it must start numbering
+    # at. PROCEDURAL sections (Prayer, Verification, Court Fee Statement,
+    # Schedule, List of Documents, Affidavit, Memo of Parties, Annexures
+    # Index) use their OWN local numbering scheme — they don't consume
+    # slots in the global body counter and don't shift downstream
+    # sections' offsets. The per-section prompt rules (A-D) decide
+    # which scheme to apply based on the section title.
+    _PROCEDURAL_TITLE_KEYWORDS = (
+        "prayer", "relief", "verification", "court fee", "court-fee",
+        "schedule", "list of documents", "list of document",
+        "affidavit", "memo of parties", "annexures index",
+        "interim application", "ia under order",
+    )
+
+    def _is_procedural(title: str) -> bool:
+        t = (title or "").lower()
+        return any(k in t for k in _PROCEDURAL_TITLE_KEYWORDS)
+
+    start_para_offsets: list[int] = []
     running = 1
     for plan in outline.sections:
-        running += max(1, plan.estimated_paragraphs)
         start_para_offsets.append(running)
+        # Procedural sections don't consume body counter slots, so the
+        # running counter stays put for the next section.
+        if not _is_procedural(plan.title):
+            running += max(1, plan.estimated_paragraphs)
     # start_para_offsets[i] = first global paragraph number for section i
+    # (only meaningful for substantive body sections; procedural sections
+    # are told to use their own local scheme via prompt rules B/C/D)
 
     async def _gen_one(i: int, plan: SectionPlan):
         async with sem:

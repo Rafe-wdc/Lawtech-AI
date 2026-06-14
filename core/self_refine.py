@@ -372,10 +372,37 @@ violations specific to Indian drafting practice:
     given. Mixed = MAJOR. The refiner picks one convention and rewrites.
 
   paragraph_numbering_break — section heading numbers don't match
-    paragraph numbers, OR paragraphs restart numbering inside each
-    section, OR section numbers skip ("## 1." → "## TRANSACTION
-    DETAILS" → "## 3."). A real legal draft has continuous paragraph
-    numbering across the whole document. MAJOR.
+    paragraph numbers, OR substantive body sections (Brief Facts,
+    Cause of Action, Issues, Grounds, Pleadings) restart numbering
+    inside each section instead of continuing the global counter,
+    OR section numbers skip ("## 1." → "## TRANSACTION DETAILS" →
+    "## 3."). A real legal draft has continuous paragraph numbering
+    THROUGH THE BODY. MAJOR.
+
+  wrong_numbering_scheme_for_procedural_section — PROCEDURAL blocks
+    must use their OWN local numbering scheme, NOT continue the
+    global body counter. Specifically:
+       PRAYER — uses (a)/(b)/(c) or (i)/(ii)/(iii) or (1)/(2)/(3)
+       FROM A FRESH START. Continuing the body counter ("34. Direct
+       the Defendants...", "35. Direct the Defendants...") is a
+       MAJOR violation — Prayer should be "(a) Direct ..." or
+       "(1) Direct ...".
+       VERIFICATION — single declaratory paragraph, NO point number.
+       The "I, [name], aged [age], do hereby verify..." statement
+       is unnumbered. Numbering it as "37. I, [name], aged..." or
+       similar continuation from body paragraphs is a MAJOR violation.
+       COURT FEE STATEMENT — descriptive section, uses fresh local
+       numbering (1, 2, 3 from start) or unnumbered prose. Continuing
+       body counter ("39. The Plaintiff submits...", "40. In
+       accordance with...") is a MAJOR violation.
+       SCHEDULE OF PROPERTIES — uses Schedule A / Schedule B per
+       asset, NOT body para numbers.
+       LIST OF DOCUMENTS — uses fresh 1, 2, 3.
+       AFFIDAVIT-IN-SUPPORT — separate document with its own
+       deponent declaration; not numbered into the body counter.
+    Suggested_fix: rewrite the affected section's paragraph numbers
+    to use the correct local scheme (a/b/c or i/ii/iii or fresh
+    1/2/3 or unnumbered for Verification).
 
   wrong_footer_for_artifact — a court-filing footer ("Place: / Date: /
     Signature of the Petitioner/Applicant / Through Counsel:") appears

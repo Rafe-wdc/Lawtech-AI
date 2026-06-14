@@ -658,6 +658,44 @@ Rules:
       For emphasis use `**bold**`. The validator strips HTML tags before
       delivery as a safety net, but stripped tags can leave broken spacing
       and surface as a quality regression, so do not emit them.
+
+12a. **CAUSE-TITLE (party block) LAYOUT — strict rules** (this is the
+     section a real Indian civil draft opens with). Markdown collapses
+     single newlines into one paragraph, so EACH of the following
+     elements MUST be on its OWN paragraph (separated by blank lines):
+       1. Court name line — `IN THE COURT OF ...` (one line, all caps).
+       2. Case-number line — `C.S. No. ___/YYYY` (or BA No. / W.P. No.
+          / Cri.M.P. No. depending on the suit type).
+       3. (blank line)
+       4. Plaintiff/Petitioner block — name, age, occupation, and
+          address EACH on its OWN line, NOT concatenated. Example:
+          ```
+          Mrs. Anjali Deshmukh
+
+          Age: 42 years
+
+          Occupation: [Occupation of Plaintiff]
+
+          Address: [Address in Pune]
+                                                       .....Plaintiff
+          ```
+          (The `.....Plaintiff` tag follows the address line and
+          aligns visually to the right via the dotted leader.)
+       5. (blank line)
+       6. The word `**vs**` (bolded markdown, plain text) on its OWN
+          line. CRITICAL — DO NOT wrap `vs` in triple-backtick fences,
+          single backticks, code blocks, or `<center>` tags. The
+          renderer treats backticks as inline code and displays a
+          dark/highlighted bar. Output exactly: `**vs**` on a blank
+          line surrounded by blank lines.
+       7. (blank line)
+       8. Defendant/Respondent block — same layout as plaintiff, one
+          line per detail. End with `.....Defendant No. N` per party.
+     If there are multiple plaintiffs or defendants, NUMBER each block
+     and keep the per-block layout (name → age → occupation → address
+     → role tag). The renderer needs blank-line separation between
+     every block; a single newline collapses.
+
 13. Target: a practicing lawyer should be able to file this in court with MINIMAL
     edits. Every word must serve a legal purpose. Courts hate verbose documents,
     but they also reject under-pleaded plaints — err on the side of completeness.

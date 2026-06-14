@@ -320,6 +320,43 @@ violations specific to Indian drafting practice:
     `align="right"` attributes inside the body. The frontend renders
     markdown only; raw HTML shows up as literal text. MAJOR.
 
+  cause_title_collapsed — the opening party block (court name + case
+    number + plaintiff details + "vs" + defendant details) is one
+    squashed paragraph instead of a structured layout. Markdown
+    collapses single newlines, so each detail must be on its OWN
+    paragraph (separated by blank lines). Pattern that's a MAJOR
+    violation:
+       "IN THE COURT OF CIVIL JUDGE ... C.S. No. ___/2026 Mrs. Anjali
+        Deshmukh Age: 42 years Occupation: ... Address: ... .....Plaintiff"
+    Should be (each line a paragraph, blank lines between):
+       IN THE COURT OF CIVIL JUDGE SENIOR DIVISION, AT PUNE
+       (blank line)
+       C.S. No. ___/2026
+       (blank line)
+       Mrs. Anjali Deshmukh
+       (blank line)
+       Age: 42 years
+       (blank line)
+       Occupation: ...
+       (blank line)
+       Address: ...
+       (blank line)
+                                                       .....Plaintiff
+    Flag MAJOR when the plaintiff or defendant block reads as a
+    flowing sentence with name + age + occupation + address
+    concatenated. Suggested_fix: rewrite the party block with
+    blank lines between every detail.
+
+  vs_in_code_block — the "vs" separator between plaintiff and
+    defendant blocks is wrapped in backticks (`` `vs` ``) or a
+    fenced triple-backtick code block. The renderer treats backticks
+    as inline code and shows a dark highlighted bar instead of
+    plain text. Expected output is `**vs**` (bolded markdown,
+    plain text) on its own paragraph with blank lines on either
+    side. Any code-block / inline-code formatting of "vs" / "VERSUS"
+    / "versus" is MAJOR. Suggested_fix: replace the code-fenced
+    "vs" with `**vs**` between blank lines.
+
   fabricated_citation — a case name + citation that does not exist OR
     that is NOT in the doctrinal stance's `key_cases` whitelist. The
     drafting agent generates a stance JSON with vetted cases before

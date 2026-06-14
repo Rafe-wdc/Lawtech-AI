@@ -1,0 +1,143 @@
+name: Prod nginx upload-limit fix (one-off)
+
+# One-off workflow_dispatch. Bumps nginx client_max_body_size on the
+# prod box so PDF uploads up to ~1 GB reach the FastAPI app instead of
+# being rejected with 413 at the proxy. Idempotent + rollback on
+# nginx -t failure.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    name: Bump client_max_body_size on prod nginx
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Apply nginx upload-limit fix on prod
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -euo pipefail
+
+          echo "=========================================================="
+          echo " 1. Locate the lawttorney nginx site config"
+          echo "=========================================================="
+          # Look for a server block that proxies to localhost:5001 (our app).
+          CANDIDATES=$(sudo grep -rl "localhost:5001\|127.0.0.1:5001" /etc/nginx/ 2>/dev/null || true)
+          if [ -z "$CANDIDATES" ]; then
+            echo "  No site found proxying to :5001; falling back to default site"
+            CANDIDATES=$(ls /etc/nginx/sites-enabled/ 2>/dev/null | head -3 | xargs -I {} echo /etc/nginx/sites-enabled/{})
+          fi
+          echo "Candidate site files:"
+          echo "$CANDIDATES"
+          # Pick the first one that contains a server { ... } block.
+          SITE_FILE=""
+          for f in $CANDIDATES; do
+            if sudo grep -q "server\s*{" "$f" 2>/dev/null; then
+              SITE_FILE="$f"
+              break
+            fi
+          done
+          if [ -z "$SITE_FILE" ]; then
+            echo "ERROR: could not locate a usable site config"
+            exit 1
+          fi
+          echo "Selected site file: $SITE_FILE"
+          echo
+          echo "Current size directive (if any):"
+          sudo grep -n "client_max_body_size" "$SITE_FILE" || echo "  (none — will add)"
+          echo
+
+          echo "=========================================================="
+          echo " 2. Snapshot current nginx config (rollback safety)"
+          echo "=========================================================="
+          BACKUP="/etc/nginx/site-backup-$(date +%s).conf"
+          sudo cp "$SITE_FILE" "$BACKUP"
+          echo "Backup written to: $BACKUP"
+          echo
+
+          echo "=========================================================="
+          echo " 3. Apply / update client_max_body_size = 1100M"
+          echo "=========================================================="
+          # Idempotent edit: if a client_max_body_size line already exists,
+          # replace it; otherwise insert one right after each "server {" line.
+          if sudo grep -q "^\s*client_max_body_size" "$SITE_FILE"; then
+            echo "Replacing existing directive"
+            sudo sed -i 's|^\s*client_max_body_size .*|    client_max_body_size 1100M;|g' "$SITE_FILE"
+          else
+            echo "Inserting new directive after each 'server {' line"
+            sudo sed -i '/^\s*server\s*{/a\    client_max_body_size 1100M;' "$SITE_FILE"
+          fi
+          echo
+          echo "Updated directive lines:"
+          sudo grep -n "client_max_body_size" "$SITE_FILE"
+          echo
+
+          echo "=========================================================="
+          echo " 4. Validate nginx config (nginx -t)"
+          echo "=========================================================="
+          if ! sudo nginx -t; then
+            echo "ERROR: nginx -t failed. Rolling back from $BACKUP"
+            sudo cp "$BACKUP" "$SITE_FILE"
+            sudo nginx -t
+            exit 1
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 5. Reload nginx"
+          echo "=========================================================="
+          sudo systemctl reload nginx
+          sleep 1
+          sudo systemctl status nginx --no-pager | head -8
+          echo
+
+          echo "=========================================================="
+          echo " 6. Probe the new limit from the host"
+          echo "=========================================================="
+          # Send a 30MB body to /pyapi/health (it won't accept POST but we
+          # care about whether the body reaches nginx vs being rejected at
+          # the proxy layer with 413).
+          dd if=/dev/zero of=/tmp/probe.bin bs=1M count=30 2>/dev/null
+          echo "30 MB body:"
+          curl -s -o /dev/null -w "  HTTP %{http_code}\n" --max-time 15 \
+            -X POST http://localhost:5001/pyapi/health \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @/tmp/probe.bin || echo "  (curl failed; not necessarily an nginx issue)"
+          # Same via the nginx-fronted public path (use Host header so cert SNI works)
+          echo "30 MB via nginx:"
+          curl -s -o /dev/null -w "  HTTP %{http_code}\n" --max-time 30 \
+            --resolve api.lawttorney.com:443:127.0.0.1 \
+            -X POST https://api.lawttorney.com/pyapi/health \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @/tmp/probe.bin || echo "  (curl failed)"
+          rm -f /tmp/probe.bin
+          echo
+
+          echo "=========================================================="
+          echo " 7. Health endpoint (sanity)"
+          echo "=========================================================="
+          curl -s --max-time 5 http://localhost:5001/pyapi/health | head -c 300
+          echo
+          echo
+          echo "=========================================================="
+          echo " DONE — backup at $BACKUP (delete after verifying)"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -39,11 +39,31 @@ jobs:
               "NEW_ORIGIN='$NEW_ORIGIN' bash -s" << 'ENDSSH'
           set -euo pipefail
 
-          ENV_FILE=/root/Lawtech-AI/.env
-          if [ ! -f "$ENV_FILE" ]; then
-            echo "ERROR: $ENV_FILE not found"
+          # Discover the .env path. systemd unit's EnvironmentFile= is the
+          # authoritative source; fall back to common candidates.
+          ENV_FILE=$(sudo systemctl show lawttorney-v2 -p EnvironmentFiles --value 2>/dev/null | tr ' ' '\n' | grep -v '^$' | head -1 | sed 's|^-||')
+          if [ -z "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+            echo "EnvironmentFile= from systemd unit was empty or missing — falling back to discovery"
+            for candidate in \
+                /root/Lawtech-AI/.env \
+                /root/Lawtech-AI/.env.production \
+                /root/Lawtech-AI/.env.prod \
+                /etc/lawttorney/.env \
+                /etc/lawttorney-v2/.env; do
+              if [ -f "$candidate" ]; then
+                ENV_FILE="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+            echo "ERROR: could not locate .env file. Files under /root/Lawtech-AI matching .env*:"
+            sudo ls -la /root/Lawtech-AI/ 2>/dev/null | grep -i env || echo "  (none)"
+            echo "systemd unit EnvironmentFile= property:"
+            sudo systemctl show lawttorney-v2 -p EnvironmentFiles
             exit 1
           fi
+          echo "Discovered .env: $ENV_FILE"
 
           echo "=========================================================="
           echo " 1. Current ALLOWED_ORIGINS line"

@@ -107,6 +107,42 @@ All routes are prefixed with `/pyapi`:
 - `GET /pyapi/health` - Health check
 - `GET /` - Frontend UI
 
+## Deployment Topology — read before smoking "prod"
+
+There are **two separate** lawttorney HTTPS surfaces. Smoke against
+the wrong one and your verification is meaningless.
+
+| Host | Backend IP | nginx | Source of code | Notes |
+|---|---|---|---|---|
+| `api.lawttorney.com` | `52.66.246.103` (AWS, ap-south-1) | 1.24.0 | **`deploy-prod.yml` workflow_dispatch from this repo** | **This is the box we own.** All commits on `main` ship here. Health: `https://api.lawttorney.com/pyapi/health`. SSH'd via `secrets.SSH_PRIVATE_KEY_PROD`. systemd unit: `lawttorney-v2.service`. App dir: `/root/Lawtech-AI`. |
+| `tool.lawttorney.com` | `185.38.109.20*` (separate infra, unknown provenance) | 1.18.0 | NOT this repo | Different machine entirely — different CPU/disk/uptime/nginx version. Our `deploy-prod.yml` does NOT touch this. End users may hit it; smokes against it do not validate our deploys. Treat as out-of-scope unless you have explicit ops context. |
+
+Practical rules:
+
+1. **Smoke prod against `https://api.lawttorney.com/pyapi/*`** — NOT
+   `tool.lawttorney.com/pyapiv2/*`. Both URLs return JSON that *looks*
+   identical (same Pydantic models, same agent schemas) but they're
+   served by different machines that may have drifted.
+2. **The health endpoint is the canonical "did our deploy land?" check**.
+   Compare `uptime_seconds` before and after CI's deploy completes.
+   `api.lawttorney.com` uptime increments on every `deploy-prod.yml`
+   run; `tool.lawttorney.com` uptime does its own thing.
+3. **Dev URL is `https://test.lawttorney.com`** (Vultr, `64.176.97.182`,
+   `deploy.yml`). Its nginx currently returns the frontend SPA on
+   `/pyapi*` and `/pyapiv2*` paths, so external API smokes against
+   dev are blocked at the proxy. To smoke dev, run from `localhost:5000`
+   on the box (or fix the nginx route).
+4. **If a smoke fails on one URL and passes on the other**, you're not
+   looking at a code bug — you're looking at the topology gap. Resolve
+   the topology question first.
+
+History note: prior to 2026-06-14, internal lore (older docs, smoke
+scripts in `tests/`) routinely used `tool.lawttorney.com/pyapiv2/*` as
+"prod". That was misleading — the deploy pipeline always pointed at
+`api.lawttorney.com`. The smokes happened to look right because both
+backends ran similar (but not identical) code. Don't perpetuate the
+mistake.
+
 ## Task Types
 
 The orchestrator classifies queries into tasks:

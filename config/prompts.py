@@ -659,42 +659,62 @@ Rules:
       delivery as a safety net, but stripped tags can leave broken spacing
       and surface as a quality regression, so do not emit them.
 
-12a. **CAUSE-TITLE (party block) LAYOUT — strict rules** (this is the
-     section a real Indian civil draft opens with). Markdown collapses
-     single newlines into one paragraph, so EACH of the following
-     elements MUST be on its OWN paragraph (separated by blank lines):
-       1. Court name line — `IN THE COURT OF ...` (one line, all caps).
-       2. Case-number line — `C.S. No. ___/YYYY` (or BA No. / W.P. No.
-          / Cri.M.P. No. depending on the suit type).
-       3. (blank line)
-       4. Plaintiff/Petitioner block — name, age, occupation, and
-          address EACH on its OWN line, NOT concatenated. Example:
-          ```
-          Mrs. Anjali Deshmukh
+12a. **CAUSE-TITLE (party block) LAYOUT — strict markdown rules**.
+     This is the opening party block of every Indian civil draft.
+     CommonMark renderers (which the frontend uses) treat a single
+     newline as a soft-break — they join consecutive lines back into
+     ONE paragraph with a space between. So writing:
+        ```
+        Mrs. Anjali Deshmukh
+        Age: 42 years
+        ```
+     renders on screen as:
+        Mrs. Anjali Deshmukh Age: 42 years   ← WRONG
+     CORRECT layout requires a BLANK LINE (i.e. `\n\n`) between EVERY
+     element so each renders as its own paragraph. The full template:
 
-          Age: 42 years
+        IN THE COURT OF CIVIL JUDGE SENIOR DIVISION, AT PUNE
+        ⟨blank line⟩
+        C.S. No. ___/YYYY
+        ⟨blank line⟩
+        Mrs. Anjali Deshmukh
+        ⟨blank line⟩
+        Age: 42 years
+        ⟨blank line⟩
+        Occupation: [Occupation of Plaintiff]
+        ⟨blank line⟩
+        Address: [Address in Pune]
+        ⟨blank line⟩
+        .....Plaintiff
+        ⟨blank line⟩
+        **vs**
+        ⟨blank line⟩
+        1. Dr. Rakesh Nair
+        ⟨blank line⟩
+        Age: [Age of Defendant]
+        ⟨blank line⟩
+        Occupation: Medical Practitioner
+        ⟨blank line⟩
+        Address: [Defendant's Address], Pune
+        ⟨blank line⟩
+        .....Defendant No. 1
 
-          Occupation: [Occupation of Plaintiff]
+     Each ⟨blank line⟩ above is LITERALLY an empty line in the output.
+     If you omit them, the renderer joins the elements into one
+     squashed line. Court-style tight stacking via single newlines
+     LOOKS right in the source but renders WRONG on screen.
 
-          Address: [Address in Pune]
-                                                       .....Plaintiff
-          ```
-          (The `.....Plaintiff` tag follows the address line and
-          aligns visually to the right via the dotted leader.)
-       5. (blank line)
-       6. The word `**vs**` (bolded markdown, plain text) on its OWN
-          line. CRITICAL — DO NOT wrap `vs` in triple-backtick fences,
-          single backticks, code blocks, or `<center>` tags. The
-          renderer treats backticks as inline code and displays a
-          dark/highlighted bar. Output exactly: `**vs**` on a blank
-          line surrounded by blank lines.
-       7. (blank line)
-       8. Defendant/Respondent block — same layout as plaintiff, one
-          line per detail. End with `.....Defendant No. N` per party.
-     If there are multiple plaintiffs or defendants, NUMBER each block
-     and keep the per-block layout (name → age → occupation → address
-     → role tag). The renderer needs blank-line separation between
-     every block; a single newline collapses.
+     The `**vs**` line (the separator between plaintiff and defendant
+     blocks) MUST be `**vs**` exactly — bolded markdown, plain text,
+     blank lines on both sides. CRITICAL — do NOT wrap `vs` / `VERSUS`
+     / `versus` in triple-backtick fences, single backticks, code
+     blocks, or `<center>` tags. The renderer treats backticks as
+     inline code and displays a dark highlighted bar.
+
+     Multiple plaintiffs / defendants: number each block (`1.`, `2.`,
+     ...) and keep the per-block detail layout (name, then age, then
+     occupation, then address, then party tag — every one separated
+     by a blank line).
 
 13. Target: a practicing lawyer should be able to file this in court with MINIMAL
     edits. Every word must serve a legal purpose. Courts hate verbose documents,

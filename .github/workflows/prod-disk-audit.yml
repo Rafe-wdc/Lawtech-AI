@@ -1,0 +1,160 @@
+name: Prod Disk Audit (read-only diagnostic)
+
+# One-off workflow_dispatch — SSH'es into the prod box using the existing
+# deploy credentials and reports disk usage breakdown. Read-only: no
+# files are deleted, modified, or created. Output is printed to the
+# workflow logs only.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: Disk usage breakdown on prod
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Run disk audit on prod
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u  # don't `set -e` — some du calls hit permission errors and that's fine
+
+          echo "=========================================================="
+          echo " 1. Overall disk usage"
+          echo "=========================================================="
+          df -h /
+          echo
+          df -i / | head -5
+          echo
+
+          echo "=========================================================="
+          echo " 2. Top-level directories by size"
+          echo "=========================================================="
+          sudo du -sh /var /root /home /tmp /opt /usr /srv /data 2>/dev/null | sort -h
+          echo
+
+          echo "=========================================================="
+          echo " 3. /var breakdown (logs, lib, cache, etc.)"
+          echo "=========================================================="
+          sudo du -sh /var/* 2>/dev/null | sort -h | tail -20
+          echo
+
+          echo "=========================================================="
+          echo " 4. /var/log breakdown"
+          echo "=========================================================="
+          sudo du -sh /var/log/* 2>/dev/null | sort -h | tail -15
+          echo
+          echo "  systemd journal size:"
+          sudo journalctl --disk-usage 2>/dev/null || echo "    (journalctl not available)"
+          echo
+
+          echo "=========================================================="
+          echo " 5. /var/lib breakdown (PG data, Docker, apt cache)"
+          echo "=========================================================="
+          sudo du -sh /var/lib/* 2>/dev/null | sort -h | tail -15
+          echo
+
+          echo "=========================================================="
+          echo " 6. /root breakdown"
+          echo "=========================================================="
+          sudo du -sh /root/* 2>/dev/null | sort -h | tail -20
+          echo
+
+          echo "=========================================================="
+          echo " 7. /root/Lawtech-AI breakdown (app dir)"
+          echo "=========================================================="
+          if [ -d /root/Lawtech-AI ]; then
+            sudo du -sh /root/Lawtech-AI/* 2>/dev/null | sort -h | tail -25
+            echo
+            echo "  Within Lawtech-AI: chroma_store contents:"
+            sudo du -sh /root/Lawtech-AI/chroma_store/* 2>/dev/null | sort -h | tail -10 || echo "    (no chroma_store)"
+            echo
+            echo "  Within Lawtech-AI: uploads contents:"
+            sudo du -sh /root/Lawtech-AI/uploads 2>/dev/null
+            sudo ls /root/Lawtech-AI/uploads 2>/dev/null | wc -l | xargs echo "    upload subdirs:"
+            echo
+            echo "  Within Lawtech-AI: logs contents:"
+            sudo du -sh /root/Lawtech-AI/logs/* 2>/dev/null | sort -h
+            echo
+            echo "  Within Lawtech-AI: models size:"
+            sudo du -sh /root/Lawtech-AI/models 2>/dev/null
+            echo
+            echo "  Within Lawtech-AI: .venv size:"
+            sudo du -sh /root/Lawtech-AI/.venv 2>/dev/null
+          else
+            echo "  /root/Lawtech-AI not present — checking common alternative paths..."
+            for p in /home/ubuntu/Lawtech-AI /opt/Lawtech-AI /srv/Lawtech-AI; do
+              if [ -d "$p" ]; then
+                echo "  Found at $p:"
+                sudo du -sh "$p"/* 2>/dev/null | sort -h | tail -15
+              fi
+            done
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 8. /tmp accumulators (deploy tarballs, scratch)"
+          echo "=========================================================="
+          sudo du -sh /tmp/* 2>/dev/null | sort -h | tail -10
+          echo
+
+          echo "=========================================================="
+          echo " 9. apt cache + snap"
+          echo "=========================================================="
+          sudo du -sh /var/cache/apt 2>/dev/null
+          sudo du -sh /var/lib/apt 2>/dev/null
+          sudo du -sh /var/lib/snapd 2>/dev/null
+          echo
+
+          echo "=========================================================="
+          echo "10. Old kernels / large /boot files"
+          echo "=========================================================="
+          sudo du -sh /boot 2>/dev/null
+          ls -lh /boot/vmlinuz-* 2>/dev/null | tail -5
+          echo
+
+          echo "=========================================================="
+          echo "11. Top 20 largest files anywhere (excluding /proc, /sys)"
+          echo "=========================================================="
+          sudo find / -xdev -type f -size +100M 2>/dev/null | head -20 | xargs -I {} sudo du -sh {} 2>/dev/null | sort -h | tail -20
+          echo
+
+          echo "=========================================================="
+          echo "12. Docker (if installed)"
+          echo "=========================================================="
+          if command -v docker >/dev/null 2>&1; then
+            sudo docker system df 2>/dev/null || echo "  (docker installed but daemon not running)"
+          else
+            echo "  (docker not installed)"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo "13. PostgreSQL data dir size"
+          echo "=========================================================="
+          for pg_path in /var/lib/postgresql /var/lib/pgsql; do
+            if [ -d "$pg_path" ]; then
+              sudo du -sh "$pg_path" 2>/dev/null
+              sudo du -sh "$pg_path"/*/main 2>/dev/null
+            fi
+          done
+          echo
+
+          echo "=========================================================="
+          echo " DIAGNOSTIC COMPLETE"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -233,8 +233,11 @@ class TestSelfRefineLoop:
         mock_r.assert_not_called()
 
     def test_max_iterations_exhausted(self):
-        i = UserIntent(strict_language=True, language="mr",
-                       language_explicit=True, confidence=0.95)
+        # Use a non-strict directive (TABLE format) so the dynamic
+        # iteration bump for strict_language doesn't kick in. The base
+        # max_iterations=2 stays in effect.
+        i = UserIntent(response_format=ResponseFormat.TABLE,
+                       format_explicit=True, confidence=0.95)
         c_fail = Critique(
             passes=False, confidence=0.85,
             violations=[Violation(field="x", issue="y", severity="major",
@@ -256,3 +259,29 @@ class TestSelfRefineLoop:
         assert result == "refine2" + "x" * 500
         assert len(history) == 3
         assert history[-1].passes is False
+
+    def test_strict_language_bumps_iterations_to_4(self):
+        # The strict-language path overrides the caller's max_iterations
+        # to 4, so the loop runs more critique passes for high-stakes
+        # localization-sensitive output.
+        i = UserIntent(strict_language=True, language="mr",
+                       language_explicit=True, confidence=0.95)
+        c_fail = Critique(
+            passes=False, confidence=0.85,
+            violations=[Violation(field="x", issue="y", severity="major",
+                                  suggested_fix="z")],
+        )
+        # Refiner returns a fresh string each time so loop can continue.
+        refine_outputs = [f"refine{n}" + "x" * 500 for n in range(1, 6)]
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(return_value=c_fail)) as mock_c, \
+             patch("core.self_refine._refine",
+                   new=AsyncMock(side_effect=refine_outputs)) as mock_r:
+            result, history = _run(self_refine(
+                "orig" + "x" * 500, "q", i, max_iterations=2,
+            ))
+        # Effective max = 4 due to strict_language bump → 4 refines + 5
+        # critiques (initial + after each refine).
+        assert mock_c.await_count == 5
+        assert mock_r.await_count == 4
+        assert len(history) == 5

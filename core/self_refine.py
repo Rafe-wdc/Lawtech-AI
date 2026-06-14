@@ -632,9 +632,25 @@ async def self_refine(
         )
         return response, []
 
+    # Dynamic budget: strict-language drafts (Marathi/Hindi/Tamil "only in X"
+    # mode) consistently need 3-4 critique passes to drive the Devanagari-vs-
+    # Latin paragraph numbers and "as per the provisions of <English Act>"
+    # clauses to zero. Single-shot self-refine catches ~50-70% of leaks per
+    # smoke run with high variance. Bumping iterations is the cheapest fix
+    # before reaching for a separate translation pass — costs ~$0.01 extra
+    # in critic+refiner calls per request, adds ~20-30s latency in the worst
+    # case. Skips bump for non-strict intents (most queries).
+    effective_max_iterations = max_iterations
+    if intent is not None and intent.strict_language:
+        effective_max_iterations = max(max_iterations, 4)
+        log.info(
+            "Self-refine iteration budget bumped for strict_language",
+            base=max_iterations, effective=effective_max_iterations,
+        )
+
     history: list[Critique] = []
     current = response
-    for iteration in range(max_iterations + 1):  # +1 for the final critique
+    for iteration in range(effective_max_iterations + 1):  # +1 for the final critique
         critique = await _critique(user_query, intent, current, critic_llm)
         history.append(critique)
         if critique.passes:
@@ -656,7 +672,7 @@ async def self_refine(
                 violation_count=len(critique.violations),
             )
             return current, history
-        if iteration >= max_iterations:
+        if iteration >= effective_max_iterations:
             log.warning(
                 "Self-refine max iterations exhausted",
                 iterations=iteration,

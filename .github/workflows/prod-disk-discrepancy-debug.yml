@@ -1,0 +1,182 @@
+name: Prod Disk Discrepancy Debug (read-only)
+
+# One-off workflow_dispatch. The /health endpoint says 90% used / 7.7 GB
+# free, but df -h on the host shows 9% used / 177 GB free. This workflow
+# investigates the discrepancy by comparing:
+#   - what shutil.disk_usage sees from inside the service process
+#   - what df -h sees on the host
+#   - the service's mount namespace
+#   - PrivateTmp / RootDirectory / ProtectSystem systemd unit settings
+# Read-only.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    name: Investigate disk discrepancy on prod
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://tool.lawttorney.com/pyapiv2/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Run discrepancy probes
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "=========================================================="
+          echo " 1. Host-level df -h on every mount"
+          echo "=========================================================="
+          df -h
+          echo
+          findmnt -T / 2>/dev/null || mount | grep " / "
+          echo
+
+          echo "=========================================================="
+          echo " 2. Find the running service (port 5001 / process name)"
+          echo "=========================================================="
+          SERVICE_NAME="lawttorney-v2"
+          echo "Looking up systemd unit '$SERVICE_NAME':"
+          if sudo systemctl status "$SERVICE_NAME" --no-pager 2>&1 | head -15; then
+            echo
+          else
+            echo "(not lawttorney-v2 — trying other names)"
+            for unit in lawttorney lawtech lawtech-ai; do
+              if sudo systemctl status "$unit" --no-pager 2>&1 | head -3 | grep -q "active"; then
+                SERVICE_NAME="$unit"
+                echo "Found: $unit"
+                sudo systemctl status "$unit" --no-pager | head -15
+                break
+              fi
+            done
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 3. systemd unit file (looking for chroot / sandbox keys)"
+          echo "=========================================================="
+          UNIT_PATH=$(sudo systemctl show "$SERVICE_NAME" -p FragmentPath --value 2>/dev/null)
+          echo "Unit file: $UNIT_PATH"
+          if [ -n "$UNIT_PATH" ] && [ -f "$UNIT_PATH" ]; then
+            sudo cat "$UNIT_PATH"
+          fi
+          echo
+          echo "Sandboxing properties (systemctl show):"
+          sudo systemctl show "$SERVICE_NAME" \
+            -p RootDirectory \
+            -p PrivateTmp \
+            -p PrivateMounts \
+            -p PrivateUsers \
+            -p ProtectSystem \
+            -p ProtectHome \
+            -p ReadOnlyPaths \
+            -p ReadWritePaths \
+            -p BindPaths \
+            -p BindReadOnlyPaths \
+            -p WorkingDirectory \
+            -p User \
+            -p Group \
+            2>/dev/null
+          echo
+
+          echo "=========================================================="
+          echo " 4. Find the process PID + cwd + mount namespace"
+          echo "=========================================================="
+          # Service may have multiple worker pids; pick the main one.
+          MAIN_PID=$(sudo systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null)
+          echo "Main PID: $MAIN_PID"
+          if [ -n "$MAIN_PID" ] && [ "$MAIN_PID" != "0" ]; then
+            echo
+            echo "CWD of the main process:"
+            sudo readlink "/proc/$MAIN_PID/cwd" 2>/dev/null
+            echo
+            echo "Root directory of the main process (PID root):"
+            sudo readlink "/proc/$MAIN_PID/root" 2>/dev/null
+            echo
+            echo "Mount namespace of the main process:"
+            sudo readlink "/proc/$MAIN_PID/ns/mnt" 2>/dev/null
+            sudo readlink "/proc/1/ns/mnt" 2>/dev/null
+            echo "(if these differ, the service is in a private mount ns)"
+            echo
+            echo "Mount info as the process sees it (/proc/<pid>/mountinfo):"
+            sudo head -30 "/proc/$MAIN_PID/mountinfo" 2>/dev/null
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 5. Cross-check: shutil.disk_usage from the host Python"
+          echo "    (run as the same user the service runs as, in the"
+          echo "     service's working directory)"
+          echo "=========================================================="
+          SERVICE_USER=$(sudo systemctl show "$SERVICE_NAME" -p User --value 2>/dev/null)
+          SERVICE_USER=${SERVICE_USER:-root}
+          SERVICE_WD=$(sudo systemctl show "$SERVICE_NAME" -p WorkingDirectory --value 2>/dev/null)
+          SERVICE_WD=${SERVICE_WD:-/root/Lawtech-AI}
+          # Pick the same python the service uses
+          for venv_python in "$SERVICE_WD/venv/bin/python" "$SERVICE_WD/.venv/bin/python" /usr/bin/python3; do
+            if [ -x "$venv_python" ]; then
+              echo "Using python: $venv_python"
+              echo "Running as: $SERVICE_USER"
+              echo "From cwd: $SERVICE_WD"
+              echo
+              sudo -u "$SERVICE_USER" "$venv_python" - << 'PYEOF'
+          import shutil, os, sys
+          for path in ['/', '/root', os.getcwd(), '/var', '/tmp']:
+              try:
+                  u = shutil.disk_usage(path)
+                  print(f"shutil.disk_usage({path!r}):")
+                  print(f"   total = {u.total/(1024**3):.1f} GB")
+                  print(f"   used  = {u.used/(1024**3):.1f} GB ({u.used/u.total*100:.1f}%)")
+                  print(f"   free  = {u.free/(1024**3):.1f} GB")
+                  print()
+              except OSError as e:
+                  print(f"shutil.disk_usage({path!r}) failed: {e}")
+          print(f"os.getcwd() = {os.getcwd()}")
+          print(f"sys.executable = {sys.executable}")
+          PYEOF
+              break
+            fi
+          done
+          echo
+
+          echo "=========================================================="
+          echo " 6. Same probe inside the SERVICE'S mount namespace"
+          echo "    (uses nsenter to enter the process namespace)"
+          echo "=========================================================="
+          if [ -n "$MAIN_PID" ] && [ "$MAIN_PID" != "0" ]; then
+            echo "Entering mount namespace of PID $MAIN_PID and running df -h:"
+            sudo nsenter --target "$MAIN_PID" --mount df -h / 2>/dev/null || echo "(nsenter not available or namespace unreadable)"
+            echo
+            echo "Same Python probe inside the service's mount namespace:"
+            sudo nsenter --target "$MAIN_PID" --mount --setuid 0 \
+              python3 -c "import shutil; u = shutil.disk_usage('/'); print(f'inside-ns shutil: total={u.total/(1024**3):.1f}GB used={u.used/(1024**3):.1f}GB free={u.free/(1024**3):.1f}GB pct={u.used/u.total*100:.1f}%')" 2>/dev/null \
+              || echo "(nsenter+python failed; PID namespace may be private)"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 7. Test the live health endpoint disk numbers"
+          echo "=========================================================="
+          curl -s --max-time 10 http://localhost:5001/pyapi/health 2>/dev/null | python3 -m json.tool 2>/dev/null | grep -A 3 '"disk"' || echo "(localhost:5001/pyapi/health not reachable)"
+          echo
+
+          echo "=========================================================="
+          echo " DIAGNOSTIC COMPLETE"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

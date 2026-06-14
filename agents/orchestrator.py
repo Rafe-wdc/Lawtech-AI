@@ -439,35 +439,52 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
         return task, agents
 
     except Exception as e:
-        fallback_task = _classify_task_regex_fallback(query)
-        log.warning("Classify+plan LLM failed, using regex fallback",
-                    error=str(e), fallback=fallback_task, source="regex_fallback")
-        return fallback_task, [fallback_task]
+        # Propagate to caller (orchestrator_plan_node) so it can apply the
+        # intent-aware fallback path (`_classify_task_from_intent`). Returning
+        # a Legal_Concepts-as-fallback tuple here would silently swallow
+        # the LLM failure AND prevent the intent fallback from running —
+        # the user's "draft a bail application" gets misrouted to a
+        # web-grounded explanation.
+        log.warning("Classify+plan LLM failed; propagating to caller",
+                    error=str(e), source="raised")
+        raise
 
 
-def _select_citation_agents(intent: UserIntent | None) -> list[str]:
+def _select_citation_agents(
+    intent: UserIntent | None,
+    existing_plan: list[str] | None = None,
+) -> list[str]:
     """Select which agents should produce the citation appendix for a draft.
 
-    Reads typed UserIntent. Falls back to a sensible default
-    [Judgment, Legislation] when intent is missing or no specific signal
-    points to Newacts / SCI_Judgment.
+    Reads typed UserIntent and (when available) the already-planned agents
+    to make a corpus-aware choice:
+
+    - Judgment: always included as the case-law source.
+    - SCI_Judgment: when `intent.wants_supreme_court` (user named SC /
+      famous SC landmark case).
+    - GST_Judgment: when `intent.wants_gst_rulings`.
+    - Newacts vs Legislation: if the planner LLM already chose Newacts
+      for this draft (i.e. the query is about BNS/IPC, BNSS/CrPC,
+      BSA/IEA), the citation appendix uses Newacts too — Legislation
+      would re-fetch the same content from a less-curated index AND
+      pollute the appendix with wrong-corpus hits. Otherwise default
+      to Legislation.
+
+    Previously the function unconditionally appended Legislation even
+    for criminal-code queries, leaking wrong-corpus statute hits into
+    the citation appendix.
     """
+    existing = set(existing_plan or [])
     agents = ["Judgment"]
     if intent is not None and intent.wants_supreme_court:
         agents.append("SCI_Judgment")
     if intent is not None and intent.wants_gst_rulings:
         agents.append("GST_Judgment")
-    # Newacts vs Legislation: extractor knows the corpus split. Default
-    # Legislation when neither signal is set.
-    if intent is not None and intent.task_intent == "lookup":
-        # When user is looking up codified Indian criminal codes (BNS/IPC,
-        # BNSS/CrPC, BSA/IEA) we route to Newacts; otherwise Legislation.
-        # The extractor's `wants_statute_text` already marks statute intent;
-        # we still need to know WHICH index. We rely on the planner LLM to
-        # pick the right one — `_select_citation_agents` is only the
-        # default. So: prefer Newacts if it's already in the running plan,
-        # else Legislation.
-        agents.append("Legislation")
+    # Corpus-aware statute pick. Newacts indexes BNS/IPC, BNSS/CrPC,
+    # BSA/IEA; Legislation indexes everything else. Prefer Newacts when
+    # the planner already routed there.
+    if "Newacts" in existing:
+        agents.append("Newacts")
     else:
         agents.append("Legislation")
     # Dedup while preserving order
@@ -517,7 +534,7 @@ import json as _json
 AGENT_QUERY_REWRITE_PROMPT = """You are a legal query optimizer. Rewrite the user's query into specialized search queries for each assigned agent.
 
 Each agent has a different database and purpose:
-- Judgment: Searches court case law database. Query should focus on: legal topic keywords, cause of action, type of case (e.g. "medical negligence", "consumer complaint", "property dispute"). NEVER include user-provided party names (they are fictional and won't match any real cases). Use generic terms like "doctor negligence hospital compensation" instead.
+- Judgment: Searches court case law database. Query should focus on: legal topic keywords, cause of action, type of case (e.g. "medical negligence", "consumer complaint", "property dispute"). PARTY NAMES — use judgment: when the user names parties in case-citation style ("Kesavananda Bharati v. State of Kerala", "Vishaka v. State of Rajasthan", "Maneka Gandhi", "Puttaswamy") or a famous landmark case, KEEP the names in the rewritten query — those are real cases and the name is the strongest match signal. When the user names parties in factual-scenario style ("Mr. Sharma defrauded Mrs. Verma", "ABC Corp sued XYZ Ltd", or any fictional/placeholder names like "Plaintiff X", "John Doe"), STRIP them and use generic legal topic terms instead — those names won't match real case law. Apply common sense: capitalized proper nouns paired with "v." or "vs" are case citations; lowercase first names in narrative prose are factual parties.
 - Legislation: Searches Indian act/statute database by full-text match. IMPORTANT: Focus on the SINGLE most relevant act and its specific sections. Do NOT list multiple acts — the search engine will match the first act name it finds. Example: "Consumer Protection Act 2019 Section 2 definition of consumer deficiency in service medical negligence" (not "Indian Contract Act; IPC; Consumer Protection Act").
 - Newacts: Searches BNS/IPC, BNSS/CrPC, BSA/IEA database. Query should mention the specific criminal code sections or topics.
 - Drafting: Creates legal documents. Query should specify: document type, parties, key facts, relief sought.
@@ -1100,7 +1117,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         _flag = state.get("cite_appendix")
         cite_appendix_on = _flag if _flag is not None else DRAFTING_CITE_APPENDIX_DEFAULT
         if cite_appendix_on:
-            citation_agents = _select_citation_agents(extracted_intent)
+            citation_agents = _select_citation_agents(extracted_intent, tasks_planned)
             for ca in citation_agents:
                 if ca not in tasks_planned:
                     tasks_planned.append(ca)

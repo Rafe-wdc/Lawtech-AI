@@ -104,7 +104,32 @@ _DOMAIN_HINTS: dict[str, str] = {
         "IPC murder appeal that contains a substantive Sec 313 CrPC "
         "discussion is on-topic for a 'Section 313 CrPC case law' query. "
         "Only reject if the section is incidental boilerplate, not a "
-        "discussed issue."
+        "discussed issue. ALSO: if the user named a specific COURT "
+        "(e.g. 'Bombay High Court bail cases'), judgments from a "
+        "DIFFERENT court are NOT relevant even when the legal subject "
+        "matches."
+    ),
+    "SCI_Judgment": (
+        "These should be Supreme Court of India judgments that "
+        "materially address the user's legal question. Judgments that "
+        "merely fuzzy-match a query term (e.g. judge surname matching "
+        "a common phrase, or party name matching a generic word) but "
+        "decide an unrelated dispute are NOT relevant. The retrieval "
+        "uses fuzzy and phrase matching together, so off-topic cases "
+        "with strong full-text term overlap can surface — reject when "
+        "the case's actual subject doesn't match the user's question."
+    ),
+    "Document": (
+        "These should be passages from the user's UPLOADED document(s) "
+        "that contain information answering the user's question. The "
+        "retrieval is MMR with k=30 and always returns 30 chunks "
+        "regardless of similarity — when the user's question is "
+        "off-topic for the uploaded file (e.g. they uploaded a "
+        "contract and asked about Section 138 NI Act), the chunks "
+        "will be unrelated and NOT relevant. Reject when the chunks "
+        "are about a different subject than the user's question. "
+        "Accept when chunks contain the answer even if the uploaded "
+        "file's overall genre is different from the question's framing."
     ),
     "Newacts": (
         "These should be sections of the new criminal-law codes (BNS, "

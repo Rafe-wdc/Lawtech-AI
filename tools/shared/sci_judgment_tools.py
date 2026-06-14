@@ -91,6 +91,23 @@ def search_by_topic(query: str, top_k: int = 5, year_from: Optional[int] = None,
     try:
         es = get_es_client()
 
+        # Phrase match is the primary signal — it requires actual term
+        # co-occurrence in the indexed text. The fuzzy multi-match used
+        # to dominate when a judge's surname or a party name fuzzy-matched
+        # an unrelated case, surfacing wrong judgments. The phrase clause
+        # is now MUST (the case must contain the user's terms in
+        # proximity), with the fuzzy multi-match retained as a tie-breaker
+        # SHOULD signal that boosts scoring but cannot match alone.
+        must_clauses = [
+            {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["full_text^2", "parties^3"],
+                    "type": "phrase",
+                    "slop": 3,
+                }
+            }
+        ]
         should_clauses = [
             {
                 "multi_match": {
@@ -100,16 +117,7 @@ def search_by_topic(query: str, top_k: int = 5, year_from: Optional[int] = None,
                     "fuzziness": "AUTO",
                     "boost": 1,
                 }
-            },
-            {
-                "multi_match": {
-                    "query": query,
-                    "fields": ["full_text^2", "parties^3"],
-                    "type": "phrase",
-                    "slop": 3,
-                    "boost": 3,
-                }
-            },
+            }
         ]
 
         filter_clauses = []
@@ -126,8 +134,8 @@ def search_by_topic(query: str, top_k: int = 5, year_from: Optional[int] = None,
             "size": min(top_k, 10),
             "query": {
                 "bool": {
+                    "must": must_clauses,
                     "should": should_clauses,
-                    "minimum_should_match": 1,
                     "filter": filter_clauses,
                 }
             },

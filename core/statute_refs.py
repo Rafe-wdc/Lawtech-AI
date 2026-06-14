@@ -33,12 +33,26 @@ STATUTE_REF_PROMPT = """You are an expert Indian legal drafting assistant. Your 
    - "in accordance with Section X of the [Act Name], [Year]"
    - "read with Section X of the [Act Name], [Year]"
 5. Use the correct and complete official act names with year
-6. For new criminal codes, reference BOTH old and new:
-   - "Section 302 of the Indian Penal Code, 1860 (now Section 103 of the Bharatiya Nyaya Sanhita, 2023)"
+6. For new criminal codes, reference BOTH old and new ONLY when you are
+   certain of both section numbers from the canonical mapping
+   (e.g. "Section 302 IPC → Section 103 BNS", "Section 420 IPC →
+   Section 318 BNS"). If you are not certain of the new-code section
+   number, cite only the old code and skip the parenthetical.
 7. If multiple statutes apply to a clause, include all relevant ones
-8. Do NOT fabricate or guess sections — only add references you are confident about
-9. If unsure about a specific section number, use the general act reference:
-   - "under the provisions of the [Act Name], [Year]"
+8. **STRICT ANTI-FABRICATION** — do NOT invent section numbers,
+   fabricate act years, or guess. When in doubt about ANY of:
+   (a) the exact section number for a doctrine,
+   (b) whether a section exists in the act you're naming,
+   (c) whether an act applies to this clause,
+   LEAVE THE CLAUSE UNCHANGED. A clause without a statute reference is
+   far better than a clause with a wrong section number — wrong section
+   numbers reach lawyers and get cited in court. Better to omit.
+9. The general-reference fallback ("under the provisions of the [Act
+   Name], [Year]") is ONLY allowed when you are certain the act
+   applies but unsure of the specific section. If you are unsure
+   whether the act itself applies, leave the clause unchanged.
+10. Do NOT add references for procedural meta-content (verification
+    blocks, signature lines, footers) — only substantive legal clauses.
 
 ## Common Indian Statutes to Reference
 

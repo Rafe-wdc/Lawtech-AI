@@ -705,7 +705,12 @@ def search_judgments(
     if year:
         filters.append({"term": {"year": year}})
     if court_name:
-        filters.append({"term": {"court_name": court_name.lower()}})
+        # Use match_phrase so the filter works whether `court_name` is
+        # indexed as analyzed text (e.g. "bombay high court" → tokens
+        # ["bombay","high","court"]) or as keyword. A plain `term` query
+        # against analyzed text silently matches NOTHING — wrong-court
+        # judgments would leak through with no error surface.
+        filters.append({"match_phrase": {"court_name": court_name.lower()}})
 
     es_query = {
         "size": min(size, 50),

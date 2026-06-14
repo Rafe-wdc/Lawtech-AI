@@ -228,22 +228,35 @@ def _retrieve_from_collections(
     return all_docs
 
 
-def _retrieve_and_answer(
-    unique_string: str, query: str, history_text: str = "",
+def _retrieve_docs(
+    unique_string: str, query: str,
     collections: list[str] | None = None,
-) -> tuple[str, int, list[Document]]:
-    """Retrieve from user's collection(s) and generate answer.
-    Returns (answer_text, tokens_consumed, retrieved_docs).
+) -> list[Document]:
+    """Retrieve documents from user's ChromaDB collection(s). No LLM call.
+
+    Split out from _retrieve_and_answer so the async caller can run a
+    `check_retrieval_relevance` gate between retrieval and generation —
+    MMR with k=30 always returns 30 chunks regardless of similarity, so
+    off-topic questions about an uploaded PDF would otherwise get 30
+    unrelated chunks pasted into the prompt and produce a confidently-
+    hallucinated answer. The gate lets the agent return a graceful
+    "this PDF doesn't cover your question" response instead.
     """
     coll_list = collections or [unique_string]
     docs = _retrieve_from_collections(coll_list, query)
-
-    if not docs:
-        log.warning("No relevant docs found", collection=unique_string)
-        return "No relevant content found in the uploaded document(s) for this query.", 0, []
-
     log.debug("Documents retrieved",
               collection=unique_string, docs_found=len(docs))
+    return docs
+
+
+def _generate_from_docs(
+    query: str, docs: list[Document], history_text: str = "",
+) -> tuple[str, int]:
+    """LLM-generate an answer from pre-retrieved chunks.
+    Returns (answer_text, tokens_consumed).
+    """
+    if not docs:
+        return "No relevant content found in the uploaded document(s) for this query.", 0
 
     docs_text = "\n\n".join(d.page_content for d in docs)
 
@@ -274,7 +287,7 @@ def _retrieve_and_answer(
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Document", "qa_chromadb", response)
 
-    return response.content, tokens, docs
+    return response.content, tokens
 
 
 # --- Agent Node ---
@@ -567,16 +580,67 @@ async def document_node(state: LegalAgentState) -> dict:
         # Use chat history from state (loaded by memory node from SQLite)
         history_text = _format_chat_history(chat_history)
 
-        # Retrieve from ChromaDB and generate answer (blocking I/O + LLM → off-thread)
-        # 90s timeout: ChromaDB MMR (k=30) + Gemini Pro generation can be slow,
-        # but if ChromaDB hangs on a locked/stalled disk this prevents infinite hang.
+        # Step 1: Retrieve from ChromaDB (off-thread; no LLM call yet)
         n_colls = len(all_collections) if all_collections else 1
         progress("document", f"Searching across {n_colls} document collections...", found=n_colls, step="search")
-        with log_time(log, "Full document QA pipeline"):
-            answer, tokens, retrieved_docs = await asyncio.wait_for(
+        with log_time(log, "ChromaDB retrieval"):
+            retrieved_docs = await asyncio.wait_for(
                 asyncio.to_thread(
-                    _retrieve_and_answer, unique_string, query, history_text,
+                    _retrieve_docs, unique_string, query,
                     collections=all_collections or None,
+                ),
+                timeout=TIMEOUT_CHROMADB_SEC,
+            )
+
+        # Step 2: Relevance gate. MMR k=30 always returns 30 chunks regardless
+        # of similarity, so an off-topic question against an uploaded PDF
+        # (e.g. user uploaded a contract, asks about Section 138 NI Act)
+        # would otherwise get 30 unrelated chunks pasted into the prompt and
+        # produce a hallucinated answer. The judge inspects the chunks and
+        # decides whether they actually cover the user's question.
+        if retrieved_docs:
+            progress("document", "Verifying retrieval relevance...",
+                     step="relevance_check")
+            chunks_for_judge = [d.page_content for d in retrieved_docs[:8]]
+            from core.retrieval_relevance import check_retrieval_relevance
+            uploaded_label = "Uploaded Document"
+            try:
+                fc_label = FileContextData.from_state(state)
+                if fc_label and fc_label.file_names:
+                    uploaded_label = f"Uploaded: {fc_label.file_names[0]}"
+            except Exception:
+                pass
+            is_relevant, judge_telemetry = await check_retrieval_relevance(
+                query, chunks_for_judge, uploaded_label, agent_name="Document",
+            )
+            log.info("Document relevance judge verdict",
+                     passed=is_relevant, **judge_telemetry)
+            if not is_relevant:
+                mismatch = judge_telemetry.get("matched_subject") or "different subject"
+                log.warning("Document retrieval failed relevance gate",
+                            **judge_telemetry)
+                progress("document",
+                         f"The uploaded document doesn't appear to cover your question "
+                         f"({mismatch[:60]}).", step="off_topic", substep=True)
+                msg = (
+                    "The uploaded document(s) don't appear to contain information "
+                    f"that answers your question ({mismatch[:80]}). "
+                    "Try asking about content that is in the file, or remove the "
+                    "attachment and ask the question as a general legal query."
+                )
+                return {"agent_results": {"Document": AgentResult(
+                    agent_name="Document",
+                    content=msg,
+                    sources=[],
+                    tokens_consumed=0,
+                    error="off_topic_for_uploaded_document",
+                )}}
+
+        # Step 3: Generate answer (off-thread; LLM call)
+        with log_time(log, "Document QA generation"):
+            answer, tokens = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _generate_from_docs, query, retrieved_docs, history_text,
                 ),
                 timeout=TIMEOUT_CHROMADB_SEC,
             )

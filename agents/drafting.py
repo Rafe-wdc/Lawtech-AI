@@ -812,6 +812,107 @@ async def _generate_doctrinal_stance(
         return stance
 
 
+async def _verify_stance_cases(stance: DoctrinalStance) -> DoctrinalStance:
+    """Verify stance.key_cases against the judgment ES corpus in parallel.
+
+    The doctrinal-stance LLM picks "real Indian SC/HC cases" without
+    retrieval grounding, so a confident-sounding fabricated citation
+    (e.g. "S.B. Gurbaksh Singh v. Union of India, (1976) 2 SCC 104")
+    can land in stance.key_cases. The drafting section prompt then
+    USES those cases verbatim, and self_refine WHITELISTS the stance
+    cases — so a fabrication slips end-to-end with no corpus check.
+
+    Per case, fire two parallel ES lookups:
+      * search_by_citation(c.citation) — exact lookup on the citation /
+        case_number keyword fields
+      * search_by_party_names(petitioner, respondent) — fallback when
+        the citation format is unusual but the parties are real
+
+    Drop any case where BOTH lookups return zero hits AND the case is
+    not in our small high-confidence anchor allowlist (the cases the
+    stance prompt explicitly names as exemplars — these are vetted).
+
+    Returns a new DoctrinalStance with key_cases filtered. Never raises.
+    """
+    if not stance.key_cases:
+        return stance
+
+    # Cases the stance prompt itself names as anchor exemplars are
+    # known-real and don't need ES verification (saves 5 ES calls).
+    _STANCE_PROMPT_ANCHORS = {
+        ("vineeta sharma", "rakesh sharma"),
+        ("smt. sitabai", "ramchandra"),
+        ("dalpat kumar", "prahlad singh"),
+        ("sawarni", "inder kaur"),
+        ("wander", "antox"),
+    }
+
+    def _parties(name: str) -> tuple[str, str]:
+        # "X v. Y" or "X vs Y" — return (petitioner, respondent) lowercased
+        norm = name.lower().replace(" v. ", " v ").replace(" vs ", " v ")
+        if " v " in norm:
+            pet, _, res = norm.partition(" v ")
+            return pet.strip(), res.strip()
+        return name.lower().strip(), ""
+
+    async def _verify_one(case) -> tuple[bool, str]:
+        pet, res = _parties(case.name)
+        # Anchor allowlist — skip ES round-trip.
+        for a_pet, a_res in _STANCE_PROMPT_ANCHORS:
+            if a_pet in pet and (not a_res or a_res in res):
+                return True, "anchor_allowlist"
+        # ES verification in parallel
+        try:
+            from tools.shared.judgment_search import (
+                search_by_citation, search_by_party_names,
+            )
+            cite_hits = await asyncio.to_thread(
+                search_by_citation, case.citation, 2,
+            )
+            party_hits: list = []
+            if pet and res:
+                try:
+                    party_hits = await asyncio.to_thread(
+                        search_by_party_names, pet, res, None, None, 2,
+                    )
+                except Exception:
+                    party_hits = []
+            if cite_hits or party_hits:
+                return True, f"es_hits={len(cite_hits)}+{len(party_hits)}"
+            return False, "es_zero_hits"
+        except Exception as e:
+            # If ES is unreachable, fail-OPEN (keep the case). We'd
+            # rather have a potentially-fabricated citation than a
+            # citation-less draft when ES is down.
+            log.warning("Stance verification ES call failed; keeping case",
+                        case=case.name[:80], error=str(e)[:120])
+            return True, "es_unreachable"
+
+    verdicts = await asyncio.gather(
+        *[_verify_one(c) for c in stance.key_cases],
+        return_exceptions=False,
+    )
+
+    verified_cases = []
+    dropped = []
+    for case, (ok, reason) in zip(stance.key_cases, verdicts):
+        if ok:
+            verified_cases.append(case)
+        else:
+            dropped.append(f"{case.name[:60]} ({reason})")
+
+    if dropped:
+        log.warning("Dropped unverified case citations from stance",
+                    dropped_count=len(dropped),
+                    kept_count=len(verified_cases),
+                    sample=dropped[:3])
+
+    # Return a NEW stance object with filtered cases (Pydantic immutable
+    # via model_copy + update); preserves everything else verbatim.
+    verified_stance = stance.model_copy(update={"key_cases": verified_cases})
+    return verified_stance
+
+
 def _format_stance_for_section(stance: DoctrinalStance | None) -> str:
     """Render the stance as a compact prompt block for each section call."""
     if stance is None:
@@ -1218,10 +1319,14 @@ async def _generate_section(
             "start_para_num": str(start_para_num),
             "est_paragraphs": str(section.estimated_paragraphs),
             "needs_citations": (
-                "Yes -- cite real Indian case names + citations inline (e.g., "
-                "'Vineeta Sharma v. Rakesh Sharma, (2020) 9 SCC 1'). If you "
-                "cannot name a case with confidence, cite the doctrine without "
-                "a case label. NEVER emit [CITE: ...] placeholder markers."
+                "Yes — cite ONLY the cases listed in the DOCTRINAL STANCE "
+                "block above under 'USE THESE CASE LAWS' (each is corpus-"
+                "verified). If the stance lists no case relevant to this "
+                "paragraph's point, cite the doctrine WITHOUT a case label "
+                "(e.g. 'as consistently held by the Supreme Court in matters "
+                "of partition between Class I heirs'). DO NOT invent case "
+                "names or citations — even confident-sounding ones. NEVER "
+                "emit [CITE: ...] placeholder markers."
             ) if section.needs_citations else "No",
             "facts_block": facts_block,
             "facts_reminder": facts_reminder,
@@ -1874,6 +1979,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
             user_facts=user_facts,
             case_facts=case_facts,
         )
+
+        # Step 4.55: Verify stance.key_cases against the judgment ES corpus.
+        # The stance LLM has no retrieval grounding, so confident-sounding
+        # fabricated citations can land here and propagate end-to-end. The
+        # verifier drops cases with zero ES hits; section prompts then only
+        # see verified anchors.
+        if stance is not None and stance.key_cases:
+            progress("drafting", "Verifying anchor case citations...",
+                     step="verify_cases")
+            stance = await _verify_stance_cases(stance)
+
         stance_block = _format_stance_for_section(stance)
 
         # Step 4.6: Inject any mandatory procedural sections the stance

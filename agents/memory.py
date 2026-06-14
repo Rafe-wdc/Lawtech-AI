@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Union
 
 from langchain.messages import HumanMessage, AIMessage
@@ -141,6 +142,20 @@ def _rewrite_query(
                       result_len=len(rewritten) if rewritten else 0)
             return query
 
+        # Provenance check — every specific legal anchor (section number,
+        # article number, named act) introduced by the rewrite MUST appear
+        # in either the chat history or the latest query. Otherwise the
+        # rewrite invented a fact and would silently mis-route retrieval
+        # to a wrong section/act. Heuristic: extract bare-token anchors
+        # from the rewritten output and confirm presence in the corpus.
+        if not _rewrite_anchors_supported(query, rewritten, chat_history_text):
+            log.warning(
+                "Rewrite introduced unsupported legal anchors; "
+                "falling back to original query",
+                original=query[:80], rewritten=rewritten[:120],
+            )
+            return query
+
         log.info("Query rewritten",
                  original=query[:60], rewritten=rewritten[:60])
         return rewritten
@@ -148,6 +163,66 @@ def _rewrite_query(
     except Exception as e:
         log.error("Rewrite failed, using original query", error=str(e))
         return query
+
+
+# Regexes for the provenance check — bounded to the specific identifier
+# patterns that, when wrong, change retrieval. We don't try to catch
+# every possible legal anchor — only the highest-impact ones (section
+# numbers, article numbers, act-shorthand acronyms).
+_PROVENANCE_SECTION_RE = re.compile(
+    r"\bsection\s*([0-9]+[A-Z]?(?:\([0-9]+\))?)", flags=re.IGNORECASE,
+)
+_PROVENANCE_ARTICLE_RE = re.compile(
+    r"\barticle\s*([0-9]+[A-Z]?)", flags=re.IGNORECASE,
+)
+_PROVENANCE_ACT_ACRONYMS = (
+    "ipc", "crpc", "iea", "bns", "bnss", "bsa", "ni act", "hama", "hma",
+    "hsa", "cpc", "sra", "ibc", "cgst", "sgst", "igst",
+)
+
+
+def _rewrite_anchors_supported(
+    original_query: str, rewritten_query: str, chat_history_text: str,
+) -> bool:
+    """True iff every specific legal anchor in the rewritten query also
+    appears in either the original query or the chat history.
+
+    Catches the failure mode where the LLM rewriter, given drifted chat
+    history, substitutes a wrong section/article/act into the rewrite
+    (e.g. history mentioned Section 138 NI Act but the rewriter wrote
+    "cases on Section 188 IPC"). Any specific identifier that the
+    rewrite added without provenance fails the check, and the caller
+    falls back to the original query.
+
+    Returns True when nothing was added (rewrite is a paraphrase) OR
+    every added anchor is provenance-supported.
+    """
+    corpus = (original_query.lower() + " " + chat_history_text.lower())
+    rewritten_lower = rewritten_query.lower()
+
+    # Sections
+    for m in _PROVENANCE_SECTION_RE.finditer(rewritten_lower):
+        sec = m.group(1).lower()
+        # Check if "section <num>" or just "<num>" with section keyword
+        # appears in the corpus.
+        if f"section {sec}" not in corpus and f"sec {sec}" not in corpus and f"sec. {sec}" not in corpus:
+            return False
+
+    # Articles
+    for m in _PROVENANCE_ARTICLE_RE.finditer(rewritten_lower):
+        art = m.group(1).lower()
+        if f"article {art}" not in corpus and f"art. {art}" not in corpus and f"art {art}" not in corpus:
+            return False
+
+    # Act acronyms — case-sensitive on a word boundary in the rewrite,
+    # case-insensitive lookup in the corpus.
+    for acronym in _PROVENANCE_ACT_ACRONYMS:
+        # Word-boundary check on the rewrite (avoid 'sra' matching 'sra' in 'asra')
+        if re.search(r"\b" + re.escape(acronym) + r"\b", rewritten_lower):
+            if acronym not in corpus:
+                return False
+
+    return True
 
 
 # --- File Context Restoration ---

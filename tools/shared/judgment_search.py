@@ -100,7 +100,7 @@ def search_by_party_names(
     if year:
         filters.append({"term": {"year": year}})
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
 
     hits = _es_search({
         "size": size,
@@ -145,7 +145,7 @@ def search_by_party_fuzzy(
     if year:
         filters.append({"term": {"year": year}})
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
 
     hits = _es_search({
         "size": size,
@@ -186,7 +186,7 @@ def search_by_single_party(
     if year:
         filters.append({"term": {"year": year}})
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
 
     hits = _es_search({
         "size": size,
@@ -320,7 +320,7 @@ def search_by_case_type(
 
     filters = []
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
     if year:
         filters.append({"term": {"year": year}})
 
@@ -378,7 +378,7 @@ def search_by_judge(
 
     filters = []
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
 
     hits = _es_search({
         "size": size,
@@ -404,7 +404,7 @@ def search_by_date_range(
         {"range": {"judgment_date": {"gte": start_date, "lte": end_date}}},
     ]
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
 
     hits = _es_search({
         "size": size,
@@ -439,7 +439,7 @@ def search_by_legal_provision(
 
     filters = []
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
 
     hits = _es_search({
         "size": size,
@@ -620,7 +620,7 @@ def smart_judgment_search(
     if year:
         filters.append({"term": {"year": year}})
     if court:
-        filters.append({"term": {"court_name": court.lower()}})
+        filters.append({"match_phrase": {"court_name": court.lower()}})
 
     mt_hits = _es_search({
         "size": size,

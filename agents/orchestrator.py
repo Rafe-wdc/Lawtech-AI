@@ -1482,24 +1482,41 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         appendix_parts: list[str] = []
         skipped_redundant: list[str] = []
 
-        # Token-overlap dedup: if a supporting agent's content shares more
-        # than 50% of its informational tokens with the primary, the
-        # supporting response is mostly a restatement (common when the
-        # planner picks Constitution + Legislation for "Article 21" — both
-        # produce the same Article text + interpretation). Skip the
-        # appendix to keep the response tight. Threshold is conservative;
-        # genuinely complementary supporting content (e.g. Maxim explaining
-        # res judicata alongside Constitution explaining Article 21) shares
-        # <50% tokens and IS preserved.
+        # Unique-token dedup: keep a supporting agent's appendix iff it
+        # contributes a meaningful number of UNIQUE informational tokens
+        # beyond the primary. Replaces the prior overlap-ratio threshold
+        # which dropped genuinely complementary content (Maxim explaining
+        # audi alteram partem alongside Constitution Article 14 share
+        # 50%+ tokens through common legal vocabulary — "natural", "justice",
+        # "principles", "court" — even when Maxim adds substantive new
+        # material). Measuring NEW tokens directly catches the actual
+        # signal we care about: does the supporting agent add information?
+        #
+        # Thresholds:
+        #   - Supporting must add >= MIN_UNIQUE new informational tokens.
+        #     30 is conservative — a 200-word response paraphrasing the
+        #     primary typically has 10-15 unique informational tokens
+        #     after stop-word filtering.
+        #   - Skip the gate entirely for very short supporting responses
+        #     (< 50 tokens total): nothing to dedup, just keep.
         primary_tokens = _content_token_set(primary)
+        MIN_UNIQUE_TOKENS_TO_KEEP = 30
 
         for name, result in supporting_results.items():
             if not result.content:
                 continue
             supporting_tokens = _content_token_set(result.content)
+            unique_to_supporting = supporting_tokens - primary_tokens
             overlap_ratio = _token_overlap_ratio(primary_tokens, supporting_tokens)
-            if overlap_ratio >= 0.5 and len(supporting_tokens) > 50:
-                skipped_redundant.append(f"{name}({overlap_ratio:.0%})")
+
+            if (
+                len(supporting_tokens) >= 50
+                and len(unique_to_supporting) < MIN_UNIQUE_TOKENS_TO_KEEP
+            ):
+                skipped_redundant.append(
+                    f"{name}(unique={len(unique_to_supporting)}, "
+                    f"overlap={overlap_ratio:.0%})"
+                )
                 # Still merge the sources — the supporting agent's
                 # citations are valuable even when its prose is redundant.
                 all_serialized_sources.extend(_serialize_sources(result))
@@ -1513,7 +1530,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         if skipped_redundant:
             log.info("Dropped redundant supporting agents from synthesis",
                      skipped=skipped_redundant,
-                     reason="content overlap >= 50% with primary")
+                     reason=f"unique tokens < {MIN_UNIQUE_TOKENS_TO_KEEP}")
 
         final_response = primary + "".join(appendix_parts)
 

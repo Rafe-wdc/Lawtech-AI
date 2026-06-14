@@ -12,6 +12,12 @@ jobs:
   audit:
     name: Disk usage breakdown on prod
     runs-on: ubuntu-latest
+    # Same environment as deploy-prod.yml — required to access the
+    # SSH_PRIVATE_KEY_PROD / SERVER_HOST_PROD / SERVER_USER_PROD
+    # secrets. Also enables the GitHub Environment approval gate.
+    environment:
+      name: production
+      url: https://tool.lawttorney.com/pyapiv2/health
 
     steps:
       - name: Set up SSH

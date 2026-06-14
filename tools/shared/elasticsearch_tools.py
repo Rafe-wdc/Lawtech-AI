@@ -1256,25 +1256,130 @@ _OLD_NEW_MAPPING = {
 }
 
 
+def _old_act_to_new_act(old_act_lower: str) -> str:
+    """Return the canonical new-act name for an old-act abbreviation."""
+    return {
+        "ipc": "BNS",
+        "crpc": "BNSS",
+        "iea": "BSA",
+    }.get(old_act_lower, "Unknown")
+
+
+def _es_lookup_old_new(section: str, old_act: str) -> dict | None:
+    """ES-backed lookup of old↔new section mapping.
+
+    Searches the newacts ES corpus (which indexes both old and new codes
+    with cross-references) for "Section {N} {old_act}" and uses Flash-Lite
+    to extract the structured mapping from the top hit. Returns None on
+    any failure so the caller can degrade to "mapping not found".
+    """
+    try:
+        from core.clients import get_gemini_flash
+    except Exception:
+        return None
+
+    new_act = _old_act_to_new_act(old_act.lower())
+    if new_act == "Unknown":
+        return None
+
+    # ES search for the old-section reference in the newacts corpus
+    try:
+        query_text = f"Section {section} {old_act} {new_act}"
+        es_query = {
+            "size": 3,
+            "query": {
+                "bool": {
+                    "should": [
+                        {"match_phrase": {"page_content": {
+                            "query": f"Section {section}", "boost": 5.0,
+                        }}},
+                        {"match": {"page_content": {
+                            "query": query_text, "boost": 1.0,
+                        }}},
+                    ],
+                    "filter": [{"match_phrase": {"page_content": old_act.upper()}}],
+                    "minimum_should_match": 1,
+                }
+            },
+        }
+        hits = _es_search(index=ES_INDICES["newacts"], body=es_query)
+        if not hits:
+            return None
+        # Concatenate top hit contents (cap to 3000 chars)
+        contents = "\n\n".join(
+            (h.get("_source") or {}).get("page_content", "")[:1500]
+            for h in hits[:3]
+        )[:3000]
+        if not contents.strip():
+            return None
+    except Exception:
+        return None
+
+    # Flash-Lite structured extraction
+    try:
+        from pydantic import BaseModel as _BM
+        from pydantic import Field as _F
+
+        class _MappingExtraction(_BM):
+            new_section: str = _F(
+                ..., description="The corresponding section number in the new act. "
+                                 "Empty string if not stated in the source text.",
+            )
+            description: str = _F(
+                ..., description="One-line description of what the section covers.",
+            )
+
+        llm = get_gemini_flash(temperature=0).with_structured_output(
+            _MappingExtraction, include_raw=False,
+        )
+        prompt = (
+            f"From the following Indian legal corpus excerpt, extract the new-act "
+            f"equivalent of Section {section} of the {old_act.upper()} "
+            f"(the new act is {new_act}, 2023). Only return information that is "
+            f"EXPLICITLY stated in the text. If the text does NOT state a clear "
+            f"mapping, return empty strings.\n\n"
+            f"EXCERPT:\n{contents}"
+        )
+        result = llm.invoke(prompt)
+        if not result.new_section.strip():
+            return None
+        return {
+            "new_act": new_act,
+            "new_section": result.new_section.strip(),
+            "description": result.description.strip() or "(see new-act section text)",
+            "source": "es_lookup",
+        }
+    except Exception:
+        return None
+
+
 @tool
 def map_old_to_new_law(section: str, old_act: str) -> dict:
     """Map a section from an old Indian law to its corresponding new law section.
 
-    Maps between IPC↔BNS, CrPC↔BNSS, and IEA↔BSA.
+    Maps between IPC↔BNS, CrPC↔BNSS, and IEA↔BSA. First checks a small
+    high-confidence cache of common mappings (fast path); on cache miss,
+    falls back to an ES search of the newacts corpus + Flash-Lite
+    structured extraction (slower but covers the long tail beyond the
+    ~23 cached entries).
 
     Args:
         section: The section number (e.g. "302", "438", "65b")
         old_act: The old act abbreviation (e.g. "ipc", "crpc", "iea")
 
     Returns:
-        Dict with keys: found (bool), new_act (str), new_section (str), description (str)
+        Dict with keys: found (bool), new_act (str), new_section (str),
+        description (str), source (str — "cache" / "es_lookup" /
+        "not_found").
     """
     act_lower = old_act.lower()
     section_lower = section.lower().strip()
 
+    # Fast path — the small hand-curated cache covers the most common
+    # sections asked about. Adding more entries is fine; the ES fallback
+    # below covers everything outside the cache without code changes.
     mapping = _OLD_NEW_MAPPING.get(act_lower, {})
     result = mapping.get(section_lower)
-
     if result:
         return {
             "found": True,
@@ -1283,6 +1388,23 @@ def map_old_to_new_law(section: str, old_act: str) -> dict:
             "new_act": result["new_act"],
             "new_section": result["new_section"],
             "description": result["description"],
+            "source": "cache",
+        }
+
+    # Dynamic fallback — ES search + Flash-Lite extraction. Covers the
+    # ~500+ sections beyond the static cache. Adds ~2s latency per miss
+    # but eliminates the "Mapping not found" failure for queries about
+    # uncommon sections like Section 379 IPC, Section 354B IPC, etc.
+    es_result = _es_lookup_old_new(section, old_act)
+    if es_result:
+        return {
+            "found": True,
+            "old_act": old_act.upper(),
+            "old_section": section,
+            "new_act": es_result["new_act"],
+            "new_section": es_result["new_section"],
+            "description": es_result["description"],
+            "source": "es_lookup",
         }
 
     return {
@@ -1292,6 +1414,7 @@ def map_old_to_new_law(section: str, old_act: str) -> dict:
         "new_act": None,
         "new_section": None,
         "description": "Mapping not found — check the full act text",
+        "source": "not_found",
     }
 
 

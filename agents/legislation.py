@@ -87,46 +87,17 @@ def _extract_match_phrase(query: str, text: str, title: str) -> QueryMetadata:
     return raw_and_parsed["parsed"]
 
 
-# --- Act Name Extraction from Query ---
-
-import re as _re
-
-# Common Indian act names to look for in queries
-_ACT_PATTERNS = [
-    r"(Consumer Protection Act[,\s]*\d*)",
-    r"(Income Tax Act[,\s]*\d*)",
-    r"(Companies Act[,\s]*\d*)",
-    r"(Negotiable Instruments Act[,\s]*\d*)",
-    r"(Motor Vehicles Act[,\s]*\d*)",
-    r"(RERA|Real Estate[^\.\n]*Act[,\s]*\d*)",
-    r"(Arbitration[^\.\n]*Act[,\s]*\d*)",
-    r"(POCSO[^\.\n]*Act[,\s]*\d*)",
-    r"(Information Technology Act[,\s]*\d*)",
-    r"(GST Act[,\s]*\d*|Goods and Services Tax[^\.\n]*Act[,\s]*\d*)",
-    r"(Hindu Marriage Act[,\s]*\d*)",
-    r"(Hindu Succession Act[,\s]*\d*)",
-    r"(Transfer of Property Act[,\s]*\d*)",
-    r"(Indian Contract Act[,\s]*\d*)",
-    r"(Specific Relief Act[,\s]*\d*)",
-    r"(Limitation Act[,\s]*\d*)",
-    r"(Registration Act[,\s]*\d*)",
-    r"(Rent Control Act[,\s]*\d*)",
-    r"(Domestic Violence[^\.\n]*Act[,\s]*\d*)",
-    r"(Insolvency[^\.\n]*Act[,\s]*\d*|IBC[,\s]*\d*)",
-]
-
-
-def _extract_act_name_from_query(query: str) -> str | None:
-    """Extract a specific act name from the query if one is mentioned.
-
-    Returns the first act name found, or None if no specific act is mentioned.
-    """
-    for pattern in _ACT_PATTERNS:
-        match = _re.search(pattern, query, _re.IGNORECASE)
-        if match:
-            act_name = match.group(1).strip().rstrip(",")
-            return act_name
-    return None
+# --- Act-name preference for source ranking ---
+#
+# The 19-entry regex bank that used to live here (_ACT_PATTERNS +
+# _extract_act_name_from_query) was retired. Act names are now extracted
+# by the orchestrator's intent extractor and exposed as
+# `UserIntent.named_acts: list[str]` — an LLM-driven extraction that
+# correctly recognises Insolvency and Bankruptcy Code, POCSO, JJ Act,
+# the Sale of Goods Act, the Industrial Disputes Act, and the hundred+
+# other Indian acts the regex didn't cover. The Legislation agent now
+# threads named_acts into `_search_legislation` and uses it for the
+# act-aware source preference.
 
 
 # Relevance gate is in core.retrieval_relevance — shared across agents.
@@ -135,8 +106,17 @@ def _extract_act_name_from_query(query: str) -> str | None:
 
 # --- Elasticsearch Search (single-section path) ---
 
-def _search_legislation(query: str) -> tuple[list[dict], str | None]:
-    """Multi-query ES search for legislation. Returns (hits, most_common_source)."""
+def _search_legislation(
+    query: str,
+    named_acts: list[str] | None = None,
+) -> tuple[list[dict], str | None]:
+    """Multi-query ES search for legislation. Returns (hits, most_common_source).
+
+    When `named_acts` is non-empty, the source ranker prefers sources whose
+    file name contains one of the named acts — this prevents queries like
+    "Consumer Protection Act 2019" matching unrelated acts that share
+    keywords. Replaces the prior 19-entry hardcoded regex bank.
+    """
     from collections import Counter
 
     es = get_es_client()
@@ -195,22 +175,37 @@ def _search_legislation(query: str) -> tuple[list[dict], str | None]:
     if not sources_counter:
         return [], None
 
-    # When the query explicitly names an act, prefer sources matching that act name
-    # This prevents "Consumer Protection Act 2019" matching "Medical Service Personnel" act
-    act_keywords_in_query = _extract_act_name_from_query(query)
-    if act_keywords_in_query:
-        matching_sources = [
-            (src, score) for src, score in sources_counter.most_common()
-            if act_keywords_in_query.lower() in src.lower()
-        ]
-        if matching_sources:
-            most_common_source = matching_sources[0][0]
-            log.info("Act-name matched source preferred",
-                     act_hint=act_keywords_in_query, source=most_common_source)
-        else:
-            most_common_source = sources_counter.most_common(1)[0][0]
-    else:
-        most_common_source = sources_counter.most_common(1)[0][0]
+    # When the query names a specific act (extracted by the intent
+    # extractor into UserIntent.named_acts), prefer ES sources whose
+    # filename matches one of those acts. Prevents queries like
+    # "Consumer Protection Act 2019" matching unrelated acts that
+    # share keywords. Falls back to most-common when no named act
+    # matches any source.
+    most_common_source = sources_counter.most_common(1)[0][0]
+    if named_acts:
+        # Try each named act in order — first match wins. Compare by
+        # significant tokens (drop "Act", "of", year digits) to be
+        # robust to formatting differences between user query and
+        # ES source filenames.
+        def _significant_tokens(s: str) -> set[str]:
+            return {
+                t for t in re.findall(r"[a-z]{3,}", s.lower())
+                if t not in {"act", "the", "and", "for", "code", "rules"}
+            }
+
+        for act_name in named_acts:
+            act_tokens = _significant_tokens(act_name)
+            if not act_tokens:
+                continue
+            matching_sources = [
+                (src, score) for src, score in sources_counter.most_common()
+                if act_tokens & _significant_tokens(src)
+            ]
+            if matching_sources:
+                most_common_source = matching_sources[0][0]
+                log.info("Named act matched source preferred",
+                         act=act_name, source=most_common_source)
+                break
 
     log.info("Most relevant source identified",
              source=most_common_source,
@@ -290,13 +285,16 @@ async def legislation_node(state: LegalAgentState) -> dict:
     query = agent_queries.get("Legislation", state.get("query", state.get("original_query", "")))
     user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
+    intent = state.get("user_intent")
+    named_acts = getattr(intent, "named_acts", None) or []
     _system_prompt = localize_prompt(
         LEGISLATION_SYSTEM_PROMPT,
         state.get("user_language", "en"),
-        state.get("user_intent"),
+        intent,
     )
     log.info("Agent started", query=query[:100],
-             using_agent_query="Legislation" in agent_queries)
+             using_agent_query="Legislation" in agent_queries,
+             named_acts_count=len(named_acts))
 
     try:
         progress("legislation", "Parsing query for section references...", step="parse")
@@ -352,7 +350,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
             # --- Standard single-section path (use clean_query) ---
             progress("legislation", "Searching legislation database...", step="search")
             with log_time(log, "ES retrieval"):
-                hits, source_name = await asyncio.to_thread(_search_legislation, clean_query)
+                hits, source_name = await asyncio.to_thread(_search_legislation, clean_query, named_acts)
 
         # Step 3: Topic fallback if no hits and no section was identified
         if not hits and not multi_parsed:
@@ -387,7 +385,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
                          detail=rewritten[:80], substep=True, step="fallback")
                 log.info("Retrying with rewritten query", rewritten=rewritten[:100])
                 try:
-                    retry_hits, retry_source = await asyncio.to_thread(_search_legislation, rewritten)
+                    retry_hits, retry_source = await asyncio.to_thread(_search_legislation, rewritten, named_acts)
                     if retry_hits:
                         hits, source_name = retry_hits, retry_source
                         log.info("Retry search succeeded", hit_count=len(hits))

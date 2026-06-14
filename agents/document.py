@@ -121,10 +121,32 @@ def _llm_config_for_artifact(intent) -> dict:
 _SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
 
 
+def _smart_truncate_message(text: str, head_chars: int, tail_chars: int) -> str:
+    """Head+tail truncation that preserves legal anchors at both ends.
+
+    A fact pattern established in para 3-5 of a long prior turn (e.g.
+    "the cheque was drawn on 2023-01-15 by ABC Corp for Rs. 50,00,000")
+    is lost if we just take `text[:500]`. Head+tail keeps the opening
+    context AND the closing summary (which usually contains the
+    conclusion / next-step / cited sections). Falls back to plain
+    truncation when text fits in the budget.
+    """
+    if not text:
+        return ""
+    budget = head_chars + tail_chars
+    if len(text) <= budget:
+        return text
+    return text[:head_chars] + "\n[...]\n" + text[-tail_chars:]
+
+
 def _format_chat_history(chat_history: list) -> str:
     """Format LangGraph chat history messages into a text block for prompts.
 
-    Takes the last 3 turns (6 messages) to keep context concise.
+    Takes the last 3 turns (6 messages). Uses head+tail truncation to
+    preserve legal anchors (parties, dates, section numbers) that often
+    sit in the middle/end of substantive prior turns. The prior 500-char
+    head-only truncation dropped fact patterns established later in the
+    response, leading to multi-turn drift in Document Q&A.
     """
     if not chat_history:
         return ""
@@ -135,9 +157,14 @@ def _format_chat_history(chat_history: list) -> str:
         role = getattr(msg, "type", "unknown")
         content = getattr(msg, "content", "")
         if role == "human":
-            parts.append(f"User: {content[:500]}")
+            # User turns are typically short — 800 chars covers most
+            # legal-query phrasings without dropping facts.
+            parts.append(f"User: {_smart_truncate_message(content, 600, 200)}")
         elif role == "ai":
-            parts.append(f"Assistant: {content[:500]}")
+            # Assistant turns can be long substantive answers — keep
+            # the introduction (frame) and the conclusion (anchors,
+            # cited sections, follow-up cues).
+            parts.append(f"Assistant: {_smart_truncate_message(content, 1200, 600)}")
     return "\n".join(parts)
 
 

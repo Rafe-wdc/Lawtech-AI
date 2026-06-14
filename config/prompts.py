@@ -456,6 +456,21 @@ Given the user's query and the recent conversation summary, produce:
        state-level GST appellate decisions. FALSE for generic statutory
        questions about GST that don't reference rulings.
 
+   named_acts — list of specific Indian acts / codes / statutes the user
+       references by name in the query. Each entry should be the canonical
+       English act name with year when given. Examples:
+         "Section 138 NI Act"                → ["Negotiable Instruments Act, 1881"]
+         "Consumer Protection Act 2019"      → ["Consumer Protection Act, 2019"]
+         "Companies Act and IBC"             → ["Companies Act, 2013", "Insolvency and Bankruptcy Code, 2016"]
+         "Section 302 IPC"                   → ["Indian Penal Code, 1860"]
+         "POCSO + JJ Act"                    → ["Protection of Children from Sexual Offences Act, 2012", "Juvenile Justice (Care and Protection of Children) Act, 2015"]
+         "Hindu Marriage Act, 1955"          → ["Hindu Marriage Act, 1955"]
+         "What are my rights"                → []  (no specific act named)
+       Use the canonical full name even when the user uses an abbreviation
+       (IPC → Indian Penal Code, NI Act → Negotiable Instruments Act, etc.).
+       Empty list when no specific act is named. Maximum 5 entries — if the
+       user lists more, pick the 5 most central to their query.
+
    additional_instructions — anything format/style-related the user said that
        doesn't fit the typed fields above. Keep under 300 characters. Examples:
        "use formal legal tone", "include the section heading verbatim",

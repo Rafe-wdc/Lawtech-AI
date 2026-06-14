@@ -365,6 +365,21 @@ class UserIntent(BaseModel):
                     "Drives GST_Judgment routing.",
     )
 
+    named_acts: list[str] = Field(
+        default_factory=list,
+        description="Specific Indian act / code / statute names the user "
+                    "explicitly references in the query. Each entry is the "
+                    "canonical English act name as the user wrote it OR a "
+                    "close paraphrase (e.g. 'Consumer Protection Act, 2019', "
+                    "'Companies Act, 2013', 'Negotiable Instruments Act, "
+                    "1881', 'Hindu Marriage Act, 1955'). Include the year "
+                    "when the user named it. Capped at 5 entries to bound "
+                    "prompt-injection attack surface. Used by the Legislation "
+                    "agent for act-name-aware source preference — replaces "
+                    "the hardcoded regex bank that only knew 19 acts.",
+        max_length=5,
+    )
+
     # — Catchall for things outside the typed schema
     additional_instructions: str = Field(
         "",

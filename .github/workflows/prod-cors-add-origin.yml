@@ -40,23 +40,29 @@ jobs:
           set -euo pipefail
 
           # Discover the .env path. systemd unit's EnvironmentFile= is the
-          # authoritative source; fall back to common candidates.
-          ENV_FILE=$(sudo systemctl show lawttorney-v2 -p EnvironmentFiles --value 2>/dev/null | tr ' ' '\n' | grep -v '^$' | head -1 | sed 's|^-||')
-          if [ -z "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
-            echo "EnvironmentFile= from systemd unit was empty or missing — falling back to discovery"
+          # authoritative source; fall back to common candidates. NOTE: the
+          # .env may be mode 700 owned by root, so existence checks must
+          # go through sudo (plain `[ -f ]` returns false for files the
+          # current user can't read).
+          ENV_FILE_RAW=$(sudo systemctl show lawttorney-v2 -p EnvironmentFiles --value 2>/dev/null | tr ' ' '\n' | grep -v '^$' | head -1 | sed 's|^-||' | awk '{print $1}')
+          ENV_FILE=""
+          if [ -n "$ENV_FILE_RAW" ] && sudo test -f "$ENV_FILE_RAW"; then
+            ENV_FILE="$ENV_FILE_RAW"
+          else
+            echo "EnvironmentFile= from systemd unit ($ENV_FILE_RAW) was empty or unreadable — falling back to discovery"
             for candidate in \
                 /root/Lawtech-AI/.env \
                 /root/Lawtech-AI/.env.production \
                 /root/Lawtech-AI/.env.prod \
                 /etc/lawttorney/.env \
                 /etc/lawttorney-v2/.env; do
-              if [ -f "$candidate" ]; then
+              if sudo test -f "$candidate"; then
                 ENV_FILE="$candidate"
                 break
               fi
             done
           fi
-          if [ -z "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+          if [ -z "$ENV_FILE" ] || ! sudo test -f "$ENV_FILE"; then
             echo "ERROR: could not locate .env file. Files under /root/Lawtech-AI matching .env*:"
             sudo ls -la /root/Lawtech-AI/ 2>/dev/null | grep -i env || echo "  (none)"
             echo "systemd unit EnvironmentFile= property:"

@@ -680,25 +680,34 @@ async def newacts_node(state: LegalAgentState) -> dict:
                         # for a query that the corpus DOES contain.
                         if not hits:
                             log.info("Per-act search returned 0 hits — "
-                                     "falling back to broad single-search")
+                                     "falling back to BM25-only broad search")
                             try:
-                                # Strip both the act_name AND section_number
-                                # filter so the broad search sees BOTH acts
-                                # and ALL sections (no narrow filter).
-                                broad_meta = metadata.model_copy(
-                                    update={
-                                        "act_name": None,
-                                        "section_number": None,
-                                    }
+                                # BM25-only via _search_newacts_by_topic is
+                                # much more reliable than the hybrid
+                                # script_score path for cross-act fallback
+                                # — no embedding field requirement, no
+                                # cosineSimilarity script that can fail
+                                # silently on certain docs. We saw the
+                                # hybrid broad-search return 0 hits twice
+                                # in 3 runs even with the act_name filter
+                                # stripped. BM25 + phrase boost surfaces
+                                # both BNS and IPC doctrine sections
+                                # reliably.
+                                bm25_broad = await asyncio.to_thread(
+                                    _search_newacts_by_topic, query, None,
                                 )
-                                def _build_and_search_broad() -> list:
-                                    q = _build_newacts_query(broad_meta, query)
-                                    es2 = get_es_client()
-                                    return es2.search(
-                                        index=ES_INDICES["newacts"], body=q
-                                    )["hits"]["hits"]
-                                hits = await asyncio.to_thread(_build_and_search_broad)
-                                log.info("Cross-act broad-search fallback",
+                                hits = [
+                                    {
+                                        "_source": {
+                                            "page_content": h["content"],
+                                            "source": h["source"],
+                                            "section_number": h.get("section_number"),
+                                        },
+                                        "_score": h.get("score"),
+                                    }
+                                    for h in bm25_broad["hits"]
+                                ]
+                                log.info("Cross-act BM25 broad-search fallback",
                                          hits=len(hits))
                             except Exception as broad_err:
                                 log.warning("Broad-search fallback failed — "

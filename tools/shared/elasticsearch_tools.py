@@ -880,8 +880,19 @@ def _search_newacts_by_topic(
     query = _sanitize_es_input(query)
     es = get_es_client()
 
+    # Cross-act detection: when the query mentions 2+ codified-act
+    # tokens (e.g. "compare BNS and IPC", "BNS vs IPC", "BNS / BSA /
+    # BNSS"), the user wants a CROSS-ACT result set — don't filter to
+    # one act even if the metadata extractor surfaced act_name. The
+    # extractor picks the first-named act ("BNS" in "BNS and IPC")
+    # which silently drops the other act's sections from results.
+    _ACT_TOKENS = ("bns", "bnss", "bsa", "ipc", "crpc", "iea")
+    q_lower = query.lower()
+    mentioned_acts = {t for t in _ACT_TOKENS if re.search(rf"\b{t}\b", q_lower)}
+    is_cross_act_query = len(mentioned_acts) >= 2
+
     filters = []
-    if act_name and act_name in ACTS_PATHS:
+    if act_name and act_name in ACTS_PATHS and not is_cross_act_query:
         filters.append({"term": {"source.keyword": ACTS_PATHS[act_name]}})
 
     # Boilerplate-section markers to demote. We don't filter them out

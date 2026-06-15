@@ -218,7 +218,18 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
     """Build ES query for newacts — either exact filter or hybrid BM25+vector."""
     filters = []
 
-    if metadata.act_name and metadata.act_name in ACTS_PATHS:
+    # Cross-act detection: when the user's query mentions 2+ codified-
+    # act tokens (e.g. "compare BNS and IPC", "BNS vs IPC", "BNS / BSA
+    # / BNSS"), do NOT filter to a single act even if the metadata
+    # extractor surfaced act_name. The extractor picks the first-named
+    # act, which silently drops the other act's sections.
+    _ACT_TOKENS = ("bns", "bnss", "bsa", "ipc", "crpc", "iea")
+    q_lower = (query_text or "").lower()
+    _mentioned = {t for t in _ACT_TOKENS if re.search(rf"\b{t}\b", q_lower)}
+    is_cross_act_query = len(_mentioned) >= 2
+
+    if (metadata.act_name and metadata.act_name in ACTS_PATHS
+            and not is_cross_act_query):
         filters.append({"term": {"source.keyword": ACTS_PATHS[metadata.act_name]}})
 
     if metadata.section_number:
@@ -226,24 +237,77 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
 
     # Hybrid search: BM25 + cosine similarity on embedding field
     if metadata.hybrid_search and query_text:
-        log.debug("Building hybrid BM25+vector query")
+        log.debug("Building hybrid BM25+vector query",
+                  cross_act=is_cross_act_query, mentioned=sorted(_mentioned))
         embeddings = get_retriever_embeddings()
         query_vector = embeddings.embed_query(query_text)
 
-        should_clauses = [{"match": {"page_content": query_text}}]
-        if metadata.act_name and metadata.act_name in ACTS_PATHS:
+        should_clauses = [
+            # Base BM25 on the raw query (existing behaviour)
+            {"match": {"page_content": query_text}},
+            # Phrase boost: doctrine-relevant chunks contain the user's
+            # multi-word topic (e.g. "right of private defence") verbatim
+            # or nearly so. Boost = 6 lifts them above lone-token matches.
+            {"match_phrase": {
+                "page_content": {"query": query_text, "slop": 3, "boost": 6.0}
+            }},
+        ]
+        # British-vs-American spelling alternative for the most common
+        # Indian-legal doctrine words (defense ↔ defence, defenses ↔
+        # defences). The corpus is British-spelled; users frequently
+        # type American spelling.
+        if "defense" in q_lower:
+            should_clauses.append({"match_phrase": {
+                "page_content": {
+                    "query": query_text.replace("defense", "defence")
+                                       .replace("Defense", "Defence"),
+                    "slop": 3, "boost": 6.0,
+                }
+            }})
+        elif "defence" in q_lower:
+            should_clauses.append({"match_phrase": {
+                "page_content": {
+                    "query": query_text.replace("defence", "defense")
+                                       .replace("Defence", "Defense"),
+                    "slop": 3, "boost": 4.0,
+                }
+            }})
+        if metadata.act_name and metadata.act_name in ACTS_PATHS and not is_cross_act_query:
             should_clauses.append(
                 {"term": {"source.keyword": ACTS_PATHS[metadata.act_name]}}
             )
+
+        # Negative query (boilerplate demotion): every act's preamble/
+        # short-title sections contain act-name tokens ("BNS", "IPC")
+        # and dominate BM25 for cross-act topic queries. negative_boost
+        # 0.3 multiplies their score by ~0.3 without filtering them out.
+        negative_query = {
+            "bool": {
+                "should": [
+                    {"match_phrase": {"page_content": "short title"}},
+                    {"match_phrase": {"page_content": "commencement"}},
+                    {"match_phrase": {"page_content": "extent and commencement"}},
+                    {"match_phrase": {"page_content": "this Act may be called"}},
+                    {"match_phrase": {"page_content": "shall come into force"}},
+                ],
+                "minimum_should_match": 1,
+            }
+        }
 
         return {
             "size": 20,
             "query": {
                 "script_score": {
                     "query": {
-                        "bool": {
-                            "should": should_clauses,
-                            "filter": filters,
+                        "boosting": {
+                            "positive": {
+                                "bool": {
+                                    "should": should_clauses,
+                                    "filter": filters,
+                                }
+                            },
+                            "negative": negative_query,
+                            "negative_boost": 0.3,
                         }
                     },
                     "script": {

@@ -667,20 +667,27 @@ async def newacts_node(state: LegalAgentState) -> dict:
                         if not hits:
                             log.info("Per-act search returned 0 hits — "
                                      "falling back to broad single-search")
-                            # Strip the act_name override on the original
-                            # metadata so the broad search sees both acts.
-                            broad_meta = metadata.model_copy(
-                                update={"act_name": None}
-                            )
-                            def _build_and_search_broad() -> list:
-                                q = _build_newacts_query(broad_meta, query)
-                                es2 = get_es_client()
-                                return es2.search(
-                                    index=ES_INDICES["newacts"], body=q
-                                )["hits"]["hits"]
-                            hits = await asyncio.to_thread(_build_and_search_broad)
-                            log.info("Cross-act broad-search fallback",
-                                     hits=len(hits))
+                            try:
+                                # Strip the act_name override on the original
+                                # metadata so the broad search sees both acts.
+                                broad_meta = metadata.model_copy(
+                                    update={"act_name": None}
+                                )
+                                def _build_and_search_broad() -> list:
+                                    q = _build_newacts_query(broad_meta, query)
+                                    es2 = get_es_client()
+                                    return es2.search(
+                                        index=ES_INDICES["newacts"], body=q
+                                    )["hits"]["hits"]
+                                hits = await asyncio.to_thread(_build_and_search_broad)
+                                log.info("Cross-act broad-search fallback",
+                                         hits=len(hits))
+                            except Exception as broad_err:
+                                log.warning("Broad-search fallback failed — "
+                                            "letting outer no-hits path handle it",
+                                            error=str(broad_err)[:200],
+                                            exc_info=True)
+                                hits = []
                     else:
                         hits = await asyncio.to_thread(_build_and_search)
                 except Exception as es_err:

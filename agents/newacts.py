@@ -218,18 +218,15 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
     """Build ES query for newacts — either exact filter or hybrid BM25+vector."""
     filters = []
 
-    # Cross-act detection: when the user's query mentions 2+ codified-
-    # act tokens (e.g. "compare BNS and IPC", "BNS vs IPC", "BNS / BSA
-    # / BNSS"), do NOT filter to a single act even if the metadata
-    # extractor surfaced act_name. The extractor picks the first-named
-    # act, which silently drops the other act's sections.
-    _ACT_TOKENS = ("bns", "bnss", "bsa", "ipc", "crpc", "iea")
+    # Cross-act handling is now done at the agent level
+    # (_build_and_search_per_act) which calls this function ONCE PER
+    # mentioned act with metadata.act_name overridden to that act.
+    # So _build_newacts_query always honours metadata.act_name as
+    # the authoritative filter — the caller decides whether to run
+    # per-act searches or a single one.
     q_lower = (query_text or "").lower()
-    _mentioned = {t for t in _ACT_TOKENS if re.search(rf"\b{t}\b", q_lower)}
-    is_cross_act_query = len(_mentioned) >= 2
 
-    if (metadata.act_name and metadata.act_name in ACTS_PATHS
-            and not is_cross_act_query):
+    if metadata.act_name and metadata.act_name in ACTS_PATHS:
         filters.append({"term": {"source.keyword": ACTS_PATHS[metadata.act_name]}})
 
     if metadata.section_number:
@@ -238,7 +235,7 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
     # Hybrid search: BM25 + cosine similarity on embedding field
     if metadata.hybrid_search and query_text:
         log.debug("Building hybrid BM25+vector query",
-                  cross_act=is_cross_act_query, mentioned=sorted(_mentioned))
+                  act_name=metadata.act_name)
         embeddings = get_retriever_embeddings()
         query_vector = embeddings.embed_query(query_text)
 
@@ -272,7 +269,7 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
                     "slop": 3, "boost": 4.0,
                 }
             }})
-        if metadata.act_name and metadata.act_name in ACTS_PATHS and not is_cross_act_query:
+        if metadata.act_name and metadata.act_name in ACTS_PATHS:
             should_clauses.append(
                 {"term": {"source.keyword": ACTS_PATHS[metadata.act_name]}}
             )

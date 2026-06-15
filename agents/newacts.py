@@ -631,13 +631,27 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 """Cross-act path — run one search per mentioned act,
                 filter each to that act explicitly via metadata.act_name
                 override, merge results (top _PER_ACT_LIMIT from each).
+
+                Also drops section_number from the per-act metadata: the
+                metadata extractor sometimes guesses a section number for
+                a cross-act comparison query ("compare BNS and IPC on
+                private defense" → extractor returns sections=[38]
+                because BNS sec 38 is one private-defense provision).
+                Filtering to that single section in EACH act returns 0
+                hits when that section is unrelated (IPC 38 isn't about
+                private defense). Strip it so per-act searches see the
+                full doctrine sections for each act.
                 """
                 _PER_ACT_LIMIT = 8
                 es = get_es_client()
                 all_hits: list = []
                 for act_full_name in _mentioned_acts:
-                    # Build a copy of metadata with this act forced in.
-                    m_copy = metadata.model_copy(update={"act_name": act_full_name})
+                    # Build a copy of metadata with this act forced in
+                    # AND section_number dropped (see docstring).
+                    m_copy = metadata.model_copy(update={
+                        "act_name": act_full_name,
+                        "section_number": None,
+                    })
                     q = _build_newacts_query(m_copy, query)
                     try:
                         res = es.search(index=ES_INDICES["newacts"], body=q)
@@ -668,10 +682,14 @@ async def newacts_node(state: LegalAgentState) -> dict:
                             log.info("Per-act search returned 0 hits — "
                                      "falling back to broad single-search")
                             try:
-                                # Strip the act_name override on the original
-                                # metadata so the broad search sees both acts.
+                                # Strip both the act_name AND section_number
+                                # filter so the broad search sees BOTH acts
+                                # and ALL sections (no narrow filter).
                                 broad_meta = metadata.model_copy(
-                                    update={"act_name": None}
+                                    update={
+                                        "act_name": None,
+                                        "section_number": None,
+                                    }
                                 )
                                 def _build_and_search_broad() -> list:
                                     q = _build_newacts_query(broad_meta, query)

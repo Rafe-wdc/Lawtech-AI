@@ -52,7 +52,15 @@ _ROMANIZED_HINTS: dict[str, list[str]] = {
         "lagta", "hoga", "wala", "mujhe", "humko", "mere", "hamare",
         "iska", "uska", "yeh", "woh", "bhi", "aur", "lekin", "kyunki",
         "dhara", "mukadma", "adalat", "vakil", "nyay", "jameen",
-        "ipc", "crpc", "bns", "bnss", "bsa",          # common in Hinglish legal
+        # NB: do NOT include Indian-legal-act acronyms like "ipc", "crpc",
+        # "bns", "bnss", "bsa" here. Indian lawyers writing in English
+        # routinely say "Section 302 IPC" or "BNS vs IPC comparison".
+        # Treating them as Hindi markers misroutes English queries to
+        # Hindi responses AND causes Newacts ES retrieval to fail on
+        # language-mismatched lookups (the corpus is English-indexed).
+        # Real Hindi-language queries about these acts will be caught
+        # by the langdetect call on the Hindi prose surrounding the
+        # acronyms, not the acronyms themselves.
     ],
     "mr": ["kasa", "aahe", "sangaa", "karayche", "mhanje", "tyala", "aapan"],
     "ta": ["eppadi", "enna", "sollunga", "pannum", "irukku", "seiyya"],

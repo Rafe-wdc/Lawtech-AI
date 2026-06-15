@@ -590,18 +590,34 @@ async def newacts_node(state: LegalAgentState) -> dict:
             # more token density in the query, drowning the other act's
             # sections (the LLM then apologises and the response gets
             # bumped to web fallback).
-            _ACT_TOKENS_MAP = {
-                "bns":  "The Bharatiya Nyaya Sanhita, 2023",
-                "bnss": "The Bharatiya Nagarik Suraksha Sanhita, 2023",
-                "bsa":  "The Bharatiya Sakshya Adhiniyam, 2023",
-                "ipc":  "The Indian Penal Code, 1860",
-                "crpc": "The Code of Criminal Procedure 1973",
-                "iea":  "Indian Evidence Act 1872",
-            }
-            _q_lower = query.lower()
+            # Match both abbreviations and full names. The memory node
+            # rewrites "BNS"/"IPC" into "Bharatiya Nyaya Sanhita 2023" /
+            # "Indian Penal Code 1860" before this agent runs, so the
+            # bare \bbns\b / \bipc\b form silently misses on the rewritten
+            # query. Search original_query too for safety.
+            _ACT_NAME_MAP = [
+                ("bns",  "The Bharatiya Nyaya Sanhita, 2023",
+                    r"\bbns\b|bharatiya\s+nyaya\s+sanhita"),
+                ("bnss", "The Bharatiya Nagarik Suraksha Sanhita, 2023",
+                    r"\bbnss\b|bharatiya\s+nagarik\s+suraksha\s+sanhita"),
+                ("bsa",  "The Bharatiya Sakshya Adhiniyam, 2023",
+                    r"\bbsa\b|bharatiya\s+sakshya\s+adhiniyam"),
+                ("ipc",  "The Indian Penal Code, 1860",
+                    r"\bipc\b|indian\s+penal\s+code"),
+                ("crpc", "The Code of Criminal Procedure 1973",
+                    r"\bcrpc\b|\bcr\.?p\.?c\.?\b|code\s+of\s+criminal\s+procedure"),
+                ("iea",  "Indian Evidence Act 1872",
+                    r"\biea\b|indian\s+evidence\s+act"),
+            ]
+            _q_lower = (
+                (query or "").lower()
+                + " "
+                + (state.get("original_query") or "").lower()
+            )
             _mentioned_acts = [
-                full_name for tok, full_name in _ACT_TOKENS_MAP.items()
-                if re.search(rf"\b{tok}\b", _q_lower)
+                full_name
+                for _tok, full_name, pat in _ACT_NAME_MAP
+                if re.search(pat, _q_lower)
             ]
             is_cross_act = len(_mentioned_acts) >= 2
 
@@ -777,11 +793,33 @@ async def newacts_node(state: LegalAgentState) -> dict:
         # Flash has known floating-point non-determinism even at temp=0,
         # so on the same input the verdict varies between runs. Skipping
         # here makes the response deterministic.
-        _ACT_TOKENS = ("bns", "bnss", "bsa", "ipc", "crpc", "iea")
-        _q_lower_check = query.lower()
+        # Detect cross-act queries on BOTH the rewritten query (post-memory)
+        # AND the original_query: memory expands "BNS"→"Bharatiya Nyaya Sanhita
+        # 2023" and "IPC"→"Indian Penal Code 1860", which strips the bare
+        # `\bbns\b` / `\bipc\b` abbreviations. Without the full-name regex
+        # below the cross-act path silently turned off post-rewrite and the
+        # relevance judge + apology-detector fell back to web for valid
+        # multi-act comparisons.
+        _ACT_PATTERNS = {
+            "bns":  r"\bbns\b|bharatiya\s+nyaya\s+sanhita",
+            "bnss": r"\bbnss\b|bharatiya\s+nagarik\s+suraksha\s+sanhita",
+            "bsa":  r"\bbsa\b|bharatiya\s+sakshya\s+adhiniyam",
+            "ipc":  r"\bipc\b|indian\s+penal\s+code",
+            "crpc": r"\bcrpc\b|\bcr\.?p\.?c\.?\b|code\s+of\s+criminal\s+procedure",
+            "iea":  r"\biea\b|indian\s+evidence\s+act",
+        }
+        _q_lower_check = (
+            (query or "").lower()
+            + " "
+            + (state.get("original_query") or "").lower()
+        )
         _is_cross_act_query = sum(
-            1 for tok in _ACT_TOKENS if re.search(rf"\b{tok}\b", _q_lower_check)
+            1 for pat in _ACT_PATTERNS.values()
+            if re.search(pat, _q_lower_check)
         ) >= 2
+        log.info("Cross-act detection",
+                 is_cross_act=_is_cross_act_query,
+                 query_preview=_q_lower_check[:160])
 
         if hits and _is_cross_act_query:
             log.info("Relevance gate skipped -- cross-act per-act search",

@@ -921,13 +921,21 @@ def _search_newacts_by_topic(
             }
         }})
 
+    # Loosened minimum_should_match: noisy queries like "Comparison
+    # Regarding between Right to Private Defense BNS and IPC." include
+    # meta words ("comparison", "regarding", "between") and act names
+    # ("BNS", "IPC") that the actual doctrine sections don't repeat.
+    # At 60%, real doctrine sections fail the threshold and don't make
+    # it into results — leaving only weak hits like preambles.
+    # At 30%, we get enough candidate sections; the phrase boost above
+    # then ranks the doctrine-matching ones first.
     positive_query = {
         "bool": {
             "must": [
                 {"match": {
                     "page_content": {
                         "query": query,
-                        "minimum_should_match": "60%",
+                        "minimum_should_match": "30%",
                     }
                 }}
             ],

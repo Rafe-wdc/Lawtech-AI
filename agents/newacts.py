@@ -854,7 +854,15 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
         # Check if LLM apologized (ES hits were irrelevant) — fall back to web search.
         # Uses the shared head+tail scanner so end-of-response hedges don't slip through.
-        if head_tail_apology_detected(llm_response.content):
+        #
+        # SKIPPED for cross-act queries: when we ran per-act searches, both
+        # acts' sections are in `docs_text` by construction. If the LLM still
+        # hedges ("a direct comparison is not possible..."), the right answer
+        # is to keep the corpus-grounded output and let the user see what was
+        # retrieved — NOT to overwrite it with web-scraped sources. Apology
+        # detector here was hiding real corpus content behind testbook.com /
+        # ipleaders.in links in the cross-act case.
+        if head_tail_apology_detected(llm_response.content) and not _is_cross_act_query:
             log.warning("LLM response is an apology or too short, using web fallback",
                         response_preview=llm_response.content[:100])
             try:
@@ -869,6 +877,10 @@ async def newacts_node(state: LegalAgentState) -> dict:
             return {
                 "agent_results": {"Newacts": fallback_result},
             }
+        elif head_tail_apology_detected(llm_response.content) and _is_cross_act_query:
+            log.info("Apology detected but suppressing web fallback — cross-act query "
+                     "(per-act hits are in docs_text, trust corpus output)",
+                     response_preview=llm_response.content[:120])
 
         # Determine display name for the act
         act_display = metadata.act_name or source_file

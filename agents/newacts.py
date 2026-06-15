@@ -770,7 +770,24 @@ async def newacts_node(state: LegalAgentState) -> dict:
                      act=metadata.act_name,
                      sections=len(metadata.section_number or []))
 
-        if hits and not _is_exact_filter_query(metadata):
+        # Skip the relevance judge for cross-act queries: when we ran
+        # per-act searches (`_build_and_search_per_act`), each hit is
+        # GUARANTEED to be a section from one of the user's named acts —
+        # the judge can't improve precision, only false-reject. Gemini
+        # Flash has known floating-point non-determinism even at temp=0,
+        # so on the same input the verdict varies between runs. Skipping
+        # here makes the response deterministic.
+        _ACT_TOKENS = ("bns", "bnss", "bsa", "ipc", "crpc", "iea")
+        _q_lower_check = query.lower()
+        _is_cross_act_query = sum(
+            1 for tok in _ACT_TOKENS if re.search(rf"\b{tok}\b", _q_lower_check)
+        ) >= 2
+
+        if hits and _is_cross_act_query:
+            log.info("Relevance gate skipped -- cross-act per-act search",
+                     hits=len(hits))
+
+        if hits and not _is_exact_filter_query(metadata) and not _is_cross_act_query:
             chunks_for_judge = [
                 h["_source"].get("page_content", "") for h in hits
             ]

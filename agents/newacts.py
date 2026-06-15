@@ -656,6 +656,31 @@ async def newacts_node(state: LegalAgentState) -> dict:
                         log.info("Cross-act query detected — running per-act searches",
                                  mentioned=_mentioned_acts)
                         hits = await asyncio.to_thread(_build_and_search_per_act)
+                        # If per-act search comes up empty (e.g. the forced
+                        # act_name filter was too strict, ES quirk, or
+                        # metadata extraction guessed a non-existent section
+                        # number that the per-act path inherits), fall back
+                        # to the broad single-search. Without this, the
+                        # `if not hits:` block below routes us to
+                        # web_search_fallback and the user sees web sources
+                        # for a query that the corpus DOES contain.
+                        if not hits:
+                            log.info("Per-act search returned 0 hits — "
+                                     "falling back to broad single-search")
+                            # Strip the act_name override on the original
+                            # metadata so the broad search sees both acts.
+                            broad_meta = metadata.model_copy(
+                                update={"act_name": None}
+                            )
+                            def _build_and_search_broad() -> list:
+                                q = _build_newacts_query(broad_meta, query)
+                                es2 = get_es_client()
+                                return es2.search(
+                                    index=ES_INDICES["newacts"], body=q
+                                )["hits"]["hits"]
+                            hits = await asyncio.to_thread(_build_and_search_broad)
+                            log.info("Cross-act broad-search fallback",
+                                     hits=len(hits))
                     else:
                         hits = await asyncio.to_thread(_build_and_search)
                 except Exception as es_err:

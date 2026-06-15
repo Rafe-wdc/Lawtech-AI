@@ -861,7 +861,22 @@ def search_newacts(
 def _search_newacts_by_topic(
     query: str, act_name: Optional[str] = None, size: int = 15,
 ) -> dict:
-    """Internal: BM25-only topic search in newacts. Avoids embedding/script errors."""
+    """Internal: BM25 topic search in newacts with phrase boosting and
+    boilerplate demotion.
+
+    Why phrase boosting: doctrine queries like "right to private defence",
+    "general exceptions", "culpable homicide" have a multi-word topic
+    phrase that BM25 alone with high minimum_should_match dilutes when
+    the query also names the acts (BNS/IPC/CrPC/etc.). The phrase clauses
+    push doctrine-relevant sections above noise.
+
+    Why boilerplate demotion: every act has a Section 1 (short title),
+    Section 2 (commencement), Section 3 (extent), and definitions. These
+    chunks contain the act-name tokens ("BNS", "IPC") and rank very high
+    on "compare BNS and IPC" queries even when they have ZERO content
+    about the actual doctrine. Demoting them by must_not boosts the
+    real doctrine sections to the top.
+    """
     query = _sanitize_es_input(query)
     es = get_es_client()
 
@@ -869,19 +884,83 @@ def _search_newacts_by_topic(
     if act_name and act_name in ACTS_PATHS:
         filters.append({"term": {"source.keyword": ACTS_PATHS[act_name]}})
 
+    # Boilerplate-section markers to demote. We don't filter them out
+    # entirely (a query genuinely about "short title of BNS" should still
+    # surface those), but we down-rank them so doctrine sections win on
+    # topic queries.
+    boilerplate_phrases = (
+        "short title", "commencement", "extent and commencement",
+        "this Act may be called", "shall come into force",
+    )
+
+    # Build the positive query (main relevance signal).
+    should_clauses = [
+        # Phrase boost: doctrine-relevant chunks contain the query's
+        # multi-word topic verbatim. boost=6 lifts these above
+        # lone-token matches.
+        {"match_phrase": {
+            "page_content": {"query": query, "slop": 3, "boost": 6.0}
+        }},
+    ]
+    # British-vs-American spelling alternative for the most common
+    # Indian-legal doctrine word ("defense" → "defence" or vice versa).
+    if "defense" in query.lower():
+        should_clauses.append({"match_phrase": {
+            "page_content": {
+                "query": query.replace("defense", "defence")
+                              .replace("Defense", "Defence"),
+                "slop": 3, "boost": 6.0,
+            }
+        }})
+    elif "defence" in query.lower():
+        should_clauses.append({"match_phrase": {
+            "page_content": {
+                "query": query.replace("defence", "defense")
+                              .replace("Defence", "Defense"),
+                "slop": 3, "boost": 4.0,
+            }
+        }})
+
+    positive_query = {
+        "bool": {
+            "must": [
+                {"match": {
+                    "page_content": {
+                        "query": query,
+                        "minimum_should_match": "60%",
+                    }
+                }}
+            ],
+            "should": should_clauses,
+            "filter": filters,
+        }
+    }
+
+    # Negative query: act-preamble chunks (short title, commencement,
+    # extent, etc.) that always token-match "BNS"/"IPC" but have ZERO
+    # doctrine content. We demote them via boosting query rather than
+    # filtering them out entirely (negative_boost=0.3 multiplies their
+    # score by ~0.3 instead of dropping them).
+    negative_query = {
+        "bool": {
+            "should": [
+                {"match_phrase": {"page_content": "short title"}},
+                {"match_phrase": {"page_content": "commencement"}},
+                {"match_phrase": {"page_content": "extent and commencement"}},
+                {"match_phrase": {"page_content": "this Act may be called"}},
+                {"match_phrase": {"page_content": "shall come into force"}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
     es_query = {
         "size": size,
         "query": {
-            "bool": {
-                "must": [
-                    {"match": {
-                        "page_content": {
-                            "query": query,
-                            "minimum_should_match": "60%",
-                        }
-                    }}
-                ],
-                "filter": filters,
+            "boosting": {
+                "positive": positive_query,
+                "negative": negative_query,
+                "negative_boost": 0.3,
             }
         },
         "sort": [

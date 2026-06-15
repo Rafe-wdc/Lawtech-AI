@@ -587,16 +587,64 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
         else:
             # Step 3: Build and execute query
-            # _build_newacts_query may call embeddings.embed_query (CPU/network);
-            # es.search is a blocking network call — both go off-thread.
+            # Cross-act queries (e.g. "BNS vs IPC comparison"): run ONE
+            # ES search per named act, filtered to that act, then merge.
+            # Otherwise BM25 + cross-encoder favours whichever act has
+            # more token density in the query, drowning the other act's
+            # sections (the LLM then apologises and the response gets
+            # bumped to web fallback).
+            _ACT_TOKENS_MAP = {
+                "bns":  "The Bharatiya Nyaya Sanhita, 2023",
+                "bnss": "The Bharatiya Nagarik Suraksha Sanhita, 2023",
+                "bsa":  "The Bharatiya Sakshya Adhiniyam, 2023",
+                "ipc":  "The Indian Penal Code, 1860",
+                "crpc": "The Code of Criminal Procedure 1973",
+                "iea":  "Indian Evidence Act 1872",
+            }
+            _q_lower = query.lower()
+            _mentioned_acts = [
+                full_name for tok, full_name in _ACT_TOKENS_MAP.items()
+                if re.search(rf"\b{tok}\b", _q_lower)
+            ]
+            is_cross_act = len(_mentioned_acts) >= 2
+
             def _build_and_search() -> list:
+                """Single-search path — used when query isn't cross-act."""
                 q = _build_newacts_query(metadata, query)
                 es = get_es_client()
                 return es.search(index=ES_INDICES["newacts"], body=q)["hits"]["hits"]
 
+            def _build_and_search_per_act() -> list:
+                """Cross-act path — run one search per mentioned act,
+                filter each to that act explicitly via metadata.act_name
+                override, merge results (top _PER_ACT_LIMIT from each).
+                """
+                _PER_ACT_LIMIT = 8
+                es = get_es_client()
+                all_hits: list = []
+                for act_full_name in _mentioned_acts:
+                    # Build a copy of metadata with this act forced in.
+                    m_copy = metadata.model_copy(update={"act_name": act_full_name})
+                    q = _build_newacts_query(m_copy, query)
+                    try:
+                        res = es.search(index=ES_INDICES["newacts"], body=q)
+                        hits_for_act = res["hits"]["hits"][:_PER_ACT_LIMIT]
+                        log.info("Cross-act per-act search",
+                                 act=act_full_name, hits=len(hits_for_act))
+                        all_hits.extend(hits_for_act)
+                    except Exception as e:
+                        log.warning("Cross-act per-act search failed",
+                                    act=act_full_name, error=str(e)[:120])
+                return all_hits
+
             with log_time(log, "ES search"):
                 try:
-                    hits = await asyncio.to_thread(_build_and_search)
+                    if is_cross_act:
+                        log.info("Cross-act query detected — running per-act searches",
+                                 mentioned=_mentioned_acts)
+                        hits = await asyncio.to_thread(_build_and_search_per_act)
+                    else:
+                        hits = await asyncio.to_thread(_build_and_search)
                 except Exception as es_err:
                     err_msg = str(es_err).lower()
                     if "embedding" in err_msg or "script" in err_msg or "illegal_argument" in err_msg:

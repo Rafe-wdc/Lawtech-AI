@@ -347,6 +347,27 @@ violations specific to Indian drafting practice:
     concatenated. Suggested_fix: rewrite the party block with
     blank lines between every detail.
 
+  missing_cause_title_elements — the cause title block is
+    formatted with blank lines (so `cause_title_collapsed` doesn't
+    catch it) but is MISSING one or more of these mandatory
+    elements (Sagar's bug #6, 2026-06-16):
+       (a) "IN THE MATTER OF:" header (bolded) between the case
+           number line and the plaintiff block.
+       (b) Subject heading at the END of the cause title block
+           (after the defendant designation), e.g. "SUIT FOR
+           COMPENSATION FOR MEDICAL NEGLIGENCE", "WRIT PETITION
+           UNDER ARTICLE 226 OF THE CONSTITUTION OF INDIA",
+           "COMPLAINT UNDER SECTION 138 NI ACT". Bolded, its own
+           paragraph.
+       (c) Court name and Suit/Petition number NOT bolded.
+           Both must be `**bolded markdown**` on their own
+           paragraphs.
+    Flag MAJOR for each missing element. Suggested_fix: "Insert
+    `**IN THE MATTER OF:**` between the suit-number line and the
+    plaintiff block" / "Append `**SUIT FOR <SUBJECT>**` after the
+    defendant designation line" / "Bold the court name and suit
+    number with `**` markers".
+
   vs_in_code_block — the "vs" separator between plaintiff and
     defendant blocks is wrapped in backticks (`` `vs` ``) or a
     fenced triple-backtick code block. The renderer treats backticks

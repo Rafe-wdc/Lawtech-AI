@@ -922,9 +922,19 @@ Rules:
     - Description of Properties / Schedule: full address, CTS/survey number,
       area, boundaries, ownership history — every flat or asset gets its own
       sub-paragraph.
-    - Court Fee Statement: 2-4 paragraphs citing the exact provision of the
-      applicable Court Fees Act (state or central), the basis of valuation
-      (ad valorem vs fixed, possession status), and the amount tendered.
+    - **List of Documents — MARKDOWN TABLE, NOT prose**. One row per document.
+      Columns: `Sr. No. | Document Description | Date | Marked As (Exhibit)`.
+      No introductory paragraph, no minimum word count, no padding sentences.
+      Standard documents (sale deed, FIR, charge sheet, agreement copies,
+      medical records, salary slips, photos, vakalatnama) each get one row.
+      Mirror this terse style for **Schedule of Properties** when there are
+      ≥2 assets: use `Sr. No. | Description | CTS/Survey No. | Area | Boundaries`.
+      A single-asset Schedule may stay in 1-2 short paragraphs.
+    - Court Fee Statement: short and structured — 2-4 SENTENCES covering the
+      applicable Court Fees Act (State Act preferred), the basis of valuation
+      (ad valorem vs fixed, possession status), and the amount tendered. No
+      filler. Sagar's bug #2 (2026-06-16): procedural blocks were being
+      padded with unnecessary prose — keep them tight.
     - Prayer: 5+ numbered reliefs, each tied to a statutory provision.
     - Verification: exact Order VI Rule 15 CPC wording, dated, signed.
     - Affidavit-in-Support: notarised form with deponent declaration, sworn-
@@ -958,33 +968,60 @@ Rules:
      renders on screen as:
         Mrs. Anjali Deshmukh Age: 42 years   ← WRONG
      CORRECT layout requires a BLANK LINE (i.e. `\n\n`) between EVERY
-     element so each renders as its own paragraph. The full template:
+     element so each renders as its own paragraph. The full template
+     (matches Sagar's bug #6, 2026-06-16 — the format the client expects):
 
-        IN THE COURT OF CIVIL JUDGE SENIOR DIVISION, AT PUNE
+        **IN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, AT _____**
         ⟨blank line⟩
-        C.S. No. ___/YYYY
+        **SUIT NO. _______ OF 2026**
+        ⟨blank line⟩
+        **IN THE MATTER OF:**
         ⟨blank line⟩
         Mrs. Anjali Deshmukh
         ⟨blank line⟩
-        Age: 42 years
+        Age: 42 years, Occupation: [Occupation of Plaintiff]
         ⟨blank line⟩
-        Occupation: [Occupation of Plaintiff]
+        R/ Address: [Residential Address of Plaintiff]
         ⟨blank line⟩
-        Address: [Address in Pune]
+        .....Plaintiff / Petitioner
         ⟨blank line⟩
-        .....Plaintiff
-        ⟨blank line⟩
-        **vs**
+        **Versus**
         ⟨blank line⟩
         1. Dr. Rakesh Nair
         ⟨blank line⟩
-        Age: [Age of Defendant]
+        Age: [Age], Occupation: Medical Practitioner
         ⟨blank line⟩
-        Occupation: Medical Practitioner
+        R/ Address: [Residential Address of Defendant]
         ⟨blank line⟩
-        Address: [Defendant's Address], Pune
+        .....Defendant No. 1 / Respondent No. 1
         ⟨blank line⟩
-        .....Defendant No. 1
+        **SUIT FOR COMPENSATION FOR MEDICAL NEGLIGENCE**
+     (or other subject line — e.g. **"SUIT FOR DECLARATION AND PERMANENT
+     INJUNCTION"**, **"WRIT PETITION UNDER ARTICLE 226 OF THE
+     CONSTITUTION OF INDIA"**, **"COMPLAINT UNDER SECTION 138 OF THE
+     NEGOTIABLE INSTRUMENTS ACT, 1881"** — pick the natural one for
+     the cause of action.)
+
+     Mandatory elements in this exact order:
+        (i)   **Court name** — bolded, on its own line.
+        (ii)  **Suit/Petition number + year** — bolded, on its own line.
+        (iii) **"IN THE MATTER OF:"** header — bolded, before the party
+              block.
+        (iv)  Party block (name → age+occupation on one line OR two
+              lines → R/ Address → ".....Plaintiff/Petitioner") with
+              BLANK LINES between every element.
+        (v)   **"Versus"** (or **"VERSUS"**) — bolded, plain text, NOT
+              code-fenced.
+        (vi)  Defendant block mirroring the plaintiff layout.
+        (vii) **Subject line** (`SUIT FOR …` / `WRIT PETITION …`) —
+              bolded, on its own line, at the END of the cause title
+              block (NOT at the top).
+
+     Age + Occupation may be on the same line ("Age: 42, Occupation:
+     Engineer") or split into two lines — either is acceptable as long
+     as each is its own paragraph (blank line on either side). The
+     R/ Address ("R/" stands for "Residing at" — Indian-court
+     convention) is ALWAYS its own paragraph.
 
      Each ⟨blank line⟩ above is LITERALLY an empty line in the output.
      If you omit them, the renderer joins the elements into one
@@ -1083,10 +1120,18 @@ Rules:
      statutory citations; never reduce to a one-sentence stub.
    - Prayer: 5-8 numbered reliefs (one paragraph each).
    - Verification / Affidavit: 1-3 paragraphs of statutory wording.
-   - Court Fee Statement: 2-4 paragraphs (citation + valuation basis + amount).
-   - Schedule, List of Documents: 2-5 short paragraphs.
-   Aim for substantive pleading, not stubs. A section that needs depth gets
-   it; a section that's just statutory wording stays compact.
+   - Court Fee Statement: 2-4 SENTENCES (citation + valuation basis + amount).
+     Not paragraphs — keep it tight.
+   - **List of Documents: TABLE format, not prose**. Columns `Sr. No. |
+     Document | Date | Marked As`. One row per document. No intro paragraph,
+     no minimum word count.
+   - Schedule of Properties: TABLE when ≥2 assets (`Sr. No. | Description |
+     CTS/Survey | Area | Boundaries`); 1-2 short paragraphs for a single asset.
+   Aim for substantive pleading on the legal sections, not stubs. A
+   section that needs depth gets it; a section that's just statutory
+   wording stays compact. Procedural blocks (List of Documents, Court
+   Fee, Schedule) stay tight regardless of how much depth the body
+   sections get — they are reference data, not argument.
 8. IMPORTANT: Prayer/relief section MUST appear as the final substantive section
    before Verification/Affidavit.
 9. Think like a BUSY judge reading this — every section must justify its existence.

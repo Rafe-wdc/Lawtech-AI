@@ -752,14 +752,92 @@ async def _background_ocr_and_store(
 # --- Text-only extractors (for DOCX / XLSX that Gemini Files API can't handle) ---
 
 def _extract_docx_text(file_path: str) -> str:
+    """Extract text from a .docx, handling Krutidev / DV-TT legacy fonts.
+
+    Sagar's bug #3 (2026-06-16): "Hindi mai krutidev word ki file attach
+    karne ke baad usko read nahi kar paa Raha hai." Krutidev stores Latin
+    codepoints that LOOK like Devanagari only when rendered with the
+    Krutidev font — python-docx's `paragraph.text` returns the raw Latin,
+    which is useless for retrieval and the LLM gets gibberish.
+
+    Approach: walk run-by-run, detect runs whose font name is a known
+    legacy-Hindi font (Krutidev, DV-TT, Shusha, Devlys, …), and run those
+    runs through the lookup-table converter in core/krutidev. Unicode/
+    English runs pass through unchanged.
+
+    If a paragraph ends up with NO Devanagari after conversion (the
+    `looks_like_unicode_devanagari` heuristic returns False) AND the
+    paragraph contained legacy-font runs, log a warning so we know a
+    vision-OCR fallback is needed for that document.
+    """
     from docx import Document
+    from core.krutidev import (
+        is_legacy_hindi_font, krutidev_to_unicode, looks_like_unicode_devanagari,
+    )
+
     doc = Document(file_path)
-    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+
+    def _para_text(paragraph) -> tuple[str, bool]:
+        """Returns (text, had_legacy_font)."""
+        chunks: list[str] = []
+        had_legacy = False
+        for run in paragraph.runs:
+            run_text = run.text or ""
+            if not run_text:
+                continue
+            font_name = run.font.name
+            # Inherit font from style if not set explicitly on the run
+            if not font_name:
+                try:
+                    font_name = run.style.font.name if run.style else None
+                except Exception:
+                    font_name = None
+            if is_legacy_hindi_font(font_name):
+                had_legacy = True
+                chunks.append(krutidev_to_unicode(run_text))
+            else:
+                chunks.append(run_text)
+        return "".join(chunks), had_legacy
+
+    paragraphs: list[str] = []
+    legacy_paragraphs_garbled = 0
+    legacy_paragraphs_clean = 0
+    for p in doc.paragraphs:
+        text, had_legacy = _para_text(p)
+        if not text.strip():
+            continue
+        if had_legacy:
+            if looks_like_unicode_devanagari(text):
+                legacy_paragraphs_clean += 1
+            else:
+                legacy_paragraphs_garbled += 1
+        paragraphs.append(text)
+
+    if legacy_paragraphs_clean or legacy_paragraphs_garbled:
+        log.info("Legacy Hindi font runs detected in DOCX",
+                 file=file_path,
+                 paragraphs_converted_clean=legacy_paragraphs_clean,
+                 paragraphs_still_garbled=legacy_paragraphs_garbled)
+        if legacy_paragraphs_garbled > 0:
+            log.warning("Some DOCX paragraphs failed Krutidev conversion; "
+                        "vision-OCR fallback recommended",
+                        file=file_path,
+                        garbled_count=legacy_paragraphs_garbled)
+
     table_texts = []
     for table in doc.tables:
         rows = []
         for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
+            cells: list[str] = []
+            for cell in row.cells:
+                # Cells may contain their own paragraphs with runs — walk
+                # them so legacy-font conversion applies inside tables too.
+                cell_parts: list[str] = []
+                for cp in cell.paragraphs:
+                    ctext, _ = _para_text(cp)
+                    if ctext.strip():
+                        cell_parts.append(ctext.strip())
+                cells.append("\n".join(cell_parts))
             rows.append(" | ".join(cells))
         if rows:
             header = rows[0]

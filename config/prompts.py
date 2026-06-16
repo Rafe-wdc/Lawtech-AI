@@ -920,6 +920,17 @@ Rules:
       draft must reflect THEIR case, not the template's example case.
 """
 
+# Append shared Indian-legal discipline blocks to DRAFTING_SYSTEM_PROMPT
+# (Phase 2A of indian_legal_prompt_integration_plan.md).
+DRAFTING_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
+
 # --- Drafting Pipeline: Outline Generation ---
 DRAFT_OUTLINE_PROMPT = """You are a legal document architect specializing in Indian law.
 Given USER-PROVIDED FACTS (when present), the user's query, and a reference template,
@@ -977,6 +988,14 @@ Rules:
    before Verification/Affidavit.
 9. Think like a BUSY judge reading this — every section must justify its existence.
 """
+
+# Append shared Indian-legal discipline blocks to DRAFT_OUTLINE_PROMPT.
+DRAFT_OUTLINE_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 # --- Drafting Pipeline: Citation Injection (with real DB results) ---
 DRAFT_SYNTHESIS_PROMPT = """You are a legal document compiler. Your task is to enrich
@@ -1874,6 +1893,15 @@ Advocate for the Notice-Giver
 - Set a realistic compliance period (15 days for cheque bounce per Section 138; 30 days standard for civil; 60 days for property restoration).
 - Minimum 400 words; produce 6-12 numbered factual paragraphs. Do NOT include disclaimers about consulting a lawyer — this IS the lawyer's product."""
 
+# Append shared Indian-legal discipline blocks to LEGAL_NOTICE_DRAFT_PROMPT.
+LEGAL_NOTICE_DRAFT_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 COMPLAINT_DRAFT_PROMPT = """You are an Indian legal practitioner drafting a COMPLAINT / PETITION on the user's behalf, based on the facts in the attached document.
 
@@ -1922,6 +1950,15 @@ A standard verification block at the end stating the contents are true to the de
 - Plead jurisdiction explicitly.
 - Minimum 500 words; aim for 800-1500 on substantive matters.
 - Use clean GitHub-flavored Markdown."""
+
+# Append shared Indian-legal discipline blocks to COMPLAINT_DRAFT_PROMPT.
+COMPLAINT_DRAFT_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
 
 
 WITNESS_PREP_PROMPT = """You are an Indian legal practitioner preparing YOUR OWN WITNESS for direct examination AND for the cross-examination that will follow, based on the attached statement / deposition / brief.

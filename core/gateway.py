@@ -354,6 +354,17 @@ class SearchRequest(BaseModel):
     # Scenario/Legislation/Judgment alongside Drafting). None → use
     # DRAFTING_CITE_APPENDIX_DEFAULT env default (off).
     cite_appendix: Optional[bool] = None
+    # Regenerate (Sagar's bug #5, 2026-06-16): when set, this is the
+    # PREVIOUS assistant response. The orchestrator short-circuits the
+    # full agent pipeline and runs ONE Gemini Flash refinement call
+    # that polishes the previous output without changing structure or
+    # generating fresh content. Preserves user-perceived continuity:
+    # "regenerate" produces a polished version of the prior answer,
+    # not a completely different new answer.
+    regenerate_of: Optional[str] = Field(
+        None, max_length=200000,
+        description="Previous assistant response to refine.",
+    )
 
 
 class SearchResponse(BaseModel):
@@ -441,6 +452,7 @@ def _build_initial_state(
     file_context: dict | None = None,
     preferred_language: str | None = None,
     cite_appendix: bool | None = None,
+    regenerate_of: str | None = None,
 ) -> dict:
     """Build the initial LangGraph state with all required fields."""
     # Validate and normalise preferred_language (client override for user_language)
@@ -467,6 +479,10 @@ def _build_initial_state(
         "integration_context": None,
         "draft_continuation": draft_continuation,
         "cite_appendix": cite_appendix,
+        # Sagar bug #5: previous assistant response to refine. The orchestrator
+        # short-circuits when this is set — see _refine_existing_response in
+        # agents/orchestrator.py.
+        "regenerate_of": regenerate_of,
         "final_response": "",
         "source_metadata": [],
         "tokens_consumed": 0,
@@ -532,6 +548,7 @@ async def search(data: SearchRequest, request: Request):
         data.prompt_query, thread_id,
         preferred_language=data.preferred_language,
         cite_appendix=data.cite_appendix,
+        regenerate_of=data.regenerate_of,
     )
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -723,6 +740,7 @@ async def search_stream(data: SearchRequest, request: Request):
         file_context=None,
         integration_token=getattr(data, "integration_token", None),
         cite_appendix=getattr(data, "cite_appendix", None),
+        regenerate_of=getattr(data, "regenerate_of", None),
         enable_cache=True,
         enable_quality_scoring=True,
     )
@@ -790,6 +808,7 @@ async def chat_with_files(
     preferred_language: Optional[str] = Form(None),
     integration_token: Optional[str] = Form(None),
     cite_appendix: Optional[bool] = Form(None),
+    regenerate_of: Optional[str] = Form(None),  # Sagar bug #5
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -889,6 +908,7 @@ async def chat_with_files(
                 file_context=file_context_dict,
                 integration_token=integration_token,
                 cite_appendix=cite_appendix,
+                regenerate_of=regenerate_of,
                 enable_cache=False,   # uploads / integration context make caching unsafe
                 enable_quality_scoring=True,
                 skip_thread_id_event=True,  # /chat already emitted before file processing

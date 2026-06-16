@@ -858,6 +858,72 @@ def _validate_and_enrich_plan(
     return tasks_planned
 
 
+# --- Regenerate helper (Sagar bug #5, 2026-06-16) ---
+
+_REFINE_PROMPT = """You are refining a previous legal AI response. The user
+clicked "regenerate" — they want a POLISHED version of the previous answer,
+NOT a completely different new response.
+
+Rules:
+- Preserve the previous response's STRUCTURE (section headings, table layouts,
+  paragraph numbering, cause-title block, etc.) EXACTLY.
+- Preserve the substantive content — every fact, citation, statute reference,
+  party name, amount, date, and address stays the same.
+- IMPROVE clarity, polish phrasing, fix typos, fix grammar, repair any markdown
+  formatting issues (broken tables, missing blank lines between cause-title
+  elements, code-fenced "vs", etc.).
+- Do NOT add new information the user didn't ask for.
+- Do NOT shorten or summarise the response.
+- Do NOT change the language (if the previous response was in Marathi, the
+  refined response stays in Marathi).
+- Do NOT prefix with "Here is the refined version" or any other preamble.
+  Start directly with the substantive content.
+
+Original user query:
+{query}
+
+Previous response (this is what you are refining):
+{previous_response}
+
+Refined response (same structure, same content, polished phrasing):"""
+
+
+async def _refine_existing_response(
+    query: str,
+    previous_response: str,
+    user_language: str = "en",
+) -> tuple[str, int]:
+    """Refinement pass over a previous AI response.
+
+    Used by the regenerate short-circuit in orchestrator_plan_node when the
+    request carries `regenerate_of`. Single Gemini Flash call with low
+    temperature so the refined response stays close to the original
+    structure but gets a quality pass.
+
+    Returns (refined_text, tokens_consumed).
+    """
+    progress("orchestrator", "Refining previous response...", step="regenerate")
+    with log_time(log, "Refine previous response"):
+        # Use temperature=0 so the refinement is as deterministic as possible.
+        # Same input + same prompt → essentially same output, matching the
+        # user's "regeneration should align with previous output" expectation.
+        llm = get_gemini_flash_full(temperature=0.0, max_output_tokens=12288)
+        prompt = ChatPromptTemplate.from_template(
+            localize_prompt(_REFINE_PROMPT, user_language)
+        )
+        chain = prompt | llm
+        from core.streaming import stream_chain_response
+        response = await stream_chain_response(
+            chain,
+            {"query": query, "previous_response": previous_response},
+            timeout=180,
+        )
+    refined = response.content
+    from core.token_tracker import record as _record_tokens
+    tokens = _record_tokens("Orchestrator", "refine", response)
+    return refined, tokens
+
+
 # --- Agent Nodes ---
 
 async def orchestrator_plan_node(state: LegalAgentState) -> dict:
@@ -872,6 +938,51 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     5. Return task + tasks_planned + agent_queries + response_instructions
     """
     query = state.get("query", state["original_query"])
+
+    # Sagar bug #5 (2026-06-16): regenerate short-circuit. When the frontend
+    # passes `regenerate_of`, the user clicked "regenerate" — they want a
+    # polished version of the previous response, NOT a completely different
+    # new answer. Run ONE Gemini Flash refinement call here and skip the
+    # full agent pipeline.
+    regenerate_of = state.get("regenerate_of") or ""
+    if regenerate_of.strip():
+        refined, refine_tokens = await _refine_existing_response(
+            query=query,
+            previous_response=regenerate_of,
+            user_language=state.get("user_language", "en"),
+        )
+        # Stream the refined content to any active SSE writer so the UX
+        # matches a normal generation.
+        try:
+            from langgraph.config import get_stream_writer
+            writer = get_stream_writer()
+            _chunk = 40
+            for i in range(0, len(refined), _chunk):
+                writer({"type": "token", "content": refined[i:i + _chunk]})
+        except RuntimeError:
+            pass  # batch endpoint
+        log.info("Regenerate short-circuit: refined previous response",
+                 prev_len=len(regenerate_of), refined_len=len(refined),
+                 tokens=refine_tokens)
+        # Build a synthetic agent result so downstream nodes (guardrail
+        # output, source handling, etc.) see a normal-looking payload.
+        from core.state import AgentResult
+        refine_result = AgentResult(
+            agent_name="Refiner",
+            content=refined,
+            sources=[],
+            tokens_consumed=refine_tokens,
+        )
+        return {
+            "task": "Refine",
+            "tasks_planned": ["Refine"],
+            "agent_queries": {},
+            "response_instructions": "",
+            "agent_results": {"Refiner": refine_result},
+            "final_response": refined,
+            "tokens_consumed": refine_tokens,
+        }
+
     _original_query = state.get("original_query", query)
     summary = state.get("summary_text", "")
     user_language = state.get("user_language", "en")

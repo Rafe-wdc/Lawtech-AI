@@ -160,6 +160,12 @@ class LegalAgentState(MessagesState):
     # "use DRAFTING_CITE_APPENDIX_DEFAULT from settings".
     cite_appendix: bool | None
 
+    # Regenerate (Sagar bug #5, 2026-06-16): when set, the orchestrator
+    # short-circuits the full agent pipeline and runs ONE refinement call
+    # over `regenerate_of` so "regenerate" produces a polished version of
+    # the previous answer instead of a completely new one.
+    regenerate_of: str | None
+
     # Final output
     final_response: str
     source_metadata: Annotated[list[dict[str, Any]], _cap_source_metadata]

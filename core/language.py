@@ -249,6 +249,23 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
             # English as a NARROW exception ("only verbatim case names")
             # so the model treats Marathi/Hindi/etc. as the default for
             # everything else.
+            # Marathi-specific ceremonial-block examples — extend hand to
+            # the model by showing exact translations for the standard
+            # court-document scaffolding. Hindi/Sanskrit reuse the same
+            # Devanagari script so they benefit too, but examples lead
+            # with the Marathi forms since drafting traffic is Maharashtra-
+            # heavy. New-doc §9 reference.
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must also be translated:\n"
+                "- 'Plaintiff' → 'वादी' (Marathi/Hindi: वादी)\n"
+                "- 'Defendant' → 'प्रतिवादी' (Marathi/Hindi: प्रतिवादी)\n"
+                "- 'Versus' → 'विरुद्ध'\n"
+                "- 'Prayer' → 'विनंती'\n"
+                "- 'Verification' → 'प्रमाणीकरण' / 'सत्यापन'\n"
+                "- 'Affidavit' → 'शपथपत्र'\n"
+                "- 'Hon'ble Court' → 'मा. न्यायालय'\n"
+                "- 'Most respectfully sheweth' → 'अत्यंत आदरपूर्वक विनंती'\n\n"
+            ) if lang in ("mr", "hi", "sa") else ""
             out += (
                 f"\n\nLANGUAGE INSTRUCTION (STRICT): The user demanded PURE "
                 f"{lang_name}. Do NOT mix in English words, phrases, or "
@@ -258,6 +275,7 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
                 f"('Section 138' → 'कलम १३८'), placeholder brackets "
                 f"('[Place]' → '[ठिकाण]'), and signature labels into "
                 f"{lang_name}.\n\n"
+                f"{ceremonial_examples}"
                 f"The ONLY narrow exception: when citing a specific "
                 f"case-law decision (e.g. 'Kesavananda Bharati v. State of "
                 f"Kerala'), preserve the case name as printed — case names "

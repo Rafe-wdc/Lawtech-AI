@@ -121,13 +121,68 @@ Return valid JSON with these keys:
 - lexical_query: normalized BM25 search string
 - size: integer (1-50)
 
-Rules:
-1. Normalize court names to lowercase, remove "of India", "at"
-2. Party before "vs"/"versus" = petitioner, after = respondent
-3. Normalize provisions: lowercase, remove "of"/"under", join with spaces
-4. lexical_query: combine petitioner vs respondent year, or acts + topics
-5. Remove filler words: "give me", "find", "show", "tell", "latest"
-6. size: both petitioner & respondent → 1, acts_or_sections → 5, topics only → 10, default → 3
+## Rules
+
+1. **Court name detection** (normalize to lowercase):
+   - "supreme court" — strip "of India" / "at" suffixes
+     ("Supreme Court of India" → "supreme court")
+   - "[location] high court" — preserve the location prefix
+     ("High Court of Delhi" → "delhi high court";
+      "Bombay High Court" → "bombay high court")
+   - Other forums: "district court", "family court", "consumer court",
+     "tribunal", "nclt", "nclat", "itat", "cat", "drt"
+   - Recognize abbreviations:
+     * "SC" → "supreme court"
+     * "HC" alone → "high court"
+     * "<location> HC" → "<location> high court"
+       ("Delhi HC" → "delhi high court", "Bombay HC" → "bombay high court")
+   - If no court is mentioned, output empty string "".
+
+2. Party before "vs"/"versus"/"v." = petitioner, after = respondent.
+   Preserve multi-word names with "& Ors." intact — do NOT split them.
+
+3. Normalize provisions: lowercase, remove "of"/"under", join with spaces.
+   "Section 482 of CrPC" → "section 482 crpc".
+
+4. lexical_query construction:
+   - Both petitioner and respondent → "{{petitioner}} versus {{respondent}} {{year}}"
+   - Both acts_or_sections and topics → "{{acts_or_sections}} {{topics}}"
+   - Only one of them exists → use it directly
+   - Prepend court_name when present and not already in the party names.
+
+5. Remove filler words: "give me", "find", "show", "tell", "list",
+   "latest", "recent", "important", "famous", "landmark".
+
+6. Size determination (priority order):
+   - Explicit user request ("top 5", "give me 10", "first 20",
+     "show 1") → extract that integer; clamp to [1, 50].
+   - "one" / "single" / "best" → size=1.
+   - Heuristic (only if no explicit size):
+     * Both petitioner + respondent → size=1
+     * acts_or_sections exist → size=5
+     * Only topics → size=10
+     * Otherwise → size=3
+
+## Examples
+
+Example 1 — Court + statutory reference
+Query: "Supreme Court judgments under Section 138 of NI Act"
+{{"court_name": "supreme court", "petitioner_names": [], "respondent_names": [],
+ "year": null, "topics": [], "acts_or_sections": ["section 138 ni act"],
+ "lexical_query": "supreme court section 138 ni act", "size": 5}}
+
+Example 2 — High Court + topic
+Query: "Bombay HC cases on negligence"
+{{"court_name": "bombay high court", "petitioner_names": [], "respondent_names": [],
+ "year": null, "topics": ["negligence"], "acts_or_sections": [],
+ "lexical_query": "bombay high court negligence", "size": 10}}
+
+Example 3 — Case title with year
+Query: "State of Maharashtra Vs John Doe 2020"
+{{"court_name": "", "petitioner_names": ["State of Maharashtra"],
+ "respondent_names": ["John Doe"], "year": 2020, "topics": [],
+ "acts_or_sections": [],
+ "lexical_query": "state of maharashtra versus john doe 2020", "size": 1}}
 
 User query: {query}
 

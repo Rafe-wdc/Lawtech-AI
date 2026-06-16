@@ -380,6 +380,15 @@ Rules:
 
 """ + _TABLE_FORMATTING_RULES
 
+# Append shared Indian-legal discipline blocks to SYNTHESIS_PROMPT.
+# Synthesizes multi-agent responses; needs FORMAT + DISCIPLINE so the merged
+# output stays markdown-clean and starts with substantive content (no
+# "Here is the synthesized response").
+SYNTHESIS_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 # =============================================================================
 # Intent extractor (Phase 1 of the intent layer rollout — see
@@ -735,6 +744,15 @@ OUTPUT REQUIREMENTS — follow EXACTLY:
    The complete response is: (optional italic line) + (H3 heading) + (table). Nothing else.
 
 """ + _TABLE_FORMATTING_RULES
+
+# Append DISCIPLINE only (not FORMAT) to SYNTHESIS_TABLE_PROMPT — the table-only
+# rule above forbids paragraphs/bullets, so INDIAN_LEGAL_OUTPUT_FORMAT
+# would conflict. DISCIPLINE (no greetings, no chatbot pleasantries) still
+# applies and reinforces the existing "NO PREAMBLE" rule.
+SYNTHESIS_TABLE_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 # --- Domain Agent Prompts ---
 # (Migrated from v1 utils/custom_prompts.py)
@@ -1838,6 +1856,14 @@ NUMBERED QUESTIONS (minimum 25; aim for 30-40), grouped into 4-7 logically title
 5. Minimum length: 600 words, minimum 20 numbered questions. Aim higher when the document is substantive.
 6. Output in clean GitHub-flavored Markdown. Use `###` headings for the three sections and `**Part N: <title>**` for the parts inside section 3."""
 
+# Append shared Indian-legal discipline blocks to CROSS_EXAMINATION_PROMPT.
+CROSS_EXAMINATION_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 DEPOSITION_SUMMARY_PROMPT = """You are an Indian legal practitioner producing a structured summary of an attached deposition / witness statement / examination-in-chief / Section 161 CrPC statement.
 
@@ -1873,6 +1899,14 @@ A clean list of every exhibit number / article letter the witness identified, wi
 - Do NOT pad with disclaimers about consulting a lawyer.
 - Use clean GitHub-flavored Markdown with `###` section headings.
 - Minimum 300 words; aim for 500-800 on substantive depositions."""
+
+# Append shared Indian-legal discipline blocks to DEPOSITION_SUMMARY_PROMPT.
+DEPOSITION_SUMMARY_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
 
 
 CONTRACT_ANALYSIS_PROMPT = """You are an Indian legal practitioner conducting a structured analysis of an attached contract / agreement / MOU / lease / employment letter / service agreement.
@@ -1911,6 +1945,14 @@ Numbered specific edits to propose at the next round of negotiation, each tied t
 - Do NOT invent statutes or precedents to plug gaps in the contract — discuss only the contract as drafted.
 - Use clean GitHub-flavored Markdown with `###` section headings.
 - Minimum 500 words; aim for 800-1500 on substantive contracts. Identify at least 5 specific clauses / risks unless the contract is genuinely minimal."""
+
+# Append shared Indian-legal discipline blocks to CONTRACT_ANALYSIS_PROMPT.
+CONTRACT_ANALYSIS_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
 
 
 LEGAL_NOTICE_DRAFT_PROMPT = """You are an Indian legal practitioner drafting a formal LEGAL NOTICE on the user's behalf, based on the facts in the attached document.
@@ -2072,6 +2114,14 @@ A short block on courtroom conduct: speak slowly, address the Hon'ble Judge, do 
 - Minimum 500 words; minimum 15 direct-examination questions.
 - Use clean GitHub-flavored Markdown with `###` section headings."""
 
+# Append shared Indian-legal discipline blocks to WITNESS_PREP_PROMPT.
+WITNESS_PREP_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 OPENING_STATEMENT_PROMPT = """You are an Indian legal practitioner drafting an OPENING STATEMENT for trial, based on the attached case papers (chargesheet / plaint / written statement / list of witnesses).
 
@@ -2102,6 +2152,14 @@ A short closing block stating the findings the court will be asked to record at 
 - Use clean GitHub-flavored Markdown with `###` section headings.
 - Minimum 350 words."""
 
+# Append shared Indian-legal discipline blocks to OPENING_STATEMENT_PROMPT.
+OPENING_STATEMENT_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 CLOSING_ARGUMENT_PROMPT = """You are an Indian legal practitioner drafting a CLOSING ARGUMENT (final argument / summing-up) for trial, based on the attached case papers and (where available) the recorded evidence.
 
@@ -2128,4 +2186,12 @@ A clean numbered prayer block — "It is therefore most respectfully prayed that
 - Closing is ARGUMENTATIVE — connect every fact to the legal element it proves and to the prayer. Unlike opening, you may editorialise on credibility, weight, motive, and inferences from circumstantial evidence.
 - Use clean GitHub-flavored Markdown with `###` section headings and `**Issue: …**` subsections in section 2.
 - Minimum 500 words; aim for 800-1500 on substantive matters."""
+
+# Append shared Indian-legal discipline blocks to CLOSING_ARGUMENT_PROMPT.
+CLOSING_ARGUMENT_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
 

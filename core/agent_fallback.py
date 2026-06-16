@@ -122,11 +122,19 @@ async def web_search_fallback(
 
     try:
         # Override any "use only provided context" instructions since we're
-        # using web search grounding — the model should use search results
+        # using web search grounding — the model should use search results.
+        # Also inject the Indian authorized-sources allowlist here so EVERY
+        # web fallback caller (Newacts / Judgment / Legislation / Drafting /
+        # Scenario) gets the discipline — not just the ones whose system
+        # prompts wire it in directly. Restores V1's allowlist that was
+        # lost in the V2 rewrite; would have prevented the testbook.com /
+        # ipleaders.in pollution seen in 2026-06-15 cross-act fallback.
+        from config.prompts import INDIAN_LEGAL_AUTHORIZED_SOURCES
         fallback_instruction = (
             "\n\nIMPORTANT: You are now using web search grounding. "
             "Use the search results to provide a comprehensive, accurate answer. "
             "Do NOT say you lack context — use the web search results."
+            "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
         )
         full_prompt = f"{system_prompt}{fallback_instruction}\n\nUser Query: {query}"
         client = get_genai_client()

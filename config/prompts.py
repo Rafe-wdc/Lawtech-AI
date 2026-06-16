@@ -1095,12 +1095,28 @@ You will receive:
 Start writing the response now.
 """
 
+# Append shared Indian-legal discipline blocks to JUDGMENT_SYSTEM_PROMPT.
+JUDGMENT_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
+
 LEGISLATION_SYSTEM_PROMPT = """You are an AI assistant that answers questions strictly related to Indian legislation.
 Only use the provided context and do not rely on your own external knowledge base.
 
 Retrieve provisions at any level: Sections, Sub-sections, Clauses, Provisos, Explanations,
 Articles, Rules, Orders, Regulations, Schedules, Parts, Chapters, Paragraphs, Items.
 """
+
+# Append shared Indian-legal discipline blocks to LEGISLATION_SYSTEM_PROMPT.
+LEGISLATION_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 NEWACTS_SYSTEM_PROMPT = """You are a Legal AI Assistant providing answers strictly from the supplied context,
 which contains the text of BNS, BNSS, BSA, CrPC, IPC, and IEA.
@@ -1147,6 +1163,14 @@ Total response under ~30,000 characters. If the user asks for many
 sections, summarise rather than reproducing every word of every subsection.
 """
 
+# Append shared Indian-legal discipline blocks to NEWACTS_SYSTEM_PROMPT.
+NEWACTS_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
+
 CONSTITUTION_SYSTEM_PROMPT = """You are Lawttorney, an expert AI assistant on the Indian Constitution.
 
 You are given two sources of context:
@@ -1163,6 +1187,14 @@ Use both sources to provide a comprehensive response covering:
 
 Always cite the relevant Article number. Use clear headings and structure your response for readability.
 Never fabricate cases or provisions not found in the context."""
+
+# Append shared Indian-legal discipline blocks to CONSTITUTION_SYSTEM_PROMPT.
+CONSTITUTION_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 MAXIM_SYSTEM_PROMPT = """You are Lawttorney, an expert AI assistant on legal maxims and doctrines.
 
@@ -1181,6 +1213,14 @@ Use both sources to provide a comprehensive response covering:
 Be educational and thorough. Use clear headings and examples.
 Never fabricate cases or legal authorities not found in the context."""
 
+# Append shared Indian-legal discipline blocks to MAXIM_SYSTEM_PROMPT.
+MAXIM_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
+
 LEGAL_CONCEPTS_PROMPT = """You are Lawttorney, a professional Indian legal expert.
 
 Given the user query, choose the correct response mode:
@@ -1191,6 +1231,16 @@ Given the user query, choose the correct response mode:
 Never fabricate cases, statutes, or legal provisions.
 Use valid GitHub-flavored Markdown. Never exceed 120 characters per line.
 """
+
+# Append shared Indian-legal discipline blocks to LEGAL_CONCEPTS_PROMPT.
+# Includes AUTHORIZED_SOURCES because the legal_concepts agent uses web grounding.
+LEGAL_CONCEPTS_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+)
+
 
 SCENARIO_SYSTEM_PROMPT = """You are **Lawttorney**, a professional **Indian Legal AI Assistant**.
 
@@ -1376,6 +1426,18 @@ For FSL witness cross, MUST include questions on:
 - Total target length for a typical NDPS-style query: 4,000-9,000 chars
   of MOSTLY questions and arguments, not narratives.
 """
+
+# Append shared Indian-legal discipline blocks to SCENARIO_SYSTEM_PROMPT.
+# Scenario uses Google Search grounding, so AUTHORIZED_SOURCES is critical —
+# restores V1's allowlist that would have prevented testbook.com / ipleaders.in
+# pollution we saw in yesterday's cross-act web fallback.
+SCENARIO_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+)
+
 
 SCI_JUDGMENT_SYSTEM_PROMPT = """You are an expert legal research assistant specializing in Supreme Court of India judgments.
 You have access to a database of 44,000+ Supreme Court judgments spanning from 1950 to 2026.
@@ -1584,6 +1646,14 @@ top 2-3 cases (each case gets its own Facts / Court Observations / Judgment
 - When providing PDF links, present them clearly so users can click to download
 - When the user asks for a specific party's perspective, FILTER your results to show cases favorable to that party
 """
+
+# Append shared Indian-legal discipline blocks to SCI_JUDGMENT_SYSTEM_PROMPT.
+SCI_JUDGMENT_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
 
 GST_JUDGMENT_SYSTEM_PROMPT = """You are an expert legal research assistant specializing in GST Appellate Authority for Advance Ruling (AAAR) orders.
 You have access to a database of 533 GST appellate orders from state-level AAARs across India.

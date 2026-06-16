@@ -186,9 +186,48 @@ def _format_intent_directives(intent) -> str:
     )
 
 
-def _is_strict_language(intent) -> bool:
-    """Duck-typed read of `intent.strict_language` for the lazy-import path."""
-    return bool(getattr(intent, "strict_language", False)) if intent is not None else False
+# Indian languages where users expect FULL native-script output by default
+# — citations + numerals + statute names all in the target language.
+# Carve-out: English remains opt-in for citations. Match V1 Lawttorney's
+# behaviour (Sagar's bug #1 + #4, 2026-06-16: "Marathi mixing with English"
+# and "Marathi answer mixes Marathi + English numbers").
+_INDIAN_LANGS_DEFAULT_STRICT: frozenset[str] = frozenset({
+    "hi", "mr", "bn", "ta", "te", "kn", "ml", "gu", "pa", "ur", "or",
+    "as", "sa",
+})
+
+
+def _is_strict_language(intent, lang: str = "") -> bool:
+    """Decide whether to emit the STRICT language directive.
+
+    Strict mode (citations + numerals + statute names ALL in target script)
+    is the user default for Indian languages because that matches V1
+    Lawttorney behaviour. The intent extractor can still flip strict_language
+    explicitly — when it does, that decision wins:
+      - intent.strict_language = True  → strict (unconditional)
+      - intent.strict_language = False → non-strict ONLY when the user has
+        explicitly asked for English citations / mixed-script output
+        (intent.language_explicit is True). Otherwise default to strict
+        for Indian langs so we don't silently mix scripts.
+      - intent is None / unset         → default to strict for Indian langs.
+
+    Args:
+        intent: Optional typed UserIntent.
+        lang:   ISO 639-1 code (e.g. 'mr'). Empty string for the legacy
+                callers — they get the prior False-default behaviour.
+    """
+    if intent is not None:
+        v = getattr(intent, "strict_language", None)
+        if v is True:
+            return True
+        if v is False:
+            # Honour an EXPLICIT non-strict signal from the intent extractor
+            # when the user actually said something explicit. Without that,
+            # fall through to the Indian-language default below.
+            if bool(getattr(intent, "language_explicit", False)):
+                return False
+    # Default: strict for Indian languages, non-strict otherwise.
+    return lang in _INDIAN_LANGS_DEFAULT_STRICT
 
 
 # Native-script numeral examples for the strict-language directive.
@@ -237,7 +276,7 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
 
     if lang != "en" and lang in SUPPORTED_LANGUAGES:
         lang_name = SUPPORTED_LANGUAGES[lang]
-        if _is_strict_language(intent):
+        if _is_strict_language(intent, lang):
             numeral_hint = _NATIVE_NUMERAL_HINTS.get(lang)
             numeral_line = (
                 f"Use {numeral_hint} for ALL numbers — paragraph numbers, "

@@ -87,6 +87,19 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
         log.info("Routing to blocked_response (guardrail blocked)")
         return [Send("blocked_response", state)]
 
+    # Sagar bug #5 (2026-06-16): regenerate short-circuit. When
+    # orchestrator_plan_node refined a previous response (task='Refine',
+    # final_response already populated), bypass ALL domain agents AND the
+    # synthesis step — go straight to guardrail_output. Otherwise the
+    # unknown task "Refine" falls through to AGENT_NODE_MAP's default
+    # ("scenario") and Scenario runs a second time over the already-
+    # refined answer.
+    if (state.get("task") == "Refine"
+            and (state.get("final_response") or "").strip()):
+        log.info("Regenerate short-circuit: skipping agent fan-out and synthesis",
+                 final_len=len(state.get("final_response") or ""))
+        return [Send("guardrail_output", state)]
+
     planned = state.get("tasks_planned", [])
 
     if not planned:

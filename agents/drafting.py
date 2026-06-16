@@ -95,11 +95,45 @@ class SectionPlan(BaseModel):
 class DraftOutline(BaseModel):
     document_title: str = Field(
         ...,
-        description="Full title (e.g. 'APPLICATION FOR ANTICIPATORY BAIL UNDER SECTION 483 BNSS')",
+        description="Short subject heading (e.g. 'SUIT FOR COMPENSATION FOR MEDICAL NEGLIGENCE', 'WRIT PETITION UNDER ARTICLE 226 OF THE CONSTITUTION OF INDIA', 'APPLICATION FOR ANTICIPATORY BAIL UNDER SECTION 483 BNSS'). Will be rendered as the BOLDED SUBJECT HEADING at the END of the cause-title block — NOT as an H1 at top of document.",
     )
     court_details: str = Field(
         ...,
-        description="Court name, case type, party placeholders",
+        description="""Pre-formatted markdown cause-title block — the
+LLM MUST emit this with proper blank lines (\\n\\n) between every
+element (Sagar's bug #6, 2026-06-16). Required layout:
+
+**IN THE COURT OF <FORUM>, AT <CITY>**
+
+**<SUIT/PETITION/COMPLAINT> NO. _______ OF <YEAR>**
+
+**IN THE MATTER OF:**
+
+<Plaintiff Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+.....Plaintiff / Petitioner
+
+**Versus**
+
+<Defendant Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+.....Defendant / Respondent
+
+Every line above must have a BLANK LINE after it (CommonMark soft-break
+otherwise collapses them into one paragraph). Do NOT prefix this block
+with `# ` (the H1) — the subject heading is appended separately at the
+END of this block during assembly. Court name and case number MUST be
+bolded with `**markdown**`. Use 'R/ Address' (Indian-court convention
+for 'Residing at'). Subject heading is added at end by the assembler
+using document_title.""",
     )
     sections: List[SectionPlan] = Field(
         ...,
@@ -1738,10 +1772,24 @@ def _assemble_document(
     Picks the right footer based on `stance.footer_kind` (see `_build_footer`).
     Falls back to court_filing footer when no stance is available, which
     preserves the prior default for backward compatibility.
+
+    Sagar's bug #6 (2026-06-16): the subject heading (e.g. "SUIT FOR
+    COMPENSATION FOR MEDICAL NEGLIGENCE") goes at the END of the cause-
+    title block as a bolded paragraph, NOT at the top as an H1. The
+    previous `# {document_title}` markup is dropped.
     """
+    # Subject heading appended to court_details if it isn't already present
+    # in the LLM's cause-title block. Bolded, blank lines before so it
+    # renders as its own paragraph at the end of the title block.
+    cause_title = outline.court_details.rstrip()
+    subject = (outline.document_title or "").strip()
+    if subject and subject.upper() not in cause_title.upper():
+        # Append as bolded subject heading on its own paragraph (the
+        # ".....Defendant" designation precedes this in the LLM output).
+        cause_title += f"\n\n**{subject.upper()}**"
+
     parts = [
-        f"# {outline.document_title}",
-        outline.court_details,
+        cause_title,
         "---",
     ]
 

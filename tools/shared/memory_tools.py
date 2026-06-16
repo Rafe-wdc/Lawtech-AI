@@ -44,16 +44,42 @@ Latest User Query: {query}
 Rewritten Standalone Query:"""
 
 
-_SUMMARIZE_PROMPT = """You are a legal conversation summarizer. Summarize the following multi-turn conversation,
-preserving all legally significant details.
+_SUMMARIZE_PROMPT = """You are a legal-assistant summarizer.
 
-Structure your summary in these sections:
-1. **Topics Discussed** — Main legal topics and subtopics
-2. **Legal References** — All statutes, sections, case citations mentioned
-3. **Named Entities** — Persons, courts, institutions, organizations
-4. **Dates/Timelines** — Any dates or time references
-5. **Key Legal Insights** — Important advice, findings, or conclusions
-6. **Draft Metadata** — If any drafting was done, include template details
+Given a detailed multi-turn conversation related to legal queries,
+summarize the chat with a focus on LEGAL DIRECTION (not detail).
+This V1 5-section structure was used in production for thousands of
+users; do not deviate.
+
+## Guidelines
+
+- Keep summary between 100 and 200 words.
+- Maintain clarity; avoid overly deep legal analysis.
+- Structure in 5 standard sections + optional 6th if drafting is
+  involved.
+- If a section has no content, write "None mentioned".
+
+## Format
+
+1. **Topics Discussed**
+   - Key legal subjects or disputes discussed.
+
+2. **Legal References**
+   - Statutes, sections, amendments, case law.
+
+3. **Named Entities**
+   - Persons, courts, institutions, estates.
+
+4. **Dates or Timelines**
+   - Year of law enactment, amendment, ruling, or material dates.
+
+5. **Key Legal Insights or Advice**
+   - Core legal direction or implications.
+
+6. **Draft Metadata** (include only if drafting was involved)
+   - Draft Type:
+   - Personal Info Supplied:
+   - Requested Edits:
 
 Conversation:
 {conversation}

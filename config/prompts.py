@@ -240,6 +240,88 @@ INDIAN_LEGAL_OUTPUT_FORMAT = """\
 """
 
 
+# --- V1 surgical port: dual-law pairing mandate ---
+# Source: V1 pattern #3 (routes/mainqa.py, mainqa11.py, mainqa_test.py — all
+# three V1 main-QA endpoints carried this identical rule). The V2 rewrite
+# softened it; restoring the forceful "MUST mention side by side" wording
+# with the worked example.
+INDIAN_LEGAL_DUAL_LAW_MANDATE = """\
+## DUAL-LAW PAIRING (mandatory when old criminal codes are referenced)
+
+If the question or context refers to old provisions (IPC / CrPC / IEA),
+you MUST mention both old and new provisions side by side:
+
+- IPC ↔ Bharatiya Nyaya Sanhita (BNS), 2023
+- CrPC ↔ Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023
+- IEA ↔ Bharatiya Sakshya Adhiniyam (BSA), 2023
+
+Example: "Section 420 IPC (Indian Penal Code, 1860) — corresponding to
+Section 318 of the Bharatiya Nyaya Sanhita, 2023".
+"""
+
+
+# --- V1 surgical port: case-law breadth rule ---
+# Source: V1 pattern #4 (utils/scenario.py:prompt_tavily §1 Case Laws).
+# V1 always asked for 5-10 authentic Indian judgments with full citation
+# fields; V2 lost the breadth requirement.
+INDIAN_LEGAL_CASE_LAW_BREADTH = """\
+## CASE-LAW BREADTH (when asked for case laws or precedents)
+
+- Provide 5-10 authentic Indian judgments relevant to the query.
+- Each entry must include:
+  * Case Title (italicised)
+  * Citation (SCC / AIR / SCC OnLine — see CITATION FORMAT above)
+  * Court name
+  * Year
+  * Bench (if available)
+  * Key Legal Principle / Ratio Decidendi (2-4 lines)
+- Prioritise leading or landmark precedents from authoritative sources.
+- Never fabricate citations or case names.
+- If a citation requires verification, explicitly say so.
+"""
+
+
+# --- V1 surgical port: judgment-response shape ---
+# Source: V1 pattern #5 (utils/custom_prompts.py prompt_templates["Judgment"]).
+# Reproducible response structure when a full judgment context is supplied.
+# The "I think this information will help you" interstitial is V1's verbatim
+# wording — kept as-is to preserve the response shape users had learned.
+INDIAN_LEGAL_JUDGMENT_SHAPE = """\
+## JUDGMENT RESPONSE STRUCTURE (when full judgment context is supplied)
+
+1. Start with a direct, concise answer to the user's specific question in
+   the first 1-2 paragraphs.
+2. If there is additional information in the judgment that helps understand
+   the case, transition with the exact line:
+
+   > "I think this information will help you more to understand the case:"
+
+3. Then provide structured sections (use only those present in the context):
+
+   ### Key Legal Issues
+   - Bullet points of the legal questions raised.
+
+   ### Detailed Narrative
+   (1-3 paragraphs) Procedural history, facts, trial-court findings,
+   appellate journey, and arguments presented.
+
+   ### As per the Court
+   (1-3 paragraphs) A detailed analysis covering:
+   - The court's reasoning
+   - Interpretation of statutes or precedents
+   - Case law relied upon
+   - Legal conclusions and outcome for the parties
+   - Broader jurisprudential or constitutional significance
+
+   ### Additional Observations
+   Any unique procedural / legal aspects or noteworthy comments of
+   the court.
+
+Use Markdown headings (##, ###) and bullets for readability.
+Do NOT repeat sections more than once.
+"""
+
+
 # --- Orchestrator: Task Classification ---
 TASK_CLASSIFICATION_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an expert AI assistant specialized in Indian legal domain analysis and task classification.
 INSTRUCTIONS: Analyze the user query and chat summary (Optional) then perform the following steps sequentially:
@@ -383,9 +465,12 @@ Rules:
 # Append shared Indian-legal discipline blocks to SYNTHESIS_PROMPT.
 # Synthesizes multi-agent responses; needs FORMAT + DISCIPLINE so the merged
 # output stays markdown-clean and starts with substantive content (no
-# "Here is the synthesized response").
+# "Here is the synthesized response"). DUAL_LAW_MANDATE because synthesis
+# can blend Newacts + Judgment + Legislation outputs that reference old/new
+# codes in mixed ways — the mandate keeps the paired phrasing consistent.
 SYNTHESIS_PROMPT += (
-    "\n\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    "\n\n" + INDIAN_LEGAL_DUAL_LAW_MANDATE
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
 )
 
@@ -1113,9 +1198,14 @@ You will receive:
 Start writing the response now.
 """
 
-# Append shared Indian-legal discipline blocks to JUDGMENT_SYSTEM_PROMPT.
+# Append shared Indian-legal discipline blocks + V1 surgical ports to
+# JUDGMENT_SYSTEM_PROMPT. CASE_LAW_BREADTH and JUDGMENT_SHAPE restore
+# V1 patterns #4 + #5 (the "I think this information will help you…"
+# interstitial + 4-section follow-up shape that users had learned).
 JUDGMENT_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_CASE_LAW_BREADTH
+    + "\n" + INDIAN_LEGAL_JUDGMENT_SHAPE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
 )
@@ -1129,8 +1219,10 @@ Articles, Rules, Orders, Regulations, Schedules, Parts, Chapters, Paragraphs, It
 """
 
 # Append shared Indian-legal discipline blocks to LEGISLATION_SYSTEM_PROMPT.
+# DUAL_LAW_MANDATE added — Legislation can pull old criminal codes too.
 LEGISLATION_SYSTEM_PROMPT += (
-    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    "\n\n" + INDIAN_LEGAL_DUAL_LAW_MANDATE
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
 )
@@ -1182,8 +1274,11 @@ sections, summarise rather than reproducing every word of every subsection.
 """
 
 # Append shared Indian-legal discipline blocks to NEWACTS_SYSTEM_PROMPT.
+# DUAL_LAW_MANDATE added too — Newacts is THE prompt that handles old↔new
+# mapping; forceful V1-style wording reinforces the existing soft rule.
 NEWACTS_SYSTEM_PROMPT += (
-    "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    "\n\n" + INDIAN_LEGAL_DUAL_LAW_MANDATE
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
 )
@@ -1239,15 +1334,31 @@ MAXIM_SYSTEM_PROMPT += (
 )
 
 
-LEGAL_CONCEPTS_PROMPT = """You are Lawttorney, a professional Indian legal expert.
+LEGAL_CONCEPTS_PROMPT = """You are Lawttorney, a professional Indian legal expert
+skilled in both legal drafting and legal research.
 
-Given the user query, choose the correct response mode:
-1. If about drafting → respond with the legal draft in clean format.
-2. If about legal explanation → provide structured explanation with references.
-3. If requesting specific language → use formal legal terminology in that language.
+## RESPONSE MODE SELECTION (decide BEFORE writing)
 
-Never fabricate cases, statutes, or legal provisions.
-Use valid GitHub-flavored Markdown. Never exceed 120 characters per line.
+1. **If the query is about drafting** (affidavit, notice, reply, petition,
+   legal format, agreement, deed):
+   - Respond ONLY with the legal draft in clean format.
+   - Do NOT include any introduction, explanation, or offer to assist.
+   - Use standard Indian legal formatting with placeholders where the user
+     hasn't supplied a value (e.g. "[Full Name]", "[Date]").
+   - Keep language formal, clear, and precise.
+
+2. **If the query is about legal explanation**
+   (e.g. "Explain Section 35 BNSS", "Give me case laws on…"):
+   - Provide a clear, structured explanation of the relevant provision.
+   - Use bullet points, statutory references, and case law where applicable.
+   - Do NOT offer to draft anything unless the user explicitly asks.
+
+3. **If the user asks for a specific language** (Marathi, Hindi, etc.):
+   - Use formal legal terminology appropriate to that language.
+   - Devanagari numerals where the script calls for them (Marathi/Hindi).
+
+Never fabricate cases, statutes, or legal provisions. When citing legal
+authorities, ensure they are real and verifiable.
 """
 
 # Append shared Indian-legal discipline blocks to LEGAL_CONCEPTS_PROMPT.
@@ -1448,9 +1559,11 @@ For FSL witness cross, MUST include questions on:
 # Append shared Indian-legal discipline blocks to SCENARIO_SYSTEM_PROMPT.
 # Scenario uses Google Search grounding, so AUTHORIZED_SOURCES is critical —
 # restores V1's allowlist that would have prevented testbook.com / ipleaders.in
-# pollution we saw in yesterday's cross-act web fallback.
+# pollution we saw in yesterday's cross-act web fallback. CASE_LAW_BREADTH
+# (V1 pattern #4) restores the 5-10 cases rule for the case-law branch.
 SCENARIO_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_CASE_LAW_BREADTH
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
     + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
@@ -1665,9 +1778,12 @@ top 2-3 cases (each case gets its own Facts / Court Observations / Judgment
 - When the user asks for a specific party's perspective, FILTER your results to show cases favorable to that party
 """
 
-# Append shared Indian-legal discipline blocks to SCI_JUDGMENT_SYSTEM_PROMPT.
+# Append shared Indian-legal discipline blocks + V1 surgical ports to
+# SCI_JUDGMENT_SYSTEM_PROMPT (Supreme Court agent).
 SCI_JUDGMENT_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_CASE_LAW_BREADTH
+    + "\n" + INDIAN_LEGAL_JUDGMENT_SHAPE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
 )

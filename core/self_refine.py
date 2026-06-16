@@ -410,6 +410,43 @@ violations specific to Indian drafting practice:
     deed). Legal notices are signed by counsel directly; agreements
     have parties' signatures. The court-filing footer is wrong. MAJOR.
 
+  missing_jurisdiction_clause — a court-filing draft (plaint, petition,
+    suit, writ, complaint) lacks an explicit jurisdiction clause stating
+    EITHER territorial jurisdiction (place of cause of action / where
+    property is situated / where defendant resides — Sec 16-20 CPC) OR
+    pecuniary jurisdiction (value of suit). Also flag MAJOR if the forum
+    named in the cause title (e.g. "Civil Judge Senior Division Pune")
+    does NOT match the jurisdiction clause (e.g. clause says "value Rs.
+    25,00,000" but the cause title is a Junior Division court whose
+    pecuniary limit excludes that valuation). MAJOR.
+
+  wrong_court_fees_act — the draft cites the central "Court Fees Act,
+    1870" for a State court in Maharashtra. Correct authority is
+    "Maharashtra Court Fees Act, 1959" (formerly Bombay Court Fees Act,
+    1959). Same principle for other States: prefer the State Court Fees
+    Act over the central Act unless the user explicitly worked from the
+    central Act. MAJOR.
+
+  missing_limitation_clause — court-filing draft does not state the
+    applicable Article of the Limitation Act, 1963 and assert that the
+    claim is within time. Limitation is a live vulnerability in any
+    plaint / suit / appeal; omitting the clause is a filing-level
+    defect. MAJOR. Suggested_fix: "Add a paragraph: 'The suit is filed
+    within the limitation period under Article ___ of the Limitation
+    Act, 1963 as the cause of action arose on ___.'"
+
+  prayer_relief_mismatch — the Prayer clause asks for relief NOT
+    pleaded in the body, OR the body pleads relief that does NOT
+    appear in the Prayer. Common patterns:
+       Body alleges permanent injunction throughout, Prayer asks only
+       for damages → MAJOR; add the injunction prayer.
+       Body alleges three distinct reliefs, Prayer lists only two →
+       MAJOR; add the missing relief.
+       Prayer asks for "any other order this Hon'ble Court may deem
+       fit" only, with no specific relief → MAJOR; specific reliefs
+       must be enumerated before the residuary catchall.
+    MAJOR.
+
 For each, the suggested_fix should be concrete:
   - "Replace 'Section 38 SRA' with 'Order XXXIX Rules 1 & 2 CPC' in
      para 4.2 and re-state the three-fold injunction test."

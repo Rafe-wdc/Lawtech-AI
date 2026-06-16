@@ -1257,6 +1257,80 @@ async def _generate_section(
         if (case_facts.strip() or user_facts.strip()) else ""
     )
 
+    # Section-specific override for the cause-title block. Sagar's bug #6
+    # (2026-06-16): the layout rules buried at rule #11 in DRAFTING_SYSTEM_PROMPT
+    # were being skimmed past — drafts came back with squashed party blocks,
+    # no "IN THE MATTER OF:" header, no bolded subject line, no R/ Address
+    # convention. The reminder below repeats the must-have layout in the
+    # section prompt itself, where the LLM is paying full attention.
+    _CAUSE_TITLE_KEYWORDS = (
+        "cause title", "memo of parties", "memorandum of parties",
+        "memo of party", "parties", "title of the suit",
+        "title of the petition", "court header",
+    )
+    _section_title_lc = (section.title or "").lower()
+    _is_cause_title_section = any(
+        kw in _section_title_lc for kw in _CAUSE_TITLE_KEYWORDS
+    )
+    cause_title_override = ""
+    if _is_cause_title_section:
+        cause_title_override = (
+            "\n\n=== CRITICAL SECTION-SPECIFIC LAYOUT OVERRIDE — "
+            "THE CAUSE TITLE BLOCK MUST FOLLOW THIS EXACT MARKDOWN ===\n\n"
+            "Every element gets its OWN paragraph (i.e. blank line after it).\n"
+            "CommonMark renderers collapse single newlines — DO NOT use them.\n\n"
+            "Mandatory layout (Sagar's bug #6, 2026-06-16):\n\n"
+            "```\n"
+            "**IN THE COURT OF <FORUM NAME>, AT <CITY>**\n"
+            "\n"
+            "**<SUIT/PETITION/COMPLAINT> NO. _______ OF <YEAR>**\n"
+            "\n"
+            "**IN THE MATTER OF:**\n"
+            "\n"
+            "<Plaintiff Full Name>\n"
+            "\n"
+            "Age: <age>, Occupation: <occupation>\n"
+            "\n"
+            "R/ Address: <residential address>\n"
+            "\n"
+            ".....Plaintiff / Petitioner\n"
+            "\n"
+            "**Versus**\n"
+            "\n"
+            "<Defendant Full Name>\n"
+            "\n"
+            "Age: <age>, Occupation: <occupation>\n"
+            "\n"
+            "R/ Address: <residential address>\n"
+            "\n"
+            ".....Defendant / Respondent\n"
+            "\n"
+            "**<SUBJECT HEADING — e.g. SUIT FOR COMPENSATION FOR MEDICAL "
+            "NEGLIGENCE / WRIT PETITION UNDER ARTICLE 226 OF THE "
+            "CONSTITUTION OF INDIA / COMPLAINT UNDER SECTION 138 NI ACT>**\n"
+            "```\n\n"
+            "Rules:\n"
+            "1. Court name on its OWN line, BOLDED.\n"
+            "2. Suit/Petition number on its OWN line, BOLDED.\n"
+            "3. 'IN THE MATTER OF:' header, BOLDED, between case number "
+            "   and parties — MANDATORY.\n"
+            "4. Party blocks: name → age+occupation → R/ Address → "
+            "   '.....Plaintiff/Defendant' designation, each its own "
+            "   paragraph (blank line between).\n"
+            "5. 'Versus' BOLDED as `**Versus**` (NOT in backticks, NOT in "
+            "   a code fence).\n"
+            "6. Subject heading at the END (after defendant designation), "
+            "   BOLDED, its own paragraph.\n"
+            "7. Use 'R/' (Residing at) — Indian court convention.\n"
+            "8. Do NOT put the subject heading at the TOP as an H1 title.\n"
+            "9. Do NOT use H1 (#) anywhere in the cause title — only "
+            "   bolded markdown (`**...**`).\n"
+            "\n"
+            "Output ONLY this cause-title block for this section. No "
+            "introductory paragraph, no explanation, no closing notes.\n"
+            "=== END CAUSE-TITLE OVERRIDE ===\n"
+        )
+
     with log_time(log, f"Section {section_index+1}/{total_sections}: {section.title}"):
         llm = get_drafting_llm()
         prompt = ChatPromptTemplate.from_messages([
@@ -1315,7 +1389,8 @@ async def _generate_section(
              "When in doubt (e.g. an unfamiliar section name), prefer the "
              "section's own local scheme starting fresh.\n\n"
              "Expected paragraphs: {est_paragraphs}\n"
-             "Needs case law citations: {needs_citations}"),
+             "Needs case law citations: {needs_citations}"
+             "{cause_title_override}"),
         ])
         chain = prompt | llm
 
@@ -1353,6 +1428,7 @@ async def _generate_section(
             "facts_reminder": facts_reminder,
             "stance_block": stance_block,
             "format_block": format_block,
+            "cause_title_override": cause_title_override,
         }), timeout=180)
 
     from core.token_tracker import record as _record_tokens

@@ -56,6 +56,190 @@ def wrap_untrusted(text: str | None) -> str:
     return f"{_UNTRUSTED_OPEN}\n{cleaned}\n{_UNTRUSTED_CLOSE}"
 
 
+# =============================================================================
+# INDIAN_LEGAL_* — Shared blocks injected into agent system prompts.
+#
+# Seven reusable text blocks distilled from
+#   prompt_md/indian_legal_drafting_instruction_prompt.md (new 341-line doc)
+# and
+#   prompt_md/AllPrompts.md (V1 Lawttorney prompts, battle-tested in production)
+# Designed to be f-string-concatenated into individual agent prompts. See
+# docs/indian_legal_prompt_integration_plan.md for the full integration map
+# (which block goes into which prompt).
+# =============================================================================
+
+# --- 1/7: Statute-selection guardrails (anti-pattern list) ---
+# Source: new doc §2. Belt-and-suspenders for _generate_doctrinal_stance
+# in agents/drafting.py — same anti-patterns at code level AND prompt level.
+INDIAN_LEGAL_JURISDICTION_GUARDRAILS = """\
+## JURISDICTION & STATUTE-SELECTION GUARDRAILS (non-negotiable)
+
+- Intestate Hindu succession of SELF-ACQUIRED / separate property
+  → Hindu Succession Act, 1956, Sections 8 and 10 (Class I heirs,
+  distribution). Do NOT default to Mitakshara coparcenary / ancestral-
+  property framework (e.g. Vineeta Sharma v. Rakesh Sharma, (2020) 9
+  SCC 1) unless the property is genuinely ancestral coparcenary property.
+- Maintenance / step-relations / dependants
+  → Hindu Adoptions and Maintenance Act, 1956 (e.g. Section 12 where
+  relevant).
+- Civil court constitution & forum (Maharashtra)
+  → Maharashtra Civil Courts Act, 1869 (NOT generic "Civil Courts Act"
+  or a wrong-State Act).
+- Court fees (Maharashtra)
+  → Maharashtra Court Fees Act, 1959 (formerly Bombay Court Fees Act,
+  1959) — use the State Act, NOT the central Court Fees Act, 1870, for
+  State courts in Maharashtra.
+- Limitation
+  → check and state the applicable Article of the Limitation Act, 1963
+  and whether the claim is within time. Treat limitation as a live
+  vulnerability, never an afterthought.
+
+If you are not certain which statute governs, say so explicitly.
+NEVER invent a section number, an Act, or a year.
+"""
+
+
+# --- 2/7: Citation format + hard rule against fabrication ---
+# Source: new doc §6. Consolidates citation rules duplicated across 5+
+# prompts (Drafting, Judgment, SCI_Judgment, Scenario, Newacts).
+INDIAN_LEGAL_CITATION_FORMAT = """\
+## CITATION FORMAT
+
+Statutes — full name, capitalised, with year and exact provision:
+- "Section 8 of the Hindu Succession Act, 1956"
+- "Order VII Rule 11 of the Code of Civil Procedure, 1908"
+  (Orders in Roman numerals, Rules in Arabic)
+- "Article 65 of the Limitation Act, 1963"
+- Refer to "the said Act" / "the said Code" after first full mention.
+
+Case law — neutral or reporter citation:
+- "Vineeta Sharma v. Rakesh Sharma, (2020) 9 SCC 1"
+- "AIR 2020 SC 3717" (AIR <year> <court> <page>)
+- "State of Maharashtra v. …, 2019 SCC OnLine Bom 1234"
+- Italicise party names; use "v." (not "vs." or "versus").
+
+HARD RULE on citations: If you do not actually know a citation is real
+and correct, do NOT cite it. NEVER fabricate AIR/SCC numbers, page
+numbers, or holdings. State the proposition and note "[citation to be
+verified by advocate]" rather than inventing one. A hallucinated
+citation is a filing-level defect.
+"""
+
+
+# --- 3/7: Formal Indian legal language register ---
+# Source: new doc §7. Style discipline for prose-emitting agents.
+INDIAN_LEGAL_LANGUAGE_REGISTER = """\
+## LEGAL LANGUAGE REGISTER
+
+- Formal Indian legal English, third person, no contractions, no slang.
+- Forms of address: "Hon'ble Court", "learned counsel", "the Plaintiff
+  above-named", "my client".
+- Pleading phrasing: "It is submitted that…", "the said property",
+  "the cause of action arose on…", "the suit is within limitation".
+- Indian numbering: "Rs. 5,00,000/- (Rupees Five Lakh only)" — figures
+  AND words, lakh/crore with grouping "5,00,000".
+- Latin tags used sparingly: inter alia, prima facie, res judicata,
+  ex parte, audi alteram partem, sine qua non, suo motu.
+- One averment per numbered paragraph; self-contained paragraphs.
+"""
+
+
+# --- 4/7: Pre-delivery audit checklist (used by self_refine critic) ---
+# Source: new doc §10. NOT injected into per-section generation prompts;
+# the self-refine critic in core/self_refine.py runs it once on the
+# assembled draft. Saves 8-12× tokens per draft vs. per-section injection.
+INDIAN_LEGAL_PREDELIVERY_CHECKLIST = """\
+## PRE-DELIVERY AUDIT (run silently before returning a draft)
+
+1. Correct statute & section — no HSA/coparcenary mix-ups, no wrong-
+   State Act, no generic "Civil Courts Act".
+2. Jurisdiction clause present (territorial + pecuniary); forum in
+   cause title matches the clause.
+3. Court fees under the right (State) Act with valuation stated.
+4. Limitation addressed — applicable Article + within-time assertion.
+5. No unfilled placeholders mid-sentence unless a blank template was
+   requested (clearly marked "[●]" / "____" placeholders are OK).
+6. Every referenced Schedule/Annexure actually exists and is complete.
+7. No fabricated citations — every case/section cited is real or
+   flagged.
+8. Prayer matches reliefs pleaded (no orphan or missing reliefs).
+9. Verification + signature/place-date blocks present and consistent
+   with the parties.
+10. Internal consistency — names, dates, amounts (figures = words),
+    and party designations identical throughout.
+"""
+
+
+# --- 5/7: Behavioral discipline (no chatbot pleasantries) ---
+# Source: V1 patterns #1, #7, #10 (utils/scenario.py and
+# utils/custom_prompts.py prompt_template_general). V2 sometimes emits
+# "I'd be happy to help" / "Here is your draft" preamble — V1 banned it.
+INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE = """\
+## TONE & DISCIPLINE (non-negotiable)
+
+- Start every response DIRECTLY with substantive legal content.
+- Do NOT open with greetings, openings, or cultural expressions
+  ("Namaste", "Bismillah", "Hello", "Dear User", "Sir/Madam").
+- Do NOT close with sign-offs ("Thank you", "Hope this helps",
+  "Regards", "Please let me know if…", "I'm here to assist").
+- Maintain neutral, impersonal, court-style tone — write as a senior
+  Indian legal researcher would.
+- If the user asks for a draft, return ONLY the draft. Do NOT add
+  prefacing "Here is your draft" / "I have prepared the following".
+- If the user asks for an explanation, do NOT offer to draft unless
+  the user explicitly requests drafting.
+"""
+
+
+# --- 6/7: Authorized-sources allowlist (web-grounded paths only) ---
+# Source: V1 pattern #2 (utils/scenario.py prompt_tavily). Removing this
+# in the V2 rewrite is what allowed testbook.com / ipleaders.in /
+# plutuslaw.com / scribd.com to surface in the cross-act web fallback
+# (fixed 2026-06-15). Restoring V1's allowlist closes the gap.
+INDIAN_LEGAL_AUTHORIZED_SOURCES = """\
+## WEB-SOURCE AUTHORITY (when web grounding is in use)
+
+Rely ONLY on authorized Indian legal sources:
+- indiankanoon.org
+- barandbench.com
+- prsindia.org
+- legislative.gov.in
+- bareactslive.com
+- supremecourtofindia.nic.in
+- official High Court domains (e.g. bombayhighcourt.nic.in,
+  delhihighcourt.nic.in, allahabadhighcourt.in)
+- livehindustan.com/legal (legal news only)
+
+Do NOT cite or rely on unverified blogs, exam-prep aggregators, or
+note-sharing sites (testbook.com, ipleaders.in, plutuslaw.com,
+legodesk.com, scribd.com, edubirdie.com, careers360.com,
+allahabadlawagency.com, ijllr.com, ijlra.com, drishtijudiciary.com,
+etc.).
+
+If only such sources appear, state "no authoritative source available
+for this proposition — independent verification required" rather than
+silently citing them.
+"""
+
+
+# --- 7/7: Output format discipline (markdown rules) ---
+# Source: V1 pattern #6 (repeated identically across utils/custom_prompts.py
+# Drafting, prompt_template_general, utils/scenario.py, routes/mainqa.py).
+# The repetition in V1 is strong evidence it mattered in production.
+INDIAN_LEGAL_OUTPUT_FORMAT = """\
+## OUTPUT FORMAT (markdown discipline)
+
+- Use valid GitHub-flavored Markdown.
+- Always separate paragraphs with a blank line.
+- Use bullet points instead of inline lists.
+- Wrap text at logical sentence boundaries.
+- Never exceed 120 characters per line.
+- Use level-2/3 headings (##, ###) for structural blocks
+  (Cause Title, Prayer, Verification, etc.).
+- A4-printable, ready for export to PDF/DOCX.
+"""
+
+
 # --- Orchestrator: Task Classification ---
 TASK_CLASSIFICATION_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an expert AI assistant specialized in Indian legal domain analysis and task classification.
 INSTRUCTIONS: Analyze the user query and chat summary (Optional) then perform the following steps sequentially:

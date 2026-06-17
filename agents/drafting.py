@@ -1600,6 +1600,87 @@ async def _generate_section(
             "=== END CAUSE-TITLE OVERRIDE ===\n"
         )
 
+    # Per-section override for the "Detailed Written Submission" section
+    # of a CIT(A) / ITAT / GST appellate / NCLT written submission. Sagar
+    # feedback 2026-06-18: each ground inside this section must follow the
+    # established appellate-argument shape — restate the ground, give
+    # detailed legal argumentation, cite case laws with FULL citation
+    # (party names + year + reporter + court), rebut the AO's reasoning
+    # specifically, AND distinguish any case laws the AO relied upon. The
+    # outline LLM produces ONE section called "Detailed Written
+    # Submission" (or "Written Submission Groundwise") which then needs
+    # the section LLM to internally split into "Re: Ground No. X" sub-
+    # headings — the override below teaches the section LLM exactly that
+    # shape, so the user doesn't get a flat narrative.
+    _GROUNDWISE_WS_KEYWORDS = (
+        "detailed written submission",
+        "written submission groundwise",
+        "groundwise written submission",
+        "written submission ground-wise",
+        "groundwise submission",
+        "ground-wise submission",
+        "submission on grounds",
+    )
+    _is_groundwise_ws_section = any(
+        kw in _section_title_lc for kw in _GROUNDWISE_WS_KEYWORDS
+    )
+    if _is_groundwise_ws_section:
+        cause_title_override += (
+            "\n\n=== CRITICAL SECTION-SPECIFIC SHAPE — DETAILED WRITTEN "
+            "SUBMISSION (GROUNDWISE) ===\n\n"
+            "This section is the BULK of the written submission. It is "
+            "addressed to a tax / quasi-judicial appellate authority "
+            "(CIT(A) / ITAT / GST AAAR / CESTAT / NCLT / NCLAT / SAT / "
+            "DRT). Each ground gets its OWN sub-heading inside this "
+            "section. Use the exact pattern:\n\n"
+            "    **Re: Ground No. X – <ground title verbatim from the "
+            "GROUNDS OF APPEAL section>**\n\n"
+            "Related grounds may be combined: "
+            "`**Re: Ground No. 1, 2 & 7 – <combined title>**`.\n\n"
+            "For EACH such sub-section, your argument MUST cover all of "
+            "these in order:\n\n"
+            "  1. **Restate the ground** in the opening sentence (1-2 "
+            "lines) so the reader doesn't have to scroll back up.\n"
+            "  2. **Legal argumentation** — explain WHY the ground is "
+            "well-founded, citing the specific statutory provisions "
+            "(with full Act + section + sub-section), CBDT Instructions "
+            "/ Circulars / Notifications by number and date, and the "
+            "facts on record that support the ground. 3-6 paragraphs.\n"
+            "  3. **Case-law support** — cite 2-5 relevant case laws "
+            "that support the appellant. Each citation MUST be in the "
+            "form `*Party A v. Party B*, (Year) Reporter Volume Page "
+            "(Court)` — e.g. `*Andaman Timber Industries v. CCE*, "
+            "(2015) 281 ELT 421 (SC)`. After each citation, in 2-3 "
+            "lines: (a) the facts of the cited case, (b) the legal "
+            "principle laid down, (c) why those facts are similar to "
+            "the appellant's case and the principle therefore applies "
+            "in the appellant's favour. Do NOT fabricate citations — if "
+            "no real case is known, omit the citation and cite the "
+            "statutory provision alone.\n"
+            "  4. **Rebuttal of the AO's reasoning** on this ground — "
+            "open with the line: 'Rebuttal of Assessment Order:' then "
+            "1-3 paragraphs explaining specifically how the AO's "
+            "conclusion is wrong on facts, wrong on law, or both.\n"
+            "  5. **Distinguishing AO's case laws** — if the assessment "
+            "order relied on any case law (or the user's facts mention "
+            "any), open with the line: 'Distinguishing the case laws "
+            "relied upon by the learned AO:' then for each case the AO "
+            "cited, in 2-3 lines: (a) the AO's case law (with citation), "
+            "(b) the facts of that case, (c) why those facts are MATERIALLY "
+            "DIFFERENT from the appellant's case so the principle does "
+            "NOT apply against the appellant.\n\n"
+            "If the user's stance / outline lists 5+ grounds, group "
+            "related grounds (e.g. legal grounds together, then factual "
+            "grounds, then without-prejudice grounds) so the section "
+            "stays navigable but each ground still gets its own "
+            "treatment per the 5-point shape above.\n\n"
+            "DO NOT add an introduction / preamble before the first "
+            "Re: Ground sub-heading. DO NOT add a summary / "
+            "conclusion AFTER the last Re: Ground sub-heading — the "
+            "PRAYER section that follows is where reliefs are sought.\n"
+            "=== END GROUNDWISE-WS OVERRIDE ===\n"
+        )
+
     with log_time(log, f"Section {section_index+1}/{total_sections}: {section.title}"):
         llm = get_drafting_llm()
         prompt = ChatPromptTemplate.from_messages([

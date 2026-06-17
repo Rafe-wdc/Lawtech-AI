@@ -1302,7 +1302,8 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # plus "All the Citations mentioned in the assessment order by
         # AO, need to be explained, how the same is not applicable to
         # the assessee with detailed explanation".
-        if not cite_appendix_on and _is_tax_appellate_query(query):
+        _tax_appellate_detected = _is_tax_appellate_query(query)
+        if not cite_appendix_on and _tax_appellate_detected:
             cite_appendix_on = True
             log.info("cite_appendix force-enabled — tax appellate query detected",
                      trigger="tax_appellate_keyword")
@@ -1321,11 +1322,35 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                      source="request" if _flag is not None else "env_default")
     else:
         tasks_planned = tasks_planned[:3]
+        _tax_appellate_detected = False
 
     # Intent-driven plan validation (Newacts/Legislation veto + SCI/GST enrich)
     tasks_planned = _validate_and_enrich_plan(
         tasks_planned, extracted_intent, log,
     )
+
+    # Tax appellate guardrail: when this is a CIT(A)/ITAT/etc. written
+    # submission, the orchestrator's intent-driven enrichment often adds
+    # Scenario / Legal_Concepts based on phrases like "explain how AO's
+    # case laws are not applicable" — but those agents DON'T produce
+    # case-law citations, they produce their OWN full draft of the
+    # submission, which then gets appended to the user's Drafting output
+    # as a confusing duplicate cause-title block. Restrict the fan-out
+    # to the corpus agents (Judgment / SCI_Judgment / Legislation /
+    # Newacts) plus Drafting itself — those are the agents that supply
+    # citations / statute text without re-drafting.
+    if _tax_appellate_detected and has_drafting:
+        _TAX_APPELLATE_ALLOWED = {
+            "Drafting", "Document",
+            "Judgment", "SCI_Judgment",
+            "Legislation", "Newacts",
+        }
+        _before = list(tasks_planned)
+        tasks_planned = [t for t in tasks_planned if t in _TAX_APPELLATE_ALLOWED]
+        dropped = [t for t in _before if t not in _TAX_APPELLATE_ALLOWED]
+        if dropped:
+            log.info("Tax appellate guardrail: dropped non-citation agents",
+                     dropped=dropped, kept=tasks_planned)
 
     # Step 4: Per-agent query rewriting (only for multi-agent plans)
     agent_queries = {}

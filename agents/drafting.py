@@ -99,9 +99,16 @@ class DraftOutline(BaseModel):
     )
     court_details: str = Field(
         ...,
-        description="""Pre-formatted markdown cause-title block — the
-LLM MUST emit this with proper blank lines (\\n\\n) between every
-element (Sagar's bug #6, 2026-06-16). Required layout:
+        description="""Pre-formatted markdown opening block of the
+document — the LLM MUST emit this with proper blank lines (\\n\\n)
+between every element (CommonMark renderers collapse single newlines).
+
+PICK THE LAYOUT BASED ON DOCUMENT TYPE:
+
+=== LAYOUT A: COURT FILING (plaint, petition, writ, complaint,
+application, bail application, written statement) ===
+
+Use when the document is filed in court.
 
 **IN THE COURT OF <FORUM>, AT <CITY>**
 
@@ -127,13 +134,89 @@ R/ Address: <residential address>
 
 .....Defendant / Respondent
 
-Every line above must have a BLANK LINE after it (CommonMark soft-break
-otherwise collapses them into one paragraph). Do NOT prefix this block
-with `# ` (the H1) — the subject heading is appended separately at the
-END of this block during assembly. Court name and case number MUST be
-bolded with `**markdown**`. Use 'R/ Address' (Indian-court convention
-for 'Residing at'). Subject heading is added at end by the assembler
-using document_title.""",
+(Subject heading is appended at END by the assembler using
+document_title — do NOT add it yourself.)
+
+=== LAYOUT B: LEGAL NOTICE / REPLY TO LEGAL NOTICE ===
+
+Use when the document is a notice (Section 138 NI Act notice, demand
+notice, eviction notice, reply to legal notice). NOT filed in court.
+
+**<NOTICE TITLE>**
+
+(Examples: "LEGAL NOTICE", "REPLY TO LEGAL NOTICE", "NOTICE UNDER
+SECTION 138 OF THE NEGOTIABLE INSTRUMENTS ACT, 1881")
+
+Date: <date or blank line>
+
+To,
+
+<Recipient Name>
+
+<Recipient Qualifications / Designation if known>
+
+<Recipient Address>
+
+**Subject: <Subject line, e.g. "Reply to your Legal Notice dated
+DD/MM/YYYY issued on behalf of [Sender's Client Name]">**
+
+Sir / Madam,
+
+Under instructions from and on behalf of my client, <Client Full Name>,
+<Client Description / Designation if applicable>, residing at
+<Client Address>, I hereby send / address you the following <notice OR
+reply>. The contents of <your notice are denied save and except those
+specifically admitted herein / are as follows>.
+
+(NO "IN THE MATTER OF", NO Plaintiff/Defendant blocks, NO Versus, NO
+court name. A legal notice is a CORRESPONDENCE, not a pleading. The
+title is at the TOP and is NOT re-appended at end by the assembler.)
+
+=== LAYOUT C: AGREEMENT / MOU / DEED / LEASE / SALE DEED / WILL ===
+
+Use when the document is a private contract or testamentary instrument.
+
+**<AGREEMENT TITLE>**
+
+(Examples: "AGREEMENT TO SELL", "MEMORANDUM OF UNDERSTANDING",
+"LEASE DEED", "POWER OF ATTORNEY", "LAST WILL AND TESTAMENT")
+
+**THIS <AGREEMENT / DEED / WILL> IS MADE AND EXECUTED ON THIS <date>**
+
+**BETWEEN**
+
+<First Party Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+(hereinafter referred to as the "<First Party Role>")
+
+**AND**
+
+<Second Party Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+(hereinafter referred to as the "<Second Party Role>")
+
+(The title is at the TOP and is NOT re-appended at end by the
+assembler.)
+
+=== UNIVERSAL RULES ===
+
+- Every element above must have a BLANK LINE after it (use \\n\\n).
+- Do NOT prefix the block with `# ` (the H1) — bolded `**markdown**`
+  only for titles and headers.
+- Use 'R/ Address' (Indian-court convention for 'Residing at') in
+  party blocks.
+- If you are unsure which layout, look at document_title: "Notice" /
+  "Reply" → Layout B; "Agreement" / "MOU" / "Deed" / "Will" / "Lease"
+  → Layout C; everything else (Suit, Petition, Writ, Complaint,
+  Application) → Layout A.""",
     )
     sections: List[SectionPlan] = Field(
         ...,
@@ -1773,19 +1856,32 @@ def _assemble_document(
     Falls back to court_filing footer when no stance is available, which
     preserves the prior default for backward compatibility.
 
-    Sagar's bug #6 (2026-06-16): the subject heading (e.g. "SUIT FOR
-    COMPENSATION FOR MEDICAL NEGLIGENCE") goes at the END of the cause-
-    title block as a bolded paragraph, NOT at the top as an H1. The
-    previous `# {document_title}` markup is dropped.
+    Sagar's bug #6 (2026-06-16): for court-filing drafts, the subject
+    heading (e.g. "SUIT FOR COMPENSATION FOR MEDICAL NEGLIGENCE") goes
+    at the END of the cause-title block as a bolded paragraph, NOT at
+    the top as an H1. The previous `# {document_title}` markup is dropped.
+
+    Bug #6 followup (2026-06-17): for legal notices, replies to legal
+    notices, and agreements/deeds/wills, the title belongs at the TOP
+    of court_details (the LLM emits it inside the layout) — DO NOT
+    re-append it at the end. The subject-append logic below is therefore
+    gated on footer_kind == "court_filing".
     """
-    # Subject heading appended to court_details if it isn't already present
-    # in the LLM's cause-title block. Bolded, blank lines before so it
-    # renders as its own paragraph at the end of the title block.
     cause_title = outline.court_details.rstrip()
     subject = (outline.document_title or "").strip()
-    if subject and subject.upper() not in cause_title.upper():
-        # Append as bolded subject heading on its own paragraph (the
-        # ".....Defendant" designation precedes this in the LLM output).
+    # Only append the subject heading at the END for court-filing drafts.
+    # Notice/agreement layouts put the title at the TOP of court_details
+    # (Layout B / Layout C in DraftOutline.court_details field doc) and
+    # appending again would produce duplicated title text and pollute
+    # legal notice formatting with court-filing scaffolding.
+    _footer_kind_for_subject = "court_filing"
+    if stance is not None:
+        _footer_kind_for_subject = (
+            getattr(stance, "footer_kind", "court_filing") or "court_filing"
+        )
+    if (subject
+            and _footer_kind_for_subject == "court_filing"
+            and subject.upper() not in cause_title.upper()):
         cause_title += f"\n\n**{subject.upper()}**"
 
     parts = [

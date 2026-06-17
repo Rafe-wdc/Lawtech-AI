@@ -220,6 +220,73 @@ NOT re-appended at end by the assembler. If the user explicitly says
 "Section 200 CrPC" / "Section 223 BNSS" / "magistrate complaint", USE
 LAYOUT A instead — those ARE court filings.)
 
+=== LAYOUT E: TAX / QUASI-JUDICIAL APPELLATE WRITTEN SUBMISSION ===
+
+Use when the document is a written submission to a tax appellate
+authority or other quasi-judicial body. Common triggers:
+"CIT(A)" / "Commissioner of Income Tax (Appeals)" / "NFAC" / "ITAT" /
+"Income Tax Appellate Tribunal" / "Form 35" / Assessment Year context /
+Section 143(3) / Section 144B / Section 250 / "Written Submission" +
+appeal context; OR GST appellate: "AAAR" / "GST Appellate Tribunal" /
+"CESTAT"; OR other quasi-judicial: "NCLT" / "NCLAT" / "SAT" / "DRT" /
+"DRAT". NOT a regular civil court filing — appellate submissions have
+a distinct format with (Appellant)/(Respondent) in PARENTHESES (not
+dotted), plain "Vs." (not bolded Versus), Subject line citing the
+assessment order, and "Most Respectfully Showeth:" opening.
+
+**BEFORE THE HON'BLE <FORUM>, <JURISDICTION>**
+
+(Examples: "BEFORE THE HON'BLE COMMISSIONER OF INCOME-TAX (APPEALS),
+NATIONAL FACELESS APPEAL CENTRE (NFAC), DELHI", "BEFORE THE HON'BLE
+INCOME TAX APPELLATE TRIBUNAL, MUMBAI BENCH", "BEFORE THE HON'BLE GST
+APPELLATE TRIBUNAL, NEW DELHI")
+
+**Appeal No.: <Appeal Number>  |  Assessment Year: <AY> / Period: <Period>**
+
+**IN THE MATTER OF:**
+
+<Appellant Full Name>  PAN: <PAN>  (or GSTIN: <GSTIN> for GST appeals)
+
+(Appellant)
+
+Vs.
+
+<Respondent Designation, e.g. "The Assessing Officer, National Faceless
+Assessment Centre, Delhi" / "The Joint Commissioner of GST, Mumbai">
+
+(Respondent)
+
+**Subject: Written Submission in respect of Appeal against the
+<Assessment Order / Adjudication Order> dated <DD.MM.YYYY> passed under
+Section <X> read with Section <Y> of the <Income-tax Act, 1961 / CGST
+Act, 2017 / Customs Act, 1962 / Companies Act, 2013 — pick the right
+Act for the forum>.**
+
+Most Respectfully Showeth:
+
+The Appellant files this written submission in support of the grounds of
+appeal raised against the impugned <assessment order / impugned order>.
+
+(After this opening block, the body sections follow: "1. STATEMENT OF
+FACTS OF THE CASE" → "2. GROUNDS OF APPEAL (as filed in Form 35)" with
+each ground listed → "ADDITIONAL GROUND OF APPEAL" if any → "3. DETAILED
+WRITTEN SUBMISSION" with groundwise sub-headings using "Re: Ground No.
+X" — each sub-section restates the ground, gives detailed legal
+argumentation, cites relevant case laws with full citation, and
+rebuts the AO's reasoning + distinguishes AO's case laws → "4. PRAYER"
+with (a)/(b)/(c) reliefs → "5. REQUEST FOR VIDEO CONFERENCING HEARING".)
+
+(CRITICAL — do NOT use court-filing scaffolding here:
+- Use "(Appellant)" / "(Respondent)" in PARENTHESES on their own
+  paragraphs — NOT ".....Appellant" / ".....Respondent" with leading
+  dots (that's Layout A only).
+- Use plain "Vs." on its own paragraph — NOT "**Versus**" bolded.
+- Do NOT add party "Age / Occupation / R/ Address" blocks — tax
+  appellate convention is just Name + PAN/GSTIN.
+- Do NOT label parties as "Plaintiff / Defendant" — they are
+  Appellant / Respondent.
+- Title is at the TOP and is NOT re-appended at end by the assembler.)
+
 === LAYOUT C: AGREEMENT / MOU / DEED / LEASE / SALE DEED / WILL ===
 
 Use when the document is a private contract or testamentary instrument.
@@ -262,12 +329,16 @@ assembler.)
 - Use 'R/ Address' (Indian-court convention for 'Residing at') in
   party blocks.
 - If you are unsure which layout, decide in this order:
-  1. "Police complaint" / "FIR" / mentions Police Inspector / SHO /
+  1. "CIT(A)" / "Commissioner of Income Tax (Appeals)" / "ITAT" / "GST
+     Appellate" / "AAAR" / "CESTAT" / "NCLT" / "NCLAT" / "SAT" / "DRT" /
+     "Form 35" / "Written Submission" + Assessment Year / Section 143(3)
+     / Section 144B / Section 250 of Income Tax Act → Layout E.
+  2. "Police complaint" / "FIR" / mentions Police Inspector / SHO /
      Section 154 CrPC / Section 173 BNSS → Layout D.
-  2. "Notice" / "Reply to legal notice" / "demand notice" → Layout B.
-  3. "Agreement" / "MOU" / "Deed" / "Will" / "Lease" / "Sale deed" /
+  3. "Notice" / "Reply to legal notice" / "demand notice" → Layout B.
+  4. "Agreement" / "MOU" / "Deed" / "Will" / "Lease" / "Sale deed" /
      "Power of attorney" → Layout C.
-  4. Everything else (Suit, Petition, Writ, Application, Bail
+  5. Everything else (Suit, Petition, Writ, Application, Bail
      application, Section 200 CrPC magistrate complaint) → Layout A.""",
     )
     sections: List[SectionPlan] = Field(
@@ -924,20 +995,34 @@ class DoctrinalStance(BaseModel):
                     "magistrate complaint): no court footer; signed by the "
                     "COMPLAINANT (not counsel) with 'Yours faithfully / Sd. / "
                     "[Complainant Name] / Place / Date'; "
+                    "'tax_submission' (written submission to a tax / "
+                    "quasi-judicial appellate authority: CIT(A) / "
+                    "Commissioner of Income Tax (Appeals) / NFAC / ITAT / "
+                    "Income Tax Appellate Tribunal / GST Appellate "
+                    "Authorities (AAAR / GSTAT) / CESTAT / NCLT / NCLAT / "
+                    "SAT / DRT / DRAT): NOT a court filing, NOT a notice; "
+                    "signed by the APPELLANT directly with 'For and on "
+                    "behalf of the Appellant / Sd. / (Name) / Place / Date'; "
                     "'agreement' (contracts, MOUs, leases, sale deeds, NDAs): "
                     "no court footer; signed by all parties with witness lines; "
                     "'will' (wills, codicils): testator + 2 attesting witnesses; "
                     "'none' (other / unknown): no automatic footer. "
                     "Pick based on the document type — DO NOT default to "
-                    "'court_filing' for a notice, police complaint, or "
-                    "agreement. DISAMBIGUATION: When the user says 'police "
-                    "complaint' / 'FIR' / mentions Police Inspector / SHO / "
-                    "Station House Officer / Section 154 CrPC / Section 173 "
-                    "BNSS, use 'police_complaint' (letter format addressed to "
-                    "police). Only use 'court_filing' for a 'complaint' when "
-                    "the user explicitly says 'Section 200 CrPC' / 'Section "
-                    "223 BNSS' / 'magistrate complaint' / 'private complaint "
-                    "before Magistrate' — those are filed in court.",
+                    "'court_filing' for a notice, police complaint, tax "
+                    "appeal, or agreement. DISAMBIGUATION: When the user says "
+                    "'police complaint' / 'FIR' / mentions Police Inspector / "
+                    "SHO / Station House Officer / Section 154 CrPC / Section "
+                    "173 BNSS, use 'police_complaint' (letter format). When "
+                    "the user says 'CIT(A)' / 'Commissioner of Income Tax "
+                    "(Appeals)' / 'ITAT' / 'Income Tax Appellate Tribunal' / "
+                    "'Written Submission' + Assessment Year context / 'Form "
+                    "35' / 'NFAC' / 'Section 143(3)' / 'Section 144B' / "
+                    "'Section 250 Income Tax Act' / 'GST Appellate' / 'AAAR' "
+                    "/ 'CESTAT' / 'NCLT' / 'NCLAT' / 'SAT' / 'DRT', use "
+                    "'tax_submission' (appellate submission format). Only use "
+                    "'court_filing' for a 'complaint' when the user explicitly "
+                    "says 'Section 200 CrPC' / 'Section 223 BNSS' / "
+                    "'magistrate complaint' — those are filed in court.",
     )
 
 
@@ -1875,6 +1960,19 @@ def _build_footer(footer_kind: str, user_language: str) -> str:
             "[Father's / Husband's Name]\n"
             "[Full Address of Complainant]\n"
             "[Contact Number]\n\n"
+            "Place: ___________\n\n"
+            "Date: ___________"
+        )
+    if footer_kind == "tax_submission":
+        # Tax / quasi-judicial appellate written submission (CIT(A) /
+        # ITAT / GST appellate / NCLT / SAT / DRT, etc.) — signed by the
+        # APPELLANT directly, not through counsel (counsel may also sign
+        # but the convention is the appellant's name + place/date below
+        # "For and on behalf of the Appellant").
+        return (
+            "For and on behalf of the Appellant,\n\n"
+            "Sd.\n\n"
+            "**(Name of Appellant)**\n\n"
             "Place: ___________\n\n"
             "Date: ___________"
         )

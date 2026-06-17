@@ -1096,6 +1096,32 @@ Rules:
    - Petitions (divorce/maintenance): 6-8 sections
    - Wills/succession: 4-6 sections
    - Appeals/revisions: 6-9 sections
+   - **CIT(A) / ITAT / GST appellate / NCLT written submissions**: 5-7
+     sections, following the established appellate-submission shape:
+       (i)   "1. STATEMENT OF FACTS OF THE CASE" — chronological narrative
+             of how the assessment/order was passed (8-12 numbered paras).
+       (ii)  "2. GROUNDS OF APPEAL (as filed in Form 35)" — list of grounds
+             extracted from the paperbook / Form 35; one short paragraph per
+             ground stating the ground number and title.
+       (iii) "ADDITIONAL GROUND OF APPEAL" — only if the user asks or the
+             facts genuinely warrant one. Skip otherwise.
+       (iv)  "3. DETAILED WRITTEN SUBMISSION" — the bulk of the document.
+             Sub-headings inside this section MUST use the pattern
+             "**Re: Ground No. X – [ground title]**" (or combine related
+             grounds: "**Re: Ground No. 1, 2 & 7 – …**"). Each sub-section
+             argues the ground in detail, cites case laws with full
+             citation (party names + year + reporter + court), AND rebuts
+             the AO's reasoning + distinguishes any case laws the AO
+             relied upon. Estimate 4-8 paragraphs per ground.
+       (v)   "4. PRAYER" — (a)/(b)/(c)/(d) reliefs (annul / delete /
+             quash penalty / any other relief).
+       (vi)  "5. REQUEST FOR VIDEO CONFERENCING HEARING" — 1 paragraph
+             asking for VC hearing before the final order.
+     DO NOT include: cause title party blocks ("Plaintiff/Defendant" with
+     Age/Occupation/R/ Address), Verification, Affidavit, Schedule of
+     Properties, Court Fee Statement, List of Documents — those are
+     court-filing artefacts and do NOT belong in a CIT(A) written
+     submission.
 4. DO NOT include these as separate sections:
    - "Introduction" or "Preliminary" (waste of space — courts don't need this)
    - "Definitions" (courts know legal terms)

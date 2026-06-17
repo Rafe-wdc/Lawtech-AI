@@ -172,6 +172,54 @@ specifically admitted herein / are as follows>.
 court name. A legal notice is a CORRESPONDENCE, not a pleading. The
 title is at the TOP and is NOT re-appended at end by the assembler.)
 
+=== LAYOUT D: POLICE COMPLAINT / FIR REGISTRATION APPLICATION ===
+
+Use when the document is a complaint addressed to the POLICE STATION
+(NOT to a magistrate). Common triggers: user says "police complaint" /
+"FIR" / mentions Police Inspector / SHO / Station House Officer /
+Section 154 CrPC / Section 173 BNSS. This is a LETTER, not a court
+pleading. Do NOT use Layout A for these — that produces a Section 200
+CrPC magistrate complaint which is filed in court, NOT what the user
+asked for.
+
+**<COMPLAINT TITLE>**
+
+(Examples: "POLICE COMPLAINT", "APPLICATION FOR REGISTRATION OF FIR
+UNDER SECTION 154 OF THE CODE OF CRIMINAL PROCEDURE, 1973", "COMPLAINT
+UNDER SECTION 173 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023")
+
+Date: <date or blank line>
+
+To,
+
+The Police Inspector / Station House Officer,
+
+<Name of Police Station>,
+
+<Address of Police Station>.
+
+**Subject: <Subject line, e.g. "Complaint regarding [offence] committed
+on [date] by [accused name]">**
+
+Sir / Madam,
+
+I, <Complainant Full Name>, son / daughter / wife of <Father / Husband
+Name>, aged <age> years, occupation <occupation>, residing at
+<Complainant Address>, do hereby state and submit as follows:
+
+(Then the body — numbered paragraphs of facts / sequence of events /
+sections of BNS or IPC invoked — is emitted by the section LLM. Close
+with "I therefore request your good office to register an FIR / take
+cognizance and investigate the matter." The signature block is
+appended automatically as footer.)
+
+(NO "IN THE COURT OF", NO "IN THE MATTER OF", NO Plaintiff/Defendant
+blocks, NO Versus. A police complaint is a LETTER addressed to the
+police, not a pleading filed in court. The title is at the TOP and is
+NOT re-appended at end by the assembler. If the user explicitly says
+"Section 200 CrPC" / "Section 223 BNSS" / "magistrate complaint", USE
+LAYOUT A instead — those ARE court filings.)
+
 === LAYOUT C: AGREEMENT / MOU / DEED / LEASE / SALE DEED / WILL ===
 
 Use when the document is a private contract or testamentary instrument.
@@ -213,10 +261,14 @@ assembler.)
   only for titles and headers.
 - Use 'R/ Address' (Indian-court convention for 'Residing at') in
   party blocks.
-- If you are unsure which layout, look at document_title: "Notice" /
-  "Reply" → Layout B; "Agreement" / "MOU" / "Deed" / "Will" / "Lease"
-  → Layout C; everything else (Suit, Petition, Writ, Complaint,
-  Application) → Layout A.""",
+- If you are unsure which layout, decide in this order:
+  1. "Police complaint" / "FIR" / mentions Police Inspector / SHO /
+     Section 154 CrPC / Section 173 BNSS → Layout D.
+  2. "Notice" / "Reply to legal notice" / "demand notice" → Layout B.
+  3. "Agreement" / "MOU" / "Deed" / "Will" / "Lease" / "Sale deed" /
+     "Power of attorney" → Layout C.
+  4. Everything else (Suit, Petition, Writ, Application, Bail
+     application, Section 200 CrPC magistrate complaint) → Layout A.""",
     )
     sections: List[SectionPlan] = Field(
         ...,
@@ -858,19 +910,34 @@ class DoctrinalStance(BaseModel):
         "court_filing",
         description="What kind of footer this draft needs. One of: "
                     "'court_filing' (plaints, petitions, written statements, "
-                    "bail applications, appeals, writs — anything filed in "
-                    "court): Place / Date / Signature of the Petitioner / "
+                    "bail applications, appeals, writs, Section 200 CrPC / "
+                    "Section 223 BNSS magistrate complaints — anything filed "
+                    "in court): Place / Date / Signature of the Petitioner / "
                     "Through Counsel; "
-                    "'legal_notice' (Section 138 notice, demand notice, "
-                    "vacate notice): no court footer; signed by counsel "
-                    "directly with 'Yours sincerely / Sd. / [Advocate Name] / "
-                    "[Enrolment No.]'; "
+                    "'legal_notice' (Section 138 NI Act notice, demand notice, "
+                    "vacate notice, reply to legal notice): no court footer; "
+                    "signed by counsel directly with 'Yours sincerely / Sd. / "
+                    "[Advocate Name] / [Enrolment No.]'; "
+                    "'police_complaint' (FIR registration application under "
+                    "Section 154 CrPC / Section 173 BNSS, complaint addressed "
+                    "to Station House Officer / Police Inspector — NOT a "
+                    "magistrate complaint): no court footer; signed by the "
+                    "COMPLAINANT (not counsel) with 'Yours faithfully / Sd. / "
+                    "[Complainant Name] / Place / Date'; "
                     "'agreement' (contracts, MOUs, leases, sale deeds, NDAs): "
                     "no court footer; signed by all parties with witness lines; "
                     "'will' (wills, codicils): testator + 2 attesting witnesses; "
                     "'none' (other / unknown): no automatic footer. "
                     "Pick based on the document type — DO NOT default to "
-                    "'court_filing' for a notice or agreement.",
+                    "'court_filing' for a notice, police complaint, or "
+                    "agreement. DISAMBIGUATION: When the user says 'police "
+                    "complaint' / 'FIR' / mentions Police Inspector / SHO / "
+                    "Station House Officer / Section 154 CrPC / Section 173 "
+                    "BNSS, use 'police_complaint' (letter format addressed to "
+                    "police). Only use 'court_filing' for a 'complaint' when "
+                    "the user explicitly says 'Section 200 CrPC' / 'Section "
+                    "223 BNSS' / 'magistrate complaint' / 'private complaint "
+                    "before Magistrate' — those are filed in court.",
     )
 
 
@@ -1796,6 +1863,21 @@ def _build_footer(footer_kind: str, user_language: str) -> str:
             "[Address of Advocate]\n"
             "[Contact Details]"
         )
+    if footer_kind == "police_complaint":
+        # Police-station FIR registration application (Section 154 CrPC /
+        # Section 173 BNSS) — addressed to SHO / Police Inspector, signed
+        # by the COMPLAINANT, not by counsel. Place + date are mandatory
+        # because police use them for FIR sequencing.
+        return (
+            "Yours faithfully,\n\n"
+            "Sd.\n"
+            "**[Name of Complainant]**\n"
+            "[Father's / Husband's Name]\n"
+            "[Full Address of Complainant]\n"
+            "[Contact Number]\n\n"
+            "Place: ___________\n\n"
+            "Date: ___________"
+        )
     if footer_kind == "agreement":
         return (
             "**IN WITNESS WHEREOF**, the parties have executed this "
@@ -1870,10 +1952,10 @@ def _assemble_document(
     cause_title = outline.court_details.rstrip()
     subject = (outline.document_title or "").strip()
     # Only append the subject heading at the END for court-filing drafts.
-    # Notice/agreement layouts put the title at the TOP of court_details
-    # (Layout B / Layout C in DraftOutline.court_details field doc) and
-    # appending again would produce duplicated title text and pollute
-    # legal notice formatting with court-filing scaffolding.
+    # Notice/agreement/police_complaint layouts put the title at the TOP
+    # of court_details (Layouts B/C/D in DraftOutline.court_details field
+    # doc); appending again would produce duplicated title text and
+    # pollute the layout with court-filing scaffolding.
     _footer_kind_for_subject = "court_filing"
     if stance is not None:
         _footer_kind_for_subject = (

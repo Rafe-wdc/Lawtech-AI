@@ -1208,6 +1208,14 @@ Rules:
 8. IMPORTANT: Prayer/relief section MUST appear as the final substantive section
    before Verification/Affidavit.
 9. Think like a BUSY judge reading this — every section must justify its existence.
+10. Section TITLES — emit a plain noun-phrase title only. Do NOT prefix the
+    title with a number, letter, or any ordinal marker. The document
+    assembler attaches its own numbered prefix (`## 1.`, `## 2.`, ...,
+    localized to the user's script — `## १.` in Hindi, `## ௧.` in Tamil,
+    etc.) so prefixes here produce duplicated headings like
+    "## 1. १. याचिका के तथ्य". Correct title: "याचिका के तथ्य" /
+    "Statement of Facts" / "Prayer" / "Verification". Wrong: "1. Prayer"
+    / "१. प्रार्थना" / "(a) Statement of Facts".
 """
 
 # Append shared Indian-legal discipline blocks to DRAFT_OUTLINE_PROMPT.

@@ -38,7 +38,10 @@ from core.clients import (
     get_es_client, get_gemini_flash, get_drafting_llm,
 )
 from core.settings import ES_INDICES
-from core.language import localize_prompt
+from core.language import (
+    localize_prompt, localize_number, strip_leading_numeric_prefix,
+    SUPPORTED_LANGUAGES,
+)
 from core.logger import get_logger, log_time
 from core.progress import progress
 from config.prompts import DRAFTING_SYSTEM_PROMPT, DRAFT_OUTLINE_PROMPT
@@ -865,11 +868,14 @@ def validate_draft(
 
 
 def _section_already_present(sections: list[SectionPlan], title: str) -> bool:
-    """Fuzzy check: True if any existing section's title shares the head word.
+    """Fast same-language head-word check: True if any existing section's title
+    shares the head word with `title`.
 
-    Avoids duplicates when the LLM emitted "Schedule A & B" and the stance
-    suggests "Schedule of Properties". Compares lower-cased first
-    significant word(s) — anything more strict over-inflates the outline.
+    Catches in-language overlaps cheaply ("Schedule A & B" vs "Schedule of
+    Properties" — both start with "schedule"). DOES NOT catch cross-lingual
+    overlaps ("गवाहों के बयान" vs "Witness Testimonies" — different head
+    words despite identical meaning); for those, the LLM-driven
+    `_dedup_procedural_sections_via_llm` pass is the safety net.
     """
     incoming = title.lower().split()
     if not incoming:
@@ -880,6 +886,153 @@ def _section_already_present(sections: list[SectionPlan], title: str) -> bool:
         if head in existing:
             return True
     return False
+
+
+class _DedupVerdict(BaseModel):
+    """Per-candidate keep/drop decision from the semantic-dedup LLM call."""
+    title: str = Field(..., description="The candidate procedural-section title as supplied.")
+    keep: bool = Field(
+        ...,
+        description="True if this candidate is TRULY procedurally distinct from "
+                    "every section already in the outline. False if any outline "
+                    "section already covers the same content (in any language / "
+                    "any phrasing).",
+    )
+    matched_outline_title: str = Field(
+        "",
+        description="When keep=False, the outline title that semantically "
+                    "overlaps this candidate. Empty string when keep=True.",
+    )
+
+
+class _DedupVerdictList(BaseModel):
+    verdicts: list[_DedupVerdict] = Field(default_factory=list)
+
+
+_SEMANTIC_DEDUP_SYSTEM = """You are a deduplication judge for Indian legal-
+document section lists. You are given:
+
+  1. An EXISTING OUTLINE list of section titles (substantive sections the
+     outline LLM already produced). Titles may be in ANY language —
+     English, Hindi, Marathi, Tamil, Telugu, Bengali, etc.
+  2. A list of CANDIDATE procedural sections (mandatory procedural blocks
+     the stance LLM thinks are needed: Schedule, Verification, Affidavit,
+     List of Documents, etc.).
+
+For EACH candidate, decide whether to KEEP it (it covers a TRULY procedural
+block the outline doesn't already carry) or DROP it (any outline section
+already covers the same purpose — same meaning, even if the phrasing or
+language differs).
+
+Cross-lingual matching MUST work:
+  - "गवाहों के बयान" ↔ "Witness Testimonies" ↔ "Statement of Witnesses"
+    → all the same purpose, DROP the candidate
+  - "स्वामित्व का आधार" ↔ "Details of the Will" ↔ "Ownership Basis"
+    → same substantive section, DROP the candidate
+  - "प्रार्थना" ↔ "Prayer" ↔ "Relief Sought" ↔ "Request to Gram Sabha"
+    → same purpose, DROP the candidate
+  - "विषय" ↔ "Subject" ↔ "Introduction" → same, DROP
+
+Only KEEP candidates whose purpose is TRULY missing from the outline. A
+candidate like "Schedule of Properties" with NO matching outline section
+should be KEPT. A candidate like "Verification" when the outline already
+has a "Verification" / "सत्यापन" / "प्रमाणीकरण" section should be DROPPED.
+
+Return a JSON object with a `verdicts` list — one entry per candidate, in
+the SAME ORDER as the candidates were supplied. Each entry has:
+  - title: the candidate's title (verbatim).
+  - keep: true/false.
+  - matched_outline_title: when keep=false, the outline title that
+    semantically overlapped (helps debugging). Empty string when keep=true.
+
+Be aggressive about dropping duplicates — the cost of an unnecessary
+section in the draft is high (visible duplication confuses the user); the
+cost of dropping a truly-needed procedural block is recoverable later.
+"""
+
+
+async def _dedup_procedural_sections_via_llm(
+    existing_outline_titles: list[str],
+    candidate_sections: list[ProceduralSectionPlan],
+) -> list[ProceduralSectionPlan]:
+    """LLM-driven semantic dedup of stance procedural_sections vs outline.
+
+    Returns the candidates that should actually be appended. On failure
+    (timeout, parse error), returns the input list unchanged — the head-
+    word `_section_already_present` check downstream is still applied,
+    so we never amplify duplicates beyond what was already there.
+
+    Single batched call (one LLM round-trip per draft, NOT one per candidate)
+    so the cost is bounded.
+    """
+    if not candidate_sections:
+        return candidate_sections
+    if not existing_outline_titles:
+        return candidate_sections
+
+    candidates_block = "\n".join(
+        f"  {i+1}. {c.title}" for i, c in enumerate(candidate_sections)
+    )
+    outline_block = "\n".join(
+        f"  {i+1}. {t}" for i, t in enumerate(existing_outline_titles)
+    )
+
+    with log_time(log, "Semantic dedup (stance vs outline)"):
+        try:
+            llm = get_gemini_flash(temperature=0.0).with_structured_output(
+                _DedupVerdictList, include_raw=True,
+            )
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", _SEMANTIC_DEDUP_SYSTEM),
+                ("user",
+                 "EXISTING OUTLINE TITLES:\n{outline}\n\n"
+                 "CANDIDATE PROCEDURAL SECTIONS (from doctrinal stance):\n"
+                 "{candidates}\n\n"
+                 "Return one verdict per candidate, in order."),
+            ])
+            chain = prompt | llm
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({
+                    "outline": outline_block,
+                    "candidates": candidates_block,
+                }),
+                timeout=20,
+            )
+        except Exception as e:
+            log.warning(
+                "Semantic dedup failed; falling back to head-word dedup only",
+                error=str(e)[:200],
+            )
+            return candidate_sections
+
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Drafting", "semantic_dedup_procedural",
+                   raw_and_parsed.get("raw"))
+    parsed = raw_and_parsed["parsed"]
+    verdicts = parsed.verdicts or []
+
+    # Defensive: when the LLM returned fewer / more verdicts than candidates,
+    # fall back to the input unchanged. We need a 1:1 mapping for safety.
+    if len(verdicts) != len(candidate_sections):
+        log.warning(
+            "Semantic dedup verdict count mismatch; keeping all candidates",
+            candidates=len(candidate_sections), verdicts=len(verdicts),
+        )
+        return candidate_sections
+
+    kept: list[ProceduralSectionPlan] = []
+    dropped: list[tuple[str, str]] = []
+    for cand, v in zip(candidate_sections, verdicts):
+        if v.keep:
+            kept.append(cand)
+        else:
+            dropped.append((cand.title, v.matched_outline_title))
+    if dropped:
+        log.info("Semantic dedup dropped overlapping candidates",
+                 dropped_count=len(dropped),
+                 kept_count=len(kept),
+                 sample=[f"{c} ↔ {m}" for c, m in dropped[:3]])
+    return kept
 
 
 def _inject_procedural_sections(
@@ -1050,10 +1203,32 @@ Return a JSON object with these keys:
   for income certificate" presupposes a Tahsildar/SDM. Use common sense,
   not regex.
 - "procedural_sections" (list of {{title, description, estimated_paragraphs,
-  needs_citations}}): EVERY mandatory procedural section this pleading
-  must carry under the Indian Code (CPC / BNSS-CrPC / SRA / Court Fees Act /
-  Order XXXIX, etc.). Be exhaustive — if anything is missing the draft is
-  not court-filing-ready. Examples by pleading type:
+  needs_citations}}): NARROWLY scoped — list ONLY the mandatory procedural
+  blocks REQUIRED under the Indian Code (CPC / BNSS-CrPC / SRA / Court
+  Fees Act / Order XXXIX, etc.) that the outline you'll see below DOES
+  NOT already carry. The outline is the source of truth for substantive
+  sections (Statement of Facts, Cause of Action, Grounds, Witness
+  Testimonies, Prayer, etc.); your job here is only to top up with
+  REQUIRED procedural blocks the outline missed.
+
+  IMPORTANT — DO NOT list anything that any of these substantive
+  categories already covers (the outline LLM owns these):
+    * "Introduction" / "Background" / "Preamble" / "Synopsis"
+    * "Details of <the will / the agreement / the property / etc.>"
+    * "Statement of Facts" / "Brief Facts" / "Cause of Action"
+    * "Witness Testimonies" / "Witness List" / "Witness Statements"
+    * "Prayer" / "Relief Sought" / "Request to <authority>"
+    * "Grounds" / "Submissions" / "Arguments"
+    * "Possession and Enjoyment" / "Use of Property"
+    * "Ownership Basis" / "Title"
+  If the outline already has a section matching one of those purposes
+  (in ANY language — Hindi याचिका के तथ्य, Marathi विनंती, Tamil
+  உரிமைகோரல், English Prayer, etc.), DO NOT re-list it as a
+  procedural_section. Duplicate sections in different languages
+  produce the worst draft output we've seen — they confuse the user
+  AND inflate token cost.
+
+  TRULY PROCEDURAL blocks (the ONLY ones this field should carry):
     * Civil suit / plaint → Schedule of Properties; Valuation and Court
       Fee; List of Documents (Order VII Rule 14 / Order XI Rule 14 CPC);
       Verification (Order VI Rule 15 CPC); Affidavit in Support (Order
@@ -1067,20 +1242,22 @@ Return a JSON object with these keys:
       (FIR copy, prior bail orders).
     * Writ / PIL → Verification; List of Documents; Affidavit; Annexures
       Index.
-    * Legal notice → Signature block of counsel (no court-filing
-      scaffolding, NO list of case-law authorities — a notice asserts a
-      position with statutory references, not precedent).
+    * Legal notice → procedural_sections: []. A notice carries no
+      court-procedural attachments.
     * Office application (RTI / department / employer / bank / society /
-      university / regulator) → Subject line; numbered paragraphs of
-      facts + the specific entitlement / rule invoked (e.g. Section 6
-      RTI Act, 2005); Prayer / Request paragraph; Signature block of
-      the applicant. NO Verification, NO Affidavit, NO court fee, NO
-      Schedule, NO case-law list.
+      university / regulator) → procedural_sections: []. The outline
+      already covers the body; nothing procedural to top up.
     * Appeal / revision / review → Memo of grounds; Application for
       condonation of delay if filed beyond limitation; Index; Verification.
+
   Include description + estimated paragraphs + needs_citations for each.
-  The drafting pipeline appends any section listed here that isn't already
-  in the outline.
+  TITLE LANGUAGE: emit each procedural_section title in the same language
+  as the outline you'll see in the user message. If the outline titles are
+  in Hindi, write "अनुसूची संपत्तियों की" (Schedule of Properties), "सत्यापन"
+  (Verification), "शपथ-पत्र" (Affidavit). If Marathi: "मालमत्तेची अनुसूची",
+  "प्रमाणीकरण", "शपथपत्र". If Tamil: "சொத்துகளின் அட்டவணை", "சத்தியம்".
+  If the outline is in English, keep titles in English. Do NOT mix
+  languages within a single draft.
 
 Be terse. JSON only. No prose around it.
 """
@@ -1197,17 +1374,43 @@ async def _generate_doctrinal_stance(
     doc_title: str,
     user_facts: str = "",
     case_facts: str = "",
+    user_language: str = "en",
+    existing_outline_titles: list[str] | None = None,
 ) -> DoctrinalStance | None:
     """One-shot Flash call producing the legal lane the whole draft will follow.
 
     Returns None on failure — section generation falls back to template-only
     guidance, same as before this step existed.
+
+    `existing_outline_titles` lets the stance LLM see what substantive sections
+    the outline already carries, so it doesn't propose overlapping procedural
+    sections (the leading cause of duplicate sections in the assembled draft).
+    `user_language` tells the stance LLM what language to emit
+    procedural_section titles in, so they match the rest of the draft.
     """
     facts_block = ""
     if case_facts.strip():
         facts_block += "KEY ENTITIES:\n" + case_facts.strip() + "\n\n"
     if user_facts.strip():
         facts_block += "FULL DOCUMENT TEXT:\n" + user_facts[:8000]
+
+    outline_titles_block = ""
+    if existing_outline_titles:
+        outline_titles_block = (
+            "EXISTING OUTLINE SECTIONS (the outline LLM already produced "
+            "these — do NOT propose overlapping procedural_sections; emit "
+            "your procedural_section titles in the SAME language as these):\n"
+            + "\n".join(f"  {i+1}. {t}" for i, t in enumerate(existing_outline_titles))
+            + "\n"
+        )
+
+    language_name = SUPPORTED_LANGUAGES.get(user_language, "English")
+    target_language_block = (
+        f"TARGET LANGUAGE for procedural_section titles + descriptions: "
+        f"{language_name} ({user_language}). Use the conventional Indian "
+        f"legal vocabulary for this language; do NOT mix languages within "
+        f"a single procedural_section entry."
+    )
 
     with log_time(log, "Doctrinal stance generation"):
         try:
@@ -1219,6 +1422,8 @@ async def _generate_doctrinal_stance(
                 ("user",
                  "USER QUERY:\n{query}\n\n"
                  "DOCUMENT TYPE (from template selection): {doc_title}\n\n"
+                 "{target_language_block}\n\n"
+                 "{outline_titles_block}"
                  "USER-PROVIDED FACTS (may be empty):\n{facts_block}"),
             ])
             chain = prompt | llm
@@ -1227,6 +1432,8 @@ async def _generate_doctrinal_stance(
                     "query": query,
                     "doc_title": doc_title,
                     "facts_block": facts_block or "(none -- proceed from query alone)",
+                    "outline_titles_block": outline_titles_block,
+                    "target_language_block": target_language_block,
                 }),
                 timeout=30,
             )
@@ -2411,14 +2618,61 @@ _FOOTER_LABELS: dict[str, dict[str, str]] = {
 }
 
 
+# Per-(footer_kind, user_language) localized-footer cache. Each entry is the
+# already-translated footer text for that combination, so subsequent drafts
+# that use the same footer in the same language pay zero LLM cost.
+_LOCALIZED_FOOTER_CACHE: dict[tuple[str, str], str] = {}
+
+
+_FOOTER_LOCALIZE_SYSTEM = """You are a translator for Indian legal-document
+boilerplate. You are given a short English footer block (signature line,
+witness lines, place/date lines, etc.) and a target language.
+
+Translate the prose to {language_name} ({language_code}). RULES:
+
+1. PRESERVE every `[bracketed placeholder]` VERBATIM — these are slots the
+   user will fill in later (names, addresses, contact numbers, etc.).
+   Do NOT translate the text inside brackets, do NOT remove the brackets,
+   do NOT change their position.
+2. PRESERVE every `___________` blank line and every `Sd.` signature
+   marker EXACTLY as printed.
+3. PRESERVE markdown bolding (`**...**`) and bullet/number markers
+   ("1.", "2.") — but render the number in the target script when the
+   target language uses a distinct digit family
+   (Devanagari १, २ for Hindi/Marathi/Sanskrit; Bengali ১, ২ for Bengali;
+   Tamil ௧, ௨ for Tamil; Telugu ౧, ౨ for Telugu; Kannada ೧, ೨;
+   Malayalam ൧, ൨; Gujarati ૧, ૨; Gurmukhi ੧, ੨; Eastern Arabic ۱, ۲
+   for Urdu).
+4. Translate ALL standalone labels and phrases — "Place", "Date",
+   "Yours faithfully", "Yours sincerely", "Through Counsel",
+   "Signature of the Applicant", "Name of Advocate", "Enrolment No.",
+   "WITNESSES", "IN WITNESS WHEREOF", "the parties have executed this
+   Agreement on the date first written above", "Signed by the Testator in
+   our presence and signed by us in the presence of the Testator and of
+   each other", "For and on behalf of the Appellant",
+   "[Name of Advocate]" placeholder LABEL (translate the LABEL inside the
+   brackets while keeping the brackets — e.g. "[Name of Advocate]" →
+   "[वकील का नाम]" in Hindi). Use the conventional Indian legal-
+   correspondence register for the target language — match Maharashtra
+   bar / Delhi bar / Madras bar conventions as appropriate.
+5. Output ONLY the translated footer text. NO preamble, NO explanation,
+   NO surrounding commentary, NO code fences.
+"""
+
+
 def _build_footer(footer_kind: str, user_language: str) -> str:
     """Return the appropriate footer block for a given artifact kind.
 
-    Reads stance.footer_kind ("court_filing" / "legal_notice" / "agreement"
-    / "will" / "none") and picks the right footer template. Labels for
-    "court_filing" come from _FOOTER_LABELS in the requested Indian
-    language; other footer kinds are emitted in English (the self-refine
-    critic translates them when strict_language is set).
+    Always returns the ENGLISH skeleton for kinds other than court_filing.
+    The async `_localize_footer_block` is then called from the assembler
+    to translate non-English drafts via a cached Gemini Flash Lite call.
+    court_filing already uses `_FOOTER_LABELS` (a hand-maintained dict)
+    so it bypasses the LLM path entirely.
+
+    Future-proof principle: do NOT add another per-language hardcoded dict
+    every time a new footer kind lands. Adding a new footer kind = one
+    English skeleton here + zero per-language work; the LLM localizer
+    handles every Indian language uniformly.
     """
     if footer_kind == "none":
         return ""
@@ -2522,7 +2776,81 @@ def _build_footer(footer_kind: str, user_language: str) -> str:
     )
 
 
-def _assemble_document(
+async def _localize_footer_block(
+    footer_text: str,
+    footer_kind: str,
+    user_language: str,
+) -> str:
+    """Translate a footer skeleton to user_language via Gemini Flash Lite.
+
+    Cached per (footer_kind, user_language). Returns the English skeleton
+    unchanged when:
+      * user_language is English / unsupported, OR
+      * the LLM call fails (timeout / network / parse) — we'd rather show
+        an English footer than no footer at all.
+    """
+    if not footer_text:
+        return footer_text
+    if user_language == "en" or user_language not in SUPPORTED_LANGUAGES:
+        return footer_text
+
+    cache_key = (footer_kind, user_language)
+    if cache_key in _LOCALIZED_FOOTER_CACHE:
+        log.debug("Localized footer cache hit",
+                  footer_kind=footer_kind, lang=user_language)
+        return _LOCALIZED_FOOTER_CACHE[cache_key]
+
+    language_name = SUPPORTED_LANGUAGES[user_language]
+    with log_time(log, f"Footer localization ({footer_kind}→{user_language})"):
+        try:
+            llm = get_gemini_flash(temperature=0.0)
+            system = _FOOTER_LOCALIZE_SYSTEM.format(
+                language_name=language_name,
+                language_code=user_language,
+            )
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system),
+                ("user",
+                 "Translate this footer block to "
+                 f"{language_name}. Preserve placeholders and blanks "
+                 "verbatim. Output ONLY the translated text.\n\n"
+                 "FOOTER:\n{footer}"),
+            ])
+            chain = prompt | llm
+            response = await asyncio.wait_for(
+                chain.ainvoke({"footer": footer_text}),
+                timeout=20,
+            )
+        except Exception as e:
+            log.warning(
+                "Footer localization failed; returning English skeleton",
+                footer_kind=footer_kind, lang=user_language,
+                error=str(e)[:200],
+            )
+            return footer_text
+
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting",
+                       f"footer_localize_{footer_kind}_{user_language}",
+                       response)
+        translated = (response.content or "").strip()
+        if not translated:
+            log.warning("Footer localizer returned empty content; keeping English",
+                        footer_kind=footer_kind, lang=user_language)
+            return footer_text
+        # Strip occasional code fences the LLM emits despite the prompt
+        if translated.startswith("```"):
+            translated = translated.strip("`").strip()
+            if translated.startswith(("markdown", "text")):
+                translated = translated.split("\n", 1)[1] if "\n" in translated else translated
+        _LOCALIZED_FOOTER_CACHE[cache_key] = translated
+        log.info("Footer localized",
+                 footer_kind=footer_kind, lang=user_language,
+                 src_chars=len(footer_text), dst_chars=len(translated))
+        return translated
+
+
+async def _assemble_document(
     outline: DraftOutline,
     sections: list[str],
     user_language: str = "en",
@@ -2571,7 +2899,16 @@ def _assemble_document(
     for i, (section_plan, section_text) in enumerate(zip(outline.sections, sections)):
         text = section_text.strip()
         if not text.startswith("#"):
-            text = f"## {i + 1}. {section_plan.title}\n\n{text}"
+            # Localize the section number to the user's digit script
+            # (Devanagari १. in Hindi, Tamil ௧. in Tamil, …) and strip any
+            # numeric prefix the outline LLM put on the title — otherwise
+            # you get a doubled-prefix heading like "## 1. १. याचिका...".
+            # Bug report 2026-06-19: Hindi draft headings showed
+            # "1. १. याचिका के तथ्य" / "2. २. स्वामित्व का आधार" all the
+            # way down.
+            num = localize_number(i + 1, user_language)
+            clean_title = strip_leading_numeric_prefix(section_plan.title)
+            text = f"## {num}. {clean_title}\n\n{text}"
         parts.append(text)
 
     footer_kind = "court_filing"
@@ -2579,6 +2916,16 @@ def _assemble_document(
         footer_kind = getattr(stance, "footer_kind", "court_filing") or "court_filing"
 
     footer_block = _build_footer(footer_kind, user_language)
+    # Localize the footer when the user wants a non-English response and
+    # the footer kind doesn't already use the _FOOTER_LABELS labels dict
+    # (court_filing handles its own localization). Cached per
+    # (footer_kind, user_language) so this is a one-time cost per process.
+    if (footer_block
+            and footer_kind != "court_filing"
+            and user_language != "en"):
+        footer_block = await _localize_footer_block(
+            footer_block, footer_kind, user_language,
+        )
     if footer_block:
         parts.append("---")
         parts.append(footer_block)
@@ -2698,7 +3045,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                 "completed_sections": len(outline.sections) - len(new_failed),
             })
 
-        full_draft = _assemble_document(outline, sections, state.get("user_language", "en"))
+        full_draft = await _assemble_document(outline, sections, state.get("user_language", "en"))
 
         if new_failed:
             log.warning("Continue draft: some sections still failed",
@@ -2940,6 +3287,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
             query, outline.document_title,
             user_facts=user_facts,
             case_facts=case_facts,
+            user_language=user_language,
+            existing_outline_titles=[s.title for s in outline.sections],
         )
 
         # Step 4.55: Verify stance.key_cases against the judgment ES corpus.
@@ -2959,6 +3308,23 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # Documents, separate IA for TI, notarised Affidavit, etc.). When
         # the stance call failed or returned no procedural list, the outline
         # is left as-is — no hardcoded fallback pack.
+        #
+        # Two-stage dedup before injection:
+        #   (a) LLM semantic dedup catches cross-lingual overlap that the
+        #       head-word check downstream cannot (e.g. "गवाहों के बयान" vs
+        #       "Witness Testimonies"). Bug report 2026-06-19: Hindi draft
+        #       came back with sections 8-12 in English as duplicates of
+        #       sections 1-7 in Hindi — pure cross-lingual overlap.
+        #   (b) Head-word dedup inside _inject_procedural_sections is the
+        #       second pass; it catches in-language overlaps the LLM may
+        #       miss.
+        if stance is not None and stance.procedural_sections:
+            deduped = await _dedup_procedural_sections_via_llm(
+                existing_outline_titles=[s.title for s in outline.sections],
+                candidate_sections=stance.procedural_sections,
+            )
+            if len(deduped) != len(stance.procedural_sections):
+                stance = stance.model_copy(update={"procedural_sections": deduped})
         outline.sections = _inject_procedural_sections(outline, stance)
         # Re-cap after injection
         if len(outline.sections) > _MAX_SECTIONS:
@@ -3001,7 +3367,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
         # Step 6: Assemble complete document
         progress("drafting", "Assembling final document...", step="assemble")
-        full_draft = _assemble_document(outline, sections, user_language, stance=stance)
+        full_draft = await _assemble_document(outline, sections, user_language, stance=stance)
 
         # Step 6.5: Validator -- auto-fix mojibake + leftover [CITE: ...], log
         # warnings for statute traps and orphan citation tails. Never raises.

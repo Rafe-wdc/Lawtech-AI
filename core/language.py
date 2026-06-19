@@ -402,3 +402,98 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
 def language_name(lang: str) -> str:
     """Return human-readable name for an ISO code."""
     return SUPPORTED_LANGUAGES.get(lang, "English")
+
+
+# ---------------------------------------------------------------------------
+# Numeral script mapping — used by the drafting assembler (and any other
+# layer that needs to render an integer in the user's native script).
+#
+# Hindi / Marathi / Sanskrit drafts MUST render section numbers in Devanagari
+# (१, २, ३), not Latin (1, 2, 3) — mixing the two is a major mismatch the
+# self-refine critic already flags. Same applies to every Indic script with
+# a distinct digit family. Languages whose written form uses Latin digits
+# (English, plus any future Latin-script language) keep ASCII digits.
+# ---------------------------------------------------------------------------
+
+# Per-language Latin → native digit map. Keys are ISO 639-1 codes.
+# Only languages whose digit family DIFFERS from Latin are listed here;
+# anything else falls through to Latin.
+_NATIVE_DIGITS: dict[str, str] = {
+    "hi": "०१२३४५६७८९",
+    "mr": "०१२३४५६७८९",
+    "sa": "०१२३४५६७८९",
+    "bn": "০১২৩৪৫৬৭৮৯",
+    "as": "০১২৩৪৫৬৭৮৯",
+    "or": "୦୧୨୩୪୫୬୭୮୯",
+    "te": "౦౧౨౩౪౫౬౭౮౯",
+    "ta": "௦௧௨௩௪௫௬௭௮௯",
+    "kn": "೦೧೨೩೪೫೬೭೮೯",
+    "ml": "൦൧൨൩൪൫൬൭൮൯",
+    "gu": "૦૧૨૩૪૫૬૭૮૯",
+    "pa": "੦੧੨੩੪੫੬੭੮੯",
+    "ur": "۰۱۲۳۴۵۶۷۸۹",
+}
+
+
+def localize_number(n: int, lang: str) -> str:
+    """Render an integer in the user_language's native digit script.
+
+    Falls back to Latin digits ("1", "23") when:
+      - lang is English / unrecognised
+      - n is non-positive (uncommon caller case; pass through as-is)
+
+    Used by the drafting assembler to localize section-number prefixes
+    ("## १. ..." in Hindi instead of "## 1. ..."), and is safe for any
+    other layer that wants a script-localized integer.
+    """
+    if n < 0:
+        return str(n)  # negatives are a caller bug; don't transliterate the sign
+    digits = _NATIVE_DIGITS.get(lang)
+    if not digits:
+        return str(n)
+    return "".join(digits[int(c)] for c in str(n))
+
+
+# Regex matching a leading numeric prefix in ANY Indic / Arabic-Indic / Latin
+# digit script, optionally followed by `.`, `)`, `:`, `-`, or whitespace.
+# Used to strip prefixes the outline LLM put on section titles (e.g.
+# "१. याचिका के तथ्य" → "याचिका के तथ्य") so the assembler's own
+# localized prefix doesn't produce double-numbered headings.
+_LEADING_NUMERIC_PREFIX_RE = re.compile(
+    r"^\s*[0-9"
+    # Hindi/Marathi/Sanskrit Devanagari (U+0966-096F)
+    r"०-९"
+    # Bengali / Assamese (U+09E6-09EF)
+    r"০-৯"
+    # Odia (U+0B66-0B6F)
+    r"୦-୯"
+    # Telugu (U+0C66-0C6F)
+    r"౦-౯"
+    # Tamil (U+0BE6-0BEF)
+    r"௦-௯"
+    # Kannada (U+0CE6-0CEF)
+    r"೦-೯"
+    # Malayalam (U+0D66-0D6F)
+    r"൦-൯"
+    # Gujarati (U+0AE6-0AEF)
+    r"૦-૯"
+    # Gurmukhi (U+0A66-0A6F)
+    r"੦-੯"
+    # Extended Arabic-Indic (Urdu) (U+06F0-06F9)
+    r"۰-۹"
+    r"]+[\.\)\:\-\s]+",
+)
+
+
+def strip_leading_numeric_prefix(title: str) -> str:
+    """Remove any leading numeric prefix the outline LLM put on a title.
+
+    Examples:
+      "१. याचिका के तथ्य"     → "याचिका के तथ्य"
+      "1. Statement of Facts" → "Statement of Facts"
+      "(1) Prayer"            → "(1) Prayer"  (only LEADING `1.` style stripped)
+      "Statement of Facts"    → "Statement of Facts"  (no-op)
+    """
+    if not title:
+        return title
+    return _LEADING_NUMERIC_PREFIX_RE.sub("", title, count=1).strip()

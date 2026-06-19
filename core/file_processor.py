@@ -625,6 +625,101 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
     return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.content.strip()}"
 
 
+def _vision_ocr_image(file_path: str, filename: str = "") -> str:
+    """Run Gemini Vision OCR on a single image file.
+
+    Hash-cached by file content (mirrors `_vision_ocr_pdf`) so repeat uploads
+    of the same image are zero-cost. Uses the same legal-aware OCR prompt as
+    the PDF path so transcription quality (party names, case numbers, dates,
+    section numbers, Indian-language scripts) is identical across kinds.
+
+    Returns empty string on failure — callers fall back to the Gemini URI
+    path for the Document agent (multimodal), but non-multimodal agents
+    (Drafting, Scenario, Legislation) lose grounding for that file. This
+    is logged but doesn't break the request.
+
+    Bug report 2026-06-19: user attached 3 JPEGs of a real apartment dispute
+    + 1 scanned PDF and asked "Prepare a legal notice". Drafting produced an
+    employment-dues notice with 40 [placeholders], zero references to the
+    real facts. Root cause: images had no OCR branch at all, so inline_text
+    was empty and the agent had no grounding.
+    """
+    from core.clients import get_gemini_flash
+    import base64
+
+    img_hash = _file_hash(file_path)
+    cached = _load_ocr_cache(img_hash)
+    if cached:
+        log.debug("Image OCR cache hit",
+                  file=filename or os.path.basename(file_path))
+        return cached
+
+    try:
+        with open(file_path, "rb") as f:
+            img_bytes = f.read()
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        # Best-effort mime sniff from extension; data: URLs accept image/jpeg
+        # for jpg/jpeg, image/png for png, etc. Default to image/jpeg
+        # because Gemini Vision treats all common raster formats uniformly.
+        ext = os.path.splitext(file_path)[1].lower()
+        mime_for_data_url = {
+            ".png": "image/png",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+            ".bmp": "image/bmp",
+        }.get(ext, "image/jpeg")
+
+        llm = get_gemini_flash(temperature=0.0)
+        content = [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "You are an OCR engine for legal documents. Transcribe ALL "
+                        "visible text from this single document image, exactly as it "
+                        "appears.\n"
+                        "- The document may be in English OR an Indian language "
+                        "(Hindi, Kannada, Tamil, Telugu, Malayalam, Bengali, Marathi, "
+                        "Gujarati, Punjabi, Odia, Assamese, Urdu, etc.). Transcribe "
+                        "text in its ORIGINAL script. Do NOT translate. Do NOT "
+                        "transliterate to the Latin/Roman alphabet. If the image "
+                        "mixes scripts, keep each part in its own script.\n"
+                        "- Preserve formatting, paragraph breaks, headings, lists, "
+                        "tables, and the natural reading order.\n"
+                        "- For tables, render as markdown tables with pipe-delimited "
+                        "rows so downstream agents can read the columns (date / UTR "
+                        "/ amount / bank / etc. for payment proofs, schedules, etc.).\n"
+                        "- Transcribe party names, case numbers, dates, section "
+                        "numbers, court names, statutory provisions, amounts, and "
+                        "bank/account/UTR references EXACTLY as written.\n"
+                        "- If a word or passage is genuinely illegible (blurred, "
+                        "cut off, glare), write [illegible] in its place. Do NOT "
+                        "guess, fill in, or invent text.\n"
+                        "Output only the transcribed text, nothing else."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_for_data_url};base64,{b64}"},
+                },
+            ],
+        }]
+        with log_time(log, "Image Vision OCR", file=filename or "image"):
+            resp = llm.invoke(content)
+        text = (resp.content or "").strip()
+
+        if text:
+            _save_ocr_cache(img_hash, text)
+        return text
+
+    except Exception as e:
+        log.error("Image Vision OCR failed",
+                  file=filename or os.path.basename(file_path),
+                  error=str(e)[:200])
+        return ""
+
+
 def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
     """Run Gemini Vision OCR on PDF pages with parallel batch processing.
 
@@ -1154,21 +1249,22 @@ async def process_files(
                             "Background OCR task exception", error=str(t.exception()))
                     )
 
-                elif is_scanned and pf.gemini_uri:
-                    # Small scanned PDF with Gemini URI — skip OCR.
-                    # Gemini Pro reads it natively, and it's small enough
-                    # that follow-ups can also use the Gemini URI directly.
-                    log.info("Small scanned PDF: Gemini URI available, skipping Vision OCR",
-                             file=pf.original_name, pages=page_count)
-
                 elif is_scanned:
                     # Scanned PDF (or a garbled non-Latin text layer we just
-                    # invalidated) and no Gemini URI — must run Vision OCR.
-                    # Capped so a giant document can't block the request past the
-                    # gateway timeout; the in-flight thread keeps running to fill
-                    # the OCR cache for the retry.
-                    log.info("Scanned/garbled PDF: no Gemini URI, running Vision OCR",
-                             file=pf.original_name, pages=page_count)
+                    # invalidated). Run Vision OCR REGARDLESS of whether a
+                    # Gemini URI is available — the Document agent can use
+                    # the Gemini URI multimodally, but Drafting / Scenario /
+                    # Legislation read fc.inline_text exclusively and need
+                    # OCR text to ground on. Skipping OCR when Gemini URI is
+                    # available (the old optimization) was the root cause of
+                    # the 2026-06-19 bug where a 25-page scanned PDF + 3
+                    # JPEGs produced an employment-dues template-with-
+                    # placeholders notice instead of a notice grounded on
+                    # the actual apartment dispute. Hash-cached so repeat
+                    # uploads of the same file are zero-cost.
+                    log.info("Scanned/garbled PDF: running Vision OCR for inline_text",
+                             file=pf.original_name, pages=page_count,
+                             has_gemini_uri=bool(pf.gemini_uri))
                     try:
                         text = await asyncio.wait_for(
                             asyncio.to_thread(_vision_ocr_pdf, local_path, page_count),
@@ -1265,6 +1361,61 @@ async def process_files(
                     inline_parts.append(f"[File: {pf.original_name}]\n{text}")
             except Exception as e:
                 pf.error = f"Failed to read XLSX: {e}"
+
+        # Image branch — JPEG / PNG / WebP. We MUST OCR images so non-
+        # multimodal agents (Drafting, Scenario, Legislation) get grounding
+        # text in fc.inline_text. The Gemini URI path stays in place for the
+        # Document agent's multimodal access, but it is NOT a substitute for
+        # inline_text — Drafting consumes inline_text exclusively for fact
+        # extraction (BUG-02 + 2026-06-19 bug report: image-attached drafts
+        # came back as employment-dues template-with-placeholders because
+        # inline_text was empty).
+        #
+        # Future-proof principle: every accepted file format must populate
+        # inline_text whenever its content is extractable. Adding a new file
+        # format = adding a branch here that extracts text; downstream agents
+        # need no changes.
+        elif ext in (".jpg", ".jpeg", ".png", ".webp"):
+            try:
+                text = await asyncio.wait_for(
+                    asyncio.to_thread(_vision_ocr_image, local_path, pf.original_name),
+                    timeout=120,
+                )
+                if text.strip():
+                    if len(text) > MAX_INLINE_TEXT_CHARS:
+                        # Long OCR output (multi-page photo dump etc.) — also
+                        # stash in ChromaDB so future follow-ups can do
+                        # targeted retrieval rather than re-reading 50k chars
+                        # of inline text every turn.
+                        collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                        try:
+                            await asyncio.to_thread(
+                                _store_in_chromadb, text, collection_id, pf.original_name)
+                            pf.chromadb_collection = collection_id
+                            ctx.chromadb_collections.append(collection_id)
+                        except Exception as e:
+                            log.error("ChromaDB storage failed for image OCR text",
+                                      file=pf.original_name, error=str(e))
+                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
+                    else:
+                        pf.extracted_text = text
+                    inline_parts.append(f"[Image: {pf.original_name}]\n{pf.extracted_text}")
+                    log.info("Image OCR populated inline_text",
+                             file=pf.original_name, chars=len(pf.extracted_text))
+                else:
+                    log.warning("Image OCR returned no text",
+                                file=pf.original_name)
+            except asyncio.TimeoutError:
+                log.error("Image OCR timed out",
+                          file=pf.original_name)
+            except Exception as e:
+                # Image OCR failure is non-fatal when we have a Gemini URI
+                # (the Document agent can still read it multimodally).
+                if not pf.gemini_uri:
+                    pf.error = f"Image OCR failed: {e}"
+                else:
+                    log.warning("Image OCR failed; Gemini URI still available",
+                                file=pf.original_name, error=str(e)[:200])
 
         # CSV / TXT / MD: also extract text as inline fallback
         # (Gemini URI handles primary access; inline text is fallback context)

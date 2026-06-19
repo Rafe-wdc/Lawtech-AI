@@ -287,6 +287,63 @@ with (a)/(b)/(c) reliefs → "5. REQUEST FOR VIDEO CONFERENCING HEARING".)
   Appellant / Respondent.
 - Title is at the TOP and is NOT re-appended at end by the assembler.)
 
+=== LAYOUT F: OFFICE APPLICATION / LETTER TO A NON-COURT AUTHORITY ===
+
+Use when the document is an application addressed to a NON-COURT
+authority. Common triggers: RTI application; application for caste /
+income / domicile / character / experience / NOC certificate;
+application to an employer for leave / NOC; application to a bank /
+housing society / university / regulator (SEBI / RBI / IRDAI / TRAI).
+NOT a pleading and NOT a court filing. The reader is an administrative
+officer, not a judge — court-filing scaffolding ("IN THE COURT OF",
+"IN THE MATTER OF", Plaintiff/Defendant blocks, Versus) is wrong
+output here.
+
+**<APPLICATION TITLE>**
+
+(Examples: "APPLICATION UNDER SECTION 6 OF THE RIGHT TO INFORMATION
+ACT, 2005", "APPLICATION FOR ISSUANCE OF INCOME CERTIFICATE",
+"APPLICATION FOR NO OBJECTION CERTIFICATE", "APPLICATION FOR LEAVE
+OF ABSENCE")
+
+Date: <date or blank line>
+
+To,
+
+<Recipient Designation, e.g. "The Public Information Officer", "The
+Tahsildar", "The Sub-Divisional Magistrate", "The Branch Manager",
+"The Principal", "The HR Manager">,
+
+<Name of Office / Department>,
+
+<Office Address>.
+
+**Subject: <Subject line, e.g. "Application for information under the
+Right to Information Act, 2005" / "Application for issuance of income
+certificate">**
+
+Sir / Madam,
+
+I, <Applicant Full Name>, son / daughter / wife of <Father / Husband
+Name>, aged <age> years, residing at <Applicant Address>, respectfully
+submit as follows:
+
+(Then the body — numbered paragraphs of facts + the specific rule /
+section / entitlement invoked (e.g. Section 6 RTI Act, 2005; State
+Government circular dated <date>; service rule) — is emitted by the
+section LLM. Close with "I therefore request you to kindly <issue the
+certificate / furnish the information / grant the leave / accord
+approval>." The signature block is appended automatically as footer.)
+
+(NO "IN THE COURT OF", NO "IN THE MATTER OF", NO Plaintiff/Defendant
+blocks, NO Versus, NO Prayer-clause-style numbering. An office
+application is a LETTER addressed to an administrative authority, not
+a pleading filed in court. The title is at the TOP and is NOT
+re-appended at end by the assembler. If the user explicitly asks for
+a bail application / anticipatory bail / IA under Order XXXIX CPC /
+application under Section 482 BNSS / transfer application — those ARE
+court filings and use LAYOUT A instead.)
+
 === LAYOUT C: AGREEMENT / MOU / DEED / LEASE / SALE DEED / WILL ===
 
 Use when the document is a private contract or testamentary instrument.
@@ -338,8 +395,27 @@ assembler.)
   3. "Notice" / "Reply to legal notice" / "demand notice" → Layout B.
   4. "Agreement" / "MOU" / "Deed" / "Will" / "Lease" / "Sale deed" /
      "Power of attorney" → Layout C.
-  5. Everything else (Suit, Petition, Writ, Application, Bail
-     application, Section 200 CrPC magistrate complaint) → Layout A.""",
+  5. An "application" — DECIDE BY ADDRESSEE, not by the word
+     "application":
+     * Addressed to a Court / Magistrate / Tribunal / Sessions Judge /
+       High Court / Supreme Court / Family Court / Consumer Forum /
+       Labour Court → Layout A. Examples: bail application,
+       anticipatory-bail application, IA under Order XXXIX CPC,
+       Section 482 BNSS application, transfer application under
+       Section 24 CPC, Section 156(3) CrPC application.
+     * Addressed to a Public Information Officer / government
+       department / Tahsildar / Collector / SDM / Registrar / Municipal
+       Corporation / employer / bank / housing society / university /
+       regulator → Layout F. Examples: RTI application, application
+       for income / caste / domicile / character / experience
+       certificate, application for NOC, application for leave,
+       application for ration card.
+     If the user does not name an addressee, INFER from purpose using
+     common sense (an "RTI application" addresses a PIO; an
+     "application for income certificate" addresses a Tahsildar / SDM;
+     a "bail application" addresses a court).
+  6. Everything else (Suit, Petition, Writ, Section 200 CrPC
+     magistrate complaint) → Layout A.""",
     )
     sections: List[SectionPlan] = Field(
         ...,
@@ -882,6 +958,14 @@ Return a JSON object with these keys:
     * Dalpat Kumar v. Prahlad Singh, (1992) 1 SCC 719 — three-fold injunction test
     * Sawarni v. Inder Kaur, (1996) 6 SCC 223 — mutation does not confer title
     * Wander Ltd. v. Antox India, 1990 (Supp) SCC 727 — interim injunction principles
+  HARD RULE — return EMPTY key_cases ([]) when footer_kind is
+  "legal_notice" or "office_application". A legal notice is correspondence
+  asserting a position with statutory references — case-law citations make
+  it look like a pleading and dilute the demand. An office application
+  (RTI / department / employer / bank) is a request to an authority — it
+  cites rules and entitlements, not case law. Treating these like pleadings
+  is the exact client complaint we are fixing. For "agreement" and "will"
+  also return []; contracts cite clauses, not precedents.
 - "must_plead" (list of strings): specific facts/elements every section
   writer must include where relevant (e.g. "Section 11 HAMA giving-and-taking
   ceremony with date and adoptive parents named").
@@ -894,8 +978,13 @@ Return a JSON object with these keys:
 - "footer_kind" (string): the footer convention this draft must end with.
   Pick exactly ONE based on the document type:
     "court_filing"  → plaints, petitions, written statements, bail
-                      applications, writ petitions, appeals, revisions,
-                      reviews — anything FILED in court. Footer:
+                      applications, anticipatory-bail applications,
+                      interim / interlocutory applications under Order
+                      XXXIX CPC, transfer applications under Section
+                      24 CPC, applications under Section 482 BNSS /
+                      482 CrPC, applications to a Magistrate, writ
+                      petitions, appeals, revisions, reviews — anything
+                      FILED IN COURT or before a Tribunal. Footer:
                       Place / Date / Signature of the Petitioner /
                       Applicant / Through Counsel: [Advocate Name].
     "legal_notice"  → Section 138 NI notice, demand notice, eviction
@@ -903,6 +992,22 @@ Return a JSON object with these keys:
                       sent by registered post. Footer signed by counsel
                       directly ("Yours sincerely, Sd. [Advocate Name],
                       [Enrolment No.]"). NO "Petitioner/Applicant" block.
+    "office_application" → applications addressed to a NON-COURT
+                      authority: RTI applications under the Right to
+                      Information Act, 2005; applications to a government
+                      department / public officer / Tahsildar / SDM /
+                      Collector / Registrar / Sub-Registrar / Municipal
+                      Corporation for a certificate, no-objection,
+                      mutation, license, ration card, birth/death/
+                      domicile certificate; applications to an employer
+                      for leave / NOC / experience letter; applications
+                      to a bank / housing society / university /
+                      regulator (SEBI / RBI / IRDAI / TRAI) that are NOT
+                      appeals to a tribunal. These are LETTERS, not
+                      pleadings. Use this when the addressee is not a
+                      court, magistrate, or tribunal. Footer: signed by
+                      the APPLICANT directly with "Yours faithfully /
+                      Sd. / [Applicant Name] / Place / Date".
     "agreement"     → contracts, MOUs, lease deeds, sale deeds, NDAs,
                       partnership deeds, settlement agreements. Footer:
                       all parties' signatures + 2 attesting witness
@@ -913,7 +1018,30 @@ Return a JSON object with these keys:
     "none"          → other document types where no automatic footer
                       should be added (e.g. legal opinion memo).
   DO NOT default to "court_filing" — a legal notice with a court-filing
-  footer is broken output.
+  footer is broken output. APPLICATION DISAMBIGUATION (do not guess —
+  reason from the addressee): the word "application" alone is not enough
+  to pick a footer. Decide by WHO the application is ADDRESSED TO:
+    - Addressed to a Court / Magistrate / Tribunal / Sessions Judge /
+      High Court / Supreme Court / Family Court / Consumer Forum /
+      Labour Court / Authority that adjudicates → "court_filing".
+      Examples: bail application, anticipatory bail, IA under Order
+      XXXIX CPC, application under Section 482 BNSS, transfer
+      application under Section 24 CPC.
+    - Addressed to a Public Information Officer / Government
+      Department / Tahsildar / Collector / Registrar / Municipal
+      Corporation / Police Commissioner (administrative, not for FIR) /
+      Employer / Bank / Housing Society / University / Regulator
+      → "office_application". Examples: RTI application, application
+      for caste certificate, application for income certificate,
+      application for leave, application for experience letter,
+      application for NOC, application for ration card.
+    - Addressed to a Police Inspector / SHO / Station House Officer
+      for FIR registration / cognisable offence → "police_complaint".
+  When the user's query does not explicitly name an addressee, INFER
+  from purpose: a "bail application" presupposes a court; an "RTI
+  application" presupposes a Public Information Officer; an "application
+  for income certificate" presupposes a Tahsildar/SDM. Use common sense,
+  not regex.
 - "procedural_sections" (list of {{title, description, estimated_paragraphs,
   needs_citations}}): EVERY mandatory procedural section this pleading
   must carry under the Indian Code (CPC / BNSS-CrPC / SRA / Court Fees Act /
@@ -932,7 +1060,15 @@ Return a JSON object with these keys:
       (FIR copy, prior bail orders).
     * Writ / PIL → Verification; List of Documents; Affidavit; Annexures
       Index.
-    * Legal notice → Notarisation block; Signature block of counsel.
+    * Legal notice → Signature block of counsel (no court-filing
+      scaffolding, NO list of case-law authorities — a notice asserts a
+      position with statutory references, not precedent).
+    * Office application (RTI / department / employer / bank / society /
+      university / regulator) → Subject line; numbered paragraphs of
+      facts + the specific entitlement / rule invoked (e.g. Section 6
+      RTI Act, 2005); Prayer / Request paragraph; Signature block of
+      the applicant. NO Verification, NO Affidavit, NO court fee, NO
+      Schedule, NO case-law list.
     * Appeal / revision / review → Memo of grounds; Application for
       condonation of delay if filed beyond limitation; Index; Verification.
   Include description + estimated paragraphs + needs_citations for each.
@@ -989,6 +1125,15 @@ class DoctrinalStance(BaseModel):
                     "vacate notice, reply to legal notice): no court footer; "
                     "signed by counsel directly with 'Yours sincerely / Sd. / "
                     "[Advocate Name] / [Enrolment No.]'; "
+                    "'office_application' (application addressed to a NON-"
+                    "court authority — RTI to a Public Information Officer; "
+                    "application to a government department / Tahsildar / "
+                    "Collector / SDM / Registrar / Municipal Corporation for "
+                    "a certificate / no-objection / mutation / licence; "
+                    "application to an employer / bank / housing society / "
+                    "university / regulator): no court footer; signed by the "
+                    "APPLICANT directly (not counsel) with 'Yours faithfully "
+                    "/ Sd. / [Applicant Name] / Place / Date'; "
                     "'police_complaint' (FIR registration application under "
                     "Section 154 CrPC / Section 173 BNSS, complaint addressed "
                     "to Station House Officer / Police Inspector — NOT a "
@@ -1022,7 +1167,21 @@ class DoctrinalStance(BaseModel):
                     "'tax_submission' (appellate submission format). Only use "
                     "'court_filing' for a 'complaint' when the user explicitly "
                     "says 'Section 200 CrPC' / 'Section 223 BNSS' / "
-                    "'magistrate complaint' — those are filed in court.",
+                    "'magistrate complaint' — those are filed in court. "
+                    "APPLICATION DISAMBIGUATION: the word 'application' is "
+                    "ambiguous; pick footer_kind by the ADDRESSEE inferred "
+                    "from the query. Court / Magistrate / Tribunal addressee "
+                    "→ 'court_filing' (bail / anticipatory bail / IA Order "
+                    "XXXIX / Section 482 BNSS / transfer / Section 156(3) "
+                    "CrPC). Public Information Officer / government dept / "
+                    "Tahsildar / Collector / SDM / Registrar / Municipal "
+                    "Corporation / employer / bank / housing society / "
+                    "university / regulator → 'office_application' (RTI, "
+                    "certificate, NOC, mutation, leave, experience letter, "
+                    "ration card, character certificate). If the addressee "
+                    "is ambiguous, infer from purpose using common sense "
+                    "(an 'RTI application' addresses a PIO; an 'application "
+                    "for income certificate' addresses a Tahsildar / SDM).",
     )
 
 
@@ -1201,7 +1360,24 @@ def _format_stance_for_section(stance: DoctrinalStance | None) -> str:
         lines.append("- DO NOT CITE THESE STATUTES (wrong for this fact pattern):")
         for s in stance.non_applicable_statutes:
             lines.append(f"    * {s}")
-    if stance.key_cases:
+    # Non-pleading drafts must NOT cite case law. Legal notices are
+    # correspondence; office applications are requests to a non-court
+    # authority. Suppress the case-law list AND emit an explicit ban so
+    # the section LLM cannot reach for its parametric case memory.
+    footer_kind = getattr(stance, "footer_kind", "") or ""
+    case_law_banned = footer_kind in ("legal_notice", "office_application")
+    if case_law_banned:
+        lines.append(
+            "- CASE-LAW BAN — this draft is "
+            + ("a legal notice" if footer_kind == "legal_notice" else "an office application")
+            + ". DO NOT cite, paraphrase, or reference any case law / judgment "
+            "/ precedent in ANY section. No "
+            "*Party v. Party*, no (Year) Reporter Vol Page, no 'as held in', "
+            "no '[CITE: ...]'. Statutes and rules are fine (e.g. Section 138 "
+            "NI Act, Section 6 RTI Act, 2005) — case-law is not. The reader "
+            "is not a court."
+        )
+    elif stance.key_cases:
         lines.append("- USE THESE CASE LAWS (cite by name + citation; never as [CITE: ...]):")
         for c in stance.key_cases:
             lines.append(f"    * {c.name}, {c.citation} -- {c.holding}")
@@ -1484,6 +1660,7 @@ async def _generate_section(
     stance_block: str = "",
     format_block: str = "",
     start_para_num: int = 1,
+    footer_kind: str = "court_filing",
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
@@ -1765,6 +1942,20 @@ async def _generate_section(
             "start_para_num": str(start_para_num),
             "est_paragraphs": str(section.estimated_paragraphs),
             "needs_citations": (
+                # Legal notices and office applications never cite case
+                # law (client feedback 2026-06-19). The stance also bans
+                # case law via _format_stance_for_section; this is the
+                # belt-and-braces reminder at the per-section prompt level
+                # where the LLM is paying full attention.
+                "No — and DO NOT cite any case law / judgment / precedent "
+                "even if this paragraph would naturally take one. This "
+                "draft is "
+                + ("a legal notice (correspondence stating position with "
+                   "statutory references)" if footer_kind == "legal_notice"
+                   else "an office application (request to a non-court "
+                        "authority citing rules and entitlements)")
+                + ". Case-law in this document is wrong output."
+            ) if footer_kind in ("legal_notice", "office_application") else (
                 "Yes — cite ONLY the cases listed in the DOCTRINAL STANCE "
                 "block above under 'USE THESE CASE LAWS' (each is corpus-"
                 "verified). If the stance lists no case relevant to this "
@@ -1804,6 +1995,7 @@ async def _generate_sections_parallel(
     case_facts: str = "",
     stance_block: str = "",
     format_block: str = "",
+    footer_kind: str = "court_filing",
 ) -> tuple[list[str], list[int], int]:
     """Generate all sections with bounded parallelism via asyncio.Semaphore.
 
@@ -1878,6 +2070,7 @@ async def _generate_sections_parallel(
                     stance_block=stance_block,
                     format_block=format_block,
                     start_para_num=start_para_offsets[i],
+                    footer_kind=footer_kind,
                 )
                 results[i] = (text, tokens, None)
                 if writer:
@@ -2028,6 +2221,20 @@ def _build_footer(footer_kind: str, user_language: str) -> str:
             "[Enrolment No.]\n"
             "[Address of Advocate]\n"
             "[Contact Details]"
+        )
+    if footer_kind == "office_application":
+        # Office application: letter addressed to a non-court authority
+        # (PIO under RTI Act, Tahsildar, SDM, Collector, employer, bank,
+        # housing society, university, regulator). Signed by the
+        # APPLICANT directly, not by counsel.
+        return (
+            "Yours faithfully,\n\n"
+            "Sd.\n\n"
+            "**[Name of Applicant]**\n"
+            "[Full Address of Applicant]\n"
+            "[Contact Number]\n\n"
+            "Place: ___________\n\n"
+            "Date: ___________"
         )
     if footer_kind == "police_complaint":
         # Police-station FIR registration application (Section 154 CrPC /
@@ -2194,6 +2401,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
     # Continuation: persisted facts (if first attempt had a file/context attached)
     user_facts = continuation.get("user_facts", "")
     case_facts = continuation.get("case_facts", "")
+    footer_kind = continuation.get("footer_kind", "court_filing") or "court_filing"
 
     log.info("Continue draft started",
              failed_sections=len(failed_indices),
@@ -2250,6 +2458,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                     state.get("user_language", "en"),
                     user_facts=user_facts,
                     case_facts=case_facts,
+                    footer_kind=footer_kind,
                 )
                 sections[idx] = section_text
                 total_tokens += section_tokens
@@ -2532,12 +2741,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
         except (RuntimeError, ImportError):
             writer = None
 
+        _section_footer_kind = (
+            getattr(stance, "footer_kind", "court_filing")
+            if stance is not None else "court_filing"
+        ) or "court_filing"
         sections, failed_indices, total_tokens = await _generate_sections_parallel(
             query, template_text, outline, writer, user_language,
             user_facts=user_facts,
             case_facts=case_facts,
             stance_block=stance_block,
             format_block=format_block,
+            footer_kind=_section_footer_kind,
         )
 
         # Emit incomplete event if needed
@@ -2641,6 +2855,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 "query": query,
                 "user_facts": user_facts,
                 "case_facts": case_facts,  # preserve extracted entities for retries
+                "footer_kind": _section_footer_kind,
                 "completed_sections": {
                     str(i): sections[i] for i in range(len(sections))
                     if i not in failed_indices

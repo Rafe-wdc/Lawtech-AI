@@ -26,7 +26,7 @@ from config.prompts import (
     wrap_untrusted,
     DRAFT_SYNTHESIS_PROMPT, DRAFT_CITATION_PROMPT,
 )
-from config.intent import UserIntent, default_intent
+from config.intent import LegalArtifact, UserIntent, default_intent
 
 log = get_logger("Orchestrator")
 
@@ -1307,6 +1307,29 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             cite_appendix_on = True
             log.info("cite_appendix force-enabled — tax appellate query detected",
                      trigger="tax_appellate_keyword")
+        # Client feedback 2026-06-19: legal notices need NO judgments and
+        # office applications (RTI / department / employer / bank / etc.)
+        # need NO judgments. These are correspondence, not pleadings. If
+        # the intent extractor identified the request as one of these,
+        # FORCE the citation appendix OFF even when the caller passed
+        # cite_appendix=true. The drafting agent's stance + section prompt
+        # is the second layer of defence (it strips case-law from the body).
+        _non_pleading_artifacts = {
+            LegalArtifact.LEGAL_NOTICE_DRAFT,
+            LegalArtifact.OFFICE_APPLICATION,
+        }
+        _non_pleading_draft = (
+            extracted_intent is not None
+            and extracted_intent.legal_artifact in _non_pleading_artifacts
+        )
+        if cite_appendix_on and _non_pleading_draft:
+            cite_appendix_on = False
+            log.info(
+                "cite_appendix force-disabled — non-pleading draft (notice / "
+                "office application); judgments / statute appendix would be "
+                "noise on a correspondence-style document",
+                artifact=extracted_intent.legal_artifact.value,
+            )
         if cite_appendix_on:
             citation_agents = _select_citation_agents(extracted_intent, tasks_planned)
             for ca in citation_agents:

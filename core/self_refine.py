@@ -240,7 +240,20 @@ Examples of how intent fields translate to checks:
   legal_artifact='legal_notice'
     → Indian legal notice format: addressee block, subject, numbered
       facts, "TAKE NOTICE THAT" demand block citing the correct statute,
-      compliance period, signature.
+      compliance period, signature. NO case-law / judgment citations
+      anywhere in the body — notices assert a position with statutory
+      references, not precedent.
+
+  legal_artifact='office_application'
+    → Letter to a non-court authority (PIO under RTI Act, Tahsildar,
+      SDM, Collector, Registrar, Municipal Corporation, employer, bank,
+      housing society, university, regulator). Addressee block ("To,
+      The <Designation>, <Office>"), Subject line, numbered paragraphs
+      of facts + the specific rule / section / entitlement invoked,
+      request paragraph, applicant signature. NO court-filing
+      scaffolding (no "IN THE COURT OF", no Plaintiff/Defendant, no
+      Versus, no Prayer-clause numbering, no Verification, no
+      Affidavit). NO case-law / judgment citations.
 
   legal_artifact='complaint_draft', 'witness_prep', 'opening_statement',
   'closing_argument'

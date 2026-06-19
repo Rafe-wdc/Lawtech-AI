@@ -90,6 +90,7 @@ class LegalArtifact(str, Enum):
     DEPOSITION_SUMMARY  = "deposition_summary"  # structured summary of a deposition / examination-in-chief
     CONTRACT_ANALYSIS   = "contract_analysis"   # risks + clauses + compliance review of a contract
     LEGAL_NOTICE_DRAFT  = "legal_notice"        # formal Indian-style legal notice draft
+    OFFICE_APPLICATION  = "office_application"  # letter-format application to a non-court authority (RTI, govt dept, employer, bank, regulator) — NOT a court filing
     COMPLAINT_DRAFT     = "complaint_draft"     # complaint / petition draft based on attached facts
     WITNESS_PREP        = "witness_prep"        # prep YOUR witness for direct + anticipated cross
     OPENING_STATEMENT   = "opening_statement"   # opening statement for trial

@@ -596,7 +596,54 @@ Given the user's query and the recent conversation summary, produce:
        "legal_notice"       draft a formal Indian legal notice (statutory
                             demand letter). Triggers: "draft a legal notice",
                             "send a notice for non-payment", "notice under
-                            Section 138 NI Act", "demand notice", "नोटीस".
+                            Section 138 NI Act", "demand notice",
+                            "eviction notice", "reply to legal notice",
+                            "नोटीस", "नोटीस का जवाब", "ਨੋਟਿਸ".
+
+       "office_application" draft an APPLICATION addressed to a NON-COURT
+                            authority — an administrative office, regulator,
+                            employer, bank, society, or university — NOT a
+                            court / tribunal / magistrate. These are letters
+                            asserting an entitlement or making a request
+                            under a rule / scheme / statute, NOT pleadings.
+                            Use this when the user asks to "draft an
+                            application" AND the inferred addressee is
+                            administrative (not adjudicatory).
+                            Triggers (any language):
+                              - "RTI application" / "application under
+                                Section 6 RTI Act" / "Right to Information
+                                application"
+                              - "application for income certificate /
+                                caste certificate / domicile certificate
+                                / character certificate / experience
+                                certificate / no-objection certificate /
+                                NOC / ration card / birth certificate /
+                                death certificate / passport / police
+                                clearance certificate"
+                              - "application for leave / increment / NOC
+                                / experience letter / transfer (within
+                                employer, NOT a court transfer petition)"
+                              - "application to the Tahsildar / SDM /
+                                Collector / Registrar / Sub-Registrar /
+                                Municipal Corporation / Gram Panchayat /
+                                Public Information Officer / PIO"
+                              - "application to a bank / housing society /
+                                university / college / regulator (SEBI /
+                                RBI / IRDAI / TRAI)"
+                              - Native-language equivalents ("अर्जी",
+                                "आवेदन", "अर्ज", "विनंती अर्ज", "RTI अर्जी")
+                            DO NOT use this for bail / anticipatory bail /
+                            IA Order XXXIX / Section 482 BNSS / transfer
+                            petition under Section 24 CPC / Section 156(3)
+                            CrPC application / any application addressed
+                            to a Court / Magistrate / Tribunal — those are
+                            court filings; use "complaint_draft" or "none"
+                            (generic drafting) instead. When the user just
+                            says "application" with no addressee and no
+                            other context, INFER from the purpose: an "RTI
+                            application" addresses a PIO; an "application
+                            for income certificate" addresses a Tahsildar /
+                            SDM; a "bail application" addresses a court.
 
        "complaint_draft"    draft a complaint / petition / private complaint /
                             consumer complaint based on attached facts.

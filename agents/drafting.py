@@ -610,6 +610,7 @@ async def _generate_outline(
     query: str, template_text: str, user_language: str = "en",
     user_facts: str = "", case_facts: str = "",
     format_block: str = "",
+    template_language: str | None = None,
 ) -> DraftOutline:
     """Generate a structured outline with all sections for the document.
 
@@ -643,6 +644,9 @@ async def _generate_outline(
         prompt = ChatPromptTemplate.from_messages([
             ("system", localize_prompt(DRAFT_OUTLINE_PROMPT, user_language)),
             ("user", "{facts_block}USER QUERY:\n{query}"),
+            # Template-language warning, empty string when the chosen
+            # template's body language matches user_language.
+            ("user", "{template_lang_warning}"),
             ("user",
              "Reference Template (use ONLY for STRUCTURE/section names — "
              "do NOT copy the template's facts/parties/amounts):\n{template}"),
@@ -661,6 +665,9 @@ async def _generate_outline(
                 "date": str(date.today()),
                 "facts_block": facts_block,
                 "format_block": format_block,
+                "template_lang_warning": _build_template_language_warning(
+                    template_language, user_language,
+                ),
             })
         except Exception as e:
             log.error("Structured outline generation failed, using fallback",
@@ -1587,6 +1594,199 @@ async def _extract_format_spec(
         return spec
 
 
+# --- Template language detection ---
+#
+# Hindi/Marathi/Sanskrit share Devanagari script, so the BM25 template search
+# regularly picks a Marathi-corpus template for a Hindi query (or vice
+# versa). The section LLM then imitates the template's specific vocabulary
+# (Marathi वय / रा. / चा-possessives vs Hindi आयु / निवासी / का-possessives)
+# even with a strict-language directive in place — the template's exemplar
+# vocabulary is too strong a signal.
+#
+# This detector runs a one-shot Gemini Flash Lite call per template (cached
+# per template_source like FormatSpec) to identify the template's PRIMARY
+# language. The outline + section prompts then carry a warning block when
+# template_language != user_language, instructing the LLM to write fresh in
+# user_language and NOT borrow language-specific vocabulary from the
+# template.
+#
+# Returns None on failure -- callers treat None as "same as user_language"
+# (no warning), which matches the prior behaviour.
+
+_TEMPLATE_LANG_STORE: dict[str, str | None] = {}
+
+
+class _TemplateLanguage(BaseModel):
+    language_code: str = Field(
+        ...,
+        description="ISO 639-1 code of the template's PRIMARY content "
+                    "language. The template may carry English headers / "
+                    "section labels and proper-noun citations; ignore those "
+                    "and identify the language the BODY paragraphs are "
+                    "written in. Examples: 'en' for fully English templates, "
+                    "'mr' for Marathi-body templates, 'hi' for Hindi-body, "
+                    "'ta' for Tamil-body. When the template body is mixed "
+                    "or unclear, return the language of the MAJORITY of "
+                    "the prose. When you genuinely can't tell, return 'en'.",
+        pattern=r"^[a-z]{2}$",
+    )
+
+
+_TEMPLATE_LANG_SYSTEM = """You are a language identifier for Indian legal
+documents. Look at the body paragraphs of the supplied exemplar and identify
+its PRIMARY language. Indian legal templates are typically in English, Hindi,
+Marathi, Tamil, Telugu, Kannada, Malayalam, Gujarati, Bengali, Punjabi, Urdu,
+or Odia. Hindi and Marathi (and Sanskrit) share Devanagari script — when the
+script is Devanagari, DISAMBIGUATE by grammar:
+
+- Marathi markers: possessive suffixes चा / ची / चे (e.g. "वादीचा अर्ज"),
+  verb आहे (is), क्रमांक (number), तालुका, जिल्हा, कोर्टात (in court), वय (age),
+  रा. (resident of), म्हणून (as / because), तसेच (also), यांचे (their),
+  ची नोंद (note of), अधिनियम कलम (act section), सन (year).
+- Hindi markers: possessive suffixes का / की / के (e.g. "वादी का आवेदन"),
+  verb है (is), संख्या (number), तहसील / जिला, न्यायालय में (in court), आयु
+  / उम्र (age), निवासी (resident), क्योंकि (because), तथा (and), उनका / उनके
+  (their), के तहत (under), अधिनियम की धारा (act section), वर्ष / साल (year).
+
+Return ONLY the ISO 639-1 code, no prose. When mixed or unclear, return the
+MAJORITY-language code; if you genuinely can't tell, return 'en'.
+"""
+
+
+async def _detect_template_language(
+    template_source: str, template_text: str,
+) -> str | None:
+    """Identify the primary content language of a drafting template.
+
+    Cached per (template_source, content_hash). Returns ISO 639-1 string or
+    None on failure (caller treats None as "no warning needed").
+    """
+    if not template_source or not template_text:
+        return None
+
+    import hashlib
+    fp = hashlib.sha256(template_text[:200].encode("utf-8")).hexdigest()[:8]
+    cache_key = f"{template_source}::{fp}"
+    if cache_key in _TEMPLATE_LANG_STORE:
+        log.debug("Template language cache hit",
+                  source=template_source[-40:],
+                  lang=_TEMPLATE_LANG_STORE[cache_key])
+        return _TEMPLATE_LANG_STORE[cache_key]
+
+    with log_time(log, "Template language detection"):
+        try:
+            llm = get_gemini_flash(temperature=0.0).with_structured_output(
+                _TemplateLanguage, include_raw=True,
+            )
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", _TEMPLATE_LANG_SYSTEM),
+                ("user", "EXEMPLAR (identify the BODY language only):\n{template}"),
+            ])
+            chain = prompt | llm
+            # 3000 chars is enough to see body paragraphs without spending
+            # tokens on signature blocks at the tail.
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({"template": template_text[:3000]}),
+                timeout=20,
+            )
+        except Exception as e:
+            log.warning(
+                "Template language detection failed -- continuing without",
+                error=str(e)[:200], source=template_source[-40:],
+            )
+            _TEMPLATE_LANG_STORE[cache_key] = None
+            return None
+
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "template_language",
+                       raw_and_parsed.get("raw"))
+        parsed = raw_and_parsed["parsed"]
+        lang = parsed.language_code
+        _TEMPLATE_LANG_STORE[cache_key] = lang
+        log.info("Template language detected",
+                 source=template_source[-40:], lang=lang)
+        return lang
+
+
+def _build_template_language_warning(
+    template_language: str | None,
+    user_language: str,
+) -> str:
+    """When the template's body language differs from what the user wants,
+    emit a strong warning that the section LLM (and outline LLM) should NOT
+    borrow vocabulary from the template.
+
+    Returns empty string when there's no mismatch (so the prompt template
+    var is always safe to interpolate even when this layer is off).
+    """
+    if not template_language:
+        return ""
+    if template_language == user_language:
+        return ""
+    from core.language import SUPPORTED_LANGUAGES
+    tlang_name = SUPPORTED_LANGUAGES.get(template_language, template_language)
+    ulang_name = SUPPORTED_LANGUAGES.get(user_language, user_language)
+    # Devanagari-vs-Devanagari (Hindi <-> Marathi <-> Sanskrit) is the most
+    # common confusion in the corpus. Surface the exact grammar differences
+    # so the LLM has zero excuse to copy the wrong forms.
+    _DEVANAGARI = {"hi", "mr", "sa"}
+    devanagari_hint = ""
+    if template_language in _DEVANAGARI and user_language in _DEVANAGARI:
+        if user_language == "hi" and template_language == "mr":
+            devanagari_hint = (
+                "Hindi and Marathi share Devanagari script but DIFFER in "
+                "grammar and vocabulary. The template is Marathi; the "
+                "output must be Hindi. Replace Marathi forms with Hindi "
+                "forms throughout:\n"
+                "  - Possessive: Marathi चा / ची / चे  →  Hindi का / की / के\n"
+                "  - 'is' verb: Marathi आहे  →  Hindi है\n"
+                "  - 'are' verb: Marathi आहेत  →  Hindi हैं\n"
+                "  - 'age': Marathi वय  →  Hindi आयु or उम्र\n"
+                "  - 'resident of' (short): Marathi रा.  →  Hindi निवासी\n"
+                "  - 'district': Marathi जिल्हा  →  Hindi जिला\n"
+                "  - 'tehsil': Marathi तालुका  →  Hindi तहसील\n"
+                "  - 'number': Marathi क्रमांक  →  Hindi संख्या\n"
+                "  - 'year': Marathi सन  →  Hindi वर्ष or साल\n"
+                "  - 'in this matter': Marathi या प्रकरणी  →  Hindi इस मामले में\n"
+                "  - 'applicant / petitioner': Marathi अर्जदार / याचिकाकर्ता  →  Hindi याचिकाकर्ता / आवेदक\n"
+                "  - 'address': 'राजूचा पत्ता' (Marathi)  →  'राजू का पता' (Hindi)\n"
+                "  - 'of section': Marathi कलम X च्या  →  Hindi धारा X की\n"
+                "  - Connective 'and': Marathi व / तसेच  →  Hindi और / तथा\n"
+                "  - Connective 'because': Marathi कारण की  →  Hindi क्योंकि\n"
+            )
+        elif user_language == "mr" and template_language == "hi":
+            devanagari_hint = (
+                "Hindi and Marathi share Devanagari script but DIFFER in "
+                "grammar and vocabulary. The template is Hindi; the "
+                "output must be Marathi. Replace Hindi forms with Marathi "
+                "forms throughout:\n"
+                "  - Possessive: Hindi का / की / के  →  Marathi चा / ची / चे\n"
+                "  - 'is' verb: Hindi है  →  Marathi आहे\n"
+                "  - 'are' verb: Hindi हैं  →  Marathi आहेत\n"
+                "  - 'age': Hindi आयु / उम्र  →  Marathi वय\n"
+                "  - 'resident of' (short): Hindi निवासी  →  Marathi रा.\n"
+                "  - 'district': Hindi जिला  →  Marathi जिल्हा\n"
+                "  - 'tehsil': Hindi तहसील  →  Marathi तालुका\n"
+                "  - 'number': Hindi संख्या  →  Marathi क्रमांक\n"
+                "  - 'year': Hindi वर्ष / साल  →  Marathi सन\n"
+                "  - 'in this matter': Hindi इस मामले में  →  Marathi या प्रकरणी\n"
+                "  - 'of section': Hindi धारा X की  →  Marathi कलम X च्या\n"
+                "  - Connective 'because': Hindi क्योंकि  →  Marathi कारण की\n"
+            )
+    return (
+        "=== TEMPLATE LANGUAGE WARNING ===\n"
+        f"The reference template below is written in {tlang_name} "
+        f"({template_language}). The user's required output language is "
+        f"{ulang_name} ({user_language}). USE THE TEMPLATE FOR STRUCTURE / "
+        f"LAYOUT / SECTION ORDERING ONLY. Do NOT copy any "
+        f"{tlang_name}-specific vocabulary, possessive suffixes, verbs, "
+        f"or grammatical constructions into your output — write fresh in "
+        f"{ulang_name}.\n\n"
+        + devanagari_hint
+        + "=== END TEMPLATE LANGUAGE WARNING ===\n\n"
+    )
+
+
 def _format_layout_block(spec: FormatSpec | None) -> str:
     """Render the FormatSpec as a compact prompt block for outline + section gen.
 
@@ -1661,6 +1861,7 @@ async def _generate_section(
     format_block: str = "",
     start_para_num: int = 1,
     footer_kind: str = "court_filing",
+    template_language: str | None = None,
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
@@ -1868,6 +2069,11 @@ async def _generate_section(
             # (empty string when stance generation failed -- silent fallback).
             ("user", "{stance_block}Document: {doc_title}\nCourt: {court_details}"),
             ("user", "Full Document Outline:\n{outline_summary}"),
+            # Template-language warning — fires only when the selected
+            # template's body language differs from the user's target
+            # language (template_lang_warning is "" when they match, so
+            # this message is a harmless empty line in that case).
+            ("user", "{template_lang_warning}"),
             # Template AFTER facts, explicitly framed as structure-only
             ("user",
              "REFERENCE TEMPLATE (use ONLY for STRUCTURE, formatting style, "
@@ -1970,6 +2176,9 @@ async def _generate_section(
             "stance_block": stance_block,
             "format_block": format_block,
             "cause_title_override": cause_title_override,
+            "template_lang_warning": _build_template_language_warning(
+                template_language, user_language,
+            ),
         }), timeout=180)
 
     from core.token_tracker import record as _record_tokens
@@ -1996,6 +2205,7 @@ async def _generate_sections_parallel(
     stance_block: str = "",
     format_block: str = "",
     footer_kind: str = "court_filing",
+    template_language: str | None = None,
 ) -> tuple[list[str], list[int], int]:
     """Generate all sections with bounded parallelism via asyncio.Semaphore.
 
@@ -2071,6 +2281,7 @@ async def _generate_sections_parallel(
                     format_block=format_block,
                     start_para_num=start_para_offsets[i],
                     footer_kind=footer_kind,
+                    template_language=template_language,
                 )
                 results[i] = (text, tokens, None)
                 if writer:
@@ -2402,6 +2613,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
     user_facts = continuation.get("user_facts", "")
     case_facts = continuation.get("case_facts", "")
     footer_kind = continuation.get("footer_kind", "court_filing") or "court_filing"
+    template_language = continuation.get("template_language")
 
     log.info("Continue draft started",
              failed_sections=len(failed_indices),
@@ -2459,6 +2671,7 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                     user_facts=user_facts,
                     case_facts=case_facts,
                     footer_kind=footer_kind,
+                    template_language=template_language,
                 )
                 sections[idx] = section_text
                 total_tokens += section_tokens
@@ -2688,8 +2901,26 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # prayer/verification clauses, signature block, etc. Empty string
         # when extraction fails (silent fallback, outline + sections still
         # run on template_text alone).
-        format_spec = await _extract_format_spec(selected_source, template_text)
+        # Step 3.75: Detect the template's PRIMARY content language. When
+        # template_language != user_language we inject a strong warning
+        # into the outline + section prompts so the LLM doesn't borrow
+        # template-specific vocabulary (especially Hindi vs Marathi —
+        # both Devanagari, but distinct grammar). Cached per template.
+        # Runs in parallel with format-spec extraction to keep the wall
+        # clock cost near-zero.
+        format_spec, template_language = await asyncio.gather(
+            _extract_format_spec(selected_source, template_text),
+            _detect_template_language(selected_source, template_text),
+        )
         format_block = _format_layout_block(format_spec)
+        if template_language and template_language != user_language:
+            log.info(
+                "Template language differs from user language — warning will "
+                "be injected into outline + section prompts",
+                template_lang=template_language,
+                user_lang=user_language,
+                source=selected_source[-40:],
+            )
 
         # Step 4: Generate document outline (max 12 sections)
         progress("drafting", "Generating document outline...", step="outline")
@@ -2698,6 +2929,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             user_facts=user_facts,
             case_facts=case_facts,
             format_block=format_block,
+            template_language=template_language,
         )
         progress("drafting", f"Outline ready: {len(outline.sections)} sections", found=len(outline.sections), substep=True, step="outline")
 
@@ -2752,6 +2984,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             stance_block=stance_block,
             format_block=format_block,
             footer_kind=_section_footer_kind,
+            template_language=template_language,
         )
 
         # Emit incomplete event if needed
@@ -2856,6 +3089,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 "user_facts": user_facts,
                 "case_facts": case_facts,  # preserve extracted entities for retries
                 "footer_kind": _section_footer_kind,
+                "template_language": template_language,
                 "completed_sections": {
                     str(i): sections[i] for i in range(len(sections))
                     if i not in failed_indices

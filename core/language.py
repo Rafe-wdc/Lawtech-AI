@@ -288,23 +288,86 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
             # English as a NARROW exception ("only verbatim case names")
             # so the model treats Marathi/Hindi/etc. as the default for
             # everything else.
-            # Marathi-specific ceremonial-block examples — extend hand to
+            # Court-document ceremonial-block examples — extend hand to
             # the model by showing exact translations for the standard
-            # court-document scaffolding. Hindi/Sanskrit reuse the same
-            # Devanagari script so they benefit too, but examples lead
-            # with the Marathi forms since drafting traffic is Maharashtra-
-            # heavy. New-doc §9 reference.
-            ceremonial_examples = (
-                "Court-document ceremonial blocks must also be translated:\n"
-                "- 'Plaintiff' → 'वादी' (Marathi/Hindi: वादी)\n"
-                "- 'Defendant' → 'प्रतिवादी' (Marathi/Hindi: प्रतिवादी)\n"
-                "- 'Versus' → 'विरुद्ध'\n"
-                "- 'Prayer' → 'विनंती'\n"
-                "- 'Verification' → 'प्रमाणीकरण' / 'सत्यापन'\n"
-                "- 'Affidavit' → 'शपथपत्र'\n"
-                "- 'Hon'ble Court' → 'मा. न्यायालय'\n"
-                "- 'Most respectfully sheweth' → 'अत्यंत आदरपूर्वक विनंती'\n\n"
-            ) if lang in ("mr", "hi", "sa") else ""
+            # court-document scaffolding. Hindi and Marathi share
+            # Devanagari script but differ in grammar: emit DIFFERENT
+            # ceremonial blocks for each so the LLM doesn't blend them.
+            # (Bug report 2026-06-19: Hindi requested, Marathi delivered —
+            # the model picked up Marathi forms from the template AND from
+            # the previously-shared ceremonial block which lumped both
+            # together as "वादी (Marathi/Hindi: वादी)". Splitting per-
+            # language removes that ambiguity.)
+            if lang == "mr":
+                ceremonial_examples = (
+                    "Court-document ceremonial blocks must be translated to Marathi:\n"
+                    "- 'Plaintiff / Petitioner' → 'वादी / अर्जदार'\n"
+                    "- 'Defendant / Respondent' → 'प्रतिवादी / गैरअर्जदार'\n"
+                    "- 'Versus' → 'विरुद्ध'\n"
+                    "- 'Prayer' → 'विनंती'\n"
+                    "- 'Verification' → 'प्रमाणीकरण'\n"
+                    "- 'Affidavit' → 'शपथपत्र'\n"
+                    "- 'Hon'ble Court' → 'मा. न्यायालय'\n"
+                    "- 'Most respectfully sheweth' → 'अत्यंत आदरपूर्वक विनंती'\n"
+                    "- 'is / are' → 'आहे / आहेत' (Marathi verb)\n"
+                    "- Possessive 'of' → 'चा / ची / चे / च्या' (Marathi suffixes; "
+                    "e.g. 'राजूचा अर्ज', 'कलम १३८ च्या तरतुदी')\n"
+                    "- 'age' → 'वय'\n"
+                    "- 'resident of' → 'रा.' (short for 'रहिवासी')\n"
+                    "- 'district' → 'जिल्हा'\n"
+                    "- 'tehsil' → 'तालुका'\n"
+                    "- 'number' (case/serial) → 'क्रमांक'\n"
+                    "- 'year' → 'सन' or 'वर्ष'\n"
+                    "- 'in this matter' → 'या प्रकरणी'\n"
+                    "- 'and / also' → 'व / तसेच'\n\n"
+                    "DO NOT use Hindi-specific forms (का/की/के, है/हैं, आयु/उम्र, "
+                    "निवासी, जिला, तहसील, संख्या) — they are wrong language even "
+                    "though they share Devanagari script.\n\n"
+                )
+            elif lang == "hi":
+                ceremonial_examples = (
+                    "Court-document ceremonial blocks must be translated to Hindi:\n"
+                    "- 'Plaintiff / Petitioner' → 'वादी / याचिकाकर्ता / आवेदक'\n"
+                    "- 'Defendant / Respondent' → 'प्रतिवादी / गैर-आवेदक'\n"
+                    "- 'Versus' → 'बनाम'\n"
+                    "- 'Prayer' → 'प्रार्थना'\n"
+                    "- 'Verification' → 'सत्यापन'\n"
+                    "- 'Affidavit' → 'शपथ-पत्र'\n"
+                    "- 'Hon'ble Court' → 'माननीय न्यायालय'\n"
+                    "- 'Most respectfully sheweth' → 'सादर निवेदन है कि'\n"
+                    "- 'is / are' → 'है / हैं' (Hindi verb)\n"
+                    "- Possessive 'of' → 'का / की / के' (Hindi suffixes; "
+                    "e.g. 'राजू का आवेदन', 'धारा १३८ की उपधाराएँ')\n"
+                    "- 'age' → 'आयु' or 'उम्र'\n"
+                    "- 'resident of' → 'निवासी'\n"
+                    "- 'district' → 'जिला' (NOT 'जिल्हा' — that is Marathi)\n"
+                    "- 'tehsil' → 'तहसील' (NOT 'तालुका' — that is Marathi)\n"
+                    "- 'number' (case/serial) → 'संख्या' (or 'क्रमांक' "
+                    "only in headers, never in body prose)\n"
+                    "- 'year' → 'वर्ष' or 'साल'\n"
+                    "- 'in this matter' → 'इस मामले में' or 'इस प्रकरण में'\n"
+                    "- 'and' → 'और / तथा'\n"
+                    "- 'because' → 'क्योंकि' (Hindi; Marathi is 'कारण की')\n\n"
+                    "DO NOT use Marathi-specific forms (चा/ची/चे/च्या, आहे/आहेत, "
+                    "वय, रा., जिल्हा, तालुका, क्रमांक in body prose, सन for year, "
+                    "या प्रकरणी, अर्जदार, तसेच, व) — they share Devanagari script "
+                    "with Hindi but are WRONG LANGUAGE. This bug surfaces when "
+                    "the reference template happens to be Marathi: ignore the "
+                    "template's vocabulary, write fresh in Hindi grammar.\n\n"
+                )
+            elif lang == "sa":
+                ceremonial_examples = (
+                    "Court-document ceremonial blocks must be translated to Sanskrit:\n"
+                    "- 'Plaintiff' → 'वादी'\n"
+                    "- 'Defendant' → 'प्रतिवादी'\n"
+                    "- 'Versus' → 'विरुद्धम्'\n"
+                    "- 'Prayer' → 'प्रार्थना'\n"
+                    "- 'Verification' → 'प्रमाणीकरणम्'\n"
+                    "- 'Affidavit' → 'शपथपत्रम्'\n"
+                    "- 'Hon'ble Court' → 'माननीय-न्यायालयम्'\n\n"
+                )
+            else:
+                ceremonial_examples = ""
             out += (
                 f"\n\nLANGUAGE INSTRUCTION (STRICT): The user demanded PURE "
                 f"{lang_name}. Do NOT mix in English words, phrases, or "

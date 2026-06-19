@@ -157,6 +157,51 @@ Examples of how intent fields translate to checks:
     → Response prose must be in Marathi (Devanagari script). English
       citations may appear if strict_language=False.
 
+  Devanagari-script language drift (Hindi vs Marathi vs Sanskrit)
+    → Hindi, Marathi, and Sanskrit all use Devanagari, so detecting
+      drift between them by SCRIPT alone is not enough — disambiguate
+      by GRAMMAR and VOCABULARY. When language='hi' (Hindi), flag any
+      Marathi-specific forms as a MAJOR violation; when language='mr'
+      (Marathi), flag any Hindi-specific forms as a MAJOR violation.
+      Concrete markers to audit:
+
+        Marathi-only forms (WRONG when language='hi'):
+          - Possessive suffixes: चा / ची / चे / च्या (Marathi);
+            Hindi uses का / की / के.  Examples: "वादीचा अर्ज",
+            "ग्रामसभेचे नाव", "राजूचा पत्ता", "१९६३ च्या कलम".
+          - Verb आहे / आहेत (Marathi 'is/are'); Hindi uses है / हैं.
+          - वय (Marathi 'age'); Hindi uses आयु or उम्र.
+          - रा. as short for resident (Marathi रहिवासी); Hindi uses
+            निवासी.
+          - जिल्हा (Marathi 'district'); Hindi spelling is जिला.
+          - तालुका (Marathi 'tehsil'); Hindi uses तहसील.
+          - क्रमांक (Marathi 'number') used in standalone Hindi prose
+            without explanation; Hindi normally uses संख्या.
+          - सन (Marathi 'year'); Hindi uses वर्ष or साल.
+          - या प्रकरणी (Marathi 'in this matter'); Hindi uses
+            इस मामले में / इस प्रकरण में.
+          - अर्जदार (Marathi 'applicant'); Hindi uses आवेदक /
+            याचिकाकर्ता.
+          - तसेच / व (Marathi 'and / also'); Hindi uses तथा / और.
+
+        Hindi-only forms (WRONG when language='mr'):
+          - Possessive का / की / के / की; Marathi uses चा / ची /
+            चे / च्या.
+          - Verb है / हैं; Marathi uses आहे / आहेत.
+          - आयु / उम्र; Marathi uses वय.
+          - निवासी; Marathi uses रा.
+          - जिला; Marathi spelling is जिल्हा.
+          - तहसील; Marathi uses तालुका.
+          - संख्या used as case-number label; Marathi uses क्रमांक.
+
+      One or two leak words can be ignored as cosmetic if the bulk of
+      the document is correct, BUT systematic leakage (5+ instances of
+      the wrong-language possessive suffix, or a full Marathi vocabulary
+      stack — चा, आहे, वय, रा., जिल्हा, तालुका — in a Hindi draft) is a
+      CRITICAL violation. The refiner must translate the affected
+      spans into the target language's grammar, not just swap individual
+      words.
+
   strict_language=True with language!='en'
     → STRICT MODE. Audit ALL of the following — each is a MAJOR violation:
        (a) Any English sentence, clause, or phrase OTHER than verbatim

@@ -1,0 +1,158 @@
+name: Prod Inspect Logging Setup (read-only diagnostic)
+
+# One-off workflow_dispatch to investigate why /root/Lawtech-AI/logs/
+# does not exist on prod despite core/logger.py:168 calling
+# os.makedirs(LOG_DIR, exist_ok=True) on first get_logger() call.
+#
+# Hypotheses to check:
+#   H1: The app's actual install path is NOT /root/Lawtech-AI, so LOG_DIR
+#       (which is computed from Path(__file__).resolve().parent.parent / "logs"
+#       in core/settings.py:188) resolves elsewhere.
+#   H2: The systemd unit's WorkingDirectory/ExecStart points to a different tree.
+#   H3: os.makedirs failed silently (permission / read-only filesystem).
+#   H4: agent.log exists somewhere else on the box (find it).
+#
+# Read-only: nothing created, modified, or deleted on prod.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    name: Inspect logging setup on prod
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Probe logging setup
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "=========================================================="
+          echo " 1. systemd unit definition (WorkingDirectory, ExecStart)"
+          echo "=========================================================="
+          sudo systemctl cat lawttorney-v2.service 2>&1 | head -60
+          echo
+
+          echo "=========================================================="
+          echo " 2. Resolved unit properties (effective values)"
+          echo "=========================================================="
+          sudo systemctl show lawttorney-v2.service \
+            -p WorkingDirectory,ExecStart,Environment,EnvironmentFiles,User,Group,RootDirectory \
+            2>&1
+          echo
+
+          echo "=========================================================="
+          echo " 3. Where does core/settings.py actually live on disk?"
+          echo "=========================================================="
+          sudo find / -path "*/core/settings.py" \
+               -not -path "*/proc/*" \
+               -not -path "*/sys/*" \
+               -not -path "*/.venv/*" \
+               2>/dev/null
+          echo
+
+          echo "=========================================================="
+          echo " 4. /root/Lawtech-AI/ contents (does the expected app dir exist?)"
+          echo "=========================================================="
+          if [ -d /root/Lawtech-AI ]; then
+            sudo ls -la /root/Lawtech-AI/ 2>&1
+            echo
+            echo "  Has core/settings.py?"
+            sudo ls -la /root/Lawtech-AI/core/settings.py 2>&1
+          else
+            echo "  /root/Lawtech-AI does NOT exist!"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 5. Find ALL agent.log* files anywhere on the box"
+          echo "=========================================================="
+          sudo find / -name "agent.log*" \
+               -not -path "*/proc/*" \
+               -not -path "*/sys/*" \
+               2>/dev/null \
+            | head -20
+          echo
+
+          echo "=========================================================="
+          echo " 6. Find ALL 'logs' directories under common app roots"
+          echo "=========================================================="
+          for root in /root /opt /home /srv /var/lib; do
+            sudo find "$root" -maxdepth 4 -type d -name "logs" 2>/dev/null
+          done
+          echo
+
+          echo "=========================================================="
+          echo " 7. Running process's actual command line + cwd + open files"
+          echo "=========================================================="
+          PID=\$(sudo systemctl show lawttorney-v2.service -p MainPID --value 2>&1)
+          echo "  MainPID: \$PID"
+          if [ -n "\$PID" ] && [ "\$PID" != "0" ]; then
+            echo
+            echo "  Cmdline:"
+            sudo tr '\0' ' ' < /proc/\$PID/cmdline 2>&1; echo
+            echo
+            echo "  CWD (where the process thinks it is):"
+            sudo readlink /proc/\$PID/cwd 2>&1
+            echo
+            echo "  exe (which python binary):"
+            sudo readlink /proc/\$PID/exe 2>&1
+            echo
+            echo "  Open agent.log file descriptors (if any):"
+            sudo ls -la /proc/\$PID/fd 2>/dev/null | grep -i "agent.log\|/logs/" | head -10 || echo "    (none)"
+            echo
+            echo "  PYTHONPATH / LOG_DIR / LOG_LEVEL env in the running process:"
+            sudo tr '\0' '\n' < /proc/\$PID/environ 2>/dev/null | grep -E "^(PYTHONPATH|LOG_DIR|LOG_LEVEL|PWD|HOME)=" || echo "    (none of those set)"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 8. Compute LOG_DIR the way Python would, from the running install"
+          echo "=========================================================="
+          # Find the python interpreter the unit uses, and ask it directly
+          if [ -n "\$PID" ] && [ "\$PID" != "0" ]; then
+            PYEXE=\$(sudo readlink /proc/\$PID/exe 2>&1)
+            APPDIR=\$(sudo readlink /proc/\$PID/cwd 2>&1)
+            echo "  Asking \$PYEXE (in cwd \$APPDIR) what LOG_DIR resolves to:"
+            sudo -u root bash -c "cd '\$APPDIR' && '\$PYEXE' -c 'from core.settings import LOG_DIR; print(\"LOG_DIR:\", LOG_DIR)' 2>&1" || echo "    (import failed)"
+            echo
+            echo "  Does that path exist on disk?"
+            COMPUTED=\$(sudo -u root bash -c "cd '\$APPDIR' && '\$PYEXE' -c 'from core.settings import LOG_DIR; print(LOG_DIR)' 2>/dev/null")
+            if [ -n "\$COMPUTED" ]; then
+              sudo ls -la "\$COMPUTED" 2>&1 | head -5
+            fi
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 9. Does any 'Logger initialized' / startup log appear in journal?"
+          echo "    (Confirms logger module IS being imported on startup)"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "1 hour ago" --no-pager 2>/dev/null \
+            | grep -iE "Logger initialized|log_dir|LOG_DIR|FileHandler|logs/agent" \
+            | head -10 \
+            || echo "  (no logger-init mentions found in last hour — that's expected, logger.py doesn't print one)"
+          echo
+
+          echo "=========================================================="
+          echo " DIAGNOSTIC COMPLETE"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

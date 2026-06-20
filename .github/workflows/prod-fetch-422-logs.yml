@@ -92,12 +92,20 @@ jobs:
           echo
 
           echo "=========================================================="
-          echo " 6. Cross-check: any validation_error references in agent.log?"
-          echo "    (RequestValidationError handler does not log details, so"
-          echo "     this is unlikely to show much — but worth confirming.)"
+          echo " 6a. Structured validation-failure log lines from journal"
+          echo "     (added in handler patch — shows path + client + field)"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep -i "Request validation failed" \
+            | tail -30 \
+            || echo "  (no matches — patch may not be deployed yet)"
+          echo
+
+          echo "=========================================================="
+          echo " 6b. Cross-check: validation references in agent.log"
           echo "=========================================================="
           if [ -d /root/Lawtech-AI/logs ]; then
-            sudo grep -hi -E "validation_error|RequestValidationError|422" \
+            sudo grep -hi -E "Request validation failed|validation_error|RequestValidationError" \
                  /root/Lawtech-AI/logs/agent.log* 2>/dev/null \
               | tail -30 \
               || echo "  (no matches in /root/Lawtech-AI/logs/)"

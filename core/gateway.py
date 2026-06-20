@@ -169,6 +169,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     req_id = getattr(request.state, "request_id", "")
     errors = exc.errors()
     message = errors[0]["msg"] if errors else "Request validation error"
+    # Strip "input" (raw user payload — PII/large text) and "url" (Pydantic
+    # docs link, noise) so the log stays tight and leak-safe.
+    field_errors = [
+        {"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")}
+        for e in errors
+    ]
+    log.warning(
+        "Request validation failed",
+        request_id=req_id,
+        path=request.url.path,
+        method=request.method,
+        client=request.client.host if request.client else None,
+        errors=field_errors,
+    )
     return _error_response(422, "validation_error", message, req_id)
 
 

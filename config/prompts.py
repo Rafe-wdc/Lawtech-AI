@@ -1119,16 +1119,195 @@ DRAFTING_SYSTEM_PROMPT += (
 
 
 # --- Drafting Pipeline: Outline Generation ---
+
+# Doc-type-conditional rule blocks. The outline call substitutes ONE of these
+# into the {doc_type_rules} slot of DRAFT_OUTLINE_PROMPT based on the upstream
+# `_classify_doc_type` decision. Splitting these out lets us stop forcing a
+# Prayer / Verification / cause-title onto office letters and police complaints.
+
+DRAFT_OUTLINE_RULES_COURT_FILING = """The user is asking for a COURT-FILED PLEADING
+(plaint, petition, written statement, bail / anticipatory bail, IA, Section 200
+CrPC / Section 223 BNSS magistrate complaint, writ, PIL, SLP, application to a
+court, succession-certificate application to District Judge, probate petition).
+
+  - Cause-title is REQUIRED in court_details: "IN THE COURT OF ...",
+    "IN THE MATTER OF:", Plaintiff/Petitioner block, "Versus", Defendant/
+    Respondent block, bolded SUBJECT HEADING at the end (the assembler
+    appends the heading from document_title — do NOT add it yourself).
+  - Prayer / Relief Sought IS the final SUBSTANTIVE section before
+    Verification. 5-8 numbered reliefs (one paragraph each).
+  - Verification (Order VI Rule 15 CPC) is mandatory after Prayer.
+  - Affidavit-in-Support (Order XIX Rule 3 CPC) is mandatory for suits,
+    writs, bail applications.
+  - For civil suits: Schedule of Properties, Valuation and Court Fee, List
+    of Documents are added later by the procedural-injection step — do NOT
+    duplicate them here unless they are central to the user's facts.
+  - For temporary-injunction prayers: a SEPARATE IA under Order XXXIX
+    Rules 1 & 2 CPC is added later — do NOT carve out a standalone IA
+    here either.
+"""
+
+DRAFT_OUTLINE_RULES_TRIBUNAL_APPELLATE = """The user is asking for a WRITTEN
+SUBMISSION before a tax / quasi-judicial appellate body (CIT(A), ITAT, NFAC,
+GST Appellate Tribunal, AAAR, CESTAT, NCLT, NCLAT, SAT, DRT, DRAT).
+
+  - court_details uses the appellate layout: "BEFORE THE HON'BLE <FORUM>",
+    Appeal No. / Assessment Year line, "(Appellant)" / "(Respondent)" in
+    parentheses on their own lines, plain "Vs." (NOT bolded "Versus"),
+    Subject line citing the impugned order, "Most Respectfully Showeth:".
+  - Section shape (5-7 sections):
+      (i)   "1. STATEMENT OF FACTS OF THE CASE" (8-12 numbered paras)
+      (ii)  "2. GROUNDS OF APPEAL (as filed in Form 35)" (one short paragraph per ground)
+      (iii) "ADDITIONAL GROUND OF APPEAL" — only if user asks
+      (iv)  "3. DETAILED WRITTEN SUBMISSION" — sub-headings using
+            "Re: Ground No. X – [title]"; cites case laws with full citation;
+            rebuts AO's reasoning. Estimate 4-8 paras per ground.
+      (v)   "4. PRAYER" — (a)/(b)/(c)/(d) reliefs.
+      (vi)  "5. REQUEST FOR VIDEO CONFERENCING HEARING" — 1 paragraph.
+  - DO NOT include: Plaintiff/Defendant cause-title party blocks with
+    Age/Occupation/R/ Address, Verification, Affidavit, Schedule of
+    Properties, Court Fee Statement, List of Documents — those are
+    court-filing artefacts and do NOT belong in an appellate written submission.
+"""
+
+DRAFT_OUTLINE_RULES_OFFICE_LETTER = """The user is asking for an OFFICE-LETTER
+APPLICATION to a NON-COURT authority (RTI to PIO; income / caste / domicile /
+character / NOC certificate to Tahsildar / SDM / Collector; leave / NOC to
+employer; letter to bank / housing society / university / regulator).
+
+  - court_details is the LETTER OPENING (Layout F from the section prompt):
+    title at top, "Date:", "To,", recipient designation, office address,
+    bolded "Subject:" line, then "Sir / Madam," and the applicant identity
+    paragraph. NO "IN THE COURT OF". NO "IN THE MATTER OF". NO
+    Plaintiff/Defendant blocks. NO "Versus".
+  - Section count: 3-5 SHORT body sections (NOT the 8-14 of a suit).
+    Typical shape:
+      1. Identity and standing of the applicant (1 short paragraph)
+      2. Facts / grounds for the request (2-4 numbered paragraphs — what
+         happened, when, what rule / section / entitlement is invoked)
+      3. Supporting documents enclosed (1 short paragraph)
+      4. Specific request / closing ("I therefore request you to kindly ...")
+  - DO NOT include any of: "Prayer", "Relief Sought", "Verification",
+    "Affidavit", "Schedule of Properties", "Court Fee Statement", "List of
+    Documents", "Cause of Action", "Grounds of Appeal". These are
+    COURT-FILING artefacts; an office letter has NONE of them.
+  - Signature block is appended automatically by the footer builder — do
+    NOT add a "Signature" section.
+  - Total length is typically a single page. Be terse.
+"""
+
+DRAFT_OUTLINE_RULES_POLICE_COMPLAINT = """The user is asking for a POLICE COMPLAINT
+addressed to the SHO / Police Inspector (NOT a Section 200 CrPC magistrate
+complaint — that one is court_filing).
+
+  - court_details is the police-letter opening (Layout D): title at top,
+    "Date:", "To,", "The Police Inspector / Station House Officer," police
+    station name + address, bolded "Subject:" line, then "Sir / Madam," and
+    the complainant identity paragraph. NO "IN THE COURT OF". NO
+    Plaintiff/Defendant blocks. NO "Versus".
+  - Section count: 4-6 body sections:
+      1. Identity of the complainant (1 short paragraph)
+      2. Sequence of events / facts (chronological, 3-6 numbered paragraphs)
+      3. Identity of the accused (if known)
+      4. Offences invoked (sections of BNS / IPC) with brief reasoning
+      5. Witnesses / evidence / documents enclosed (if any)
+      6. Specific request: "register an FIR and investigate" / "take
+         cognizance" — closing paragraph
+  - DO NOT include any of: "Prayer", "Verification", "Affidavit",
+    "Cause Title", "Grounds of Appeal".
+  - Signature is appended automatically by the footer builder.
+"""
+
+DRAFT_OUTLINE_RULES_LEGAL_NOTICE = """The user is asking for a LEGAL NOTICE or
+a REPLY to a legal notice (Section 138 NI Act, demand notice, eviction
+notice). This is a PRE-LITIGATION CORRESPONDENCE, NOT a pleading.
+
+  - court_details is the notice opening (Layout B): title at top
+    (e.g. "LEGAL NOTICE"), "Date:", "To,", recipient block with address,
+    bolded "Subject:" line, then "Sir / Madam," and the standard "Under
+    instructions from and on behalf of my client ..." paragraph.
+    NO "IN THE COURT OF". NO Plaintiff/Defendant blocks. NO "Versus".
+  - Section count: 3-5 body sections:
+      1. Facts / background of the transaction or dispute
+      2. Statutory / contractual basis for the claim (cite the relevant
+         section / clause inline)
+      3. Specific demand (pay X within Y days / cease and desist / vacate /
+         reply to specific allegations)
+      4. Consequence of non-compliance (civil suit / criminal complaint /
+         eviction)
+      5. Closing — "Take notice accordingly."
+  - DO NOT include any of: "Prayer", "Verification", "Affidavit",
+    "Grounds of Appeal", "Cause of Action" as a separate section. A legal
+    notice ASSERTS the cause of action narratively, not in court-filing
+    categories.
+  - Signature is the advocate's, appended automatically by the footer builder.
+"""
+
+DRAFT_OUTLINE_RULES_AGREEMENT_DEED = """The user is asking for a PRIVATE
+CONTRACT or TESTAMENTARY INSTRUMENT (agreement to sell, MOU, lease deed,
+sale deed, power of attorney, gift deed, will).
+
+  - court_details uses the agreement layout (Layout C): title at top,
+    "THIS <AGREEMENT/DEED/WILL> IS MADE AND EXECUTED ON THIS <date>",
+    "BETWEEN" + First Party block + role label, "AND" + Second Party block +
+    role label. NO "IN THE COURT OF". NO Prayer/Verification.
+  - Section shape (6-9 sections, depends on subject):
+      - Recitals / Background ("WHEREAS ...")
+      - Definitions (if a complex commercial agreement)
+      - Subject matter of the agreement / property description
+      - Consideration / consideration paid
+      - Covenants / obligations of each party
+      - Representations and warranties
+      - Indemnity / dispute resolution / governing law
+      - Termination / default / remedies
+      - Execution (signatures of parties + witnesses)
+  - DO NOT include any of: "Prayer", "Relief Sought", "Verification",
+    "Affidavit", "Grounds", "Cause of Action".
+"""
+
+DRAFT_OUTLINE_RULES_AFFIDAVIT = """The user is asking for a STANDALONE AFFIDAVIT
+(affidavit for change of name, affidavit for passport, affidavit of support,
+affidavit for re-verification). When the affidavit is in support of a court
+filing, treat it as a court_filing instead.
+
+  - court_details opens with "BEFORE THE HON'BLE NOTARY / OATH COMMISSIONER"
+    or directly with the deponent block. NO Plaintiff/Defendant. NO Prayer.
+  - Section shape (3-5 sections):
+      1. Identification of the deponent ("I, <Name>, S/o <Father>, aged
+         <age>, R/o <address>, do hereby solemnly affirm and declare as
+         under:")
+      2. The fact(s) being sworn to (one per paragraph, numbered)
+      3. Statement that the contents are true to the deponent's knowledge
+      4. Place + Date + Deponent signature line
+      5. Verification clause and notary attestation block
+  - DO NOT include: Prayer, Relief Sought, Grounds, Cause of Action.
+"""
+
+DRAFT_OUTLINE_RULES_BY_TYPE = {
+    "court_filing": DRAFT_OUTLINE_RULES_COURT_FILING,
+    "tribunal_appellate": DRAFT_OUTLINE_RULES_TRIBUNAL_APPELLATE,
+    "office_letter": DRAFT_OUTLINE_RULES_OFFICE_LETTER,
+    "police_complaint": DRAFT_OUTLINE_RULES_POLICE_COMPLAINT,
+    "legal_notice": DRAFT_OUTLINE_RULES_LEGAL_NOTICE,
+    "agreement_deed": DRAFT_OUTLINE_RULES_AGREEMENT_DEED,
+    "affidavit": DRAFT_OUTLINE_RULES_AFFIDAVIT,
+}
+
+
 DRAFT_OUTLINE_PROMPT = """You are a legal document architect specializing in Indian law.
 Given USER-PROVIDED FACTS (when present), the user's query, and a reference template,
-create a CONCISE section-by-section outline for a court-filing quality legal document.
+create a CONCISE section-by-section outline for the requested legal document.
 
 CRITICAL: When USER-PROVIDED FACTS are present (e.g. extracted from an uploaded plaint,
 contract, or notice), the outline MUST be tailored to those specific facts — the court
 name, party titles, case type, and section breakdown should match the user's case, NOT
 the reference template's example. The reference template provides STRUCTURE only.
 
-Rules:
+DOC-TYPE-SPECIFIC RULES (read this FIRST — these override the generic rules below
+whenever they conflict):
+{doc_type_rules}
+
+Generic rules (apply when the doc-type-specific block does NOT prescribe otherwise):
 1. Include ONLY necessary sections — no padding, no filler sections.
 2. Each section needs: title, description of content, estimated paragraph count.
 3. Section count guidelines (target range — choose what the facts require):
@@ -1174,13 +1353,16 @@ Rules:
    - "Definitions" (courts know legal terms)
    - "Background of Law" (cite law inline, don't dedicate a section)
    - "Scope and Purpose" (obvious from the document type)
-5. Standard sections to include (as applicable):
+5. Standard sections to include (as applicable — SUBJECT TO the doc-type
+   block above, which can drop Prayer/Verification/Affidavit entirely):
    - Brief facts / synopsis (concise, factual, chronological)
    - Grounds/arguments (consolidate — group 3-5 grounds per section, NOT one section per ground)
    - Legal provisions relied upon (inline with arguments, or brief separate section)
-   - Prayer/relief sought (MUST be the LAST substantive section)
-   - Verification
-   - Affidavit (if required)
+   - Prayer/relief sought — ONLY when the doc-type block calls for it
+     (court_filing, tribunal_appellate). For office_letter, police_complaint,
+     legal_notice, agreement_deed, affidavit — DO NOT add a "Prayer" section.
+   - Verification — ONLY for court_filing. NOT for letters/notices/agreements.
+   - Affidavit (if required by court_filing facts)
 6. Mark sections that need case law citations with needs_citations=true.
 7. Paragraph count per section depends on the section's role:
    - Brief Facts / Synopsis: 6-10 numbered paragraphs (chronological detail).
@@ -1205,8 +1387,12 @@ Rules:
    wording stays compact. Procedural blocks (List of Documents, Court
    Fee, Schedule) stay tight regardless of how much depth the body
    sections get — they are reference data, not argument.
-8. IMPORTANT: Prayer/relief section MUST appear as the final substantive section
-   before Verification/Affidavit.
+8. IMPORTANT: For court_filing and tribunal_appellate ONLY, Prayer/relief
+   section MUST appear as the final substantive section before
+   Verification/Affidavit. For office_letter, police_complaint,
+   legal_notice, agreement_deed, affidavit — see the doc-type block above;
+   those types END with their own closing convention (request paragraph,
+   "Take notice accordingly", execution/signature block) — NOT a Prayer.
 9. Think like a BUSY judge reading this — every section must justify its existence.
 10. Section TITLES — emit a plain noun-phrase title only. Do NOT prefix the
     title with a number, letter, or any ordinal marker. The document

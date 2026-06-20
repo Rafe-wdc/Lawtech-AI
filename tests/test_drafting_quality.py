@@ -336,6 +336,102 @@ class TestMaxSections:
 
 
 # ---------------------------------------------------------------------------
+# Doc-type gate (Jun 2026): stops office-letter requests from being
+# force-fitted to court templates.
+#
+# Background: a 2026-06-20 census of the drafting OpenSearch index found
+# zero office-letter templates among 497 entries. Without this gate, asking
+# for an RTI application returned a court petition with Prayer/Verification
+# because BM25 had nothing letter-shaped to retrieve.
+# ---------------------------------------------------------------------------
+
+class TestDocTypeGate:
+    def test_doc_type_constants_exported(self):
+        from agents.drafting import (
+            DOC_TYPES, DOC_TYPE_TO_FOOTER_KIND,
+            DOC_TYPES_USE_SKELETON, SYNTHETIC_SKELETONS,
+        )
+        # Every doc type must have a footer-kind mapping
+        for t in DOC_TYPES:
+            assert t in DOC_TYPE_TO_FOOTER_KIND, f"{t} missing from footer-kind map"
+        # The 3 non-court types that bypass the drafting index must have skeletons
+        for t in ("office_letter", "police_complaint", "legal_notice"):
+            assert t in DOC_TYPES_USE_SKELETON
+            assert t in SYNTHETIC_SKELETONS
+            assert len(SYNTHETIC_SKELETONS[t]) > 500, (
+                f"Skeleton for {t} looks too short — outline LLM needs structure"
+            )
+
+    def test_synthetic_office_letter_skeleton_shape(self):
+        """The office-letter skeleton must have addressee/subject/closing
+        and must NOT have court-filing scaffolding."""
+        from agents.drafting import SYNTHETIC_SKELETONS
+        s = SYNTHETIC_SKELETONS["office_letter"]
+        # Letter shape signals
+        assert "To," in s
+        assert "Subject:" in s
+        assert "Sir / Madam" in s
+        assert "respectfully submit" in s.lower() or "respectfully" in s.lower()
+        # Anti-signals (court scaffolding must not appear)
+        assert "IN THE COURT OF" not in s
+        assert "IN THE MATTER OF" not in s
+        assert "Versus" not in s
+        assert "Prayer" not in s
+        assert "Verification" not in s
+
+    def test_synthetic_police_complaint_skeleton_shape(self):
+        from agents.drafting import SYNTHETIC_SKELETONS
+        s = SYNTHETIC_SKELETONS["police_complaint"]
+        assert "To," in s
+        assert "Police Inspector" in s or "Station House Officer" in s
+        assert "Subject:" in s
+        assert "register an FIR" in s.lower() or "FIR" in s
+        # Police complaint is a LETTER not a court pleading
+        assert "IN THE COURT OF" not in s
+        assert "Versus" not in s
+        assert "Prayer" not in s
+        assert "Verification" not in s
+
+    def test_synthetic_legal_notice_skeleton_shape(self):
+        from agents.drafting import SYNTHETIC_SKELETONS
+        s = SYNTHETIC_SKELETONS["legal_notice"]
+        assert "To," in s
+        assert "Subject:" in s
+        assert "Take notice" in s
+        assert "Advocate" in s
+        assert "IN THE COURT OF" not in s
+        assert "Versus" not in s
+        assert "Prayer" not in s
+        assert "Verification" not in s
+
+    def test_outline_rules_branches_for_every_doc_type(self):
+        """Every DOC_TYPE must have a doc-type-specific rule branch in the
+        outline prompt, and the non-court branches must explicitly forbid
+        Prayer / Verification."""
+        from agents.drafting import DOC_TYPES
+        from config.prompts import DRAFT_OUTLINE_RULES_BY_TYPE
+        for t in DOC_TYPES:
+            assert t in DRAFT_OUTLINE_RULES_BY_TYPE, f"{t} missing rule branch"
+        # Non-court branches must drop Prayer/Verification
+        for t in ("office_letter", "police_complaint", "legal_notice", "agreement_deed"):
+            rules = DRAFT_OUTLINE_RULES_BY_TYPE[t]
+            assert "DO NOT include" in rules, f"{t} branch should forbid court artefacts"
+            assert "Prayer" in rules, f"{t} branch should name Prayer in its forbid-list"
+
+    def test_outline_prompt_makes_prayer_conditional(self):
+        """The generic outline rules must no longer hard-code Prayer as a
+        universal MUST. It can only fire for court_filing / tribunal_appellate."""
+        from config.prompts import DRAFT_OUTLINE_PROMPT
+        # The pre-fix wording was: "Prayer/relief section MUST appear as the
+        # final substantive section before Verification/Affidavit." Without a
+        # type guard it forced Prayer onto every doc type. Confirm it is now
+        # qualified.
+        assert "For court_filing and tribunal_appellate ONLY" in DRAFT_OUTLINE_PROMPT
+        # The doc-type rules placeholder is present
+        assert "{doc_type_rules}" in DRAFT_OUTLINE_PROMPT
+
+
+# ---------------------------------------------------------------------------
 # End-to-end (opt-in) -- partition suit regression
 # ---------------------------------------------------------------------------
 

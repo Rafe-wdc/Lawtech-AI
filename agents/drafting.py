@@ -430,6 +430,299 @@ class TemplateSource(BaseModel):
     source: str = Field(..., description="The most relevant source file path")
 
 
+# --- Step 0.5: Doc-type classifier (pre-search gate) ---
+#
+# WHY: A wide census of the drafting OpenSearch index (2026-06-20) confirmed
+# that all 136 "Application"-titled templates are COURT FILINGS — zero are
+# office letters (RTI / income certificate / leave / NOC / employer / bank).
+# So when a user asks "draft an RTI application", BM25 has nothing letter-shaped
+# to retrieve and silently force-fits a court template, producing wrong output
+# (Prayer + Verification + IN THE COURT OF on a one-page letter).
+#
+# This classifier runs BEFORE template search and gates the rest of the
+# pipeline so non-court doc types skip the index entirely and use a synthetic
+# skeleton instead. Single Flash-Lite call, ~150 input tokens.
+
+DOC_TYPES = (
+    "court_filing",        # plaint, petition, written statement, bail, IA, magistrate complaint
+    "tribunal_appellate",  # CIT(A), ITAT, GST appellate, NCLT, CESTAT written submissions
+    "office_letter",       # RTI, certificate request, leave, NOC, employer/bank/society/regulator
+    "police_complaint",    # letter to SHO / Inspector for FIR registration
+    "legal_notice",        # Sec 138 NI Act notice, demand notice, reply to legal notice
+    "agreement_deed",      # agreement, MOU, deed, lease, will, sale, gift
+    "affidavit",           # standalone affidavit (usually filed with court)
+)
+
+# Maps doc_type → footer_kind used by _build_footer / _generate_section.
+DOC_TYPE_TO_FOOTER_KIND = {
+    "court_filing": "court_filing",
+    "tribunal_appellate": "tax_submission",
+    "office_letter": "office_application",
+    "police_complaint": "police_complaint",
+    "legal_notice": "legal_notice",
+    "agreement_deed": "agreement",
+    "affidavit": "court_filing",
+}
+
+
+class DocTypeChoice(BaseModel):
+    doc_type: str = Field(
+        ...,
+        description=(
+            "One of: " + ", ".join(DOC_TYPES) + ". Decide by ADDRESSEE, "
+            "not by the keyword 'application'. A 'bail application' addresses "
+            "a court → court_filing. An 'RTI application' addresses a Public "
+            "Information Officer → office_letter. An 'application for income "
+            "certificate' addresses a Tahsildar → office_letter."
+        ),
+    )
+    reasoning: str = Field(
+        "",
+        description="One short sentence: who is the addressee and what is the document's purpose.",
+    )
+
+
+_DOC_TYPE_CLASSIFIER_PROMPT = """You classify Indian-law drafting requests into ONE of these doc types:
+
+  - court_filing: pleadings filed in a court (suit, plaint, petition, written
+    statement, bail application, anticipatory bail, IA under Order XXXIX CPC,
+    application under Section 482 BNSS / Section 156(3) CrPC, transfer
+    application under Section 24 CPC, Section 200 CrPC / Section 223 BNSS
+    magistrate complaint, writ, PIL, SLP, succession-certificate application
+    to District Judge, probate petition).
+  - tribunal_appellate: written submissions to tax / quasi-judicial appellate
+    bodies (CIT(A), ITAT, NFAC, GST Appellate Tribunal, AAAR, CESTAT, NCLT,
+    NCLAT, SAT, DRT, DRAT).
+  - office_letter: letters to NON-COURT administrative authorities (RTI to
+    Public Information Officer; application for income / caste / domicile /
+    character / experience / NOC certificate to Tahsildar / SDM / Collector;
+    application for leave / NOC to employer; application to bank / housing
+    society / university / regulator like SEBI / RBI / IRDAI / TRAI).
+  - police_complaint: letter to a Police Station / SHO / Inspector for FIR
+    registration. Trigger words: "police complaint", "FIR", "SHO", "Section
+    154 CrPC", "Section 173 BNSS" addressed to POLICE not magistrate.
+  - legal_notice: pre-litigation notice (Section 138 NI Act notice, demand
+    notice, eviction notice, reply to legal notice).
+  - agreement_deed: private contracts / testamentary instruments (agreement
+    to sell, MOU, lease deed, sale deed, power of attorney, gift deed, will).
+  - affidavit: standalone affidavit (usually filed with a court — most common
+    is affidavit for change of name, affidavit for passport, affidavit of support).
+
+DECIDE BY ADDRESSEE, NOT BY THE WORD "application":
+  - "bail application" → court_filing (addressee = court)
+  - "RTI application" → office_letter (addressee = PIO)
+  - "application for income certificate" → office_letter (addressee = Tahsildar/SDM)
+  - "leave application to my manager" → office_letter (addressee = employer)
+  - "leave of absence application to my employer" → office_letter
+  - "leave application" without other context → office_letter (default addressee = employer)
+  - "application for NOC to society" / "NOC application to bank" → office_letter
+  - "application for grant of probate" → court_filing (addressee = District Judge)
+  - "succession certificate application" → court_filing (addressee = District Judge)
+  - "complaint to police" → police_complaint
+  - "complaint under Section 200 CrPC" → court_filing (Magistrate)
+
+USER QUERY:
+{query}
+
+CASE CONTEXT (may be empty):
+{case_context}
+
+Return doc_type AND one short reasoning sentence."""
+
+
+async def _classify_doc_type(query: str, case_facts: str = "") -> str:
+    """Pre-search classifier — returns one of DOC_TYPES.
+
+    Single Flash-Lite call. Used to gate template search: office_letter /
+    police_complaint / legal_notice skip the drafting index entirely and use
+    a synthetic skeleton; court_filing / tribunal_appellate / agreement_deed
+    keep the current BM25 path.
+
+    Falls back to "court_filing" on any error so production traffic never
+    breaks — the worst case is the current behaviour.
+    """
+    try:
+        with log_time(log, "Doc-type classification"):
+            from langchain.chat_models import init_chat_model
+            llm = init_chat_model(
+                "google_genai:gemini-2.5-flash-lite",
+                temperature=0.0,
+            ).with_structured_output(DocTypeChoice, include_raw=True)
+            prompt = ChatPromptTemplate.from_template(_DOC_TYPE_CLASSIFIER_PROMPT)
+            chain = prompt | llm
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({
+                    "query": query[:2000],
+                    "case_context": (case_facts or "(none)")[:1500],
+                }),
+                timeout=10,
+            )
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "classify_doc_type", raw_and_parsed.get("raw"))
+        choice = raw_and_parsed["parsed"]
+        doc_type = (choice.doc_type or "").strip().lower()
+        if doc_type not in DOC_TYPES:
+            log.warning("Doc-type classifier returned unknown value, falling back",
+                        returned=doc_type)
+            return "court_filing"
+        log.info("Doc-type classified",
+                 doc_type=doc_type,
+                 reasoning=(choice.reasoning or "")[:160])
+        return doc_type
+    except Exception as e:
+        log.warning("Doc-type classifier failed -- falling back to court_filing",
+                    error=str(e)[:200])
+        return "court_filing"
+
+
+# --- Step 0.6: Synthetic skeletons for non-court doc types ---
+#
+# When the classifier picks office_letter / police_complaint / legal_notice,
+# the drafting index has no letter-shaped templates to feed the outline LLM.
+# Instead, we hand it a short markdown skeleton lifted from Layout B/D/F (the
+# format-block in court_details of `DraftOutline`). The outline LLM imitates
+# this structure — body-only, no court scaffolding, no Prayer.
+
+_OFFICE_LETTER_SKELETON = """**<APPLICATION TITLE>**
+
+Date: <date>
+
+To,
+
+<Recipient Designation, e.g. "The Public Information Officer", "The
+Tahsildar", "The Sub-Divisional Magistrate", "The Branch Manager">,
+
+<Name of Office / Department>,
+
+<Office Address>.
+
+**Subject: <Subject line — what this application is about, e.g.
+"Application for information under the Right to Information Act, 2005" /
+"Application for issuance of income certificate">**
+
+Sir / Madam,
+
+I, <Applicant Full Name>, son / daughter / wife of <Father / Husband Name>,
+aged <age> years, residing at <Applicant Address>, respectfully submit as
+follows:
+
+1. <Fact / ground 1 — who I am and why I am writing>
+
+2. <Fact / ground 2 — the specific rule / section / entitlement invoked
+   (e.g. Section 6 RTI Act, 2005; State Government circular dated <date>;
+   service rule)>
+
+3. <Fact / ground 3 — supporting documents enclosed>
+
+I therefore request you to kindly <issue the certificate / furnish the
+information / grant the leave / accord approval>.
+
+Thanking you,
+
+Yours faithfully,
+
+<Applicant Name>
+"""
+
+_POLICE_COMPLAINT_SKELETON = """**<COMPLAINT TITLE>**
+
+(Examples: "POLICE COMPLAINT", "APPLICATION FOR REGISTRATION OF FIR UNDER
+SECTION 154 OF THE CODE OF CRIMINAL PROCEDURE, 1973", "COMPLAINT UNDER
+SECTION 173 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023")
+
+Date: <date>
+
+To,
+
+The Police Inspector / Station House Officer,
+
+<Name of Police Station>,
+
+<Address of Police Station>.
+
+**Subject: <Subject line, e.g. "Complaint regarding [offence] committed on
+[date] by [accused name]">**
+
+Sir / Madam,
+
+I, <Complainant Full Name>, son / daughter / wife of <Father / Husband
+Name>, aged <age> years, occupation <occupation>, residing at <Complainant
+Address>, do hereby state and submit as follows:
+
+1. <Sequence of events — what happened, when, where>
+
+2. <Identity of accused — name, description, address if known>
+
+3. <Offences invoked — sections of BNS / IPC, brief reasoning>
+
+4. <Witnesses, if any>
+
+5. <Documents / evidence enclosed>
+
+I therefore request your good office to register an FIR and investigate
+the matter at the earliest.
+
+Thanking you,
+
+Yours faithfully,
+
+<Complainant Name>
+"""
+
+_LEGAL_NOTICE_SKELETON = """**<NOTICE TITLE>**
+
+(Examples: "LEGAL NOTICE", "REPLY TO LEGAL NOTICE", "NOTICE UNDER SECTION
+138 OF THE NEGOTIABLE INSTRUMENTS ACT, 1881")
+
+Date: <date>
+
+To,
+
+<Recipient Name>
+
+<Recipient Qualifications / Designation if known>
+
+<Recipient Address>
+
+**Subject: <Subject line, e.g. "Notice under Section 138 of the Negotiable
+Instruments Act, 1881 / Reply to Legal Notice dated DD/MM/YYYY">**
+
+Sir / Madam,
+
+Under instructions from and on behalf of my client, <Client Full Name>,
+<Client Description / Designation>, residing at <Client Address>, I hereby
+serve upon you the following notice:
+
+1. <Facts / background of the transaction or dispute>
+
+2. <Statutory / contractual basis for the claim>
+
+3. <Specific demand: pay X amount within 15 days / cease and desist /
+   vacate premises / reply to specific allegations>
+
+4. <Consequence on non-compliance: civil suit / criminal complaint /
+   eviction proceedings>
+
+Take notice accordingly.
+
+Yours faithfully,
+
+<Advocate Name>
+Advocate for <Client>
+"""
+
+SYNTHETIC_SKELETONS = {
+    "office_letter": _OFFICE_LETTER_SKELETON,
+    "police_complaint": _POLICE_COMPLAINT_SKELETON,
+    "legal_notice": _LEGAL_NOTICE_SKELETON,
+}
+
+# Doc types whose templates are NOT in our drafting index at all (per the
+# 2026-06-20 census). For these, skip ES search and feed the synthetic
+# skeleton above directly to the outline LLM.
+DOC_TYPES_USE_SKELETON = frozenset(SYNTHETIC_SKELETONS.keys())
+
+
 # --- Step 1: Hybrid Template Search (BM25 + kNN, Python-side RRF merge) ---
 
 async def _search_templates(query: str) -> list[dict]:
@@ -614,6 +907,7 @@ async def _generate_outline(
     user_facts: str = "", case_facts: str = "",
     format_block: str = "",
     template_language: str | None = None,
+    doc_type: str = "court_filing",
 ) -> DraftOutline:
     """Generate a structured outline with all sections for the document.
 
@@ -627,7 +921,17 @@ async def _generate_outline(
     `format_block` carries layout/typographic conventions extracted from the
     chosen template (see _extract_format_spec). Empty string disables the
     block; the outline still works on template_text alone.
+
+    `doc_type` (one of `DOC_TYPES`) selects the doc-type-specific rule branch
+    from `DRAFT_OUTLINE_RULES_BY_TYPE` that gates whether Prayer / Verification
+    / cause-title are included. For office_letter / police_complaint /
+    legal_notice this drops them entirely.
     """
+    # Import here to avoid circular import at module load time.
+    from config.prompts import DRAFT_OUTLINE_RULES_BY_TYPE, DRAFT_OUTLINE_RULES_COURT_FILING
+    doc_type_rules = DRAFT_OUTLINE_RULES_BY_TYPE.get(
+        doc_type, DRAFT_OUTLINE_RULES_COURT_FILING,
+    )
     facts_block = ""
     if case_facts.strip() or user_facts.strip():
         parts = [
@@ -644,8 +948,15 @@ async def _generate_outline(
         llm = get_drafting_llm().with_structured_output(
             DraftOutline, include_raw=True,
         )
+        # Substitute {doc_type_rules} into the system prompt BEFORE handing
+        # off to ChatPromptTemplate; otherwise it would be treated as an
+        # unfilled template variable. Use .replace (not .format) so any
+        # incidental braces in the INDIAN_LEGAL_* blocks don't blow up.
+        system_prompt = DRAFT_OUTLINE_PROMPT.replace(
+            "{doc_type_rules}", doc_type_rules,
+        )
         prompt = ChatPromptTemplate.from_messages([
-            ("system", localize_prompt(DRAFT_OUTLINE_PROMPT, user_language)),
+            ("system", localize_prompt(system_prompt, user_language)),
             ("user", "{facts_block}USER QUERY:\n{query}"),
             # Template-language warning, empty string when the chosen
             # template's body language matches user_language.
@@ -3173,101 +3484,124 @@ async def drafting_node(state: LegalAgentState) -> dict:
             progress("drafting", "Extracting key facts from your document...", step="extract")
             case_facts = await _extract_case_facts(user_facts)
 
-        # Step 1: Hybrid search for templates (BM25 + kNN, top 15)
-        progress("drafting", "Searching for document templates...", step="search")
-        hits = await _search_templates(query)
+        # Step 0.5: Classify doc-type BEFORE template search.
+        # The 2026-06-20 census of the drafting index confirmed 0 office-letter
+        # templates exist — so for office_letter / police_complaint /
+        # legal_notice we skip ES entirely and use a synthetic skeleton.
+        progress("drafting", "Classifying document type...", step="classify")
+        doc_type = await _classify_doc_type(query, case_facts)
+        progress("drafting", f"Doc type: {doc_type}", substep=True, step="classify")
 
-        if not hits:
-            log.warning("No templates found")
-            return {
-                "agent_results": {"Drafting": AgentResult(
-                    agent_name="Drafting",
-                    content="",
-                    sources=[],
-                    tokens_consumed=0,
-                    error="No matching templates found in our database.",
-                )},
-            }
+        use_skeleton = doc_type in DOC_TYPES_USE_SKELETON
 
-        progress("drafting", f"Found {len(hits)} matching templates", found=len(hits), substep=True, step="search")
-        log.info("Template candidates found", count=len(hits))
+        if use_skeleton:
+            # No ES search. Use the synthetic skeleton lifted from Layout B/D/F.
+            template_text = SYNTHETIC_SKELETONS[doc_type]
+            selected_source = f"<synthetic:{doc_type}>"
+            template_language = user_language
+            format_block = ""
+            log.info("Bypassing template search for non-court doc type",
+                     doc_type=doc_type,
+                     reason="drafting index has 0 letter-shaped templates")
+        else:
+            # Step 1: Hybrid search for templates (BM25 + kNN, top 15)
+            progress("drafting", "Searching for document templates...", step="search")
+            hits = await _search_templates(query)
 
-        # Step 2: Select best template (previews + case-context + validation)
-        progress("drafting", "Selecting best template...", step="select")
-        selected_source, all_paths = await asyncio.to_thread(
-            _select_best_template, query, hits, user_facts,
-        )
-        template_display_name = os.path.splitext(os.path.basename(selected_source))[0]
-        progress("drafting", f"Selected: {template_display_name[:60]}", substep=True, step="select")
-        log.info("Template selected", template=selected_source)
+            if not hits:
+                log.warning("No templates found")
+                return {
+                    "agent_results": {"Drafting": AgentResult(
+                        agent_name="Drafting",
+                        content="",
+                        sources=[],
+                        tokens_consumed=0,
+                        error="No matching templates found in our database.",
+                    )},
+                }
 
-        # Step 3: Fetch the full template document
-        source_query = {
-            "size": 1,
-            "query": {"term": {"source.keyword": selected_source}},
-            "_source": ["page_content", "source"],
-        }
-        source_response = es.search(index=index, body=source_query)
-        source_hits = source_response["hits"]["hits"]
+            progress("drafting", f"Found {len(hits)} matching templates", found=len(hits), substep=True, step="search")
+            log.info("Template candidates found", count=len(hits))
 
-        # Fallback: try next-best candidate if selected template not found
-        if not source_hits:
-            log.warning("Selected template not found, trying fallback",
-                        template=selected_source)
-            for path in all_paths:
-                if path == selected_source:
-                    continue
-                fb_resp = es.search(index=index, body={
-                    "size": 1,
-                    "query": {"term": {"source.keyword": path}},
-                    "_source": ["page_content", "source"],
-                })
-                if fb_resp["hits"]["hits"]:
-                    source_hits = fb_resp["hits"]["hits"]
-                    selected_source = path
-                    log.info("Using fallback template", template=path)
-                    break
-
-        if not source_hits:
-            return {
-                "agent_results": {"Drafting": AgentResult(
-                    agent_name="Drafting", content="", sources=[],
-                    tokens_consumed=0,
-                    error=f"Template source not found: {selected_source}",
-                )},
-            }
-
-        template_text = source_hits[0]["_source"]["page_content"]
-        log.debug("Template loaded",
-                  template=selected_source, template_len=len(template_text))
-
-        # Step 3.7: Extract layout/format conventions from the template, in
-        # parallel with outline gen. Cached per template_source so this only
-        # actually fires once per unique template -- afterwards it's an
-        # in-memory lookup. format_block carries alignment, numbering glyphs,
-        # prayer/verification clauses, signature block, etc. Empty string
-        # when extraction fails (silent fallback, outline + sections still
-        # run on template_text alone).
-        # Step 3.75: Detect the template's PRIMARY content language. When
-        # template_language != user_language we inject a strong warning
-        # into the outline + section prompts so the LLM doesn't borrow
-        # template-specific vocabulary (especially Hindi vs Marathi —
-        # both Devanagari, but distinct grammar). Cached per template.
-        # Runs in parallel with format-spec extraction to keep the wall
-        # clock cost near-zero.
-        format_spec, template_language = await asyncio.gather(
-            _extract_format_spec(selected_source, template_text),
-            _detect_template_language(selected_source, template_text),
-        )
-        format_block = _format_layout_block(format_spec)
-        if template_language and template_language != user_language:
-            log.info(
-                "Template language differs from user language — warning will "
-                "be injected into outline + section prompts",
-                template_lang=template_language,
-                user_lang=user_language,
-                source=selected_source[-40:],
+            # Step 2: Select best template (previews + case-context + validation)
+            progress("drafting", "Selecting best template...", step="select")
+            selected_source, all_paths = await asyncio.to_thread(
+                _select_best_template, query, hits, user_facts,
             )
+            template_display_name = os.path.splitext(os.path.basename(selected_source))[0]
+            progress("drafting", f"Selected: {template_display_name[:60]}", substep=True, step="select")
+            log.info("Template selected", template=selected_source)
+
+            # Step 3: Fetch the full template document
+            source_query = {
+                "size": 1,
+                "query": {"term": {"source.keyword": selected_source}},
+                "_source": ["page_content", "source"],
+            }
+            source_response = es.search(index=index, body=source_query)
+            source_hits = source_response["hits"]["hits"]
+
+            # Fallback: try next-best candidate if selected template not found
+            if not source_hits:
+                log.warning("Selected template not found, trying fallback",
+                            template=selected_source)
+                for path in all_paths:
+                    if path == selected_source:
+                        continue
+                    fb_resp = es.search(index=index, body={
+                        "size": 1,
+                        "query": {"term": {"source.keyword": path}},
+                        "_source": ["page_content", "source"],
+                    })
+                    if fb_resp["hits"]["hits"]:
+                        source_hits = fb_resp["hits"]["hits"]
+                        selected_source = path
+                        log.info("Using fallback template", template=path)
+                        break
+
+            if not source_hits:
+                return {
+                    "agent_results": {"Drafting": AgentResult(
+                        agent_name="Drafting", content="", sources=[],
+                        tokens_consumed=0,
+                        error=f"Template source not found: {selected_source}",
+                    )},
+                }
+
+            template_text = source_hits[0]["_source"]["page_content"]
+            log.debug("Template loaded",
+                      template=selected_source, template_len=len(template_text))
+
+        # Step 3.7 / 3.75: Layout/format conventions + template-language
+        # detection. Skipped entirely when using the synthetic skeleton —
+        # we already know its language (= user_language) and there's no
+        # template-specific layout to imitate beyond the skeleton itself.
+        if use_skeleton:
+            format_block = ""
+            template_language = user_language
+        else:
+            # Extract format conventions and template language in parallel.
+            # Cached per template_source so this only fires once per unique
+            # template — afterwards it's an in-memory lookup. format_block
+            # carries alignment, numbering glyphs, prayer/verification
+            # clauses, signature block, etc. Empty string when extraction
+            # fails (silent fallback, outline + sections still run on
+            # template_text alone). template_language drives a warning
+            # injected into outline + section prompts whenever the template's
+            # body language differs from user_language.
+            format_spec, template_language = await asyncio.gather(
+                _extract_format_spec(selected_source, template_text),
+                _detect_template_language(selected_source, template_text),
+            )
+            format_block = _format_layout_block(format_spec)
+            if template_language and template_language != user_language:
+                log.info(
+                    "Template language differs from user language — warning will "
+                    "be injected into outline + section prompts",
+                    template_lang=template_language,
+                    user_lang=user_language,
+                    source=selected_source[-40:],
+                )
 
         # Step 4: Generate document outline (max 12 sections)
         progress("drafting", "Generating document outline...", step="outline")
@@ -3277,6 +3611,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             case_facts=case_facts,
             format_block=format_block,
             template_language=template_language,
+            doc_type=doc_type,
         )
         progress("drafting", f"Outline ready: {len(outline.sections)} sections", found=len(outline.sections), substep=True, step="outline")
 
@@ -3300,6 +3635,28 @@ async def drafting_node(state: LegalAgentState) -> dict:
             progress("drafting", "Verifying anchor case citations...",
                      step="verify_cases")
             stance = await _verify_stance_cases(stance)
+
+        # Step 4.57: For non-court doc types (office letter, police complaint,
+        # legal notice, agreement, will, standalone affidavit) — clear any
+        # procedural_sections and key_cases the stance LLM proposed. These
+        # are court-pleading attachments (Schedule of Properties, Verification,
+        # IA under Order XXXIX, anchor case citations) that DO NOT belong in
+        # a one-page office letter or a pre-litigation notice. The outline
+        # branch already produced the right shape; if we let injection run,
+        # we'd re-introduce the very court scaffolding the gate was meant to
+        # avoid.
+        if stance is not None and doc_type in DOC_TYPES_USE_SKELETON | {"agreement_deed"}:
+            cleared_proc = len(stance.procedural_sections)
+            cleared_cases = len(stance.key_cases)
+            if cleared_proc or cleared_cases:
+                stance = stance.model_copy(update={
+                    "procedural_sections": [],
+                    "key_cases": [],
+                })
+                log.info("Cleared stance procedural_sections and key_cases for non-court doc type",
+                         doc_type=doc_type,
+                         cleared_procedural=cleared_proc,
+                         cleared_cases=cleared_cases)
 
         stance_block = _format_stance_for_section(stance)
 
@@ -3339,10 +3696,21 @@ async def drafting_node(state: LegalAgentState) -> dict:
         except (RuntimeError, ImportError):
             writer = None
 
-        _section_footer_kind = (
+        # Section footer kind. Upstream classifier wins over the stance LLM's
+        # guess for non-court types — the classifier reads the user's intent
+        # directly (e.g. "RTI application" → office_letter), while the stance
+        # LLM only sees the outline title (which the outline may have rendered
+        # generically). This keeps the synthesized footer aligned with the
+        # body shape produced by the doc-type-conditional outline branch.
+        _classifier_footer_kind = DOC_TYPE_TO_FOOTER_KIND.get(doc_type, "court_filing")
+        _stance_footer_kind = (
             getattr(stance, "footer_kind", "court_filing")
             if stance is not None else "court_filing"
         ) or "court_filing"
+        if doc_type in DOC_TYPES_USE_SKELETON:
+            _section_footer_kind = _classifier_footer_kind
+        else:
+            _section_footer_kind = _stance_footer_kind
         sections, failed_indices, total_tokens = await _generate_sections_parallel(
             query, template_text, outline, writer, user_language,
             user_facts=user_facts,

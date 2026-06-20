@@ -103,14 +103,15 @@ jobs:
 
           echo "=========================================================="
           echo " 6b. Cross-check: validation references in agent.log"
+          echo "     (Must use sudo to see /root/* — 700 perms.)"
           echo "=========================================================="
-          if [ -d /root/Lawtech-AI/logs ]; then
+          if sudo test -d /root/Lawtech-AI/logs; then
             sudo grep -hi -E "Request validation failed|validation_error|RequestValidationError" \
                  /root/Lawtech-AI/logs/agent.log* 2>/dev/null \
               | tail -30 \
               || echo "  (no matches in /root/Lawtech-AI/logs/)"
           else
-            echo "  (no /root/Lawtech-AI/logs directory)"
+            echo "  (no /root/Lawtech-AI/logs directory — even with sudo)"
           fi
           echo
 

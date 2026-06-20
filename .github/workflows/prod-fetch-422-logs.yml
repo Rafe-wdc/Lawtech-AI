@@ -1,0 +1,127 @@
+name: Prod Fetch 422 Logs (read-only diagnostic)
+
+# One-off workflow_dispatch — SSH'es into the prod box using the existing
+# deploy credentials and prints uvicorn access-log lines for HTTP 422
+# (Unprocessable Entity) responses in the last 24 hours. Read-only: no
+# files are deleted, modified, or created on prod. Output is printed
+# to the workflow logs only.
+#
+# Limitation: core/gateway.py's RequestValidationError handler does not
+# log the Pydantic error detail server-side (gateway.py:167-172). So the
+# only signal in prod logs is uvicorn's access-log line. To get the
+# missing-field detail, patch the handler to log exc.errors() at WARNING.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    name: Fetch 422 logs from prod
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Pull 422s from prod
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "=========================================================="
+          echo " 0. Box identity (confirm we're on api.lawttorney.com)"
+          echo "=========================================================="
+          hostname
+          curl -fsS https://api.lawttorney.com/pyapi/health 2>/dev/null | head -c 400 || echo "(health probe failed)"
+          echo
+          echo
+
+          echo "=========================================================="
+          echo " 1. Total 422 count from systemd journal (last 24h)"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep -c " 422 " \
+            | xargs echo "  Total 422 responses:"
+          echo
+
+          echo "=========================================================="
+          echo " 2. Breakdown by path (uvicorn access log format)"
+          echo "=========================================================="
+          # uvicorn access log: '... "METHOD /path HTTP/1.1" 422 ...'
+          sudo journalctl -u lawttorney-v2.service --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep " 422 " \
+            | grep -oE '"[A-Z]+ [^"]+ HTTP/[0-9.]+"' \
+            | sort | uniq -c | sort -rn | head -30
+          echo
+
+          echo "=========================================================="
+          echo " 3. Breakdown by client IP (top 20 — spot abusive callers)"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep " 422 " \
+            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+            | sort | uniq -c | sort -rn | head -20
+          echo
+
+          echo "=========================================================="
+          echo " 4. Last 50 raw 422 lines (timestamp + IP + method + path)"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep " 422 " \
+            | tail -50
+          echo
+
+          echo "=========================================================="
+          echo " 5. Hourly distribution (last 24h)"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep " 422 " \
+            | awk '{print $1, $2, $3}' \
+            | cut -d: -f1 \
+            | sort | uniq -c
+          echo
+
+          echo "=========================================================="
+          echo " 6. Cross-check: any validation_error references in agent.log?"
+          echo "    (RequestValidationError handler does not log details, so"
+          echo "     this is unlikely to show much — but worth confirming.)"
+          echo "=========================================================="
+          if [ -d /root/Lawtech-AI/logs ]; then
+            sudo grep -hi -E "validation_error|RequestValidationError|422" \
+                 /root/Lawtech-AI/logs/agent.log* 2>/dev/null \
+              | tail -30 \
+              || echo "  (no matches in /root/Lawtech-AI/logs/)"
+          else
+            echo "  (no /root/Lawtech-AI/logs directory)"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 7. Nginx access log 422s (if nginx logs them separately)"
+          echo "=========================================================="
+          for f in /var/log/nginx/access.log /var/log/nginx/api.lawttorney.com-access.log; do
+            if [ -f "$f" ]; then
+              echo "  -- $f --"
+              sudo grep " 422 " "$f" 2>/dev/null | tail -20 || echo "    (no 422s)"
+            fi
+          done
+          echo
+
+          echo "=========================================================="
+          echo " DIAGNOSTIC COMPLETE"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

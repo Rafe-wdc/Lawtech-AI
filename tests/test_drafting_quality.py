@@ -432,6 +432,99 @@ class TestDocTypeGate:
 
 
 # ---------------------------------------------------------------------------
+# Niche-format web fallback (Jun 2026): when the corpus has no match, the
+# selector grades it 'none' and the pipeline tries the open web for a real
+# template before falling back to a generic skeleton.
+#
+# These are pure-Python tests — no network — that lock the schema, generic
+# skeletons, and validator surface in place.
+# ---------------------------------------------------------------------------
+
+class TestNicheFormatWebFallback:
+    def test_template_source_has_quality_fields(self):
+        from agents.drafting import TemplateSource
+        fields = TemplateSource.model_fields
+        # The selector must now surface quality + reason so drafting_node
+        # can branch into the web-fallback path when the corpus misses.
+        assert "source" in fields
+        assert "match_quality" in fields
+        assert "reason" in fields
+
+    def test_generic_court_skeletons_exported(self):
+        from agents.drafting import GENERIC_COURT_SKELETONS
+        # Court-side doc types must have a terminal-fallback skeleton in
+        # case both BM25 and the web fail.
+        for t in ("court_filing", "tribunal_appellate", "agreement_deed", "affidavit"):
+            assert t in GENERIC_COURT_SKELETONS, f"{t} missing generic skeleton"
+            assert len(GENERIC_COURT_SKELETONS[t]) > 500, (
+                f"Generic skeleton for {t} looks too short"
+            )
+
+    def test_generic_court_filing_skeleton_shape(self):
+        from agents.drafting import GENERIC_COURT_SKELETONS
+        s = GENERIC_COURT_SKELETONS["court_filing"]
+        # Court-pleading scaffolding must be present
+        assert "IN THE" in s and "COURT OF" in s
+        assert "IN THE MATTER OF" in s
+        assert "Versus" in s
+        assert "PRAYER" in s
+        assert "VERIFICATION" in s
+
+    def test_generic_tribunal_skeleton_shape(self):
+        from agents.drafting import GENERIC_COURT_SKELETONS
+        s = GENERIC_COURT_SKELETONS["tribunal_appellate"]
+        assert "BEFORE THE HON" in s
+        assert "Appeal No" in s
+        assert "(Appellant)" in s
+        assert "(Respondent)" in s
+        assert "Vs." in s
+        # Court-pleading anti-signals (appellate is NOT a court filing)
+        assert "IN THE COURT OF" not in s
+        assert "Versus" not in s  # appellate uses "Vs." not "**Versus**"
+        # PRAYER is allowed for appellate (it's a written submission with a relief block)
+        assert "PRAYER" in s
+
+    def test_generic_agreement_skeleton_shape(self):
+        from agents.drafting import GENERIC_COURT_SKELETONS
+        s = GENERIC_COURT_SKELETONS["agreement_deed"]
+        assert "BETWEEN" in s and "AND" in s
+        assert "WHEREAS" in s or "Recital" in s
+        # Agreement anti-signals
+        assert "IN THE COURT OF" not in s
+        assert "PRAYER" not in s
+        assert "VERIFICATION" not in s
+
+    def test_generic_affidavit_skeleton_shape(self):
+        from agents.drafting import GENERIC_COURT_SKELETONS
+        s = GENERIC_COURT_SKELETONS["affidavit"]
+        assert "solemnly affirm" in s.lower() or "do hereby" in s.lower()
+        assert "DEPONENT" in s
+        assert "Notary" in s or "Oath Commissioner" in s
+
+    def test_generic_skeleton_for_unknown_doc_type_falls_back(self):
+        from agents.drafting import _generic_skeleton_for, GENERIC_COURT_SKELETONS
+        # Defensive default for a doc_type the dict doesn't know about
+        out = _generic_skeleton_for("totally_made_up_type")
+        assert out == GENERIC_COURT_SKELETONS["court_filing"]
+
+    def test_generic_skeleton_prefers_office_letter_for_office_types(self):
+        from agents.drafting import _generic_skeleton_for, SYNTHETIC_SKELETONS
+        # office_letter is in the synthetic skeletons (first-line gate),
+        # not GENERIC_COURT_SKELETONS. The helper must read from synthetic
+        # first.
+        out = _generic_skeleton_for("office_letter")
+        assert out == SYNTHETIC_SKELETONS["office_letter"]
+
+    def test_web_template_verdict_model_exists(self):
+        # The validator's Pydantic model must surface is_usable_template
+        # and reason. Import via private name since it's not exported.
+        from agents.drafting import _WebTemplateVerdict
+        fields = _WebTemplateVerdict.model_fields
+        assert "is_usable_template" in fields
+        assert "reason" in fields
+
+
+# ---------------------------------------------------------------------------
 # End-to-end (opt-in) -- partition suit regression
 # ---------------------------------------------------------------------------
 

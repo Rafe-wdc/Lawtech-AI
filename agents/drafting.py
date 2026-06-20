@@ -428,6 +428,35 @@ assembler.)
 
 class TemplateSource(BaseModel):
     source: str = Field(..., description="The most relevant source file path")
+    match_quality: str = Field(
+        "good",
+        description=(
+            "How well the chosen template matches the user's request. One of:\n"
+            "  - 'good': the template is a genuine match for the user's "
+            "specific doc type, statute, and subject. The drafter can use it "
+            "as the structural reference confidently.\n"
+            "  - 'marginal': the template is for the right family of "
+            "documents but misses the specific statute/section, or the "
+            "subject matter is adjacent rather than exact. The drafter can "
+            "still imitate its structure, but the substantive sections will "
+            "need to lean more on doctrine than on the template's prose.\n"
+            "  - 'none': none of the candidates is actually a usable "
+            "template for what the user asked. A bail application template "
+            "selected for an arbitration petition request is 'none', not "
+            "'marginal'. When the user's request names a specific statute / "
+            "section / forum and no candidate covers that statute or any "
+            "close cousin of it, return 'none'."
+        ),
+    )
+    reason: str = Field(
+        "",
+        description=(
+            "ONE SHORT SENTENCE explaining the match decision. For 'good' / "
+            "'marginal': what makes this the best of the candidates. For "
+            "'none': what specifically the user asked for that NO candidate "
+            "covers (statute, forum, subject)."
+        ),
+    )
 
 
 # --- Step 0.5: Doc-type classifier (pre-search gate) ---
@@ -826,18 +855,47 @@ TEMPLATE_SELECTION_PROMPT = """You are a legal AI assistant selecting the best l
 
 User wants to draft: {query}
 
+UPSTREAM DOC-TYPE CLASSIFICATION (from a separate classifier — trust this when picking a candidate's family):
+{doc_type_directive}
+
 {facts_summary}Select the MOST relevant template based on (a) the user's instruction, (b) the case context (when supplied above). The case context tells you what KIND of dispute/matter the user is dealing with (e.g. money recovery, divorce, bail, property dispute) — use that to pick a template whose document type matches the user's actual case, NOT just keyword overlap with the question.
 
 Each candidate shows the file path and a content preview:
 
 {candidates}
 
-Return only the file path of the best matching template."""
+PICK THE FILE PATH of the best candidate AND grade the match honestly:
+
+  - 'good': the candidate genuinely matches the user's specific doc type,
+    statute, and subject. Use it as the structural reference confidently.
+  - 'marginal': right family of documents, but the specific statute /
+    section / forum isn't the same. Still imitable for structure; doctrine
+    will carry the substance.
+  - 'none': none of the candidates is actually a usable template for what
+    the user asked. Return 'none' in any of these cases:
+      * The picked candidate is in a DIFFERENT DOC-TYPE FAMILY from the
+        upstream classification (e.g. classifier says 'court_filing' but
+        the closest candidate is an agreement/deed/contract template, OR
+        classifier says 'agreement_deed' but the closest candidate is a
+        court pleading). Topic overlap (e.g. both mention "arbitration")
+        is NOT enough — the family must match.
+      * The user names a specific statute / section / forum and no
+        candidate covers that statute or any close cousin of it.
+      * A bail application template was picked for an arbitration
+        petition request. A divorce petition template was picked for a
+        company-law winding-up petition. A sale deed template was picked
+        for a will. These are all 'none'.
+
+Be honest. 'none' triggers a web search for the real template — that's
+the correct outcome when the corpus genuinely lacks the requested format.
+Forcing a 'marginal' label onto a 'none' case produces a wrong-shaped
+draft and is worse than admitting the gap."""
 
 
 def _select_best_template(
     query: str, candidates: list[dict], user_facts: str = "",
-) -> tuple[str, list[str]]:
+    doc_type: str = "court_filing",
+) -> tuple[str, list[str], str, str]:
     """Use Gemini Flash to select the most relevant template.
 
     Shows content previews alongside file paths for better selection.
@@ -845,7 +903,10 @@ def _select_best_template(
     of the case context is included in the selection prompt so the LLM picks
     a template matching the user's actual case (BUG-05) — not just one whose
     preview shares keywords with the user's question.
-    Returns (selected_source, all_valid_paths) for fallback support.
+
+    Returns (selected_source, all_valid_paths, match_quality, reason).
+    `match_quality` is one of 'good' / 'marginal' / 'none' and drives the
+    web-fallback decision in `drafting_node`.
     """
     valid_paths = list(dict.fromkeys(c["_source"]["source"] for c in candidates))
 
@@ -859,6 +920,17 @@ def _select_best_template(
             f"use this to identify the case type, not the template's example):\n"
             f"{user_facts.strip()[:1500]}\n\n"
         )
+
+    # Short directive for the upstream doc-type classification. The
+    # selector uses this to refuse cross-family picks (e.g. agreement
+    # template selected for a court_filing request → grade as 'none').
+    doc_type_directive = (
+        f"The upstream classifier graded the user's request as **{doc_type}**. "
+        f"If the only candidates the corpus offers are clearly in a different "
+        f"doc-type family (e.g. private agreements/deeds when {doc_type} is "
+        f"court_filing, or court pleadings when {doc_type} is agreement_deed), "
+        f"grade 'none' regardless of topic overlap."
+    )
 
     with log_time(log, "Template selection (LLM)"):
         # Build candidate list with previews
@@ -877,12 +949,19 @@ def _select_best_template(
             "query": query,
             "candidates": "\n".join(candidate_lines),
             "facts_summary": facts_summary,
+            "doc_type_directive": doc_type_directive,
         })
     from core.token_tracker import record as _record_tokens
     _record_tokens("Drafting", "select_template", raw_and_parsed.get("raw"))
     result = raw_and_parsed["parsed"]
 
     selected = result.source.strip()
+    match_quality = (result.match_quality or "good").strip().lower()
+    if match_quality not in ("good", "marginal", "none"):
+        log.warning("Template selector returned unknown match_quality, defaulting to 'marginal'",
+                    returned=match_quality)
+        match_quality = "marginal"
+    reason = (result.reason or "")[:300]
 
     # Validate: ensure selected path exists in candidates
     if selected not in valid_paths:
@@ -897,7 +976,664 @@ def _select_best_template(
                         returned=selected)
             selected = valid_paths[0]
 
-    return selected, valid_paths
+    log.info("Template selected",
+             template=selected[-60:],
+             match_quality=match_quality,
+             reason=reason[:160])
+
+    return selected, valid_paths, match_quality, reason
+
+
+# --- Step 2.5: Web-template fallback (when corpus has no match) ---
+#
+# Fires only when the template-selector LLM grades all candidates as 'none'.
+# Same Gemini 2.5 Flash + Google Search grounding primitive used by other
+# domain agents (see core/agent_fallback.py), but specialized for fetching a
+# document format/template rather than a substantive legal answer.
+#
+# The output is a markdown skeleton that the outline LLM can imitate the
+# same way it imitates a corpus template. A separate LLM validator
+# (`_validate_web_template`) gates whether the web result is actually a
+# usable template or just a prose explanation / refusal — without the
+# validator we'd happily feed "I cannot find a template" into the outline
+# LLM and produce garbage. On any failure the caller falls back to a
+# doc-type-specific generic skeleton (see `GENERIC_COURT_SKELETONS`).
+
+_WEB_TEMPLATE_FETCH_PROMPT = """You are a senior Indian-law draftsman. The
+user wants a draft format that is NOT in our local template library, so we
+need to fetch a real one from authoritative legal sources on the open web.
+
+USER REQUEST:
+{query}
+
+CLASSIFIED DOC TYPE: {doc_type}
+
+YOUR TASK:
+1. Use web search to find authentic Indian-law sample formats / templates
+   for this specific request. Prefer authoritative sources: court websites
+   (delhihighcourt.nic.in, bombayhighcourt.nic.in, etc.), legal databases
+   (indiankanoon.org, scconline.com, livelaw.in, barandbench.com,
+   manupatra.com), and reputed legal blogs (lawbhoomi.com,
+   advocatekhoj.com). AVOID generic SEO-template sites that sell drafts.
+2. Synthesize the BEST TEMPLATE FORMAT for the user's specific request.
+   The format must follow ESTABLISHED Indian-law conventions for that
+   doc type — correct forum / cause-title / statute citation / section
+   structure / prayer style (or "request" style for letters) / verification.
+3. Emit the template as a MARKDOWN SKELETON. Use `<PLACEHOLDER>` style
+   blanks for the user-specific values (`<Petitioner Name>`,
+   `<Address>`, `<Date>`, `<Section X>`, `<Forum>`, etc.). Do NOT invent
+   facts; this is a TEMPLATE, not a filled-in draft.
+4. Cover, in order: title block, cause-title / addressee block, opening
+   paragraph, body sections (numbered, with headers), prayer / request
+   / closing, verification or signature block — whatever the doc type
+   conventionally carries.
+
+OUTPUT FORMAT:
+Emit ONLY the markdown template body. No preamble, no "Here is the
+template:", no closing commentary. The first character of your response
+must be the title block of the template (e.g. `**IN THE COURT OF ...**`
+or `**APPLICATION FOR ...**`).
+
+If you cannot find authoritative source material for this specific
+template, emit the literal string `NO_TEMPLATE_FOUND` and nothing else.
+We have a fallback for that case."""
+
+
+async def _fetch_template_from_web(
+    query: str,
+    doc_type: str,
+    timeout_sec: float = 45.0,
+) -> tuple[str, list[str]]:
+    """Fetch a template skeleton from the open web using Gemini + Google Search.
+
+    Returns (markdown_skeleton, grounding_urls). On failure or
+    NO_TEMPLATE_FOUND, returns ("", []).
+    """
+    from core.clients import get_genai_client
+    from core.settings import MODELS
+    log.info("Web template fetch started",
+             query=query[:120], doc_type=doc_type)
+    try:
+        client = get_genai_client()
+        prompt_text = _WEB_TEMPLATE_FETCH_PROMPT.format(
+            query=query[:2000], doc_type=doc_type,
+        )
+
+        _primary = MODELS["scenario_web_grounded"]
+        response = None
+        for model in [_primary, "gemini-2.5-pro"]:
+            try:
+                with log_time(log, f"Web template fetch ({model})"):
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            client.models.generate_content,
+                            model=model,
+                            contents=[prompt_text],
+                            config={
+                                "tools": [{"google_search": {}}],
+                                "max_output_tokens": 6000,
+                                "temperature": 0.3,
+                                "top_p": 0.9,
+                            },
+                        ),
+                        timeout=timeout_sec,
+                    )
+                break
+            except Exception as model_err:
+                if "503" in str(model_err) and model == _primary:
+                    log.warning("Web template fetch — Flash 503, retrying Pro",
+                                error=str(model_err)[:120])
+                    await asyncio.sleep(1)
+                    continue
+                raise
+
+        if response is None:
+            return "", []
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning("Web template fetch returned empty content")
+            return "", []
+
+        text = (response.candidates[0].content.parts[0].text or "").strip()
+
+        # Strip optional code fences the model sometimes wraps templates in
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+
+        if not text or text == "NO_TEMPLATE_FOUND":
+            log.info("Web template fetch — model declined / no source",
+                     doc_type=doc_type)
+            return "", []
+
+        # Pull grounding URLs for attribution
+        grounding_urls: list[str] = []
+        try:
+            candidate = response.candidates[0]
+            grounding_meta = getattr(candidate, "grounding_metadata", None)
+            if grounding_meta:
+                seen = set()
+                for chunk in getattr(grounding_meta, "grounding_chunks", None) or []:
+                    web = getattr(chunk, "web", None)
+                    if web:
+                        url = getattr(web, "uri", None)
+                        if url and url not in seen:
+                            seen.add(url)
+                            grounding_urls.append(url)
+        except Exception as ge:
+            log.debug("Web template fetch — grounding extraction failed",
+                      error=str(ge)[:120])
+
+        log.info("Web template fetched",
+                 doc_type=doc_type,
+                 chars=len(text),
+                 sources=len(grounding_urls))
+        return text, grounding_urls
+
+    except Exception as e:
+        log.warning("Web template fetch failed; caller will use synthetic skeleton",
+                    error=str(e)[:200])
+        return "", []
+
+
+# --- Step 2.6: Web-template validator (LLM, no regex) ---
+#
+# The web fetcher may return a refusal ("I couldn't find..."), a prose
+# explanation ("In India, a bail application is..."), or an actual
+# template. We need to distinguish before feeding the result to the
+# outline LLM. Pure-LLM judgment — no regex / structural heuristics — so
+# this scales to any future doc type without code changes.
+
+# --- Step 2.55: Family-mismatch verifier (LLM, escalates marginal → none) ---
+#
+# The template-selector LLM sometimes rationalizes topical overlap into
+# 'marginal' when the picked template is actually in a different doc-type
+# family from what the user asked for (e.g. arbitration-AGREEMENT template
+# selected for an arbitration-COURT-APPLICATION request). The verifier
+# runs ONLY on 'marginal' picks, gets a closer look at the selected
+# template's actual body, and escalates to 'none' (triggers web fetch)
+# when the family is wrong. 'good' picks skip this — they're already
+# confirmed; 'none' picks skip this — they already trigger web fetch.
+
+class _FamilyCheckVerdict(BaseModel):
+    is_correct_family: bool = Field(
+        ...,
+        description=(
+            "True ONLY if the selected template is in the SAME doc-type "
+            "family as the user's request (both court filings; both "
+            "agreements; both letters; etc.). False when the family is "
+            "wrong — e.g. a private arbitration agreement was picked for "
+            "a Section 9 A&C Act court application; a divorce petition "
+            "was picked for a company-law winding-up petition. Topic "
+            "overlap is NOT enough — the family must match."
+        ),
+    )
+    reason: str = Field("", description="One short sentence justifying the verdict.")
+
+
+_FAMILY_CHECK_PROMPT = """The template-selector LLM graded the chosen template
+as 'marginal'. Verify whether the selected template is in the SAME doc-type
+family as the user's request, or whether it's in a DIFFERENT family
+(family-mismatch → escalate to 'none' → web fetch).
+
+USER REQUEST:
+{query}
+
+UPSTREAM CLASSIFICATION (doc-type family the user actually asked for):
+{doc_type}
+
+SELECTED TEMPLATE PREVIEW (first 1500 chars of the template body):
+{template_preview}
+
+SELECTOR'S REASON FOR PICKING IT:
+{selector_reason}
+
+A doc-type family is one of:
+  - court_filing (plaints, petitions, written statements, court applications,
+    bail, IA, magistrate complaints, writs, SLPs)
+  - tribunal_appellate (CIT(A), ITAT, GST appellate, NCLT written submissions)
+  - office_letter (RTI, certificate request, leave / NOC letters to admin authority)
+  - police_complaint (letter to SHO for FIR)
+  - legal_notice (Section 138 NI Act, demand notice, reply to legal notice)
+  - agreement_deed (agreement, MOU, deed, lease, sale, gift, will)
+  - affidavit (standalone sworn statement)
+
+EXAMPLES OF FAMILY-MISMATCH (return is_correct_family=false):
+  - User wants a Section 9 A&C Act court application (court_filing). Template
+    is an "Agreement of Reference to Arbitrator" (agreement_deed). Topic
+    overlaps (arbitration) but family is WRONG.
+  - User wants a winding-up petition under Companies Act (court_filing).
+    Template is a "Memorandum of Association" (agreement_deed). Topic overlaps
+    (company law) but family is WRONG.
+  - User wants an RTI application (office_letter). Template is a "Section
+    200 CrPC complaint" (court_filing). Wrong family.
+
+Return is_correct_family=true ONLY when the user's family and the template's
+family are the same.
+"""
+
+
+async def _verify_template_family(
+    query: str,
+    doc_type: str,
+    template_preview: str,
+    selector_reason: str,
+) -> tuple[bool, str]:
+    """Second-pass check for 'marginal' template picks. Returns
+    (is_correct_family, reason). On failure → returns (True, ...) — keep
+    the corpus pick if the verifier itself errors. We never silently
+    escalate to web on a verifier error.
+    """
+    if not template_preview.strip():
+        return True, "empty preview"
+    try:
+        with log_time(log, "Template family verification"):
+            from langchain.chat_models import init_chat_model
+            llm = init_chat_model(
+                "google_genai:gemini-2.5-flash-lite",
+                temperature=0.0,
+            ).with_structured_output(_FamilyCheckVerdict, include_raw=True)
+            prompt = ChatPromptTemplate.from_template(_FAMILY_CHECK_PROMPT)
+            chain = prompt | llm
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({
+                    "query": query[:1500],
+                    "doc_type": doc_type,
+                    "template_preview": template_preview[:1500],
+                    "selector_reason": (selector_reason or "")[:400],
+                }),
+                timeout=12,
+            )
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "verify_template_family",
+                       raw_and_parsed.get("raw"))
+        verdict = raw_and_parsed["parsed"]
+        log.info("Template family verified",
+                 doc_type=doc_type,
+                 is_correct_family=verdict.is_correct_family,
+                 reason=(verdict.reason or "")[:160])
+        return bool(verdict.is_correct_family), (verdict.reason or "")
+    except Exception as e:
+        log.warning("Template family verification failed -- keeping corpus pick",
+                    error=str(e)[:200])
+        return True, f"verifier error: {str(e)[:120]}"
+
+
+class _WebTemplateVerdict(BaseModel):
+    is_usable_template: bool = Field(
+        ...,
+        description=(
+            "True ONLY if the input is a structured legal draft format/"
+            "template that follows established Indian-law conventions for "
+            "the named doc type — has a cause-title or addressee block, "
+            "numbered body sections, and a closing convention. False for "
+            "prose explanations, model refusals, blog posts, partial "
+            "fragments, or templates that are clearly for a different "
+            "doc type than what the user asked for."
+        ),
+    )
+    reason: str = Field("", description="One short sentence justifying the verdict.")
+
+
+_WEB_TEMPLATE_VALIDATOR_PROMPT = """You are quality-checking a TEMPLATE we
+pulled from the open web before using it to draft an Indian-law document.
+
+USER REQUEST:
+{query}
+
+EXPECTED DOC TYPE (from upstream classifier):
+{doc_type}
+
+WEB-FETCHED CONTENT (first 4000 chars):
+{template_text}
+
+Verdict: is this a USABLE template? A usable template:
+  - is a structured draft FORMAT (markdown skeleton, placeholders for
+    user-specific values), NOT a prose explanation of how to draft
+    something.
+  - follows established Indian-law conventions for the expected doc type
+    (court cause-title for a court_filing; To, addressee + Subject for an
+    office_letter; appellate "BEFORE THE HON'BLE" + Vs. for tribunal_
+    appellate; etc.).
+  - covers the document end-to-end: opening block + body sections +
+    closing/prayer/request/verification — NOT a fragment.
+  - matches the user's specific doc type. A bail-application template
+    when the user asked for an arbitration petition is NOT usable.
+
+Return is_usable_template=true ONLY if all four hold. Otherwise false.
+Be honest — false triggers a synthetic-skeleton fallback that produces
+a clean (if generic) draft, which is better than a wrong-shaped one.
+"""
+
+
+async def _validate_web_template(
+    template_text: str, doc_type: str, query: str,
+) -> tuple[bool, str]:
+    """Ask Flash-Lite whether the web-fetched content is actually a usable
+    template. Returns (is_usable, reason). On any failure → (False, ...) so
+    the caller falls back to the generic skeleton.
+    """
+    if not template_text.strip():
+        return False, "empty template"
+    try:
+        with log_time(log, "Web template validation"):
+            from langchain.chat_models import init_chat_model
+            llm = init_chat_model(
+                "google_genai:gemini-2.5-flash-lite",
+                temperature=0.0,
+            ).with_structured_output(_WebTemplateVerdict, include_raw=True)
+            prompt = ChatPromptTemplate.from_template(_WEB_TEMPLATE_VALIDATOR_PROMPT)
+            chain = prompt | llm
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({
+                    "query": query[:2000],
+                    "doc_type": doc_type,
+                    "template_text": template_text[:4000],
+                }),
+                timeout=15,
+            )
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "validate_web_template",
+                       raw_and_parsed.get("raw"))
+        verdict = raw_and_parsed["parsed"]
+        log.info("Web template validated",
+                 is_usable=verdict.is_usable_template,
+                 reason=(verdict.reason or "")[:160])
+        return bool(verdict.is_usable_template), (verdict.reason or "")
+    except Exception as e:
+        log.warning("Web template validation failed -- treating as unusable",
+                    error=str(e)[:200])
+        return False, f"validation error: {str(e)[:120]}"
+
+
+# --- Step 2.7: Generic court skeletons (terminal fallback) ---
+#
+# When the corpus has no match AND the web fetch fails / is unusable, we
+# still produce a usable draft by feeding the outline LLM one of these
+# generic court skeletons — picked by doc_type. They are intentionally
+# bare-bones (just enough scaffolding for the outline LLM to produce a
+# coherent structure) so the LLM has to do the doctrinal work itself.
+
+_GENERIC_COURT_FILING_SKELETON = """**IN THE HON'BLE COURT OF <FORUM>, AT <CITY>**
+
+**<CASE TYPE> NO. _______ OF <YEAR>**
+
+**IN THE MATTER OF:**
+
+<Petitioner / Applicant Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+.....Petitioner / Applicant
+
+**Versus**
+
+<Respondent Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+.....Respondent
+
+**<SUBJECT HEADING — describe the specific application/petition>**
+
+MOST RESPECTFULLY SHOWETH:
+
+1. <Identity and standing of the petitioner / applicant>
+
+2. <Brief facts giving rise to the cause of action, chronological>
+
+3. <Statutory / jurisdictional basis for invoking this court — cite the
+   exact section, rule, or article>
+
+4. <Substantive grounds, one per paragraph>
+
+5. <Cause of action and limitation>
+
+6. <Jurisdiction (territorial + pecuniary) with statutory citations>
+
+**PRAYER:**
+
+It is therefore most respectfully prayed that this Hon'ble Court may be
+pleased to:
+
+(a) <Primary relief sought, with statutory citation>
+
+(b) <Secondary / interim relief, if any>
+
+(c) <Costs of the proceeding>
+
+(d) Pass such other and further orders as this Hon'ble Court may deem
+fit and proper in the facts and circumstances of the case, in the
+interest of justice.
+
+**VERIFICATION:**
+
+I, <Petitioner Name>, the Petitioner above-named, do hereby verify that
+the contents of paragraphs <X> to <Y> are true to my personal knowledge,
+those of paragraphs <X> to <Y> are based on legal advice received which
+I believe to be true, and nothing material has been concealed therefrom.
+
+Verified at <City> on this <Date>.
+
+Petitioner
+"""
+
+_GENERIC_TRIBUNAL_APPELLATE_SKELETON = """**BEFORE THE HON'BLE <APPELLATE FORUM>, <JURISDICTION>**
+
+**Appeal No. <Number>  |  Assessment Year: <AY> / Period: <Period>**
+
+**IN THE MATTER OF:**
+
+<Appellant Full Name>  PAN/GSTIN: <ID>
+
+(Appellant)
+
+Vs.
+
+<Respondent Designation, e.g. "The Assessing Officer / Joint Commissioner">
+
+(Respondent)
+
+**Subject: Written Submission in respect of Appeal against the
+<Impugned Order Type> dated <DD.MM.YYYY> passed under Section <X> of the
+<Statute Name>.**
+
+Most Respectfully Showeth:
+
+The Appellant files this written submission in support of the grounds of
+appeal raised against the impugned <assessment order / adjudication order>.
+
+## 1. STATEMENT OF FACTS OF THE CASE
+
+1. <Chronological narrative of how the impugned order was passed,
+   8-12 numbered paragraphs.>
+
+## 2. GROUNDS OF APPEAL (as filed in Form 35)
+
+<List each ground as filed; one short paragraph per ground.>
+
+## 3. DETAILED WRITTEN SUBMISSION
+
+**Re: Ground No. 1 — <ground title>**
+
+<Detailed legal argumentation, full citation of supporting case laws,
+rebuttal of the lower authority's reasoning, distinguishing case laws
+relied upon.>
+
+**Re: Ground No. 2 — <ground title>**
+
+<As above.>
+
+## 4. PRAYER
+
+It is respectfully prayed that the Hon'ble <Forum> may be pleased to:
+
+(a) Allow the appeal in its entirety.
+
+(b) Annul / set aside the impugned order dated <date>.
+
+(c) Delete the additions / disallowances / penalties.
+
+(d) Pass any other order that the Hon'ble Forum deems fit in the
+interest of justice.
+
+## 5. REQUEST FOR VIDEO CONFERENCING HEARING
+
+The Appellant respectfully prays for an opportunity of personal hearing
+through video conferencing before final disposal of this appeal.
+
+Place: <City>
+
+Date: <Date>
+
+<Appellant Name>
+"""
+
+_GENERIC_AGREEMENT_SKELETON = """**<AGREEMENT TITLE>**
+
+**THIS <AGREEMENT / DEED / MOU / WILL> IS MADE AND EXECUTED ON THIS <date>**
+
+**BETWEEN**
+
+<First Party Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+(hereinafter referred to as the "<First Party Role>")
+
+**AND**
+
+<Second Party Full Name>
+
+Age: <age>, Occupation: <occupation>
+
+R/ Address: <residential address>
+
+(hereinafter referred to as the "<Second Party Role>")
+
+**WHEREAS:**
+
+A. <Recital 1 — background fact relevant to the agreement>
+
+B. <Recital 2>
+
+C. <Recital 3>
+
+**NOW THIS DEED WITNESSETH AS FOLLOWS:**
+
+## 1. DEFINITIONS AND INTERPRETATION
+
+<Terms used in the agreement with their defined meanings.>
+
+## 2. SUBJECT MATTER
+
+<Description of the property / service / obligation being transacted.>
+
+## 3. CONSIDERATION
+
+<Amount / mode / time of payment of consideration.>
+
+## 4. COVENANTS AND OBLIGATIONS
+
+<Specific covenants undertaken by each party.>
+
+## 5. REPRESENTATIONS AND WARRANTIES
+
+<Each party's representations as to capacity, title, and authority.>
+
+## 6. TERM AND TERMINATION
+
+<Duration of the agreement and circumstances of termination.>
+
+## 7. DISPUTE RESOLUTION AND GOVERNING LAW
+
+This agreement shall be governed by and construed in accordance with
+the laws of India. Any dispute arising out of or in connection with
+this agreement shall be referred to arbitration / the courts at <city>.
+
+## 8. INDEMNITY
+
+<Indemnification clauses.>
+
+## 9. EXECUTION
+
+IN WITNESS WHEREOF the parties hereto have set their hands on the day,
+month and year first above written.
+
+<First Party Signature>                  <Second Party Signature>
+
+WITNESSES:
+
+1. <Witness 1 Name and Signature>
+
+2. <Witness 2 Name and Signature>
+"""
+
+_GENERIC_AFFIDAVIT_SKELETON = """**AFFIDAVIT**
+
+I, <Deponent Full Name>, son / daughter / wife of <Father / Husband Name>,
+aged <age> years, occupation <occupation>, residing at <Deponent Address>,
+do hereby solemnly affirm and declare as under:
+
+1. <Identification of the deponent and standing to swear this affidavit>
+
+2. <Fact 1 being sworn to>
+
+3. <Fact 2 being sworn to>
+
+4. <Fact 3 being sworn to — add as many numbered paragraphs as the facts require>
+
+5. I state that the contents of the above paragraphs are true to my
+personal knowledge and nothing material has been concealed therefrom.
+
+Verified at <City> on this <Date> day of <Month>, <Year> that the
+contents of the above affidavit are true and correct to the best of my
+knowledge and belief.
+
+<Deponent Signature>
+
+DEPONENT
+
+Attested before me on <Date>:
+
+<Notary Public / Oath Commissioner>
+"""
+
+# Maps doc_type → generic skeleton for terminal fallback.
+# office_letter / police_complaint / legal_notice already use the
+# (different) SYNTHETIC_SKELETONS — those are the FIRST-LINE fallback for
+# doc types our corpus never covers. GENERIC_COURT_SKELETONS is the
+# LAST-LINE fallback for the remaining doc types when corpus AND web both
+# fail.
+GENERIC_COURT_SKELETONS = {
+    "court_filing": _GENERIC_COURT_FILING_SKELETON,
+    "tribunal_appellate": _GENERIC_TRIBUNAL_APPELLATE_SKELETON,
+    "agreement_deed": _GENERIC_AGREEMENT_SKELETON,
+    "affidavit": _GENERIC_AFFIDAVIT_SKELETON,
+}
+
+
+def _generic_skeleton_for(doc_type: str) -> str:
+    """Return the terminal-fallback skeleton for `doc_type`.
+
+    First checks the office-letter-family synthetic skeletons (the gate from
+    the previous commit), then the generic court skeletons. Returns the
+    `court_filing` skeleton as a defensive default if `doc_type` is unknown.
+    """
+    return (
+        SYNTHETIC_SKELETONS.get(doc_type)
+        or GENERIC_COURT_SKELETONS.get(doc_type)
+        or _GENERIC_COURT_FILING_SKELETON
+    )
 
 
 # --- Step 3: Generate Document Outline ---
@@ -3494,6 +4230,16 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
         use_skeleton = doc_type in DOC_TYPES_USE_SKELETON
 
+        # Path-tracking flags. Initialized here so they exist in every
+        # branch (skeleton / corpus-hit / web-fallback / generic-fallback)
+        # and can be inspected by post-processing (source attribution,
+        # outline gen, format-spec skip).
+        used_web_template = False
+        used_generic_skeleton = False
+        web_template_urls: list[str] = []
+        match_quality = "good"      # corpus-hit path overrides this
+        match_reason = ""           # corpus-hit path overrides this
+
         if use_skeleton:
             # No ES search. Use the synthetic skeleton lifted from Layout B/D/F.
             template_text = SYNTHETIC_SKELETONS[doc_type]
@@ -3525,58 +4271,164 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
             # Step 2: Select best template (previews + case-context + validation)
             progress("drafting", "Selecting best template...", step="select")
-            selected_source, all_paths = await asyncio.to_thread(
-                _select_best_template, query, hits, user_facts,
+            selected_source, all_paths, match_quality, match_reason = await asyncio.to_thread(
+                _select_best_template, query, hits, user_facts, doc_type,
             )
             template_display_name = os.path.splitext(os.path.basename(selected_source))[0]
-            progress("drafting", f"Selected: {template_display_name[:60]}", substep=True, step="select")
-            log.info("Template selected", template=selected_source)
+            progress(
+                "drafting",
+                f"Selected: {template_display_name[:60]} ({match_quality})",
+                substep=True, step="select",
+            )
 
-            # Step 3: Fetch the full template document
-            source_query = {
-                "size": 1,
-                "query": {"term": {"source.keyword": selected_source}},
-                "_source": ["page_content", "source"],
-            }
-            source_response = es.search(index=index, body=source_query)
-            source_hits = source_response["hits"]["hits"]
+            # Step 2.5: Niche-format fallback.
+            # When the selector says 'none', BM25 returned no genuine match
+            # (e.g. an arbitration petition under Section 9 of the A&C Act
+            # is not in our corpus). Try the open web first; if Gemini +
+            # Google Search returns a usable template AND the LLM validator
+            # confirms it's a real format (not a refusal / prose blurb),
+            # use it. Otherwise fall through to a doc-type-keyed generic
+            # skeleton.
+            #
+            # 'marginal' picks go through a family-mismatch verifier first.
+            # The selector LLM sometimes rationalizes topical overlap into
+            # 'marginal' when the picked template is actually in a different
+            # doc-type family from what the user asked for (e.g. arbitration
+            # AGREEMENT picked for a Section 9 A&C Act court APPLICATION). The
+            # verifier reads the picked template's body and escalates to
+            # 'none' (triggers web fetch) when the family is wrong.
+            web_template_urls = []  # reset for this branch; see top-level init
+            if match_quality == "marginal":
+                # Fetch the selected template's body first so the verifier
+                # can read it. (The same body is reused downstream — no
+                # duplicate ES call.)
+                _verifier_source_response = es.search(index=index, body={
+                    "size": 1,
+                    "query": {"term": {"source.keyword": selected_source}},
+                    "_source": ["page_content"],
+                })
+                _verifier_hits = _verifier_source_response["hits"]["hits"]
+                _verifier_preview = (
+                    _verifier_hits[0]["_source"].get("page_content", "")[:1800]
+                    if _verifier_hits else ""
+                )
+                if _verifier_preview:
+                    is_correct_family, family_reason = await _verify_template_family(
+                        query=query,
+                        doc_type=doc_type,
+                        template_preview=_verifier_preview,
+                        selector_reason=match_reason,
+                    )
+                    if not is_correct_family:
+                        log.info("Marginal pick escalated to 'none' by family verifier",
+                                 doc_type=doc_type,
+                                 reason=family_reason)
+                        match_quality = "none"
+                        match_reason = (
+                            f"family-mismatch escalation: {family_reason}"
+                        )
 
-            # Fallback: try next-best candidate if selected template not found
-            if not source_hits:
-                log.warning("Selected template not found, trying fallback",
-                            template=selected_source)
-                for path in all_paths:
-                    if path == selected_source:
-                        continue
-                    fb_resp = es.search(index=index, body={
-                        "size": 1,
-                        "query": {"term": {"source.keyword": path}},
-                        "_source": ["page_content", "source"],
-                    })
-                    if fb_resp["hits"]["hits"]:
-                        source_hits = fb_resp["hits"]["hits"]
-                        selected_source = path
-                        log.info("Using fallback template", template=path)
-                        break
+            if match_quality == "none":
+                log.info("Selector graded all corpus candidates as 'none'; "
+                         "trying web fallback",
+                         reason=match_reason)
+                progress("drafting",
+                         "No corpus match — searching the web for a real template...",
+                         step="web_template_fetch")
+                web_text, web_template_urls = await _fetch_template_from_web(
+                    query, doc_type,
+                )
+                is_usable = False
+                if web_text:
+                    is_usable, val_reason = await _validate_web_template(
+                        web_text, doc_type, query,
+                    )
+                    if is_usable:
+                        template_text = web_text
+                        selected_source = f"<web:{doc_type}>"
+                        template_language = user_language
+                        format_block = ""
+                        used_web_template = True
+                        log.info("Web template accepted by validator",
+                                 chars=len(web_text),
+                                 sources=len(web_template_urls))
+                        progress(
+                            "drafting",
+                            f"Web template adopted ({len(web_template_urls)} sources)",
+                            substep=True, step="web_template_fetch",
+                        )
+                    else:
+                        log.warning("Web template rejected by validator",
+                                    reason=val_reason)
+                if not used_web_template:
+                    template_text = _generic_skeleton_for(doc_type)
+                    selected_source = f"<generic:{doc_type}>"
+                    template_language = user_language
+                    format_block = ""
+                    used_generic_skeleton = True
+                    log.info("Falling back to generic skeleton",
+                             doc_type=doc_type)
+                    progress(
+                        "drafting",
+                        "Using a generic skeleton for this niche format",
+                        substep=True, step="web_template_fetch",
+                    )
 
-            if not source_hits:
-                return {
-                    "agent_results": {"Drafting": AgentResult(
-                        agent_name="Drafting", content="", sources=[],
-                        tokens_consumed=0,
-                        error=f"Template source not found: {selected_source}",
-                    )},
+            # Step 3 (regular path): fetch the full template from the index.
+            # Skipped when we already adopted a web template or generic
+            # skeleton above.
+            if not (used_web_template or used_generic_skeleton):
+                source_query = {
+                    "size": 1,
+                    "query": {"term": {"source.keyword": selected_source}},
+                    "_source": ["page_content", "source"],
                 }
+                source_response = es.search(index=index, body=source_query)
+                source_hits = source_response["hits"]["hits"]
 
-            template_text = source_hits[0]["_source"]["page_content"]
-            log.debug("Template loaded",
-                      template=selected_source, template_len=len(template_text))
+                # Fallback: try next-best candidate if selected template not found
+                if not source_hits:
+                    log.warning("Selected template not found, trying fallback",
+                                template=selected_source)
+                    for path in all_paths:
+                        if path == selected_source:
+                            continue
+                        fb_resp = es.search(index=index, body={
+                            "size": 1,
+                            "query": {"term": {"source.keyword": path}},
+                            "_source": ["page_content", "source"],
+                        })
+                        if fb_resp["hits"]["hits"]:
+                            source_hits = fb_resp["hits"]["hits"]
+                            selected_source = path
+                            log.info("Using fallback template", template=path)
+                            break
+
+                if not source_hits:
+                    # Last-ditch: rather than error out, generic-skeleton it.
+                    log.warning("Template source not found in ES; using generic skeleton",
+                                template=selected_source)
+                    template_text = _generic_skeleton_for(doc_type)
+                    selected_source = f"<generic:{doc_type}>"
+                    template_language = user_language
+                    format_block = ""
+                    used_generic_skeleton = True
+                else:
+                    template_text = source_hits[0]["_source"]["page_content"]
+                    log.debug("Template loaded",
+                              template=selected_source,
+                              template_len=len(template_text))
 
         # Step 3.7 / 3.75: Layout/format conventions + template-language
-        # detection. Skipped entirely when using the synthetic skeleton —
-        # we already know its language (= user_language) and there's no
-        # template-specific layout to imitate beyond the skeleton itself.
-        if use_skeleton:
+        # detection. Skipped entirely when using any synthetic / web /
+        # generic skeleton — language is known (= user_language) and the
+        # skeleton already encodes its own layout conventions.
+        synthetic_path = (
+            use_skeleton                              # office_letter family
+            or used_web_template                      # web-fetched skeleton
+            or used_generic_skeleton                  # terminal generic fallback
+        )
+        if synthetic_path:
             format_block = ""
             template_language = user_language
         else:
@@ -3794,18 +4646,33 @@ async def drafting_node(state: LegalAgentState) -> dict:
                             error=str(refine_err))
 
         template_display = os.path.splitext(os.path.basename(selected_source))[0]
+        # Build source attribution. For web-fallback drafts, add a separate
+        # SourceMetadata entry per grounding URL so the user can see where
+        # the template came from.
+        sources = [SourceMetadata(
+            source_type="drafting",
+            title=template_display,
+            content=[template_text[:300]],
+            file_name=selected_source,
+            agent_name="Drafting",
+            template_type=template_display,
+        )]
+        if used_web_template and web_template_urls:
+            for url in web_template_urls[:8]:
+                sources.append(SourceMetadata(
+                    source_type="drafting",
+                    title="Web template source",
+                    web_url=url,
+                    web_title=url,
+                    agent_name="Drafting",
+                ))
+
         result = AgentResult(
             agent_name="Drafting",
             content=full_draft,
-            sources=[SourceMetadata(
-                source_type="drafting",
-                title=template_display,
-                content=[template_text[:300]],
-                file_name=selected_source,
-                agent_name="Drafting",
-                template_type=template_display,
-            )],
+            sources=sources,
             tokens_consumed=total_tokens,
+            fallback_used=(used_web_template or used_generic_skeleton),
             meta=(
                 {"draft_warnings": draft_warnings}
                 if draft_warnings else {}

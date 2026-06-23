@@ -4816,10 +4816,19 @@ async def drafting_node(state: LegalAgentState) -> dict:
         if full_draft and not failed_indices and intent_obj is not None:
             try:
                 progress("drafting", "Auditing draft against your directives...", step="self_refine")
+                # Pass source_languages so the critic force-runs (and the
+                # English-strict rule fires) when the source PDF is in a
+                # non-target script. Prod test on 2026-06-24 showed Marathi
+                # tokens like "दस्त क्र. 637/2023" surviving in otherwise-
+                # English replies; without this, the critic skipped the
+                # response because intent.language='en' alone wasn't a
+                # directive worth auditing.
+                _refine_source_langs = detect_source_languages(user_facts, case_facts)
                 refined_draft, refine_history = await self_refine(
                     full_draft,
                     user_query=query,
                     intent=intent_obj,
+                    source_languages=_refine_source_langs,
                 )
                 if refined_draft != full_draft:
                     log.info(

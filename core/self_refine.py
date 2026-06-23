@@ -206,15 +206,33 @@ Examples of how intent fields translate to checks:
     → The response must be written entirely in English using the Latin
       script. Flag any non-Latin script (Devanagari, Tamil, Bengali, Telugu,
       Kannada, Malayalam, Gujarati, Gurmukhi, Odia, Arabic) appearing in the
-      response body as a MAJOR violation. The ONLY narrow exception is a
-      verbatim case-name proper noun that is inherently in another script
-      (e.g. a party name printed in Devanagari in the source) — even then,
-      the surrounding sentence must be in English. This check fires
-      regardless of strict_language; English-target responses must not
-      code-switch into the source document's language. When the source
-      content (uploaded files, retrieved passages) is in another language,
-      the refiner must TRANSLATE quoted/cited content into English instead
-      of leaving it in the source script.
+      response body as a MAJOR violation.
+
+      The narrow exception is TIGHTLY SCOPED to case-law CITATIONS where the
+      reported case name is itself in a non-Latin script (e.g. a transliterated
+      party-name printed by the Reporter). It does NOT exempt:
+        - Document identifiers ("दस्त क्र. 637/2023", "वकालतनामा क्र. ...")
+          — these are common-noun document labels, not case names. Translate
+          to "Document No. 637/2023" or similar.
+        - Statute / act titles ("भारतीय करार अधिनियम") — translate.
+        - Place names, district names, taluka names ("मौजे शिवरी", "जिल्हा
+          पुणे") — transliterate to Latin ("Mauje Shivri", "District Pune").
+        - Party names from a notice / contract / FIR — transliterate to Latin
+          ("श्री. कैलास" → "Mr. Kailas"). Party names are NOT case-law
+          citations.
+        - Section / article numbers in Indic numerals (६३७, २०२३) —
+          MUST be Latin (637, 2023).
+      In short: the ONLY surviving non-Latin run permitted is inside a
+      verbatim case-law citation block such as "ABC v. XYZ (2020) 5 SCC 1",
+      where the case-name part as printed by the Reporter happens to be in
+      a non-Latin script. Anything else is MAJOR.
+
+      This check fires regardless of strict_language; English-target
+      responses must not code-switch into the source document's language.
+      When the source content (uploaded files, retrieved passages) is in
+      another language, the refiner must TRANSLATE quoted/cited content
+      into English (or transliterate proper nouns) instead of leaving them
+      in the source script.
 
   strict_language=True with language!='en'
     → STRICT MODE. Audit ALL of the following — each is a MAJOR violation:

@@ -26,7 +26,7 @@ from langchain_community.vectorstores import Chroma
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
 from core.clients import get_gemini_pro, get_qa_embeddings, get_chroma_client
 from core.settings import CHROMA_STORE_ROOT, TIMEOUT_CHROMADB_SEC
-from core.language import localize_prompt
+from core.language import localize_prompt, detect_source_languages
 from core.logger import get_logger, log_time
 from core.progress import progress
 from config.intent import LegalArtifact, UserIntent
@@ -277,9 +277,22 @@ def _retrieve_docs(
 
 
 def _generate_from_docs(
-    query: str, docs: list[Document], history_text: str = "",
+    query: str,
+    docs: list[Document],
+    history_text: str = "",
+    user_language: str = "en",
+    intent=None,
 ) -> tuple[str, int]:
     """LLM-generate an answer from pre-retrieved chunks.
+
+    The ChromaDB retrieval path used to ship a bare English system prompt with
+    NO language directive — when the uploaded PDF was in an Indian language,
+    Gemini would code-switch into that language even though the user typed
+    their query in English. Wrapping the prompt in `localize_prompt` (with
+    the source-content language detected from the retrieved chunks)
+    propagates the same language-consistency rules every other agent honours
+    and closes the Marathi-PDF + English-query mixing hole.
+
     Returns (answer_text, tokens_consumed).
     """
     if not docs:
@@ -287,11 +300,23 @@ def _generate_from_docs(
 
     docs_text = "\n\n".join(d.page_content for d in docs)
 
+    # Detect the dominant language of the retrieved chunks so localize_prompt
+    # can emit the STRONG English directive (e.g. "source is Marathi —
+    # translate it") instead of the soft default. Sampling the first chunk is
+    # enough — chunks from one PDF are uniform in language.
+    source_langs = detect_source_languages(docs_text)
+
     with log_time(log, "LLM generation"):
         llm = get_gemini_pro(temperature=0.3)
-        prompt_messages = [
-            ("system", "You are Lawttorney, a legal AI assistant. Answer questions about the uploaded document(s) using only the provided context. Be thorough and cite specific sections when possible."),
-        ]
+        system_prompt = localize_prompt(
+            "You are Lawttorney, a legal AI assistant. Answer questions about "
+            "the uploaded document(s) using only the provided context. Be "
+            "thorough and cite specific sections when possible.",
+            user_language,
+            intent,
+            source_languages=source_langs,
+        )
+        prompt_messages = [("system", system_prompt)]
         if history_text:
             prompt_messages.append(("user", "Previous conversation:\n{history}"))
         prompt_messages.extend([
@@ -402,6 +427,15 @@ async def document_node(state: LegalAgentState) -> dict:
                     # Pick the system prompt: specialized one (e.g.
                     # CROSS_EXAMINATION_PROMPT) when intent surfaced a
                     # legal_artifact, otherwise the generic file-Q&A prompt.
+                    # Source-language hint: Gemini reads the file directly so
+                    # we lack raw text here; fall back to any inline_text
+                    # OCR companion (e.g. when a scanned PDF was both
+                    # uploaded and OCR-extracted). When unavailable, the
+                    # soft English directive in localize_prompt still
+                    # prevents most code-switching.
+                    _source_langs_gemini = detect_source_languages(
+                        fc.inline_text if fc and fc.inline_text else None
+                    )
                     _doc_system = localize_prompt(
                         _pick_specialized_prompt(
                             intent_obj,
@@ -423,6 +457,7 @@ async def document_node(state: LegalAgentState) -> dict:
                         ),
                         user_language,
                         intent_obj,
+                        source_languages=_source_langs_gemini,
                     )
                     history_text = _format_chat_history(chat_history)
 
@@ -441,10 +476,15 @@ async def document_node(state: LegalAgentState) -> dict:
                 # Reads the typed UserIntent, surfaces violations, rewrites.
                 # Skips trivial intents internally (no directives / low conf).
                 # Replaces _passes_quality_gate + hardcoded retry preambles.
+                # Pass detected source languages so the critic force-runs
+                # when the file is in a different language than the
+                # response target — the safety net for the prompt-level
+                # English directive emitted by localize_prompt.
                 refined_content, refine_history = await self_refine(
                     response.content,
                     user_query=query,
                     intent=intent_obj,
+                    source_languages=_source_langs_gemini,
                 )
                 if refined_content != response.content:
                     log.info(
@@ -498,6 +538,12 @@ async def document_node(state: LegalAgentState) -> dict:
                     artifact = getattr(intent_obj, "legal_artifact", LegalArtifact.NONE) if intent_obj else LegalArtifact.NONE
                     llm = get_gemini_pro(**_llm_config_for_artifact(intent_obj))
                     history_text = _format_chat_history(chat_history)
+                    # Inline-text path: we have the full file text in hand,
+                    # so detect its script directly and pass it as the
+                    # source-language hint. localize_prompt uses this to
+                    # escalate the English directive when the user typed
+                    # English but the file is, say, Marathi.
+                    _source_langs_inline = detect_source_languages(fc.inline_text)
                     system_prompt = localize_prompt(
                         _pick_specialized_prompt(
                             intent_obj,
@@ -510,6 +556,7 @@ async def document_node(state: LegalAgentState) -> dict:
                         ),
                         user_language,
                         intent_obj,
+                        source_languages=_source_langs_inline,
                     )
                     prompt_messages = [("system", system_prompt)]
                     if history_text:
@@ -539,6 +586,7 @@ async def document_node(state: LegalAgentState) -> dict:
                     response.content,
                     user_query=query,
                     intent=intent_obj,
+                    source_languages=_source_langs_inline,
                 )
                 if refined_content != response.content:
                     log.info(
@@ -664,10 +712,16 @@ async def document_node(state: LegalAgentState) -> dict:
                 )}}
 
         # Step 3: Generate answer (off-thread; LLM call)
+        intent_obj_chromadb = state.get("user_intent")
         with log_time(log, "Document QA generation"):
             answer, tokens = await asyncio.wait_for(
                 asyncio.to_thread(
-                    _generate_from_docs, query, retrieved_docs, history_text,
+                    _generate_from_docs,
+                    query,
+                    retrieved_docs,
+                    history_text,
+                    user_language,
+                    intent_obj_chromadb,
                 ),
                 timeout=TIMEOUT_CHROMADB_SEC,
             )

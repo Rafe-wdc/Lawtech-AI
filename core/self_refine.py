@@ -202,6 +202,20 @@ Examples of how intent fields translate to checks:
       spans into the target language's grammar, not just swap individual
       words.
 
+  language='en' (English target)
+    → The response must be written entirely in English using the Latin
+      script. Flag any non-Latin script (Devanagari, Tamil, Bengali, Telugu,
+      Kannada, Malayalam, Gujarati, Gurmukhi, Odia, Arabic) appearing in the
+      response body as a MAJOR violation. The ONLY narrow exception is a
+      verbatim case-name proper noun that is inherently in another script
+      (e.g. a party name printed in Devanagari in the source) — even then,
+      the surrounding sentence must be in English. This check fires
+      regardless of strict_language; English-target responses must not
+      code-switch into the source document's language. When the source
+      content (uploaded files, retrieved passages) is in another language,
+      the refiner must TRANSLATE quoted/cited content into English instead
+      of leaving it in the source script.
+
   strict_language=True with language!='en'
     → STRICT MODE. Audit ALL of the following — each is a MAJOR violation:
        (a) Any English sentence, clause, or phrase OTHER than verbatim
@@ -657,6 +671,26 @@ def _intent_has_directives(intent: Optional[UserIntent]) -> bool:
     )
 
 
+def _source_language_mismatch(
+    intent: Optional[UserIntent], source_languages: tuple[str, ...]
+) -> bool:
+    """True when the target response language differs from any detected
+    source-content language — a strong signal that the response is at risk
+    of code-switching. Used to force the critic loop even when the intent
+    has no explicit directives (e.g. user typed English, uploaded a Marathi
+    PDF; intent defaults to language="en"/language_explicit=False, but the
+    Marathi source is real and worth auditing).
+    """
+    target = (getattr(intent, "language", "en") if intent else "en") or "en"
+    for s in source_languages:
+        if s and s in {
+            "en", "hi", "bn", "te", "mr", "ta", "kn", "ml",
+            "gu", "pa", "ur", "or", "as", "sa",
+        } and s != target:
+            return True
+    return False
+
+
 def _format_violations(violations: list[Violation]) -> str:
     """Render the violation list for the refiner prompt."""
     if not violations:
@@ -785,6 +819,7 @@ async def self_refine(
     min_response_chars: int = 500,
     critic_llm=None,
     refiner_llm=None,
+    source_languages: tuple[str, ...] = (),
 ) -> tuple[str, list[Critique]]:
     """Generate-critique-refine loop over an existing response.
 
@@ -798,12 +833,23 @@ async def self_refine(
       - response < min_response_chars → no critic call (not worth the
         cost; the response is too thin to refine usefully).
 
+    Force-run on language mismatch:
+      When `source_languages` includes any code that differs from the
+      target response language (intent.language), the critic runs even
+      if the intent expresses no other directives. This catches the
+      "English-query + Marathi-PDF → mixed response" failure mode at
+      the audit layer — localize_prompt's directive is the primary
+      defence, but the critic is the safety net when Gemini ignores
+      the directive.
+
     Returns:
       (final_response, list_of_Critiques) — the critique list is the
       per-iteration record for telemetry. Empty list when the loop was
       skipped.
     """
-    if not _intent_has_directives(intent):
+    has_directives = _intent_has_directives(intent)
+    has_lang_mismatch = _source_language_mismatch(intent, source_languages)
+    if not (has_directives or has_lang_mismatch):
         return response, []
     if len(response) < min_response_chars:
         log.info(
@@ -812,10 +858,16 @@ async def self_refine(
         )
         return response, []
 
+    # When the loop is force-run on language-mismatch but the caller passed
+    # no intent, build a default one so the critic still has a typed
+    # ground-truth to reason against (the language='en' branch of the
+    # critic prompt is enough to catch script mixing).
+    critic_intent = intent if intent is not None else default_intent()
+
     history: list[Critique] = []
     current = response
     for iteration in range(max_iterations + 1):  # +1 for the final critique
-        critique = await _critique(user_query, intent, current, critic_llm)
+        critique = await _critique(user_query, critic_intent, current, critic_llm)
         history.append(critique)
         if critique.passes:
             log.info(
@@ -844,6 +896,6 @@ async def self_refine(
             )
             return current, history
         # Refine
-        current = await _refine(user_query, intent, current, critique, refiner_llm)
+        current = await _refine(user_query, critic_intent, current, critique, refiner_llm)
 
     return current, history

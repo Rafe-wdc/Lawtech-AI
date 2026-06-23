@@ -109,6 +109,9 @@ async def web_search_fallback(
     agent_name: str,
     system_prompt: str,
     original_query: str = "",
+    *,
+    user_language: str = "en",
+    intent=None,
 ) -> AgentResult:
     """Fall back to Gemini 2.5 Flash with Google Search grounding.
 
@@ -116,6 +119,17 @@ async def web_search_fallback(
     (NOT LangChain) because LangChain doesn't support the google_search tool.
 
     Retries once with gemini-2.5-pro if Flash returns 503.
+
+    Language consistency:
+        Some call sites pass an already-localized `system_prompt`, but
+        several (e.g. orchestrator's last-resort fallback, legacy
+        constitution_maxim paths) pass a raw English prompt. To make the
+        layer self-correcting, this function ALSO runs `localize_prompt`
+        on the assembled `full_prompt` using the supplied `user_language`
+        and `intent`. Re-localizing an already-localized prompt is
+        idempotent in effect — the directive simply gets reinforced.
+        Default args (`user_language="en"`, `intent=None`) preserve the
+        legacy English behaviour for callers that haven't been updated.
     """
     log.info("Web search fallback started", agent=agent_name, query=query[:100])
     METRICS["fallback_total"].labels(agent=agent_name, tier="web_search").inc()
@@ -130,13 +144,19 @@ async def web_search_fallback(
         # lost in the V2 rewrite; would have prevented the testbook.com /
         # ipleaders.in pollution seen in 2026-06-15 cross-act fallback.
         from config.prompts import INDIAN_LEGAL_AUTHORIZED_SOURCES
+        from core.language import localize_prompt
         fallback_instruction = (
             "\n\nIMPORTANT: You are now using web search grounding. "
             "Use the search results to provide a comprehensive, accurate answer. "
             "Do NOT say you lack context — use the web search results."
             "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
         )
-        full_prompt = f"{system_prompt}{fallback_instruction}\n\nUser Query: {query}"
+        # Apply the language directive at the fallback layer so callers that
+        # passed a raw English prompt also get language consistency.
+        localized_system = localize_prompt(
+            system_prompt + fallback_instruction, user_language, intent,
+        )
+        full_prompt = f"{localized_system}\n\nUser Query: {query}"
         client = get_genai_client()
 
         # Try scenario_web_grounded model first, fall back to gemini-2.5-pro on 503

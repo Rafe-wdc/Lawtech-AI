@@ -1546,6 +1546,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             query, "Orchestrator",
             "You are Lawttorney, an Indian legal AI assistant. "
             "Answer the user's legal question comprehensively with citations.",
+            user_language=_resolve_user_language(state),
+            intent=state.get("user_intent"),
         )
         if fallback.content:
             return {

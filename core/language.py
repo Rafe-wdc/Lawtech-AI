@@ -255,26 +255,96 @@ _NATIVE_NUMERAL_HINTS: dict[str, str] = {
 }
 
 
-def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
+def localize_prompt(
+    base_prompt: str,
+    lang: str,
+    intent=None,
+    *,
+    source_languages: tuple[str, ...] = (),
+) -> str:
     """Append a language instruction (and optionally a user-intent directive
     block) to any agent system prompt.
 
-    - If lang == "en" or unsupported, no language line is appended.
-    - If intent.strict_language is True AND lang != "en", emit a STRICTER
-      instruction: native-script numerals, translated act names + placeholder
-      labels, only case names + section/article numbers kept in English.
-    - Otherwise, emit the standard instruction: respond in <lang>, keep all
-      legal citations in English. (Preserves the existing convention for
-      callers that haven't opted in to strict mode.)
-    - If intent has non-default depth or additional_instructions, also append
-      a "USER DIRECTIVES" block.
+    Behaviour by `lang`:
+      - lang == "en"  → ALWAYS appends an English-strict directive instructing
+        the model to respond entirely in English and translate any quoted
+        non-English content. When `source_languages` includes any non-English
+        code, OR when callers explicitly mark strict mode via the intent,
+        emits the STRONG variant naming the source script (e.g. "Devanagari")
+        as forbidden in the response.
+        Rationale: previously this branch was a no-op, leaving Gemini free to
+        code-switch into the source-document's language. That produced the
+        Marathi-PDF + English-query → mixed-language bug. The directive
+        closes that hole at the localization layer so every downstream agent
+        inherits the fix.
+      - lang != "en" and in SUPPORTED_LANGUAGES → emits the existing
+        strict / non-strict directive set (script + numerals + ceremonial-
+        block translations). Unchanged.
+      - lang unsupported → no language line is appended (intent block only).
 
-    Returning the unchanged prompt when both signals are empty preserves the
-    pre-Phase-3 behaviour for callers that don't pass an intent.
+    Args:
+        base_prompt: The agent's system prompt.
+        lang: ISO 639-1 code (e.g. "en", "mr").
+        intent: Optional typed UserIntent — drives strict-mode + depth
+            directives.
+        source_languages: Optional tuple of ISO codes detected in the
+            retrieved/uploaded source content (e.g. ("mr",) when a Marathi
+            PDF is in play). Used ONLY to escalate the English-strict
+            directive — the model is told NOT to leak Marathi script into
+            an English response. Empty tuple = caller didn't bother to
+            detect (still safe: the default English directive prevents
+            most mixing).
+
+    Returns the prompt with directives appended; never mutates input.
     """
     out = base_prompt
 
-    if lang != "en" and lang in SUPPORTED_LANGUAGES:
+    if lang == "en":
+        # English path: the previous behaviour was to emit nothing, which left
+        # Gemini free to mix in non-English script when source documents (PDFs,
+        # ES hits, chat history) were in another language. We now always emit
+        # a positive English directive. The strength scales with signal:
+        #   - no source-language hint and default intent → soft directive
+        #   - non-English source detected OR strict intent → strong directive
+        non_en_sources = tuple(s for s in source_languages if s and s != "en")
+        strict_intent = bool(intent and getattr(intent, "strict_language", False)
+                              and getattr(intent, "language", "en") == "en")
+        if non_en_sources or strict_intent:
+            source_names = ", ".join(
+                SUPPORTED_LANGUAGES.get(s, s) for s in non_en_sources
+            )
+            source_clause = (
+                f" The source content contains {source_names} text — "
+                f"TRANSLATE or paraphrase it into English; do NOT quote the "
+                f"original script verbatim."
+            ) if non_en_sources else ""
+            out += (
+                f"\n\nLANGUAGE INSTRUCTION (STRICT): Respond entirely in "
+                f"English using the Latin script. Do NOT insert any "
+                f"non-Latin script anywhere in the response — no Devanagari "
+                f"(Hindi/Marathi/Sanskrit), Bengali, Tamil, Telugu, Kannada, "
+                f"Malayalam, Gujarati, Gurmukhi, Odia, or Arabic-script "
+                f"text.{source_clause}\n\n"
+                f"The ONLY narrow exception: a verbatim case-name proper "
+                f"noun (e.g. 'Kesavananda Bharati v. State of Kerala') that "
+                f"is inherently in another script may be preserved AS-IS. "
+                f"Even then, the surrounding sentence must be in English. "
+                f"All paragraph numbers, dates, section numbers, monetary "
+                f"amounts, and list-item prefixes must use Latin digits "
+                f"(1, 2, 3...). Translate any non-English act / statute "
+                f"titles into their English equivalents."
+            )
+        else:
+            out += (
+                "\n\nLANGUAGE INSTRUCTION: Respond entirely in English. "
+                "If quoted source material is in another language, "
+                "translate or paraphrase it into English in your response. "
+                "Do not insert non-Latin script (Devanagari, Tamil, etc.) "
+                "except for verbatim case-name proper nouns; the "
+                "surrounding sentence stays in English."
+            )
+
+    elif lang != "en" and lang in SUPPORTED_LANGUAGES:
         lang_name = SUPPORTED_LANGUAGES[lang]
         if _is_strict_language(intent, lang):
             numeral_hint = _NATIVE_NUMERAL_HINTS.get(lang)
@@ -394,8 +464,69 @@ def localize_prompt(base_prompt: str, lang: str, intent=None) -> str:
                 "and party names. Do NOT translate these."
             )
 
+        # Cross-language source mismatch warning: when the user wants the
+        # answer in Indian-language X but the retrieved source content is in
+        # a DIFFERENT non-English language (e.g. user asked in Hindi, file
+        # is Marathi, or vice versa). The per-language ceremonial blocks
+        # above only handle the Hindi↔Marathi pair; this generic warning
+        # covers every other combination (Tamil source + Hindi query, etc.).
+        cross_script = tuple(
+            s for s in source_languages
+            if s and s != "en" and s != lang and s in SUPPORTED_LANGUAGES
+        )
+        if cross_script:
+            other_names = ", ".join(
+                SUPPORTED_LANGUAGES[s] for s in cross_script
+            )
+            out += (
+                f"\n\nSOURCE-LANGUAGE NOTE: The source content (uploaded "
+                f"files, retrieved passages, or quoted text) contains "
+                f"{other_names} material. Translate or paraphrase that "
+                f"material into {lang_name} in your response. Do NOT "
+                f"insert {other_names} sentences, clauses, or phrases "
+                f"verbatim — write everything in {lang_name}."
+            )
+
     out += _format_intent_directives(intent)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Source-content language detection helper
+# ---------------------------------------------------------------------------
+#
+# Used by callers that have access to retrieved text (uploaded file extract,
+# ES hit text, chat-history snippets) to derive the `source_languages` hint
+# for `localize_prompt`. Returning a tuple (not a single code) lets callers
+# join evidence from multiple sources without per-call branching.
+# ---------------------------------------------------------------------------
+
+def detect_source_languages(
+    *text_samples: str | None,
+    sample_chars: int = 800,
+) -> tuple[str, ...]:
+    """Detect the dominant language(s) across one or more text samples.
+
+    Each non-empty sample is truncated to `sample_chars` and passed through
+    `detect_language()`. The returned tuple is deduplicated and ordered by
+    first appearance — useful when callers want a stable signal across
+    multiple files.
+
+    Empty / None samples are skipped silently. Returns an empty tuple when
+    nothing usable was passed, which `localize_prompt` interprets as "no
+    source-language hint" (i.e. defaults to soft directive).
+    """
+    seen: list[str] = []
+    for sample in text_samples:
+        if not sample:
+            continue
+        snippet = sample.strip()[:sample_chars]
+        if len(snippet) < 10:
+            continue
+        lang = detect_language(snippet)
+        if lang and lang not in seen:
+            seen.append(lang)
+    return tuple(seen)
 
 
 @lru_cache(maxsize=None)

@@ -40,7 +40,7 @@ from core.clients import (
 from core.settings import ES_INDICES
 from core.language import (
     localize_prompt, localize_number, strip_leading_numeric_prefix,
-    SUPPORTED_LANGUAGES,
+    detect_source_languages, SUPPORTED_LANGUAGES,
 )
 from core.logger import get_logger, log_time
 from core.progress import progress
@@ -1685,6 +1685,14 @@ async def _generate_outline(
             parts.append("\nFULL DOCUMENT TEXT:\n" + user_facts[:25000])
         facts_block = "\n".join(parts) + "\n\n"
 
+    # Detect the script of the user-supplied facts so localize_prompt can
+    # escalate to the STRICT directive when the response language differs
+    # from the source-document language (e.g. English target with Marathi
+    # PDF facts). Without this, the drafting agent leaks short Marathi
+    # phrases like "दस्त क्र." into otherwise-English replies even though
+    # the prompt asks for English.
+    _source_langs_outline = detect_source_languages(user_facts, case_facts)
+
     with log_time(log, "Outline generation"):
         llm = get_drafting_llm().with_structured_output(
             DraftOutline, include_raw=True,
@@ -1697,7 +1705,10 @@ async def _generate_outline(
             "{doc_type_rules}", doc_type_rules,
         )
         prompt = ChatPromptTemplate.from_messages([
-            ("system", localize_prompt(system_prompt, user_language)),
+            ("system", localize_prompt(
+                system_prompt, user_language,
+                source_languages=_source_langs_outline,
+            )),
             ("user", "{facts_block}USER QUERY:\n{query}"),
             # Template-language warning, empty string when the chosen
             # template's body language matches user_language.
@@ -3427,10 +3438,19 @@ async def _generate_section(
             "=== END GROUNDWISE-WS OVERRIDE ===\n"
         )
 
+    # Source-language hint propagated into the section generator so
+    # localize_prompt emits the STRICT English directive when the user
+    # facts are in another script (the typical "Marathi PDF → English
+    # reply notice" case). Detected once per section; cheap.
+    _source_langs_section = detect_source_languages(user_facts, case_facts)
+
     with log_time(log, f"Section {section_index+1}/{total_sections}: {section.title}"):
         llm = get_drafting_llm()
         prompt = ChatPromptTemplate.from_messages([
-            ("system", localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language)),
+            ("system", localize_prompt(
+                DRAFTING_SYSTEM_PROMPT, user_language,
+                source_languages=_source_langs_section,
+            )),
             # FACTS FIRST — most prominent position (BUG-02)
             ("user", "{facts_block}USER INSTRUCTION:\n{query}"),
             # Stance block: shared legal lane across all parallel sections

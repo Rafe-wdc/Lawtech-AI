@@ -75,23 +75,30 @@ def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> flo
 
 @dataclass
 class TokenCall:
-    """One LLM call's token usage."""
+    """One LLM call's token usage.
+
+    `model` is kept INTERNALLY for cost calculation + per-model rollup,
+    but is NEVER serialized into the public payload (see `to_dict`).
+    Exposing the underlying model identifier would leak provider/family
+    information to end users; admin and log paths are sanitized
+    elsewhere too.
+    """
     agent: str                    # "Drafting", "Document", "Orchestrator", …
     step: str                     # "classification", "section_3", "outline", …
-    model: str = ""               # e.g. "gemini-2.5-flash"
+    model: str = ""               # internal-only — see class docstring
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
-    cache_read_tokens: int = 0    # Gemini context-cache hit (cheaper)
+    cache_read_tokens: int = 0    # context-cache hit (cheaper input tokens)
     cache_creation_tokens: int = 0
     reasoning_tokens: int = 0     # thinking-model tokens (priced as output)
     cost_usd: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        # Deliberately omit `model` from the public per-call payload.
         return {
             "agent": self.agent,
             "step": self.step,
-            "model": self.model,
             "input": self.input_tokens,
             "output": self.output_tokens,
             "total": self.total_tokens,
@@ -210,7 +217,14 @@ class TokenUsage:
         """Serializable summary for the API response.
 
         Set `include_calls=False` for a lighter payload that omits the
-        per-LLM-call list (still keeps the per-agent / per-model rollups).
+        per-LLM-call list (still keeps the per-agent rollup).
+
+        `by_model` and the per-call `model` field are NEVER serialized
+        — they would leak the underlying LLM provider / family to end
+        users. Internal cost tracking still works because the model
+        identifier is kept in memory (TokenCall.model, self.by_model)
+        and used by `_estimate_cost_usd`; only the public payload is
+        stripped.
         """
         with self._lock:
             d = {
@@ -222,7 +236,6 @@ class TokenUsage:
                 "reasoning_tokens": self.reasoning_tokens,
                 "cost_usd": round(self.cost_usd, 6),
                 "by_agent": {k: dict(v) for k, v in self.by_agent.items()},
-                "by_model": {k: dict(v) for k, v in self.by_model.items()},
             }
             if include_calls:
                 d["calls"] = [c.to_dict() for c in self.calls]

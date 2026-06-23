@@ -70,7 +70,13 @@ class ResponseCache:
 
     def get(self, query: str, file_fingerprint: str = "") -> CacheEntry | None:
         """Look up a cached response. Returns None on miss, expiry, or when
-        the cache is globally disabled via RESPONSE_CACHE_ENABLED."""
+        the cache is globally disabled via RESPONSE_CACHE_ENABLED.
+
+        Defensively scrubs `by_model` and per-call `model` from the
+        cached token_usage payload: entries written before model
+        identifiers were removed from the public schema still carry
+        those keys and would leak on replay.
+        """
         if not self._enabled:
             return None
         key = self._make_key(query, file_fingerprint)
@@ -85,6 +91,14 @@ class ResponseCache:
                 return None
             self._hits += 1
             log.info("Cache hit", key=key[:8], age_s=int(time.time() - entry.timestamp))
+            if entry.token_usage:
+                tu = entry.token_usage
+                tu.pop("by_model", None)
+                calls = tu.get("calls")
+                if isinstance(calls, list):
+                    for c in calls:
+                        if isinstance(c, dict):
+                            c.pop("model", None)
             return entry
 
     def set(self, query: str, entry: CacheEntry, file_fingerprint: str = "") -> None:

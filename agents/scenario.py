@@ -97,7 +97,7 @@ async def scenario_node(state: LegalAgentState) -> dict:
             # Invoke Gemini 2.5 Flash with Google Search grounding
             # Uses asyncio.to_thread to avoid blocking the event loop
             # 120s timeout to prevent indefinite hangs on complex searches
-            progress("scenario", "Searching the web with Google Search...", step="web_search")
+            progress("scenario", "Searching the web for current information...", step="web_search")
             with log_time(log, "Gemini Flash + Google Search"):
                 client = get_genai_client()
                 response = await asyncio.wait_for(

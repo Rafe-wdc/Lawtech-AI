@@ -466,7 +466,7 @@ async def document_node(state: LegalAgentState) -> dict:
                 sources = [SourceMetadata(
                     source_type="document",
                     title=f"Uploaded: {fn}",
-                    content=["Multimodal file analysis (Gemini Files API)"],
+                    content=["Multimodal file analysis"],
                     file_name=fn,
                     agent_name="Document",
                 ) for fn in fc.file_names[:5]]

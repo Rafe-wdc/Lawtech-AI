@@ -188,7 +188,7 @@ class _SqliteChatHistoryStore:
                     relevance        REAL    NOT NULL DEFAULT 0.0,
                     completeness     REAL    NOT NULL DEFAULT 0.0,
                     avg_score        REAL    NOT NULL DEFAULT 0.0,
-                    model_used       TEXT    NOT NULL DEFAULT 'gemini-2.5-flash-lite'
+                    model_used       TEXT    NOT NULL DEFAULT ''
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_quality_log_ts
@@ -1396,9 +1396,15 @@ class _SqliteChatHistoryStore:
         relevance: float,
         completeness: float,
         avg_score: float,
-        model_used: str = "gemini-2.5-flash-lite",
+        model_used: str = "",
     ) -> int:
-        """Insert a quality score entry. Returns new row id."""
+        """Insert a quality score entry. Returns new row id.
+
+        `model_used` is defensively redacted at write — even if a caller
+        passes a brand-bearing identifier (e.g. "gemini-2.5-flash-lite"),
+        the stored value is scrubbed so admin reads cannot surface it.
+        """
+        from core.redact import redact_brands
         self._ensure_schema()
         with self._write_lock:
             conn = self._get_connection()
@@ -1417,7 +1423,7 @@ class _SqliteChatHistoryStore:
                     relevance,
                     completeness,
                     avg_score,
-                    model_used,
+                    redact_brands(model_used),
                 ))
                 conn.commit()
                 return cur.lastrowid
@@ -1434,7 +1440,7 @@ class _SqliteChatHistoryStore:
         relevance: float,
         completeness: float,
         avg_score: float,
-        model_used: str = "gemini-2.5-flash-lite",
+        model_used: str = "",
     ) -> int:
         """Async wrapper — log a quality score entry."""
         return await asyncio.to_thread(
@@ -1669,7 +1675,7 @@ class _PostgresChatHistoryStore:
                         relevance      DOUBLE PRECISION NOT NULL DEFAULT 0.0,
                         completeness   DOUBLE PRECISION NOT NULL DEFAULT 0.0,
                         avg_score      DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-                        model_used     TEXT NOT NULL DEFAULT 'gemini-2.5-flash-lite'
+                        model_used     TEXT NOT NULL DEFAULT ''
                     )""",
                     "CREATE INDEX IF NOT EXISTS idx_quality_log_ts ON quality_log(timestamp DESC)",
                     "CREATE INDEX IF NOT EXISTS idx_quality_log_agent ON quality_log(agent, timestamp DESC)",
@@ -2626,8 +2632,10 @@ class _PostgresChatHistoryStore:
         relevance: float,
         completeness: float,
         avg_score: float,
-        model_used: str = "gemini-2.5-flash-lite",
+        model_used: str = "",
     ) -> int:
+        # Defensive redaction at write — see SQLite backend docstring.
+        from core.redact import redact_brands
         self._ensure_schema()
         from psycopg.rows import dict_row
         with self._get_pool().connection() as conn:
@@ -2647,7 +2655,7 @@ class _PostgresChatHistoryStore:
                 relevance,
                 completeness,
                 avg_score,
-                model_used,
+                redact_brands(model_used),
             )).fetchone()
             conn.commit()
         return row["id"]
@@ -2662,7 +2670,7 @@ class _PostgresChatHistoryStore:
         relevance: float,
         completeness: float,
         avg_score: float,
-        model_used: str = "gemini-2.5-flash-lite",
+        model_used: str = "",
     ) -> int:
         return await asyncio.to_thread(
             self._log_quality_sync,

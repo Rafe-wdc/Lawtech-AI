@@ -72,20 +72,34 @@ class AgentFormatter(logging.Formatter):
         # Component name from logger name (e.g. "v2.Orchestrator" -> "Orchestrator")
         component = record.name.split(".")[-1]
 
+        # Redact LLM brand/model tokens from the message body + every
+        # structured extra. Centralized here so call sites don't need to
+        # remember to scrub — covers prints from upstream SDK error
+        # strings, model identifiers in log_time messages, and any
+        # accidental f-string interpolation of model names.
+        # Lazy import: core.logger is imported very early; core.redact
+        # is a leaf module with no back-edges, so this is safe.
+        from core.redact import redact_brands, redact_kv
+
         # Base message
-        base = f"{ts}.{ms:03d} | {level} | [{component}] req={rid} | {record.getMessage()}"
+        base = (
+            f"{ts}.{ms:03d} | {level} | [{component}] req={rid} | "
+            f"{redact_brands(record.getMessage())}"
+        )
 
         # Append structured key=value pairs if present
         extras = getattr(record, "_extra_kv", None)
         if extras:
-            kv_str = " | ".join(f"{k}={v}" for k, v in extras.items())
+            kv_str = " | ".join(
+                f"{k}={redact_kv(v)}" for k, v in extras.items()
+            )
             base = f"{base} | {kv_str}"
 
         # Append exception info if present
         if record.exc_info and not record.exc_text:
             record.exc_text = self.formatException(record.exc_info)
         if record.exc_text:
-            base = f"{base}\n{record.exc_text}"
+            base = f"{base}\n{redact_brands(record.exc_text)}"
 
         return base
 

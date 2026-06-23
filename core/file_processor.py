@@ -1346,7 +1346,7 @@ async def process_files(
         emit({
             "type": "file_processing",
             "stage": "gemini_upload",
-            "message": f"Uploading {len(gemini_tasks)} file(s) to Gemini...",
+            "message": f"Uploading {len(gemini_tasks)} file(s)...",
             "count": len(gemini_tasks),
         })
         with log_time(log, "Parallel Gemini uploads", count=len(gemini_tasks)):
@@ -1360,11 +1360,11 @@ async def process_files(
                 log.error("Gemini Files upload timed out — file degraded to extraction-only",
                           file=pf.original_name, size_mb=round(pf.size_bytes / (1024*1024), 1),
                           timeout_s=GEMINI_UPLOAD_TIMEOUT_S)
-                pf.error = f"Gemini upload timed out after {GEMINI_UPLOAD_TIMEOUT_S}s"
+                pf.error = f"Multimodal upload timed out after {GEMINI_UPLOAD_TIMEOUT_S}s"
                 emit({
                     "type": "file_processing",
                     "stage": "gemini_upload_timeout",
-                    "message": f"{pf.original_name}: Gemini upload timed out — will use text extraction only",
+                    "message": f"{pf.original_name}: upload timed out — will use text extraction only",
                     "file": pf.original_name,
                 })
             elif isinstance(result, Exception):
@@ -1385,7 +1385,7 @@ async def process_files(
         emit({
             "type": "file_processing",
             "stage": "gemini_upload_done",
-            "message": f"Gemini uploads complete ({ok_uploads}/{len(gemini_tasks)} succeeded)",
+            "message": f"Uploads complete ({ok_uploads}/{len(gemini_tasks)} succeeded)",
             "ok": ok_uploads,
             "total": len(gemini_tasks),
         })

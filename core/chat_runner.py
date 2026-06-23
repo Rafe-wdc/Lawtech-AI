@@ -233,7 +233,6 @@ async def run_chat_pipeline(
                 "reasoning_tokens": 0,
                 "cost_usd": 0.0,
                 "by_agent": {},
-                "by_model": {},
                 "calls": [],
             }
             yield _sse({
@@ -393,7 +392,11 @@ async def run_chat_pipeline(
         yield _sse({"type": "error", "data": "Request timed out. Please try a simpler query."})
     except Exception as e:
         log.error("Stream error", endpoint=i.endpoint_name, error=str(e))
-        yield _sse({"type": "error", "data": str(e)})
+        # Scrub brand/model tokens before surfacing the upstream exception
+        # text. SDK errors often carry "google.genai" / "gemini" /
+        # "openai" / "anthropic" identifiers that must not reach the user.
+        from core.redact import redact_brands
+        yield _sse({"type": "error", "data": redact_brands(str(e))})
 
     # --- Final events ------------------------------------------------------
     # Strip any HTML before delivery. validate_draft already runs in the

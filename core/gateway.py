@@ -92,10 +92,21 @@ _HTTP_ERROR_CODES: dict[int, str] = {
 
 
 def _error_response(status_code: int, error: str, message: str, request_id: str = "") -> JSONResponse:
-    """Return a uniform error JSON body across all error handlers."""
+    """Return a uniform error JSON body across all error handlers.
+
+    Brand/model tokens are scrubbed from `message` so that wrapped
+    upstream SDK errors (e.g. "google.genai.errors.PermissionDenied") do
+    not leak the underlying provider to clients. `error` is a short
+    machine code we control, so it does not need redaction.
+    """
+    from core.redact import redact_brands
     return JSONResponse(
         status_code=status_code,
-        content={"error": error, "message": message, "request_id": request_id},
+        content={
+            "error": error,
+            "message": redact_brands(message),
+            "request_id": request_id,
+        },
     )
 
 
@@ -615,7 +626,7 @@ async def search(data: SearchRequest, request: Request):
                 "total_tokens": cached.tokens_consumed or 0,
                 "cache_read_tokens": 0, "cache_creation_tokens": 0,
                 "reasoning_tokens": 0, "cost_usd": 0.0,
-                "by_agent": {}, "by_model": {}, "calls": [],
+                "by_agent": {}, "calls": [],
             }
             return SearchResponse(
                 globalThreadId=thread_id,
@@ -1003,7 +1014,9 @@ async def chat_with_files(
                              new_file_count=len(fc.file_names))
                 except Exception as e:
                     log.error("File processing failed", error=str(e))
-                    yield f"data: {json.dumps({'type': 'file_processing', 'message': f'File processing failed: {e}', 'files': []})}\n\n"
+                    from core.redact import redact_brands
+                    _fp_msg = redact_brands(f"File processing failed: {e}")
+                    yield f"data: {json.dumps({'type': 'file_processing', 'message': _fp_msg, 'files': []})}\n\n"
                     # Make sure the background task is cleaned up.
                     if not _fp_task.done():
                         _fp_task.cancel()
@@ -1259,7 +1272,8 @@ async def continue_draft(data: ContinueDraftRequest, request: Request):
             raise
         except Exception as e:
             log.error("Continue draft stream error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+            from core.redact import redact_brands
+            yield f"data: {json.dumps({'type': 'error', 'data': redact_brands(str(e))})}\n\n"
 
         # Send final response
         if final_response:

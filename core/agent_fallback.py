@@ -253,9 +253,12 @@ async def web_search_fallback(
     except Exception as e:
         log.error("Web search fallback failed",
                   agent=agent_name, error=str(e), exc_info=True)
-        # Sanitize: take first line only (no stack trace) and cap to 200 chars
-        # so the field can never leak internal paths or full Python tracebacks.
-        sanitized = str(e).splitlines()[0][:200] if str(e) else "unknown error"
+        # Sanitize: take first line only (no stack trace), strip brand
+        # tokens (so a "google.genai.errors..." SDK message can't leak
+        # the provider to the user), and cap to 200 chars.
+        from core.redact import redact_brands
+        raw = str(e).splitlines()[0] if str(e) else "unknown error"
+        sanitized = redact_brands(raw)[:200]
         return AgentResult(
             agent_name=agent_name,
             content="I was unable to retrieve information on this topic at the moment. Please try rephrasing your question.",

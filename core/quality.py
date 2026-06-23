@@ -55,6 +55,10 @@ async def score_response(
     request_log_id: int | None = None,
     thread_id: str = "",
 ) -> dict | None:
+    # NOTE: do NOT pass the underlying model identifier to chat_store.log_quality
+    # — model identifiers must never leave this process (see core/redact.py).
+    # The DB column accepts an empty string and the admin endpoint aggregates
+    # by agent, not by model.
     """Score a response with Gemini Flash Lite. Returns scores dict or None.
 
     Called fire-and-forget from gateway.py with 10% sampling:

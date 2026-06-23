@@ -1,0 +1,135 @@
+name: Prod Verify Language Fix (read-only diagnostic)
+
+# One-off check that commit 45c9a8e ("language: fix Marathi-PDF + English-query
+# mixing") actually shipped to /root/Lawtech-AI on the AWS prod box.
+#
+# Prod test runs of the fix showed Marathi tokens ("दस्त क्र.") leaking into
+# what should be pure-English replies — opposite of the local test, where the
+# same input produced zero non-Latin chars. This workflow rules out the
+# "code never made it to disk" hypothesis before we go deeper.
+#
+# Read-only: greps + sha256sum + git rev-parse. Nothing created, modified,
+# or deleted.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify deployed language fix
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Inspect deployed files
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+          APP_DIR=/root/Lawtech-AI
+
+          echo "=========================================================="
+          echo " 1. App dir mtime + recent file changes"
+          echo "=========================================================="
+          sudo ls -la --time-style=full-iso $APP_DIR/core/language.py \
+                                            $APP_DIR/core/self_refine.py \
+                                            $APP_DIR/core/agent_fallback.py \
+                                            $APP_DIR/agents/drafting.py \
+                                            $APP_DIR/agents/document.py 2>&1
+          echo
+
+          echo "=========================================================="
+          echo " 2. core/language.py — does it contain the new"
+          echo "    source_languages keyword?"
+          echo "=========================================================="
+          sudo grep -nE "source_languages|detect_source_languages|LANGUAGE INSTRUCTION \(STRICT\)" \
+            $APP_DIR/core/language.py 2>&1 | head -20 \
+            || echo "  NOT FOUND — file does NOT have the new code"
+          echo
+
+          echo "=========================================================="
+          echo " 3. agents/drafting.py — does it pass source_languages to"
+          echo "    localize_prompt in _generate_outline / _generate_section?"
+          echo "=========================================================="
+          sudo grep -nE "_source_langs_outline|_source_langs_section|source_languages=" \
+            $APP_DIR/agents/drafting.py 2>&1 | head -10 \
+            || echo "  NOT FOUND — drafting agent does NOT have the new code"
+          echo
+
+          echo "=========================================================="
+          echo " 4. agents/document.py — _generate_from_docs signature"
+          echo "=========================================================="
+          sudo grep -nA2 "def _generate_from_docs" $APP_DIR/agents/document.py 2>&1 | head -12
+          echo
+
+          echo "=========================================================="
+          echo " 5. SHA256 of the 5 patched files (compare to local sha)"
+          echo "=========================================================="
+          sudo sha256sum $APP_DIR/core/language.py \
+                         $APP_DIR/core/self_refine.py \
+                         $APP_DIR/core/agent_fallback.py \
+                         $APP_DIR/agents/drafting.py \
+                         $APP_DIR/agents/document.py 2>&1
+          echo
+
+          echo "=========================================================="
+          echo " 6. Stale __pycache__ that might shadow new .py files?"
+          echo "=========================================================="
+          sudo ls -la $APP_DIR/core/__pycache__/ 2>&1 | grep -E "language|self_refine|agent_fallback" | head -10
+          echo
+          sudo ls -la $APP_DIR/agents/__pycache__/ 2>&1 | grep -E "drafting|document" | head -10
+          echo
+
+          echo "=========================================================="
+          echo " 7. Running process info — is it actually using $APP_DIR?"
+          echo "=========================================================="
+          PID=\$(sudo systemctl show lawttorney-v2.service -p MainPID --value 2>&1)
+          echo "  MainPID: \$PID"
+          if [ -n "\$PID" ] && [ "\$PID" != "0" ]; then
+            echo "  CWD: \$(sudo readlink /proc/\$PID/cwd 2>&1)"
+            echo "  exe: \$(sudo readlink /proc/\$PID/exe 2>&1)"
+            echo "  Service start time:"
+            sudo systemctl show lawttorney-v2.service -p ActiveEnterTimestamp --value 2>&1
+            echo "  Worker PIDs (gunicorn):"
+            sudo ps --ppid \$PID -o pid,etime,cmd 2>&1 | head -15
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 8. Ask the running Python what localize_prompt actually does"
+          echo "    when called with source_languages=('mr',)"
+          echo "=========================================================="
+          if [ -n "\$PID" ] && [ "\$PID" != "0" ]; then
+            PYEXE=\$(sudo readlink /proc/\$PID/exe 2>&1)
+            APPDIR=\$(sudo readlink /proc/\$PID/cwd 2>&1)
+            sudo -u root bash -c "cd '\$APPDIR' && '\$PYEXE' -c '
+          from core.language import localize_prompt
+          out = localize_prompt(\"BASE\", \"en\", source_languages=(\"mr\",))
+          print(\"output length:\", len(out))
+          marker = \"LANGUAGE INSTRUCTION (STRICT)\" in out
+          print(\"has STRICT marker:\", marker)
+          if marker:
+              print(\"first 400 chars after BASE:\", out[4:404])
+          ' 2>&1" || echo "  (import / call failed — that itself indicates code mismatch)"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " VERIFY COMPLETE"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

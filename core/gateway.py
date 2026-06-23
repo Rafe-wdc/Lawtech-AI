@@ -286,27 +286,19 @@ async def _cache_request_body_for_diagnostics(request: Request, call_next):
             0 < size <= _BODY_CACHE_MAX_BYTES
             and (ct.startswith("application/json") or ct.startswith("text/"))
         ):
+            # Read the body once. Starlette's Request caches it on
+            # `request._body` automatically, so downstream FastAPI handlers
+            # that call `await request.body()` or `await request.json()`
+            # will hit the cache and never touch the underlying ASGI
+            # receive callable. We deliberately DO NOT replace
+            # `request._receive` — replacing it broke /pyapi/search/stream
+            # (and would break any future streaming JSON endpoint) because
+            # Starlette's StreamingResponse runs a concurrent
+            # `listen_for_disconnect` task that calls receive() to detect
+            # client closure. A replaced _receive that blocks or returns a
+            # duplicate http.request short-circuits the entire SSE stream
+            # to one event ([thread_id]) before the response body can flow.
             body = await request.body()
-            # One-shot receive that delivers the cached body once and then
-            # blocks forever (Starlette's BaseHTTPMiddleware uses
-            # subsequent receive() calls only for disconnect detection, so
-            # blocking is safe — the asgi server's actual receive sits
-            # underneath and still fires disconnect when the socket dies).
-            _body_consumed = False
-
-            async def _receive():
-                nonlocal _body_consumed
-                if not _body_consumed:
-                    _body_consumed = True
-                    return {"type": "http.request", "body": body, "more_body": False}
-                # Block until cancelled rather than returning a duplicate
-                # http.request message that the wrapping middleware can't
-                # interpret. asyncio.Event().wait() never returns unless
-                # the event is set, and we don't set it.
-                await asyncio.Event().wait()
-                return {"type": "http.disconnect"}  # unreachable
-
-            request._receive = _receive
             request.state.cached_body = body
     return await call_next(request)
 

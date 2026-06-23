@@ -33,10 +33,19 @@ def _validate_collection_name(unique_string: str) -> None:
 
 
 # --- Text Splitter ---
+#
+# Chunk size raised from 800 → 8000 on 2026-06-23 to match the V1 baseline
+# (V1 used 15000) and reduce embedding-service round-trips by ~10×. The
+# shared chunk constants live in core.file_processor; we import them so a
+# single source of truth governs both this in-process API and the
+# inline-chat persistence path. Legal documents are coherent paragraphs and
+# tolerate large chunks well — the per-retrieval k=30 MMR keeps recall
+# strong even with fewer total chunks per document.
+from core.file_processor import CHROMA_CHUNK_SIZE, CHROMA_CHUNK_OVERLAP
 
 _text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=800,
-    chunk_overlap=200,
+    chunk_size=CHROMA_CHUNK_SIZE,
+    chunk_overlap=CHROMA_CHUNK_OVERLAP,
     length_function=len,
 )
 

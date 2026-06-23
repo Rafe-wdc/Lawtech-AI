@@ -29,13 +29,16 @@ log = get_logger("Guardrail")
 MAX_QUERY_LENGTH = 200000
 MIN_QUERY_LENGTH = 2
 
-# Hard ceiling on the final response after all sanitization. Even after
-# sanitize_output collapses runaway pad-char runs, an LLM can still emit
-# legitimately diverse prose that runs longer than is useful to display.
-# 60k chars is well above any normal answer (a richly-formatted comparison
-# table for 10 statutes is ~15k chars; a long legal explainer is ~25k).
-# Beyond that we truncate and surface a hint to narrow the query.
-MAX_FINAL_RESPONSE_CHARS = 60_000
+# Hard ceiling on the final response after all sanitization. Sized to match
+# the orchestrator's own synthesis cap (250 KB, see agents/orchestrator.py).
+# The previous value (60 KB) was the binding production limit on assembled
+# Drafting output: a 17-section writ for the Bombay High Court routinely
+# assembles to 80-110 KB and was being truncated mid-sentence with a misleading
+# "ask a narrower question" suffix that is nonsense advice for a Drafting
+# workload (see Buglist/drafting_writ_petition_failure_2026-06-22.md). The
+# orchestrator's 250 K cap remains the upper bound — guardrail is now aligned
+# with it rather than overriding it 4× lower.
+MAX_FINAL_RESPONSE_CHARS = 250_000
 TRUNCATION_SUFFIX = (
     "\n\n---\n_Response truncated -- the answer was longer than the display "
     "budget. Try asking a narrower question (specific section / specific act / "

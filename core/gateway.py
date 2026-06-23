@@ -175,12 +175,28 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         {"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")}
         for e in errors
     ]
+    # Diagnostic body capture (added 2026-06-21 to chase lawttorney.ai 422s).
+    # request.state.cached_body is set by _cache_request_body_for_diagnostics
+    # middleware below for small POSTs (<100KB).
+    cached_body = getattr(request.state, "cached_body", None)
+    body_size = len(cached_body) if cached_body is not None else None
+    body_preview = None
+    if cached_body is not None:
+        try:
+            body_preview = cached_body.decode("utf-8", errors="replace")
+        except Exception as e:
+            body_preview = f"<undecodable: {e}>"
     log.warning(
         "Request validation failed",
         request_id=req_id,
         path=request.url.path,
         method=request.method,
         client=request.client.host if request.client else None,
+        content_type=request.headers.get("content-type", ""),
+        user_agent=request.headers.get("user-agent", ""),
+        referer=request.headers.get("referer", ""),
+        body_size=body_size,
+        body=body_preview,
         errors=field_errors,
     )
     return _error_response(422, "validation_error", message, req_id)
@@ -233,6 +249,65 @@ async def request_id_middleware(request: Request, call_next):
     rid = str(uuid.uuid4())[:8]
     request.state.request_id = rid
     set_request_id(rid)
+    return await call_next(request)
+
+
+# ── Body cache for 422 diagnostic logging ────────────────────────────────────
+# Stashes raw request body on request.state for validation_exception_handler.
+# Bounded by Content-Length to avoid buffering large file uploads. Added
+# 2026-06-21 to capture what lawttorney.ai clients are actually sending when
+# they hit 422 — the validation handler alone tells us which field is missing,
+# not what the client sent in place of it.
+
+_BODY_CACHE_MAX_BYTES = 100 * 1024  # 100 KB cap — large enough for any
+                                     # text query, small enough that even a
+                                     # malicious POST flood can't blow memory.
+
+
+@app.middleware("http")
+async def _cache_request_body_for_diagnostics(request: Request, call_next):
+    if request.method in ("POST", "PUT", "PATCH"):
+        cl = request.headers.get("content-length", "")
+        try:
+            size = int(cl) if cl else -1
+        except ValueError:
+            size = -1
+        ct = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        # Only cache JSON bodies. Multipart/form-data uploads must NOT be
+        # cached here: re-priming `request._receive` with a single-shot
+        # http.request returner breaks streaming responses (SSE), because
+        # Starlette's BaseHTTPMiddleware later calls receive() again to
+        # detect client disconnect — and our naive _receive returned the
+        # same body event, triggering `RuntimeError: Unexpected message
+        # received: http.request`. The 422 diagnostics we added this for
+        # only need JSON capture anyway (the lawttorney.ai 422 spike was
+        # all JSON POSTs missing the `query` field).
+        if (
+            0 < size <= _BODY_CACHE_MAX_BYTES
+            and (ct.startswith("application/json") or ct.startswith("text/"))
+        ):
+            body = await request.body()
+            # One-shot receive that delivers the cached body once and then
+            # blocks forever (Starlette's BaseHTTPMiddleware uses
+            # subsequent receive() calls only for disconnect detection, so
+            # blocking is safe — the asgi server's actual receive sits
+            # underneath and still fires disconnect when the socket dies).
+            _body_consumed = False
+
+            async def _receive():
+                nonlocal _body_consumed
+                if not _body_consumed:
+                    _body_consumed = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                # Block until cancelled rather than returning a duplicate
+                # http.request message that the wrapping middleware can't
+                # interpret. asyncio.Event().wait() never returns unless
+                # the event is set, and we don't set it.
+                await asyncio.Event().wait()
+                return {"type": "http.disconnect"}  # unreachable
+
+            request._receive = _receive
+            request.state.cached_body = body
     return await call_next(request)
 
 
@@ -897,9 +972,39 @@ async def chat_with_files(
 
             if file_tuples:
                 yield f"data: {json.dumps({'type': 'file_processing', 'message': 'Processing uploaded files...'})}\n\n"
+                # Drain in-flight progress events from process_files while it runs.
+                # Before 2026-06-23 the gateway awaited process_files directly,
+                # so when a sub-task (Gemini upload / PDF extract / Chroma write)
+                # stalled, the SSE channel went silent for the duration of the
+                # stall — the user-visible symptom of the V2 file-processing
+                # regression. The queue-drained pattern surfaces per-stage
+                # events to the user as they happen.
+                _fp_events: asyncio.Queue = asyncio.Queue()
+                _FP_SENTINEL = object()
+
+                def _fp_writer(evt: dict) -> None:
+                    # Called from process_files; runs on the same event loop.
+                    # put_nowait is safe because the queue is unbounded.
+                    _fp_events.put_nowait(evt)
+
+                async def _run_fp():
+                    try:
+                        return await process_files(file_tuples, thread_id, writer=_fp_writer)
+                    finally:
+                        _fp_events.put_nowait(_FP_SENTINEL)
+
+                _fp_task = asyncio.create_task(_run_fp())
                 try:
-                    fc = await process_files(file_tuples, thread_id)
+                    while True:
+                        evt = await _fp_events.get()
+                        if evt is _FP_SENTINEL:
+                            break
+                        yield f"data: {json.dumps(evt)}\n\n"
+                    fc = await _fp_task
                     file_context_dict = fc.to_dict()
+                    # Final summary event (kept for frontend back-compat — the
+                    # 'all_files_done' stage event above carries the same data
+                    # but with stage='all_files_done').
                     yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"
                     log.info("Files processed for chat",
                              summary=fc.summary, thread_id=thread_id[:12],
@@ -907,6 +1012,13 @@ async def chat_with_files(
                 except Exception as e:
                     log.error("File processing failed", error=str(e))
                     yield f"data: {json.dumps({'type': 'file_processing', 'message': f'File processing failed: {e}', 'files': []})}\n\n"
+                    # Make sure the background task is cleaned up.
+                    if not _fp_task.done():
+                        _fp_task.cancel()
+                        try:
+                            await _fp_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
 
             # Delegate the rest (integration + agent graph + persistence) to the
             # shared pipeline. Note that the pipeline emits its own thread_id event,

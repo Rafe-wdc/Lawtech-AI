@@ -25,6 +25,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, Optional
 
 from core.logger import get_logger, log_time
 from core.settings import (
@@ -48,10 +49,53 @@ log = get_logger("FileProcessor")
 
 MAX_INLINE_TEXT_CHARS = 100_000
 MAX_INLINE_PDF_PAGES = 20
+
+# Vision OCR DPI. V1 ran at 96 for years on production legal documents with
+# acceptable accuracy. V2 raised this to 200 for sharper Indic-script OCR,
+# but the resulting 4x increase in pixels per page is the main driver of
+# OCR latency on long PDFs. We keep a high-DPI option for genuinely poor
+# text-layer cases and default to V1's 96 for the common path.
+# (Bug analysis 2026-06-23: V2 file-processing regression — V1 baseline.)
+VISION_DPI_LOW = 96             # V1 default — fast, acceptable for most cases
+VISION_DPI_HIGH = 200            # used when low-DPI OCR returns very little text
+VISION_DPI = VISION_DPI_LOW      # default; _vision_ocr_pdf may escalate
+
 VISION_BATCH_SIZE = 10          # pages per Gemini Vision call (was 5)
-VISION_DPI = 200                # render DPI for scanned PDFs (was 120)
 VISION_MAX_CONCURRENT = 4       # max parallel OCR batch calls
 OCR_CACHE_DIR = os.path.join(CHROMA_STORE_ROOT, ".ocr_cache")
+
+# ChromaDB chunk size for evidence PDFs. V2 originally used 1000 char chunks,
+# which produced ~750 chunks for a 524-page PDF — 750 embedding round-trips
+# to the embedding service is most of why ChromaDB writes are the third-
+# largest silent-wait stage. V1 used 15000 chunks (50 embeddings for the
+# same PDF). We compromise at 8000 — 8x fewer round-trips than V2 default
+# but with finer-grained retrieval than V1's 15000.
+CHROMA_CHUNK_SIZE = 8000
+CHROMA_CHUNK_OVERLAP = 200
+
+# PDF compression timeout. PikePDF lossless re-streaming is fast (<10s for
+# a 30 MB PDF on commodity hardware). Ghostscript lossy can take 30-60s
+# on the same input. 60s is a generous upper bound; on timeout we skip
+# compression and proceed with the original file.
+PDF_COMPRESS_TIMEOUT_S = 60
+
+# Per-task timeouts for process_files sub-tasks. None of these existed before
+# 2026-06-23; their absence was the root cause of the silent hangs reported on
+# 29 MB / 524-page evidence bundles (V2 file-processing regression vs V1, see
+# Buglist/v2_file_processing_regression_2026-06-23.md). V1's lean pipeline did
+# not need timeouts because the payload was always small enough to keep every
+# stage fast. V2's richer pipeline (200 DPI render, 1k-char chunks, Gemini
+# Files upload) blows past V1's implicit budgets and needs explicit ceilings.
+#
+# On timeout: log + skip the affected file with a clear file_processing
+# rejection event. Never hang the whole request.
+GEMINI_UPLOAD_TIMEOUT_S = 180        # per-file Gemini Files API upload
+PDF_EXTRACT_TIMEOUT_S = 120          # per-file PyMuPDF per-page extraction
+DOCX_EXTRACT_TIMEOUT_S = 60          # per-file DOCX text extraction
+XLSX_EXTRACT_TIMEOUT_S = 60          # per-file XLSX text extraction
+CSV_EXTRACT_TIMEOUT_S = 30           # per-file CSV text extraction
+CHROMA_STORE_TIMEOUT_S = 180         # per-file embedding + Chroma write
+SQLITE_SAVE_TIMEOUT_S = 30           # per-file thread_files row insert
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".jpg", ".jpeg", ".png", ".webp",
@@ -549,15 +593,21 @@ def _save_ocr_cache(file_hash: str, text: str) -> None:
         log.warning("Failed to cache OCR result", error=str(e))
 
 
-def _render_pdf_pages(file_path: str, page_count: int) -> list[tuple[int, str]]:
+def _render_pdf_pages(
+    file_path: str, page_count: int, dpi: int | None = None,
+) -> list[tuple[int, str]]:
     """Render all PDF pages to base64 JPEG images. Returns [(page_start, b64), ...]
 
     Uses JPEG (not PNG) for ~2x smaller payloads on scanned documents.
-    Uses higher DPI (200) for better OCR accuracy on legal documents.
+    DPI defaults to VISION_DPI (96 — V1 baseline). Callers can pass DPI
+    explicitly to request the high-DPI path (200) when low-DPI OCR
+    produced very thin text (the adaptive-DPI second pass).
     Groups pages into batches of VISION_BATCH_SIZE.
     """
     import base64
     import fitz
+
+    use_dpi = dpi if dpi is not None else VISION_DPI
 
     doc = fitz.open(file_path)
     batches: list[tuple[int, list[str]]] = []
@@ -566,7 +616,7 @@ def _render_pdf_pages(file_path: str, page_count: int) -> list[tuple[int, str]]:
 
     for i in range(page_count):
         page = doc[i]
-        pix = page.get_pixmap(dpi=VISION_DPI)
+        pix = page.get_pixmap(dpi=use_dpi)
         # JPEG at quality 85 — ~2x smaller than PNG for scanned docs
         img_bytes = pix.tobytes("jpeg", jpg_quality=85)
         b64 = base64.b64encode(img_bytes).decode("utf-8")
@@ -720,52 +770,97 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
         return ""
 
 
-def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
-    """Run Gemini Vision OCR on PDF pages with parallel batch processing.
-
-    Improvements over original:
-    1. Hash-based cache — skip OCR if same PDF was processed before
-    2. JPEG @ quality 85 — ~2x smaller payloads vs PNG
-    3. 200 DPI — better accuracy for faded/handwritten legal text (was 120)
-    4. Batch size 10 — fewer API calls (was 5)
-    5. Parallel batch calls — up to 4 concurrent Gemini calls (was sequential)
-    6. Legal-aware OCR prompt — better extraction of names, dates, sections
+def _ocr_pdf_at_dpi(
+    file_path: str, page_count: int, dpi: int,
+) -> str:
+    """Run Vision OCR over a PDF at a specific DPI. Internal helper for the
+    adaptive-DPI logic in _vision_ocr_pdf — separated so the low- and
+    high-DPI passes share rendering + batching code.
     """
     from core.clients import get_gemini_flash
 
-    # Check cache first
+    with log_time(log, "PDF page rendering", pages=page_count, dpi=dpi):
+        batches = _render_pdf_pages(file_path, page_count, dpi=dpi)
+
+    llm = get_gemini_flash(temperature=0.0)
+    log.info("Starting parallel OCR",
+             batches=len(batches), pages=page_count, dpi=dpi,
+             batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT)
+
+    with log_time(log, "Parallel Vision OCR", batches=len(batches)):
+        with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
+            futures = [
+                executor.submit(_ocr_batch, llm, batch_images, batch_start)
+                for batch_start, batch_images in batches
+            ]
+            results = []
+            for future in futures:
+                try:
+                    results.append(future.result(timeout=120))
+                except Exception as e:
+                    log.warning("OCR batch failed", error=str(e))
+                    results.append("")
+
+    return "\n\n".join(r for r in results if r)
+
+
+# Adaptive-DPI threshold: if the low-DPI OCR returns fewer than
+# (page_count × LOW_DPI_TEXT_PER_PAGE_FLOOR) chars, we retry at high
+# DPI. The threshold is intentionally conservative — many one-page
+# Indian court orders are dense; we want to retry only on genuinely
+# thin output (truly garbled or scanned-poorly cases). V1 used the
+# same family of heuristic with `text_length > num_pages * 700` to
+# decide whether to OCR at all; we re-use 200 as the "this OCR pass
+# clearly under-read the doc" floor.
+LOW_DPI_TEXT_PER_PAGE_FLOOR = 200
+
+
+def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
+    """Run Gemini Vision OCR on PDF pages with parallel batch processing.
+
+    Adaptive DPI (added 2026-06-23):
+      1. First pass at VISION_DPI_LOW (96) — V1 baseline, ~4x faster than 200
+      2. If output is unusably thin (< page_count × LOW_DPI_TEXT_PER_PAGE_FLOOR
+         chars), retry at VISION_DPI_HIGH (200) for better fidelity on faded /
+         handwritten / unusually-formatted legal text
+      3. Cache the best result
+
+    Other features (unchanged):
+    - Hash-based cache: same PDF + DPI not re-OCR'd within cache lifetime
+    - JPEG @ quality 85 — ~2x smaller payloads vs PNG
+    - Batch size 10 — fewer API calls (was 5)
+    - Parallel batch calls — up to 4 concurrent Gemini calls
+    - Legal-aware OCR prompt — better extraction of names, dates, sections
+    """
+    # Check cache first (hash uses file content, not DPI — first hit wins
+    # regardless of which DPI produced it).
     pdf_hash = _file_hash(file_path)
     cached = _load_ocr_cache(pdf_hash)
     if cached:
         return cached
 
     try:
-        with log_time(log, "PDF page rendering", pages=page_count, dpi=VISION_DPI):
-            batches = _render_pdf_pages(file_path, page_count)
+        text = _ocr_pdf_at_dpi(file_path, page_count, VISION_DPI_LOW)
 
-        llm = get_gemini_flash(temperature=0.0)
-        log.info("Starting parallel OCR",
-                 batches=len(batches), pages=page_count,
-                 batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT)
+        # Adaptive escalation: if the low-DPI pass produced very thin text
+        # for a large PDF, retry at high DPI. Cheap heuristic: chars per
+        # page. Single-page PDFs always retry on empty output regardless.
+        thin = (
+            len(text.strip()) < max(LOW_DPI_TEXT_PER_PAGE_FLOOR, page_count * LOW_DPI_TEXT_PER_PAGE_FLOOR)
+        )
+        if thin and VISION_DPI_HIGH > VISION_DPI_LOW:
+            log.info("Low-DPI OCR produced thin output — retrying at high DPI",
+                     file=os.path.basename(file_path),
+                     pages=page_count,
+                     low_dpi_chars=len(text.strip()),
+                     low_dpi=VISION_DPI_LOW,
+                     high_dpi=VISION_DPI_HIGH)
+            high_text = _ocr_pdf_at_dpi(file_path, page_count, VISION_DPI_HIGH)
+            # Keep whichever pass produced more substantive text.
+            if len(high_text.strip()) > len(text.strip()):
+                text = high_text
 
-        # Run batches in parallel using ThreadPoolExecutor
-        with log_time(log, "Parallel Vision OCR", batches=len(batches)):
-            with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
-                futures = [
-                    executor.submit(_ocr_batch, llm, batch_images, batch_start)
-                    for batch_start, batch_images in batches
-                ]
-                results = []
-                for future in futures:
-                    try:
-                        results.append(future.result(timeout=120))
-                    except Exception as e:
-                        log.warning("OCR batch failed", error=str(e))
-                        results.append("")
-
-        text = "\n\n".join(r for r in results if r)
-
-        # Cache the result
+        # Cache the best result
         if text.strip():
             _save_ocr_cache(pdf_hash, text)
 
@@ -776,6 +871,128 @@ def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
         return ""
 
 
+def _compress_pdf(input_path: str) -> tuple[str, dict]:
+    """Compress a PDF using PikePDF lossless re-streaming + optional
+    Ghostscript lossy fallback. Returns the path to USE for downstream
+    processing (compressed when smaller; original otherwise) and a stats
+    dict for logging.
+
+    Ported from V1 (mainqa_test.py + utils/pdf_utils.py at
+    C:\\lawtech_backup) where this ran as the first step of every PDF
+    processing flow. V2 dropped it; the resulting larger payloads
+    contributed to the silent-hang regression on large bundles
+    (see Buglist/v2_file_processing_regression_2026-06-23.md).
+
+    Strategy:
+      1. PikePDF stream-compression (lossless). Always available.
+      2. Ghostscript /ebook preset (lossy). Skipped silently when the
+         `gs` binary is not on PATH — we don't ship Ghostscript as a
+         hard dependency.
+      3. Return whichever output is smallest. If neither compressed
+         beats `original × 0.97`, return the original (no point shipping
+         a basically-identical re-encoded file downstream).
+
+    Side effects: writes one or two sibling files
+    (`<base>_pike.pdf`, `<base>_gs.pdf`). The temp dir is the same as
+    `input_path`'s parent; callers should expect those files until the
+    request completes. Files that lose are cleaned up before return;
+    the chosen file (if not the original) is the caller's responsibility.
+    """
+    import shutil as _shutil
+    import subprocess as _subprocess
+
+    original_size = os.path.getsize(input_path)
+    stats = {
+        "original": original_size,
+        "pike": None,
+        "gs": None,
+        "chosen": "original",
+        "saved_bytes": 0,
+    }
+
+    base, ext = os.path.splitext(input_path)
+    pike_out: str | None = f"{base}_pike{ext}"
+    gs_out: str | None = f"{base}_gs{ext}"
+
+    # ---------- PikePDF lossless ----------
+    try:
+        import pikepdf
+        with pikepdf.open(input_path) as pdf:
+            pdf.save(pike_out, compress_streams=True)
+        stats["pike"] = os.path.getsize(pike_out)
+    except Exception as e:
+        log.warning("PikePDF compression failed (continuing with Ghostscript / original)",
+                    file=os.path.basename(input_path), error=str(e)[:200])
+        if pike_out and os.path.exists(pike_out):
+            try: os.remove(pike_out)
+            except OSError: pass
+        pike_out = None
+
+    # ---------- Ghostscript lossy (optional) ----------
+    gs_bin = _shutil.which("gs") or _shutil.which("gswin64c") or _shutil.which("gswin32c")
+    if gs_bin:
+        try:
+            _subprocess.run(
+                [
+                    gs_bin,
+                    "-sDEVICE=pdfwrite",
+                    "-dCompatibilityLevel=1.4",
+                    "-dPDFSETTINGS=/ebook",
+                    "-dNOPAUSE",
+                    "-dQUIET",
+                    "-dBATCH",
+                    f"-sOutputFile={gs_out}",
+                    input_path,
+                ],
+                check=True,
+                # Hard cap subprocess time so a bad GS install can't hang.
+                # Re-using the same budget the async caller gives us.
+                timeout=PDF_COMPRESS_TIMEOUT_S,
+            )
+            stats["gs"] = os.path.getsize(gs_out)
+        except (_subprocess.SubprocessError, _subprocess.TimeoutExpired, OSError) as e:
+            log.warning("Ghostscript compression failed (continuing with PikePDF / original)",
+                        file=os.path.basename(input_path), error=str(e)[:200])
+            if gs_out and os.path.exists(gs_out):
+                try: os.remove(gs_out)
+                except OSError: pass
+            gs_out = None
+    else:
+        # GS not installed — that's fine, PikePDF alone is enough on
+        # most inputs. Don't log a warning per file; this is the
+        # expected baseline on most dev / container images.
+        gs_out = None
+
+    # ---------- Pick the smallest winner ----------
+    threshold = int(original_size * 0.97)
+    candidates: list[tuple[int, str, str]] = []
+    if pike_out and stats["pike"] is not None:
+        candidates.append((stats["pike"], pike_out, "pike"))
+    if gs_out and stats["gs"] is not None:
+        candidates.append((stats["gs"], gs_out, "gs"))
+
+    if candidates:
+        candidates.sort()
+        winner_size, winner_path, winner_kind = candidates[0]
+        # Only switch away from the original when we save at least 3%.
+        if winner_size < threshold:
+            stats["chosen"] = winner_kind
+            stats["saved_bytes"] = original_size - winner_size
+            # Clean up the loser(s).
+            for _sz, _p, _k in candidates[1:]:
+                if _p and os.path.exists(_p):
+                    try: os.remove(_p)
+                    except OSError: pass
+            return winner_path, stats
+
+    # No worthwhile compression — drop both compressed files.
+    for _p in (pike_out, gs_out):
+        if _p and os.path.exists(_p):
+            try: os.remove(_p)
+            except OSError: pass
+    return input_path, stats
+
+
 def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     """Chunk text and store in ChromaDB collection."""
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -783,8 +1000,8 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     from core.clients import get_qa_embeddings, get_chroma_client
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
+        chunk_size=CHROMA_CHUNK_SIZE,
+        chunk_overlap=CHROMA_CHUNK_OVERLAP,
         separators=["\n\n", "\n", ". ", " "],
     )
     chunks = splitter.split_text(text)
@@ -986,20 +1203,36 @@ def _extract_xlsx_text(file_path: str) -> str:
 
 # --- Main Processing Function ---
 
+
+def _noop_writer(_evt: dict) -> None:
+    """Default writer when no SSE channel is wired — silently drops events."""
+    return
+
+
 async def process_files(
     files: list[tuple[str, str, int]],
     thread_id: str,
+    writer: Optional[Callable[[dict], None]] = None,
 ) -> FileContext:
     """Process uploaded files with local storage + Gemini Files API persistence.
 
     Args:
         files: List of (temp_file_path, original_filename, size_bytes) tuples.
         thread_id: Used for upload dir, ChromaDB collection naming, and DB record.
+        writer: Optional callback that receives in-flight progress events.
+            Each call is `writer({"type": "file_processing", "stage": ..., ...})`.
+            The gateway wires this to the SSE stream so users see progress
+            instead of dead silence during 60-180s extraction / upload / embed
+            stages. Defaults to a no-op so callers that don't care (tests,
+            background OCR) still work.
 
     Returns:
         FileContext with gemini_file_parts, inline_text, and chromadb_collections.
     """
     from core.chat_store import chat_store
+
+    # Default to a no-op so every emit call can be unconditional.
+    emit = writer or _noop_writer
 
     ctx = FileContext()
 
@@ -1090,22 +1323,51 @@ async def process_files(
         existing_bytes += size_bytes
 
     # --- Phase 2: Parallel Gemini Files API uploads ---
-    # Upload all Gemini-supported files concurrently instead of one-by-one
+    # Each upload wrapped in asyncio.wait_for so a single stalled upload (e.g.
+    # a 15 MB PDF over a slow Indian → US-region pipe) cannot hang the whole
+    # request indefinitely. Before this guard, a stalled upload would block
+    # asyncio.gather() forever — no exception raised, no timeout, no
+    # recovery. Confirmed root cause of the 1h44m / 600s+ hangs on large
+    # bundles (see Buglist/v2_file_processing_regression_2026-06-23.md).
+    async def _upload_one(pf, local_path, mime):
+        return await asyncio.wait_for(
+            asyncio.to_thread(upload_to_gemini, local_path, mime, pf.original_name),
+            timeout=GEMINI_UPLOAD_TIMEOUT_S,
+        )
+
     gemini_tasks = []
     gemini_indices = []  # track which prepared[] index each task maps to
     for idx, (pf, local_path, ext, mime, gemini_ok) in enumerate(prepared):
         if gemini_ok:
-            gemini_tasks.append(asyncio.to_thread(upload_to_gemini, local_path, mime, pf.original_name))
+            gemini_tasks.append(_upload_one(pf, local_path, mime))
             gemini_indices.append(idx)
 
     if gemini_tasks:
+        emit({
+            "type": "file_processing",
+            "stage": "gemini_upload",
+            "message": f"Uploading {len(gemini_tasks)} file(s) to Gemini...",
+            "count": len(gemini_tasks),
+        })
         with log_time(log, "Parallel Gemini uploads", count=len(gemini_tasks)):
             gemini_results = await asyncio.gather(*gemini_tasks, return_exceptions=True)
 
+        ok_uploads = 0
         for i, result in enumerate(gemini_results):
             idx = gemini_indices[i]
             pf = prepared[idx][0]
-            if isinstance(result, Exception):
+            if isinstance(result, asyncio.TimeoutError):
+                log.error("Gemini Files upload timed out — file degraded to extraction-only",
+                          file=pf.original_name, size_mb=round(pf.size_bytes / (1024*1024), 1),
+                          timeout_s=GEMINI_UPLOAD_TIMEOUT_S)
+                pf.error = f"Gemini upload timed out after {GEMINI_UPLOAD_TIMEOUT_S}s"
+                emit({
+                    "type": "file_processing",
+                    "stage": "gemini_upload_timeout",
+                    "message": f"{pf.original_name}: Gemini upload timed out — will use text extraction only",
+                    "file": pf.original_name,
+                })
+            elif isinstance(result, Exception):
                 log.error("Gemini Files upload failed, falling back to extraction",
                           file=pf.original_name, error=str(result))
                 pf.error = f"Gemini upload failed: {result}"
@@ -1118,20 +1380,92 @@ async def process_files(
                     "file_data": {"file_uri": uri, "mime_type": pf.mime_type},
                     "name": pf.original_name,
                 })
+                ok_uploads += 1
                 log.info("Gemini Files upload OK", file=pf.original_name, mime=pf.mime_type)
+        emit({
+            "type": "file_processing",
+            "stage": "gemini_upload_done",
+            "message": f"Gemini uploads complete ({ok_uploads}/{len(gemini_tasks)} succeeded)",
+            "ok": ok_uploads,
+            "total": len(gemini_tasks),
+        })
 
     # --- Phase 3: Process each file (text extraction, OCR, ChromaDB) ---
     for pf, local_path, ext, mime, gemini_ok in prepared:
         # --- PDF-specific handling ---
         if ext == ".pdf":
+            # --- Step 3.0: Optional PDF compression (V1 port) ---
+            # PikePDF lossless re-streaming reduces file size for downstream
+            # fitz extraction and Vision OCR rendering. Ghostscript /ebook
+            # adds further lossy reduction when available. We swap
+            # local_path to the smaller file when compression saves at
+            # least 3% — otherwise we proceed with the original. NEVER
+            # blocks: if compression times out or both engines fail, we
+            # log and continue with the uncompressed file.
+            emit({
+                "type": "file_processing",
+                "stage": "pdf_compress_start",
+                "message": f"Compressing {pf.original_name}...",
+                "file": pf.original_name,
+            })
+            try:
+                new_path, comp_stats = await asyncio.wait_for(
+                    asyncio.to_thread(_compress_pdf, local_path),
+                    timeout=PDF_COMPRESS_TIMEOUT_S,
+                )
+                if new_path != local_path:
+                    log.info("PDF compressed",
+                             file=pf.original_name,
+                             original_bytes=comp_stats["original"],
+                             chosen=comp_stats["chosen"],
+                             saved_bytes=comp_stats["saved_bytes"])
+                    emit({
+                        "type": "file_processing",
+                        "stage": "pdf_compress_done",
+                        "message": (
+                            f"{pf.original_name}: compressed "
+                            f"({comp_stats['saved_bytes'] // 1024} KB saved, "
+                            f"engine={comp_stats['chosen']})"
+                        ),
+                        "file": pf.original_name,
+                        "saved_bytes": comp_stats["saved_bytes"],
+                        "engine": comp_stats["chosen"],
+                    })
+                    local_path = new_path  # use compressed file downstream
+                else:
+                    log.debug("PDF compression skipped (no worthwhile saving)",
+                              file=pf.original_name, original_bytes=comp_stats["original"])
+            except asyncio.TimeoutError:
+                log.warning("PDF compression timed out — using original",
+                            file=pf.original_name, timeout_s=PDF_COMPRESS_TIMEOUT_S)
+            except Exception as e:
+                log.warning("PDF compression error — using original",
+                            file=pf.original_name, error=str(e)[:200])
+
+            emit({
+                "type": "file_processing",
+                "stage": "pdf_extract_start",
+                "message": f"Extracting text from {pf.original_name}...",
+                "file": pf.original_name,
+            })
             try:
                 # Per-page extraction so we can score each page for garbled
                 # text-layer (broken Identity-H fonts, bad embedded OCR).
                 # Joined text reproduces the legacy `_extract_pdf_text`
                 # output format with "--- Page N ---" markers.
-                per_page_texts, page_count = await asyncio.to_thread(
-                    _extract_pdf_text_per_page, local_path,
+                # Wrapped in wait_for: PyMuPDF can rarely hang on damaged
+                # PDFs; the timeout converts that into a clean per-file fail.
+                per_page_texts, page_count = await asyncio.wait_for(
+                    asyncio.to_thread(_extract_pdf_text_per_page, local_path),
+                    timeout=PDF_EXTRACT_TIMEOUT_S,
                 )
+                emit({
+                    "type": "file_processing",
+                    "stage": "pdf_extract_done",
+                    "message": f"{pf.original_name}: {page_count} pages",
+                    "file": pf.original_name,
+                    "pages": page_count,
+                })
                 text = "\n\n".join(
                     f"--- Page {i + 1} ---\n{t.strip()}"
                     for i, t in enumerate(per_page_texts) if t.strip()
@@ -1287,12 +1621,31 @@ async def process_files(
                 # content. Mirrors the small-PDF branch fix (BUG-02).
                 if text.strip() and (page_count > MAX_INLINE_PDF_PAGES or len(text) > MAX_INLINE_TEXT_CHARS):
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                    emit({
+                        "type": "file_processing",
+                        "stage": "chroma_store_start",
+                        "message": f"Embedding {pf.original_name} into vector store...",
+                        "file": pf.original_name,
+                    })
                     try:
-                        await asyncio.to_thread(_store_in_chromadb, text, collection_id, pf.original_name)
+                        await asyncio.wait_for(
+                            asyncio.to_thread(_store_in_chromadb, text, collection_id, pf.original_name),
+                            timeout=CHROMA_STORE_TIMEOUT_S,
+                        )
                         pf.chromadb_collection = collection_id
                         ctx.chromadb_collections.append(collection_id)
                         log.info("Large PDF stored in ChromaDB",
                                  file=pf.original_name, pages=page_count, collection=collection_id)
+                    except asyncio.TimeoutError:
+                        log.error("ChromaDB storage timed out — proceeding without vector index",
+                                  file=pf.original_name, pages=page_count,
+                                  timeout_s=CHROMA_STORE_TIMEOUT_S)
+                        emit({
+                            "type": "file_processing",
+                            "stage": "chroma_store_timeout",
+                            "message": f"{pf.original_name}: vector embedding timed out — text still usable inline",
+                            "file": pf.original_name,
+                        })
                     except Exception as e:
                         log.error("ChromaDB storage failed", error=str(e))
                     pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
@@ -1307,26 +1660,57 @@ async def process_files(
                     pf.extracted_text = text
                     inline_parts.append(f"[File: {pf.original_name}]\n{text}")
 
+            except asyncio.TimeoutError:
+                # PyMuPDF extract timed out (or any inner wait_for not handled
+                # specifically). Record per-file failure but DO NOT abort
+                # the whole upload — other files still get processed.
+                log.error("PDF processing timed out", file=pf.original_name,
+                          timeout_s=PDF_EXTRACT_TIMEOUT_S)
+                emit({
+                    "type": "file_processing",
+                    "stage": "pdf_extract_timeout",
+                    "message": f"{pf.original_name}: text extraction timed out",
+                    "file": pf.original_name,
+                })
+                if not pf.gemini_uri:
+                    pf.error = f"PDF text extraction timed out after {PDF_EXTRACT_TIMEOUT_S}s"
             except Exception as e:
                 if not pf.gemini_uri:
                     pf.error = f"PDF processing failed: {e}"
 
         # --- Step 4: Text extraction for DOCX / XLSX (Gemini Files API not supported) ---
         elif ext == ".docx":
+            emit({
+                "type": "file_processing",
+                "stage": "docx_extract_start",
+                "message": f"Extracting text from {pf.original_name}...",
+                "file": pf.original_name,
+            })
             try:
-                text = await asyncio.to_thread(_extract_docx_text, local_path)
+                text = await asyncio.wait_for(
+                    asyncio.to_thread(_extract_docx_text, local_path),
+                    timeout=DOCX_EXTRACT_TIMEOUT_S,
+                )
                 log.debug("DOCX text-only analysis (Gemini Files API does not support .docx)",
                           file=pf.original_name, chars=len(text))
                 if len(text) > MAX_INLINE_TEXT_CHARS:
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     try:
-                        await asyncio.to_thread(
-                            _store_in_chromadb, text, collection_id, pf.original_name)
+                        await asyncio.wait_for(
+                            asyncio.to_thread(
+                                _store_in_chromadb, text, collection_id, pf.original_name),
+                            timeout=CHROMA_STORE_TIMEOUT_S,
+                        )
                         pf.chromadb_collection = collection_id
                         ctx.chromadb_collections.append(collection_id)
                         log.info("Large DOCX stored in ChromaDB",
                                  file=pf.original_name, chars=len(text),
                                  collection=collection_id)
+                    except asyncio.TimeoutError:
+                        log.error("ChromaDB storage timed out for DOCX",
+                                  file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
+                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
+                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
                     except Exception as e:
                         log.error("ChromaDB storage failed for DOCX", error=str(e))
                         pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
@@ -1334,24 +1718,45 @@ async def process_files(
                 else:
                     pf.extracted_text = text
                     inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+            except asyncio.TimeoutError:
+                log.error("DOCX extraction timed out", file=pf.original_name,
+                          timeout_s=DOCX_EXTRACT_TIMEOUT_S)
+                pf.error = f"DOCX extraction timed out after {DOCX_EXTRACT_TIMEOUT_S}s"
             except Exception as e:
                 pf.error = f"Failed to read DOCX: {e}"
 
         elif ext == ".xlsx":
+            emit({
+                "type": "file_processing",
+                "stage": "xlsx_extract_start",
+                "message": f"Extracting text from {pf.original_name}...",
+                "file": pf.original_name,
+            })
             try:
-                text = await asyncio.to_thread(_extract_xlsx_text, local_path)
+                text = await asyncio.wait_for(
+                    asyncio.to_thread(_extract_xlsx_text, local_path),
+                    timeout=XLSX_EXTRACT_TIMEOUT_S,
+                )
                 log.debug("XLSX text-only analysis (Gemini Files API does not support .xlsx)",
                           file=pf.original_name, chars=len(text))
                 if len(text) > MAX_INLINE_TEXT_CHARS:
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     try:
-                        await asyncio.to_thread(
-                            _store_in_chromadb, text, collection_id, pf.original_name)
+                        await asyncio.wait_for(
+                            asyncio.to_thread(
+                                _store_in_chromadb, text, collection_id, pf.original_name),
+                            timeout=CHROMA_STORE_TIMEOUT_S,
+                        )
                         pf.chromadb_collection = collection_id
                         ctx.chromadb_collections.append(collection_id)
                         log.info("Large XLSX stored in ChromaDB",
                                  file=pf.original_name, chars=len(text),
                                  collection=collection_id)
+                    except asyncio.TimeoutError:
+                        log.error("ChromaDB storage timed out for XLSX",
+                                  file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
+                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
+                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
                     except Exception as e:
                         log.error("ChromaDB storage failed for XLSX", error=str(e))
                         pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
@@ -1359,6 +1764,10 @@ async def process_files(
                 else:
                     pf.extracted_text = text
                     inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+            except asyncio.TimeoutError:
+                log.error("XLSX extraction timed out", file=pf.original_name,
+                          timeout_s=XLSX_EXTRACT_TIMEOUT_S)
+                pf.error = f"XLSX extraction timed out after {XLSX_EXTRACT_TIMEOUT_S}s"
             except Exception as e:
                 pf.error = f"Failed to read XLSX: {e}"
 
@@ -1376,6 +1785,12 @@ async def process_files(
         # format = adding a branch here that extracts text; downstream agents
         # need no changes.
         elif ext in (".jpg", ".jpeg", ".png", ".webp"):
+            emit({
+                "type": "file_processing",
+                "stage": "image_ocr_start",
+                "message": f"OCR-ing {pf.original_name}...",
+                "file": pf.original_name,
+            })
             try:
                 text = await asyncio.wait_for(
                     asyncio.to_thread(_vision_ocr_image, local_path, pf.original_name),
@@ -1389,10 +1804,16 @@ async def process_files(
                         # of inline text every turn.
                         collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                         try:
-                            await asyncio.to_thread(
-                                _store_in_chromadb, text, collection_id, pf.original_name)
+                            await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    _store_in_chromadb, text, collection_id, pf.original_name),
+                                timeout=CHROMA_STORE_TIMEOUT_S,
+                            )
                             pf.chromadb_collection = collection_id
                             ctx.chromadb_collections.append(collection_id)
+                        except asyncio.TimeoutError:
+                            log.error("ChromaDB storage timed out for image OCR text",
+                                      file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
                         except Exception as e:
                             log.error("ChromaDB storage failed for image OCR text",
                                       file=pf.original_name, error=str(e))
@@ -1421,8 +1842,14 @@ async def process_files(
         # (Gemini URI handles primary access; inline text is fallback context)
         elif ext in (".csv",) and pf.gemini_uri:
             try:
-                text = await asyncio.to_thread(_extract_csv_text, local_path)
+                text = await asyncio.wait_for(
+                    asyncio.to_thread(_extract_csv_text, local_path),
+                    timeout=CSV_EXTRACT_TIMEOUT_S,
+                )
                 pf.extracted_text = text
+            except asyncio.TimeoutError:
+                log.warning("CSV inline text extraction timed out (Gemini URI still primary)",
+                            file=pf.original_name, timeout_s=CSV_EXTRACT_TIMEOUT_S)
             except Exception as e:
                 log.warning("CSV inline text extraction failed (Gemini URI still primary)",
                             file=pf.original_name, error=str(e)[:200])
@@ -1442,8 +1869,18 @@ async def process_files(
         ctx.files.append(pf)
 
         # --- Persist to SQLite thread_files ---
+        # Wrapped in wait_for so a slow PostgreSQL connection cannot hang the
+        # whole request after the heavy lifting (extract / OCR / embed) is
+        # already done. SQLite save is normally < 10 ms; the 30 s ceiling
+        # catches pathological cases (connection pool exhaustion etc).
         try:
-            await chat_store.save_thread_file(thread_id, pf)
+            await asyncio.wait_for(
+                chat_store.save_thread_file(thread_id, pf),
+                timeout=SQLITE_SAVE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            log.error("save_thread_file timed out — file processed but not persisted",
+                      file=pf.original_name, timeout_s=SQLITE_SAVE_TIMEOUT_S)
         except Exception as e:
             log.error("Failed to save thread_file record", file=pf.original_name, error=str(e))
 
@@ -1465,6 +1902,15 @@ async def process_files(
             type_counts[pf.file_type] = type_counts.get(pf.file_type, 0) + 1
     parts = [f"{c} {t}{'s' if c > 1 else ''}" for t, c in type_counts.items()]
     ctx.summary = f"Processed {', '.join(parts)}" if parts else "No files processed"
+
+    emit({
+        "type": "file_processing",
+        "stage": "all_files_done",
+        "message": ctx.summary,
+        "files": ctx.file_names,
+        "errors": [{"name": pf.original_name, "error": pf.error}
+                   for pf in ctx.files if pf.error],
+    })
 
     log.info("File processing complete",
              total=len(files), summary=ctx.summary,

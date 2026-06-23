@@ -52,10 +52,15 @@ log = get_logger("Drafting")
 # Max concurrent section generations (avoids Gemini rate limits)
 _SECTION_CONCURRENCY = 3
 
-# Max sections the outline can contain. Civil suits with the full procedural
-# pack (Schedule, Court Fee, List of Docs, separate IA for TI, Verification,
-# Affidavit) routinely need 14-16 sections, so the cap is generous.
-_MAX_SECTIONS = 16
+# Max sections the outline can contain. Raised from 16 to 28 (2026-06-23) so
+# user-authored multi-part skeletons (e.g. the Avachat writ with 15 named
+# Parts A-O + GROUNDS + PRAYER + Verification + List of Documents +
+# Affidavit + Annexures Index = 21 sections) survive the post-procedural-
+# injection re-cap. Civil suits with the full procedural pack routinely
+# need 14-16; long-form writs and complex tax appellate submissions can
+# need 20-24. We don't slice silently anymore — over-cap triggers a
+# loud log and chops; this is a defensive ceiling, not a budget.
+_MAX_SECTIONS = 28
 
 # Limit concurrent Drafting/ContinueDraft executions per worker process
 _AGENT_SEMAPHORE = asyncio.Semaphore(3)
@@ -1808,6 +1813,100 @@ _MOJIBAKE_REPLACEMENTS = [
 # done by `core/self_refine.self_refine` against the typed DoctrinalStance.
 _CITE_PLACEHOLDER_RE = re.compile(r"\[CITE:[^\]]*\]", flags=re.IGNORECASE)
 
+# Empty numbered paragraphs — a bare `N.` line with no body on its own line.
+# Symptom: section LLM started a paragraph but emitted nothing for it before
+# the next paragraph number. Match BOTH the paragraph marker and the
+# preceding/trailing whitespace so removal doesn't leave double blank lines.
+_EMPTY_NUMBERED_PARA_RE = re.compile(
+    r"(?m)^\s*\d+\.\s*$\n?",
+)
+
+# Substantive numbered paragraph at the START of a line. Latin and Devanagari
+# digits because Hindi / Marathi drafts use Devanagari numerals natively.
+# We rewrite `N. ` → `<new>. ` where `<new>` is the position in the global
+# substantive-paragraph counter.
+_NUMBERED_PARA_LINE_RE = re.compile(
+    r"(?m)^(?P<indent>[ \t]*)(?P<num>[\d०-९]+)\.(?P<sep>[ \t]+)(?P<rest>\S)",
+)
+
+# Section heading inserted by the assembler. Matches both Latin and
+# Devanagari digits — same range we used for paragraphs.
+_SECTION_HEADING_RE = re.compile(
+    r"(?m)^##\s+(?P<num>[\d०-९]+)\.\s+(?P<title>.+)$",
+)
+
+# Procedural section keywords — title hints that mean the section uses
+# its own local numbering scheme rather than the global body counter.
+# Mirrors `_PROCEDURAL_TITLE_KEYWORDS` in `_generate_sections_parallel`
+# (drafting.py:3490) — keep these two lists in sync. They're separate
+# because the renumber pass needs a free-standing constant.
+_PROCEDURAL_HEADING_KEYWORDS_FOR_RENUMBER = (
+    "prayer", "relief", "verification", "court fee", "court-fee",
+    "schedule", "list of documents", "list of document",
+    "affidavit", "memo of parties", "annexures index",
+    "interim application", "ia under order",
+)
+
+
+def _renumber_global_paragraphs(full_draft: str) -> str:
+    """Walk the assembled draft and rewrite paragraph numbers across
+    substantive body sections so the global counter is continuous from 1.
+
+    Procedural sections (Prayer, Verification, Schedule, Court Fee, List of
+    Documents, Affidavit, etc.) keep whatever numbering scheme they have —
+    typically (a)/(b)/(c) or 1-based local — because they aren't part of
+    the global body counter. We detect procedural sections by title-keyword
+    and skip them.
+
+    Why this is needed: section generation runs in parallel and each
+    section receives a precomputed `start_para_num` derived from the
+    outline LLM's `estimated_paragraphs`. When actual paragraph count
+    drifts from the estimate, every downstream section's start offset is
+    wrong. Symptom in the Avachat writ: Sec 5 jumped to para 23 (expected
+    ~17), Sec 9 jumped to 59 (expected 51), Sec 11 restarted at 74
+    overlapping with Sec 10's last paragraph. The renumber pass walks the
+    assembled output AFTER it's all in hand and rewrites the global
+    counter deterministically — no LLM, no estimate, no drift.
+    """
+    lines = full_draft.split("\n")
+    counter = 1
+    in_procedural = False
+    rewrote = 0
+
+    for i, line in enumerate(lines):
+        heading_m = _SECTION_HEADING_RE.match(line)
+        if heading_m:
+            title_lower = heading_m.group("title").lower()
+            in_procedural = any(
+                kw in title_lower
+                for kw in _PROCEDURAL_HEADING_KEYWORDS_FOR_RENUMBER
+            )
+            continue
+
+        if in_procedural:
+            continue
+
+        m = _NUMBERED_PARA_LINE_RE.match(line)
+        if m:
+            new_num = str(counter)
+            new_line = (
+                m.group("indent")
+                + new_num
+                + "."
+                + m.group("sep")
+                + m.group("rest")
+                + line[m.end():]
+            )
+            if new_line != line:
+                lines[i] = new_line
+                rewrote += 1
+            counter += 1
+
+    if rewrote:
+        log.info("Validator: renumbered global paragraphs",
+                 rewrote=rewrote, final_counter=counter - 1)
+    return "\n".join(lines)
+
 # HTML tag cleanup. Gemini occasionally tries to fake centering/alignment in
 # legal drafts by emitting <p align="center">TITLE</p>, <p align="right">...,
 # or wrapping content in <div>/<span>/<center>. Our frontend renders markdown
@@ -1879,6 +1978,21 @@ def validate_draft(
             f"Stripped {len(cite_hits)} leftover [CITE: ...] placeholder(s). "
             "Drafting prompt was meant to prevent this -- check section "
             "prompts if it keeps happening."
+        )
+
+    # --- Auto-fix: empty numbered paragraphs ---
+    # A numbered paragraph like "69." with no body is a section LLM
+    # omission. Symptom in the Avachat writ (Sec 10): paragraph 69 rendered
+    # as a bare "69." line between paras 68 and 70. We strip such lines
+    # rather than leaving them in — paragraph-renumbering downstream
+    # closes the gap.
+    empty_para_hits = _EMPTY_NUMBERED_PARA_RE.findall(cleaned)
+    if empty_para_hits:
+        cleaned = _EMPTY_NUMBERED_PARA_RE.sub("", cleaned)
+        warnings.append(
+            f"Removed {len(empty_para_hits)} empty numbered paragraph(s) "
+            f"(bare `N.` lines with no body). Section LLM omitted the body "
+            f"for these paragraphs."
         )
 
     # NOTE: orphan citation tails, forbidden statute pairings, trailing
@@ -3344,7 +3458,15 @@ async def _generate_section(
             ("user",
              "NOW WRITE section {section_num} of {total} IN FULL DETAIL.\n"
              "{facts_reminder}\n\n"
-             "## {section_title}\n{section_desc}\n\n"
+             "Section title (for your context only — DO NOT emit it as a "
+             "heading; the assembler will inject the canonical numbered "
+             "`## N. TITLE` heading itself): \"{section_title}\"\n"
+             "Section description: {section_desc}\n\n"
+             "DO NOT prefix your output with `## {section_title}` or any "
+             "other heading line. Begin directly with the first numbered "
+             "paragraph of the section body. Headings emitted by the section "
+             "produce duplicated `## N. TITLE` rendering after the assembler "
+             "adds its own.\n\n"
              "PARAGRAPH NUMBERING — apply ONE of these schemes based on this "
              "section's role:\n\n"
              "  (A) **Substantive body sections** — Brief Facts, Statement of "
@@ -3945,17 +4067,47 @@ async def _assemble_document(
 
     for i, (section_plan, section_text) in enumerate(zip(outline.sections, sections)):
         text = section_text.strip()
-        if not text.startswith("#"):
-            # Localize the section number to the user's digit script
-            # (Devanagari १. in Hindi, Tamil ௧. in Tamil, …) and strip any
-            # numeric prefix the outline LLM put on the title — otherwise
-            # you get a doubled-prefix heading like "## 1. १. याचिका...".
-            # Bug report 2026-06-19: Hindi draft headings showed
-            # "1. १. याचिका के तथ्य" / "2. २. स्वामित्व का आधार" all the
-            # way down.
-            num = localize_number(i + 1, user_language)
-            clean_title = strip_leading_numeric_prefix(section_plan.title)
-            text = f"## {num}. {clean_title}\n\n{text}"
+
+        # Strip any leading `#`-prefixed lines from the section LLM's output
+        # (and the optional bare numeric/title lines that sometimes follow)
+        # before injecting our canonical numbered heading. Previously the
+        # assembler only injected when `text.startswith("#")` was false, so
+        # when the section LLM echoed its own `## {section_title}` line
+        # (the section prompt at drafting.py:3347 literally includes this
+        # in the user message), the assembler skipped its prefix injection
+        # AND the LLM-emitted heading stuck around without our numbering.
+        # Symptom in the Avachat writ: Sec 3, 5, 8 had numbered headings
+        # (`## 3. ARGUMENTS …`) but Sec 1, 2, 4, 6, 7, 9, 10 didn't.
+        # Symptom on the Bombay HC appeal re-test: same pattern (Sec 4
+        # rendered the title twice with a stray `4.` between).
+        # We now strip up to 3 leading heading-shaped lines and ALWAYS
+        # inject the canonical heading.
+        _stripped_lines = 0
+        while _stripped_lines < 3 and text:
+            line, _, rest = text.partition("\n")
+            stripped = line.strip()
+            # `## ...`, `# ...`, bare `N.` numeric stub, or title echo.
+            if (
+                stripped.startswith("#")
+                or re.match(r"^\d+\.\s*$", stripped)
+                or stripped == section_plan.title.strip()
+                or stripped == section_plan.title.strip().upper()
+            ):
+                text = rest.lstrip()
+                _stripped_lines += 1
+                continue
+            break
+
+        # Now inject the canonical numbered heading. Localize the section
+        # number to the user's digit script (Devanagari १. in Hindi, Tamil
+        # ௧. in Tamil, …) and strip any numeric prefix from the title —
+        # otherwise you get a doubled-prefix heading like
+        # "## 1. १. याचिका...". Bug report 2026-06-19: Hindi draft
+        # headings showed "1. १. याचिका के तथ्य" / "2. २. स्वामित्व का आधार"
+        # all the way down.
+        num = localize_number(i + 1, user_language)
+        clean_title = strip_leading_numeric_prefix(section_plan.title)
+        text = f"## {num}. {clean_title}\n\n{text}"
         parts.append(text)
 
     footer_kind = "court_filing"
@@ -4093,6 +4245,15 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
             })
 
         full_draft = await _assemble_document(outline, sections, state.get("user_language", "en"))
+
+        # Run the same validate + renumber chain the main drafting path uses
+        # so continued drafts also get the duplicate-heading + empty-paragraph
+        # + global-renumber treatment. The stance object isn't reachable from
+        # continuation state today, so we pass None — validate_draft's stance-
+        # specific checks (statute pair warnings) are skipped, mojibake and
+        # citation cleanup still run.
+        full_draft, _draft_warnings = validate_draft(full_draft, None)
+        full_draft = _renumber_global_paragraphs(full_draft)
 
         if new_failed:
             log.warning("Continue draft: some sections still failed",
@@ -4592,6 +4753,13 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # Step 6.5: Validator -- auto-fix mojibake + leftover [CITE: ...], log
         # warnings for statute traps and orphan citation tails. Never raises.
         full_draft, draft_warnings = validate_draft(full_draft, stance)
+
+        # Renumber global paragraphs across substantive sections. This MUST
+        # run AFTER validate_draft because the validator strips empty
+        # numbered paragraphs (`N.` with no body), and after assembly so
+        # we can see the canonical `## N. TITLE` headings the assembler
+        # injected. See _renumber_global_paragraphs docstring for rationale.
+        full_draft = _renumber_global_paragraphs(full_draft)
 
         if failed_indices:
             log.warning("Agent completed with incomplete sections",

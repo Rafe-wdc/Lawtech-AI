@@ -1105,6 +1105,36 @@ Rules:
       not "[Loan Amount]" / "[Plaintiff Name]" / "[Date]".
     - This is the most important rule. The user uploaded a real document and the
       draft must reflect THEIR case, not the template's example case.
+15. FACTS-LANGUAGE TRANSLITERATION — when the USER-PROVIDED FACTS block is in a
+    non-English script (Marathi / Hindi / Tamil / Bengali / etc.) but the draft
+    language is English, every entity copied from the FACTS into the draft must
+    be rendered in Latin script. Translate common-noun labels; transliterate
+    proper nouns. Concrete patterns this rule covers (the leak the language
+    fix was repeatedly catching mid-2026):
+    - Document-type labels — "दस्त क्र." → "Document No.", "मु.अ.क्र." →
+      "Case No.", "वकालतनामा क्र." → "Power of Attorney No.", "रजि. क्र."
+      → "Reg. No.". These are common-noun labels for document types, NOT
+      proper-noun identifiers; translate the label, keep the number in Latin
+      digits.
+    - Party / advocate names — "श्री. कैलास अनंत जगताप" → "Mr. Kailas Anant
+      Jagtap", "सौ. निशा अनिल उघडे" → "Smt. Nisha Anil Ughade". The user
+      writes their own name in Devanagari in the source; the draft renders
+      it in Latin to match court-filing convention.
+    - Place names — "मौजे शिवरी, ता. पुरंदर, जि. पुणे" → "Mauje Shivri,
+      Tal. Purandar, Dist. Pune".
+    - Statute / act titles cited inside facts — translate to the standard
+      English form ("भारतीय करार अधिनियम, १८७२" → "Indian Contract Act, 1872").
+    - All numeric fields — Devanagari / Bengali / Tamil / Gurmukhi digits MUST
+      become Latin digits in the draft ("६३७/२०२३" → "637/2023", "१३८" →
+      "138"). NEVER preserve native-script digits inside an English draft.
+    The only exception is a verbatim case-law CITATION block (e.g. "ABC v.
+    XYZ, AIR 1973 SC 1461") where the printed case-name happens to be in
+    a non-Latin script. This exception does NOT extend to source-document
+    identifiers, party names, addresses, or statute names — those are NOT
+    case-law citations.
+    Mixed-script parentheticals are forbidden: writing "(दस्त क्र. 637/2023)"
+    in an otherwise-English paragraph is a violation. Write
+    "(Document No. 637/2023)" instead.
 """
 
 # Append shared Indian-legal discipline blocks to DRAFTING_SYSTEM_PROMPT

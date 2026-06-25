@@ -88,7 +88,21 @@ class SectionPlan(BaseModel):
     title: str = Field(..., description="Section heading (e.g. 'Facts of the Case')")
     description: str = Field(
         ...,
-        description="What this section should contain -- key points, arguments, details",
+        description=(
+            "Brief scope statement (1-3 sentences) describing what content this "
+            "section should carry — the key facts, doctrines, or procedural "
+            "elements to cover. Write it as a SCOPE NOTE, NOT as a template or "
+            "set of instructions for the section LLM. Do NOT include bracketed "
+            "placeholders intended to be filled in later (e.g. '[first paragraph "
+            "number of Reply on Merits]', '[last paragraph number of Prayer]') — "
+            "the section LLM cannot compute those references at the time it sees "
+            "this description, and they leak verbatim into the final draft. If "
+            "the section needs to reference paragraph ranges of OTHER sections "
+            "(e.g. an Affidavit verifying paragraphs 5-23), say so in plain prose "
+            "('verify the factual paragraphs that precede the prayer'); the "
+            "section LLM will resolve the actual range from the outline summary "
+            "it receives at generation time."
+        ),
     )
     estimated_paragraphs: int = Field(
         5,
@@ -1649,6 +1663,7 @@ async def _generate_outline(
     format_block: str = "",
     template_language: str | None = None,
     doc_type: str = "court_filing",
+    intent=None,
 ) -> DraftOutline:
     """Generate a structured outline with all sections for the document.
 
@@ -1707,6 +1722,7 @@ async def _generate_outline(
         prompt = ChatPromptTemplate.from_messages([
             ("system", localize_prompt(
                 system_prompt, user_language,
+                intent=intent,
                 source_languages=_source_langs_outline,
             )),
             ("user", "{facts_block}USER QUERY:\n{query}"),
@@ -1942,19 +1958,29 @@ def validate_draft(
     cleaned = full_draft
 
     # --- Auto-fix: mojibake ---
-    # The canonical fix for cp1252-misread-as-UTF-8: encode as cp1252 and
-    # decode as UTF-8 again, recovering the original bytes. Skip if the round
-    # trip would fail (string contains chars not in cp1252) -- those strings
-    # are already clean. Fall back to the substring table for any survivors.
-    if any(s in cleaned for s in ("â€", "Â ", "Ã©", "Ã ", "ï¿½")):
+    # Canonical fix: re-encode the string under the codec that misread the
+    # bytes, then decode as utf-8 to recover the original characters.
+    # Try cp1252 first (stricter — has unmapped bytes 0x81/0x8D/0x8F/0x90/
+    # 0x9D that raise, protecting some edge cases), then latin-1 (every
+    # byte 0x00-0xFF round-trips, so it catches mojibake whose hidden
+    # chars fall in the cp1252 unmapped range — e.g. em-dash via E2 80 94
+    # contains 0x80, which decodes to € in cp1252 but a non-printing C1
+    # control char in latin-1; the rupee ₹ via E2 82 B9 likewise contains
+    # 0x82). errors="strict" is its own gate: the encode raises on chars
+    # outside the codec range (Devanagari, already-clean ₹, etc.) and the
+    # decode raises when the resulting bytes aren't valid utf-8 (clean
+    # "café" → bytes 63 61 66 E9, E9 alone is invalid utf-8 lead). Both
+    # raise paths leave the string untouched. Substring table below is a
+    # safety net for mixed-encoding strings where the roundtrip aborts.
+    for codec in ("cp1252", "latin-1"):
         try:
-            roundtripped = cleaned.encode("cp1252", errors="strict").decode("utf-8", errors="strict")
+            roundtripped = cleaned.encode(codec, errors="strict").decode("utf-8", errors="strict")
             if roundtripped != cleaned:
                 cleaned = roundtripped
-                log.info("Validator: mojibake auto-fixed (cp1252->utf-8 roundtrip)")
+                log.info("Validator: mojibake auto-fixed", codec=codec)
+                break
         except (UnicodeEncodeError, UnicodeDecodeError):
-            # Mixed encodings -- fall through to per-substring repair below.
-            log.debug("Validator: full cp1252 roundtrip failed, using substring table")
+            continue
 
     fixed_count = 0
     for bad, good in _MOJIBAKE_REPLACEMENTS:
@@ -3241,6 +3267,7 @@ async def _generate_section(
     start_para_num: int = 1,
     footer_kind: str = "court_filing",
     template_language: str | None = None,
+    intent=None,
 ) -> tuple[str, int]:
     """Generate one section of the document in full detail.
 
@@ -3449,6 +3476,7 @@ async def _generate_section(
         prompt = ChatPromptTemplate.from_messages([
             ("system", localize_prompt(
                 DRAFTING_SYSTEM_PROMPT, user_language,
+                intent=intent,
                 source_languages=_source_langs_section,
             )),
             # FACTS FIRST — most prominent position (BUG-02)
@@ -3602,6 +3630,7 @@ async def _generate_sections_parallel(
     format_block: str = "",
     footer_kind: str = "court_filing",
     template_language: str | None = None,
+    intent=None,
 ) -> tuple[list[str], list[int], int]:
     """Generate all sections with bounded parallelism via asyncio.Semaphore.
 
@@ -3678,6 +3707,7 @@ async def _generate_sections_parallel(
                     start_para_num=start_para_offsets[i],
                     footer_kind=footer_kind,
                     template_language=template_language,
+                    intent=intent,
                 )
                 results[i] = (text, tokens, None)
                 if writer:
@@ -3692,7 +3722,59 @@ async def _generate_sections_parallel(
                         "char_count": len(text),
                     })
             except Exception as e:
-                log.error("Section failed", section=i + 1, title=plan.title,
+                # Mandatory procedural sections (Schedule, List of Documents,
+                # Verification, Affidavit, Memo of Parties, etc.) get ONE
+                # server-side retry before we leak the "could not be
+                # generated. Click Continue" placeholder to the user. These
+                # sections are not optional — the doc isn't court-ready
+                # without them — and the most common failure mode (timeout
+                # / transient rate-limit) is fixed by a second attempt. The
+                # body sections do NOT auto-retry: they're the heaviest
+                # generations, the user can re-run via Continue, and we
+                # don't want to double-spend the semaphore on long-tail
+                # body failures.
+                if _is_procedural(plan.title):
+                    log.warning(
+                        "Procedural section failed, retrying",
+                        section=i + 1, title=plan.title,
+                        error_type=type(e).__name__,
+                        error=str(e)[:200],
+                    )
+                    try:
+                        text, tokens = await _generate_section(
+                            query, template_text, plan, i, total, outline, user_language,
+                            user_facts=user_facts,
+                            case_facts=case_facts,
+                            stance_block=stance_block,
+                            format_block=format_block,
+                            start_para_num=start_para_offsets[i],
+                            footer_kind=footer_kind,
+                            template_language=template_language,
+                            intent=intent,
+                        )
+                        results[i] = (text, tokens, None)
+                        log.info("Procedural section recovered on retry",
+                                 section=i + 1, title=plan.title)
+                        if writer:
+                            writer({
+                                "type": "drafting_progress",
+                                "section": section_num,
+                                "index": i,
+                                "start_order": start_order,
+                                "total": total,
+                                "title": plan.title,
+                                "status": "completed",
+                                "char_count": len(text),
+                            })
+                        return
+                    except Exception as e2:
+                        # Fall through with the retry error so the leaked
+                        # placeholder + log surface the SECOND failure
+                        # (more diagnostic than the first if root cause is
+                        # not transient).
+                        e = e2
+                log.error("Section failed", exc_info=True, section=i + 1,
+                          title=plan.title, error_type=type(e).__name__,
                           error=str(e)[:200])
                 results[i] = (None, 0, e)
                 if writer:
@@ -3849,7 +3931,7 @@ Translate the prose to {language_name} ({language_code}). RULES:
 """
 
 
-def _build_footer(footer_kind: str, user_language: str) -> str:
+def _build_footer(footer_kind: str, user_language: str, intent=None) -> str:
     """Return the appropriate footer block for a given artifact kind.
 
     Always returns the ENGLISH skeleton for kinds other than court_filing.
@@ -3857,6 +3939,16 @@ def _build_footer(footer_kind: str, user_language: str) -> str:
     to translate non-English drafts via a cached Gemini Flash Lite call.
     court_filing already uses `_FOOTER_LABELS` (a hand-maintained dict)
     so it bypasses the LLM path entirely.
+
+    `intent` carries the user's `arguments_for_party` so the court-filing
+    signature label matches the speaking party — a Written Statement
+    drafted on behalf of the defendant ends with "Signature of the
+    Defendant/Respondent", not the generic "Petitioner/Applicant" that
+    leaked previously. Non-English court filings fall back to the
+    language's generic signature label unless the labels dict carries a
+    party-specific key (e.g. `signature_defendant`); add those entries
+    incrementally as users complain — DO NOT block the English fix on
+    full translation coverage.
 
     Future-proof principle: do NOT add another per-language hardcoded dict
     every time a new footer kind lands. Adding a new footer kind = one
@@ -3952,7 +4044,18 @@ def _build_footer(footer_kind: str, user_language: str) -> str:
     labels = _FOOTER_LABELS.get(user_language, {})
     place_label = labels.get("place", "Place")
     date_label = labels.get("date", "Date")
-    signature_label = labels.get("signature", "Signature of the Petitioner/Applicant")
+    party = getattr(intent, "arguments_for_party", "none") if intent else "none"
+    _party_english_defaults = {
+        "plaintiff": "Signature of the Plaintiff/Petitioner",
+        "defendant": "Signature of the Defendant/Respondent",
+        "both":      "Signature of the Petitioner/Applicant",
+        "none":      "Signature of the Petitioner/Applicant",
+    }
+    signature_label = (
+        labels.get(f"signature_{party}")
+        or labels.get("signature")
+        or _party_english_defaults.get(party, _party_english_defaults["none"])
+    )
     through_counsel_label = labels.get("through_counsel", "Through Counsel")
     return (
         f"**{place_label}:** [Place]\n\n"
@@ -4044,6 +4147,7 @@ async def _assemble_document(
     sections: list[str],
     user_language: str = "en",
     stance: "DoctrinalStance | None" = None,
+    intent=None,
 ) -> str:
     """Combine all sections into the final document with proper structure.
 
@@ -4134,7 +4238,7 @@ async def _assemble_document(
     if stance is not None:
         footer_kind = getattr(stance, "footer_kind", "court_filing") or "court_filing"
 
-    footer_block = _build_footer(footer_kind, user_language)
+    footer_block = _build_footer(footer_kind, user_language, intent=intent)
     # Localize the footer when the user wants a non-English response and
     # the footer kind doesn't already use the _FOOTER_LABELS labels dict
     # (court_filing handles its own localization). Cached per
@@ -4236,14 +4340,16 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                     state.get("user_language", "en"),
                     user_facts=user_facts,
                     case_facts=case_facts,
+                    intent=state.get("user_intent"),
                     footer_kind=footer_kind,
                     template_language=template_language,
                 )
                 sections[idx] = section_text
                 total_tokens += section_tokens
             except Exception as sec_err:
-                log.error("Continue: section still failed",
+                log.error("Continue: section still failed", exc_info=True,
                           section=idx + 1, title=section_plan.title,
+                          error_type=type(sec_err).__name__,
                           error=str(sec_err))
                 sections[idx] = (
                     f"\n\n---\n\n"
@@ -4264,7 +4370,10 @@ async def continue_draft_node(state: LegalAgentState) -> dict:
                 "completed_sections": len(outline.sections) - len(new_failed),
             })
 
-        full_draft = await _assemble_document(outline, sections, state.get("user_language", "en"))
+        full_draft = await _assemble_document(
+            outline, sections, state.get("user_language", "en"),
+            intent=state.get("user_intent"),
+        )
 
         # Run the same validate + renumber chain the main drafting path uses
         # so continued drafts also get the duplicate-heading + empty-paragraph
@@ -4645,6 +4754,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             format_block=format_block,
             template_language=template_language,
             doc_type=doc_type,
+            intent=intent_obj,
         )
         progress("drafting", f"Outline ready: {len(outline.sections)} sections", found=len(outline.sections), substep=True, step="outline")
 
@@ -4752,6 +4862,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             format_block=format_block,
             footer_kind=_section_footer_kind,
             template_language=template_language,
+            intent=intent_obj,
         )
 
         # Emit incomplete event if needed
@@ -4768,7 +4879,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
         # Step 6: Assemble complete document
         progress("drafting", "Assembling final document...", step="assemble")
-        full_draft = await _assemble_document(outline, sections, user_language, stance=stance)
+        full_draft = await _assemble_document(outline, sections, user_language, stance=stance, intent=intent_obj)
 
         # Step 6.5: Validator -- auto-fix mojibake + leftover [CITE: ...], log
         # warnings for statute traps and orphan citation tails. Never raises.

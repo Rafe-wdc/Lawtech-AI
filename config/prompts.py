@@ -570,7 +570,30 @@ Given the user's query and the recent conversation summary, produce:
    include_citations — default TRUE. Set FALSE only if user said "no citations".
    include_examples  — TRUE iff user asked for examples / illustrations.
    include_case_law  — TRUE iff user asked for case laws / precedents.
-   arguments_for_party — for drafting: "plaintiff" / "defendant" / "both" / "none".
+   arguments_for_party — for drafting / argument-writing tasks: who the user
+       is speaking FOR. The downstream Drafting and Scenario agents use this
+       to pick the right first-person voice for the body, prayer, verification,
+       and signature block.
+         "plaintiff" → user said any of: "on behalf of plaintiff/petitioner/
+                       applicant/complainant/appellant", "for the plaintiff",
+                       "I am the plaintiff / my client is the petitioner",
+                       "arguments for the appellant/applicant/complainant".
+         "defendant" → user said any of: "on behalf of defendant/respondent/
+                       opposite party/accused", "for the defendant",
+                       "I am the defendant / my client is the respondent",
+                       "arguments for the accused/respondent".
+         "both"      → user said "arguments for both sides", "both
+                       perspectives", "plaintiff and defendant arguments".
+         "none"      → default. The user did not name a party AND the
+                       request is not draft/arguments (e.g. lookup, explain,
+                       summarize, scenario analysis, Q&A).
+       IMPORTANT: when the user EXPLICITLY names a party, honour their
+       words even if the doc type would normally imply the other side.
+       Example: "Prepare written statement on behalf of plaintiff" — set
+       "plaintiff" (the user wants a plaintiff-side responsive pleading
+       i.e. a Replication; downstream layer handles the procedural label).
+       Do NOT silently flip to "defendant" just because a WS is normally
+       a defendant's pleading.
 
    legal_artifact — TRUE specialized legal output request. Use the BEST match
        from the list below; if none clearly applies, use "none".
@@ -1432,6 +1455,31 @@ Generic rules (apply when the doc-type-specific block does NOT prescribe otherwi
     "## 1. १. याचिका के तथ्य". Correct title: "याचिका के तथ्य" /
     "Statement of Facts" / "Prayer" / "Verification". Wrong: "1. Prayer"
     / "१. प्रार्थना" / "(a) Statement of Facts".
+11. Section DESCRIPTIONS — write a brief SCOPE NOTE (1-3 sentences) of what
+    content the section will carry. Do NOT write the description as a
+    template or as a set of instructions for the section LLM. In particular,
+    DO NOT emit bracketed placeholders that name another section's
+    paragraph range or any other to-be-computed value, e.g.:
+        WRONG: "Verify the contents of paragraphs [first paragraph number
+                of Reply on Merits] to [last paragraph number of Additional
+                Submissions] are true."
+        WRONG: "List the documents marked Exhibit [first exhibit letter] to
+                [last exhibit letter]."
+        WRONG: "State the value of the suit as [computed valuation]."
+    The placeholders are written hoping the section LLM will fill them in,
+    but the section LLM sees them as content to echo and leaks them
+    verbatim into the user-facing draft. Instead, describe the scope in
+    plain prose:
+        RIGHT: "Standard Order XIX Rule 3 CPC affidavit verifying the
+                factual paragraphs of the written statement; the section
+                LLM resolves the actual paragraph range from the outline
+                summary."
+        RIGHT: "List of all documents relied upon in the written
+                statement, in tabular form with Sr. No., Description,
+                Date, and Marked-As columns."
+    If a section truly needs a value to be filled later by the user
+    (court name, party name, amount), that BELONGS in the section body
+    as a `[Bracketed Placeholder]` — but NOT in this scope note.
 """
 
 # Append shared Indian-legal discipline blocks to DRAFT_OUTLINE_PROMPT.

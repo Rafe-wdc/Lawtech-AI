@@ -155,6 +155,10 @@ def _format_intent_directives(intent) -> str:
     Currently surfaces:
       - response_depth ("brief" / "detailed") — drives length
       - additional_instructions (free-text catchall)
+      - arguments_for_party ("plaintiff" / "defendant" / "both") — forces
+        the drafting / arguments LLM to write in the named party's voice.
+        Drives both the section text (first-person stance) and the footer
+        signature label.
 
     Format and language live in their own layers: synthesis-template picker
     handles wants_table, localize_prompt itself handles the language block.
@@ -174,6 +178,40 @@ def _format_intent_directives(intent) -> str:
         parts.append(
             "USER DEPTH: comprehensive coverage. Include all relevant "
             "sub-sections, provisos, explanations, and material context."
+        )
+    party = getattr(intent, "arguments_for_party", "none")
+    if party == "plaintiff":
+        parts.append(
+            "USER PARTY: write in the PLAINTIFF / PETITIONER / APPLICANT / "
+            "COMPLAINANT / APPELLANT voice. The document speaks AS that "
+            "party. Cause-title still names both sides, but the body, "
+            "prayer, verification, and affidavit are the plaintiff-side "
+            "party's pleading. Pick the synonym that matches the document "
+            "type (Plaint→Plaintiff, Writ Petition→Petitioner, Notice→"
+            "Complainant/Sender, Appeal→Appellant). If the document type "
+            "is a Written Statement / Reply / Counter-Affidavit "
+            "(structurally the responsive pleading), treat the user's "
+            "instruction as 'draft the plaintiff's REPLICATION (Order VIII "
+            "Rule 9 CPC) / rejoinder' — DO NOT silently flip and write as "
+            "the defendant."
+        )
+    elif party == "defendant":
+        parts.append(
+            "USER PARTY: write in the DEFENDANT / RESPONDENT / OPPOSITE "
+            "PARTY / ACCUSED voice. The document speaks AS that party. "
+            "Cause-title still names both sides, but the body, prayer, "
+            "verification, and affidavit are the defendant-side party's "
+            "pleading. Pick the synonym that matches the document type "
+            "(Written Statement→Defendant, Counter-Affidavit→Respondent, "
+            "Bail Application→Accused/Applicant)."
+        )
+    elif party == "both":
+        parts.append(
+            "USER PARTY: the user asked for arguments on BOTH sides. "
+            "Structure the response with clearly labelled sections — "
+            "'Arguments for the Plaintiff/Petitioner' and 'Arguments for "
+            "the Defendant/Respondent' — so the two perspectives are not "
+            "blended into a single narrative."
         )
     extra = getattr(intent, "additional_instructions", "") or ""
     if extra.strip():

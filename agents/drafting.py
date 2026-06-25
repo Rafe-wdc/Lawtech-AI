@@ -4940,8 +4940,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
                      total_content_len=len(full_draft),
                      total_tokens=total_tokens)
 
-        # Step 7: Auto-inject statute references into the draft
-        if full_draft and not failed_indices:
+        # Step 7: Auto-inject statute references into the draft.
+        # SKIPPED for non-English drafts: add_statute_references uses an
+        # English-only prompt (with phrasing examples like "as per Section X
+        # of the <Act>, YYYY" and an English statute catalogue) and grafts
+        # those English tails onto Marathi/Hindi/Tamil prose. The per-section
+        # generator already cites statutes inline in the target language, so
+        # the post-hoc enrichment is both unnecessary and a leak source.
+        if full_draft and not failed_indices and user_language == "en":
             try:
                 from core.statute_refs import add_statute_references
                 progress("drafting", "Adding statute references...", step="statute_refs")

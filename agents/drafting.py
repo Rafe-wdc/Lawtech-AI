@@ -3831,60 +3831,90 @@ _FOOTER_LABELS: dict[str, dict[str, str]] = {
         "date": "दिनांक",
         "signature": "याचिकाकर्ता/आवेदक के हस्ताक्षर",
         "through_counsel": "अधिवक्ता के माध्यम से",
+        "name_of_advocate": "अधिवक्ता का नाम",
+        "enrolment_no": "नामांकन संख्या",
+        "address_of_advocate": "अधिवक्ता का पता",
     },
     "bn": {
         "place": "স্থান",
         "date": "তারিখ",
         "signature": "আবেদনকারীর স্বাক্ষর",
         "through_counsel": "আইনজীবীর মাধ্যমে",
+        "name_of_advocate": "আইনজীবীর নাম",
+        "enrolment_no": "তালিকাভুক্তি নং",
+        "address_of_advocate": "আইনজীবীর ঠিকানা",
     },
     "ta": {
         "place": "இடம்",
         "date": "தேதி",
         "signature": "மனுதாரர்/விண்ணப்பதாரர் கையொப்பம்",
         "through_counsel": "வழக்கறிஞர் மூலம்",
+        "name_of_advocate": "வழக்கறிஞரின் பெயர்",
+        "enrolment_no": "பதிவு எண்",
+        "address_of_advocate": "வழக்கறிஞரின் முகவரி",
     },
     "te": {
         "place": "స్థలం",
         "date": "తేదీ",
         "signature": "పిటిషనర్/దరఖాస్తుదారు సంతకం",
         "through_counsel": "న్యాయవాది ద్వారా",
+        "name_of_advocate": "న్యాయవాది పేరు",
+        "enrolment_no": "నమోదు సంఖ్య",
+        "address_of_advocate": "న్యాయవాది చిరునామా",
     },
     "mr": {
         "place": "ठिकाण",
         "date": "दिनांक",
         "signature": "याचिकाकर्ता/अर्जदाराच्या सह्या",
         "through_counsel": "वकिलांमार्फत",
+        "name_of_advocate": "वकिलाचे नाव",
+        "enrolment_no": "नोंदणी क्रमांक",
+        "address_of_advocate": "वकिलाचा पत्ता",
     },
     "kn": {
         "place": "ಸ್ಥಳ",
         "date": "ದಿನಾಂಕ",
         "signature": "ಅರ್ಜಿದಾರ/ಅರ್ಜಿದಾರರ ಸಹಿ",
         "through_counsel": "ವಕೀಲರ ಮೂಲಕ",
+        "name_of_advocate": "ವಕೀಲರ ಹೆಸರು",
+        "enrolment_no": "ನೋಂದಣಿ ಸಂಖ್ಯೆ",
+        "address_of_advocate": "ವಕೀಲರ ವಿಳಾಸ",
     },
     "ml": {
         "place": "സ്ഥലം",
         "date": "തീയതി",
         "signature": "ഹർജിക്കാരന്റെ/അപേക്ഷകന്റെ ഒപ്പ്",
         "through_counsel": "അഭിഭാഷകൻ വഴി",
+        "name_of_advocate": "അഭിഭാഷകന്റെ പേര്",
+        "enrolment_no": "എൻറോൾമെന്റ് നം",
+        "address_of_advocate": "അഭിഭാഷകന്റെ വിലാസം",
     },
     "gu": {
         "place": "સ્થળ",
         "date": "તારીખ",
         "signature": "અરજદાર/અરજકર્તાની સહી",
         "through_counsel": "વકીલ મારફત",
+        "name_of_advocate": "વકીલનું નામ",
+        "enrolment_no": "નોંધણી નંબર",
+        "address_of_advocate": "વકીલનું સરનામું",
     },
     "pa": {
         "place": "ਸਥਾਨ",
         "date": "ਮਿਤੀ",
         "signature": "ਅਰਜ਼ੀਕਰਤਾ ਦੇ ਦਸਤਖਤ",
         "through_counsel": "ਵਕੀਲ ਰਾਹੀਂ",
+        "name_of_advocate": "ਵਕੀਲ ਦਾ ਨਾਮ",
+        "enrolment_no": "ਨਾਮਾਂਕਣ ਨੰਬਰ",
+        "address_of_advocate": "ਵਕੀਲ ਦਾ ਪਤਾ",
     },
     "ur": {
         "place": "جگہ",
         "date": "تاریخ",
         "signature": "درخواست گزار کے دستخط",
         "through_counsel": "وکیل کے ذریعے",
+        "name_of_advocate": "وکیل کا نام",
+        "enrolment_no": "اندراج نمبر",
+        "address_of_advocate": "وکیل کا پتہ",
     },
 }
 
@@ -4057,14 +4087,17 @@ def _build_footer(footer_kind: str, user_language: str, intent=None) -> str:
         or _party_english_defaults.get(party, _party_english_defaults["none"])
     )
     through_counsel_label = labels.get("through_counsel", "Through Counsel")
+    name_advocate_label = labels.get("name_of_advocate", "Name of Advocate")
+    enrolment_label = labels.get("enrolment_no", "Enrollment No.")
+    address_advocate_label = labels.get("address_of_advocate", "Address of Advocate")
     return (
         f"**{place_label}:** [Place]\n\n"
         f"**{date_label}:** [Date]\n\n"
         f"**{signature_label}**\n\n"
         f"{through_counsel_label}:\n\n"
-        "**[Name of Advocate]**\n"
-        "[Enrollment No.]\n"
-        "[Address of Advocate]"
+        f"**[{name_advocate_label}]**\n"
+        f"[{enrolment_label}]\n"
+        f"[{address_advocate_label}]"
     )
 
 

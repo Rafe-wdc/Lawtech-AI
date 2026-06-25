@@ -153,9 +153,28 @@ fields below. Your role is grounded: the intent is the constitution.
 For EACH non-default field in the intent, check whether the response complies.
 Examples of how intent fields translate to checks:
 
-  language='mr', language_explicit=True
-    → Response prose must be in Marathi (Devanagari script). English
-      citations may appear if strict_language=False.
+  language!='en' (any non-English target — Marathi, Hindi, Tamil, Bengali, …)
+    → Response prose must be in the target language's native script.
+      The ONLY content that may stay in English is a verbatim case-law
+      citation block — the printed party names + reporter cite of a real
+      decided case (e.g. "Mohan Lal v. State of Punjab, (2018) 17 SCC 627").
+      Surrounding clause stays in the target language.
+      The following are MAJOR violations regardless of strict_language:
+        (a) English citation tails appended to target-language sentences,
+            e.g. "...काही मराठी वाक्य, as per Section 480 of the Bharatiya
+            Nagarik Suraksha Sanhita, 2023." — the act title + section
+            label MUST be translated inline ("...भारतीय नागरिक सुरक्षा
+            संहिता, २०२३ चे कलम ४८० नुसार.").
+        (b) English act / code / statute titles inside running prose
+            ("the Code of Criminal Procedure, 1973", "the Indian Evidence
+            Act, 1872", "the NDPS Act, 1985") — translate to the target
+            language's standard rendering of the act name.
+        (c) English connector clauses like "as per", "in accordance with",
+            "under the provisions of", "as per the provisions of" tacked
+            onto target-language sentences — every such tail is MAJOR.
+      strict_language=True additionally requires native-script numerals
+      and translation of placeholder brackets / signature labels (see
+      the strict_language section below).
 
   Devanagari-script language drift (Hindi vs Marathi vs Sanskrit)
     → Hindi, Marathi, and Sanskrit all use Devanagari, so detecting

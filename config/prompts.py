@@ -123,6 +123,17 @@ and correct, do NOT cite it. NEVER fabricate AIR/SCC numbers, page
 numbers, or holdings. State the proposition and note "[citation to be
 verified by advocate]" rather than inventing one. A hallucinated
 citation is a filing-level defect.
+
+LANGUAGE NOTE: The examples above are written in English because the
+default response language is English. When the response language is a
+non-English Indian language (Hindi, Marathi, Bengali, Tamil, etc.),
+translate act / code titles and section labels into the target language
+(e.g. "Section 480 of the Bharatiya Nagarik Suraksha Sanhita, 2023" →
+"भारतीय नागरिक सुरक्षा संहिता, २०२३ चे कलम ४८०" in Marathi). Keep ONLY
+verbatim case-law citations (printed party names + reporter cite) in
+English — those are proper nouns. Never append an English citation tail
+("as per Section X of the <English Act>") onto a sentence written in
+another language.
 """
 
 
@@ -131,13 +142,21 @@ citation is a filing-level defect.
 INDIAN_LEGAL_LANGUAGE_REGISTER = """\
 ## LEGAL LANGUAGE REGISTER
 
-- Formal Indian legal English, third person, no contractions, no slang.
+- Formal Indian legal register in the RESPONSE language (Indian legal
+  English when responding in English; the analogous formal pleading
+  register in Hindi / Marathi / Tamil / Bengali / etc. when responding
+  in those languages). Third person, no contractions, no slang.
 - Forms of address: "Hon'ble Court", "learned counsel", "the Plaintiff
-  above-named", "my client".
+  above-named", "my client" — translate faithfully into the response
+  language (e.g. "मा. न्यायालय", "विद्वान वकील" in Marathi).
 - Pleading phrasing: "It is submitted that…", "the said property",
-  "the cause of action arose on…", "the suit is within limitation".
+  "the cause of action arose on…", "the suit is within limitation" —
+  use the equivalent pleading phrasing in the response language.
 - Indian numbering: "Rs. 5,00,000/- (Rupees Five Lakh only)" — figures
-  AND words, lakh/crore with grouping "5,00,000".
+  AND words, lakh/crore with grouping "5,00,000". Render the figures
+  and the words in the response language's native script when that
+  language uses a distinct digit family (Devanagari, Bengali, Tamil,
+  etc.).
 - Latin tags used sparingly: inter alia, prima facie, res judicata,
   ex parte, audi alteram partem, sine qua non, suo motu.
 - One averment per numbered paragraph; self-contained paragraphs.

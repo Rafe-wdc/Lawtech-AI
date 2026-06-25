@@ -519,9 +519,19 @@ def localize_prompt(
         else:
             out += (
                 f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {lang_name}. "
-                "All legal citations must remain in English — this includes case names, "
-                "section numbers, act titles (e.g. IPC, BNS, CrPC), court names, "
-                "and party names. Do NOT translate these."
+                f"The ONLY content that may stay in English is a verbatim "
+                f"case-law citation block — the printed party names + reporter "
+                f"cite of a real decided case (e.g. 'Mohan Lal v. State of "
+                f"Punjab, (2018) 17 SCC 627'). Surrounding clause stays in "
+                f"{lang_name}.\n"
+                f"Everything else MUST be in {lang_name}: act / code / "
+                f"statute titles ('Section 480 of the Bharatiya Nagarik "
+                f"Suraksha Sanhita, 2023' → '{lang_name} equivalent'), "
+                f"section / article / rule labels, court names, party-role "
+                f"labels, placeholder brackets, and inline references. "
+                f"DO NOT append English citation tails like 'as per Section "
+                f"X of the <English Act name>, YYYY' or 'in accordance with "
+                f"the <English Act>' — translate the full reference inline."
             )
 
         # Cross-language source mismatch warning: when the user wants the

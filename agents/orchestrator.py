@@ -1169,8 +1169,16 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # legacy _analyze_and_normalize_query and the regex-based
         # _wants_table_format are gone. The extractor produces both the
         # normalized query and the typed UserIntent in one LLM call.
+        #
+        # Feed the user's ORIGINAL message (pre-rewrite) so explicit
+        # directives like "In marathi" survive. The memory node's
+        # follow-up rewriter expands short messages into standalone
+        # retrieval queries using chat history, which strips
+        # user-facing directives (language / format / depth) that
+        # aren't legal anchors. Reading directives from the raw input
+        # keeps `intent.language_explicit` correct on follow-up turns.
         intent_coro = asyncio.wait_for(
-            asyncio.to_thread(_extract_user_intent, query, summary or ""),
+            asyncio.to_thread(_extract_user_intent, _original_query, summary or ""),
             timeout=10,
         )
         classify_coro = asyncio.wait_for(
@@ -1195,7 +1203,17 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             normalized_query = query
         else:
             normalized_query, extracted_intent = results[0]
-            if normalized_query and normalized_query != query and not skip_normalize:
+            # Only adopt the extractor's normalized form when no upstream
+            # step (memory rewrite, long-query extraction, abbreviation
+            # expansion) already changed `query`. The rewriter's expanded
+            # form is a better retrieval target than re-normalizing the
+            # raw 2-word follow-up that the extractor just received.
+            if (
+                normalized_query
+                and normalized_query != query
+                and _original_query == query
+                and not skip_normalize
+            ):
                 log.info("Query normalized",
                          original=query[:80], normalized=normalized_query[:80])
                 query = normalized_query

@@ -1831,6 +1831,10 @@ _MOJIBAKE_REPLACEMENTS = [
     ("â€¦", "…"),   # â€¦ -> ellipsis
     ("Â ",       " "),   # Â  -> nbsp
     ("ï¿½", "?"),        # replacement char (no-info fallback)
+    (" â ", " – "),  # bare â between spaces -> en-dash (surviving fragment of
+                          # truncated 3-byte UTF-8 dash E2 80 93/94;
+                          # codec roundtrip cannot fix because 0xE2 alone
+                          # is invalid UTF-8 lead. Symptom: "Pune â 412307".
 ]
 
 # Internal LLM artefact placeholders that should never survive to the user.
@@ -1897,7 +1901,14 @@ def _renumber_global_paragraphs(full_draft: str) -> str:
     """
     lines = full_draft.split("\n")
     counter = 1
-    in_procedural = False
+    # `outline.court_details` (the cause-title block) sits ABOVE the first
+    # `## N. TITLE` heading. Its numbered lines are PARTY NUMBERS in the
+    # plaintiffs / defendants list, NOT substantive body paragraphs.
+    # Start in skip-mode so those party numbers don't get folded into the
+    # global body counter — symptom otherwise was Manjri Greens WS body
+    # opening at paragraph 11 because 8 plaintiffs + 2 defendants
+    # consumed counter slots 1..10.
+    in_procedural = True
     rewrote = 0
 
     for i, line in enumerate(lines):
@@ -3391,6 +3402,24 @@ async def _generate_section(
             "    label must appear in the subject heading at the bottom "
             "    of this block (e.g. 'WRITTEN STATEMENT ON BEHALF OF "
             "    RESPONDENT NO. 1' — not 'DEFENDANT NO. 1').\n"
+            "11. PARTY NUMBERING — when multiple plaintiffs / petitioners "
+            "    or multiple defendants / respondents exist:\n"
+            "    (a) Number the plaintiffs / petitioners as 1, 2, 3, ... "
+            "        sequentially.\n"
+            "    (b) Number the defendants / respondents INDEPENDENTLY, "
+            "        starting fresh at 1, 2, 3, ... — DO NOT continue the "
+            "        plaintiff numbering into the defendant list (no "
+            "        'Defendant No. 9' when there are 8 plaintiffs).\n"
+            "    (c) EVERY party on each side carries a number prefix "
+            "        (`1. NAME`, `2. NAME`, ...). DO NOT leave the first "
+            "        party unnumbered as a 'lead' / 'head of family' / "
+            "        'karta' even if the source plaint did so — every "
+            "        named party gets a list number.\n"
+            "    (d) Any aggregate descriptor such as 'All Nos. 1 to N "
+            "        R/at <address>' MUST use the actual count N of "
+            "        parties in that list. Count the parties you wrote "
+            "        before emitting the descriptor; do not echo a count "
+            "        from the source plaint without verifying it.\n"
             "\n"
             "Output ONLY this cause-title block for this section. No "
             "introductory paragraph, no explanation, no closing notes.\n"

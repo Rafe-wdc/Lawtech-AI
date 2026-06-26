@@ -189,6 +189,19 @@ class TestValidator:
         assert "–" in cleaned
         assert "â€" not in cleaned
 
+    def test_fixes_bare_a_circumflex_as_dash(self):
+        # Surviving fragment case: the trailing two bytes of a 3-byte
+        # UTF-8 en-dash (E2 80 93) were dropped somewhere upstream,
+        # leaving a bare  between spaces. The codec roundtrip
+        # cannot fix this (0xE2 alone is an invalid UTF-8 lead, so
+        # strict decode aborts and the string is left untouched).
+        # Symptom in the Manjri Greens WS: "Pune â 412307" where
+        # an en-dash should have separated the city from the pincode.
+        draft = "Manjri Budruk, Taluka Haveli, Dist. Pune â 412307"
+        cleaned, _ = validate_draft(draft)
+        assert " – " in cleaned
+        assert " â " not in cleaned
+
     # NOTE: tests for forbidden statute pairings (Sec 38 SRA + temp
     # injunction; Sec 54 CPC + residential partition), orphan citation
     # tails ("Supreme Court in."), and stance compliance violations

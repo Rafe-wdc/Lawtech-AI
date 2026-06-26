@@ -117,6 +117,13 @@ Case law — neutral or reporter citation:
 - "AIR 2020 SC 3717" (AIR <year> <court> <page>)
 - "State of Maharashtra v. …, 2019 SCC OnLine Bom 1234"
 - Italicise party names; use "v." (not "vs." or "versus").
+- DO NOT bold case citations — no `**Vineeta Sharma v. Rakesh
+  Sharma**` and no `**(2020) 9 SCC 1**`. Italics on the party names
+  is the only emphasis. Bolding the whole citation produces orphan
+  `**` markers when the citation wraps across a line (symptom in the
+  Manjri Greens WS: `**Sawarni v. Inder Kaur,**` on one line followed
+  by `(1996) 6 SCC 223**` on the next), and it visually competes with
+  bolded section headings. Plain weight, italic party names only.
 
 HARD RULE on citations: If you do not actually know a citation is real
 and correct, do NOT cite it. NEVER fabricate AIR/SCC numbers, page
@@ -596,11 +603,22 @@ Given the user's query and the recent conversation summary, produce:
          "plaintiff" → user said any of: "on behalf of plaintiff/petitioner/
                        applicant/complainant/appellant", "for the plaintiff",
                        "I am the plaintiff / my client is the petitioner",
-                       "arguments for the appellant/applicant/complainant".
+                       "arguments for the appellant/applicant/complainant",
+                       OR a NUMBERED reference such as "on behalf of
+                       Plaintiff No. 2", "for Petitioner no. 1",
+                       "arguments for Applicant No. 3" — the role-noun
+                       carries the side even when a specific party number
+                       follows it.
          "defendant" → user said any of: "on behalf of defendant/respondent/
                        opposite party/accused", "for the defendant",
                        "I am the defendant / my client is the respondent",
-                       "arguments for the accused/respondent".
+                       "arguments for the accused/respondent",
+                       OR a NUMBERED reference such as "on behalf of
+                       Respondent no. 1", "for Defendant No. 2",
+                       "arguments for Opposite Party No. 3", "written
+                       statement for Accused No. 4" — same rule, the
+                       role-noun carries the side even when a specific
+                       party number follows.
          "both"      → user said "arguments for both sides", "both
                        perspectives", "plaintiff and defendant arguments".
          "none"      → default. The user did not name a party AND the
@@ -608,11 +626,17 @@ Given the user's query and the recent conversation summary, produce:
                        summarize, scenario analysis, Q&A).
        IMPORTANT: when the user EXPLICITLY names a party, honour their
        words even if the doc type would normally imply the other side.
-       Example: "Prepare written statement on behalf of plaintiff" — set
-       "plaintiff" (the user wants a plaintiff-side responsive pleading
-       i.e. a Replication; downstream layer handles the procedural label).
-       Do NOT silently flip to "defendant" just because a WS is normally
-       a defendant's pleading.
+       Examples:
+         "Prepare written statement on behalf of plaintiff" — set
+           "plaintiff" (the user wants a plaintiff-side responsive
+           pleading i.e. a Replication; downstream layer handles the
+           procedural label). Do NOT silently flip to "defendant" just
+           because a WS is normally a defendant's pleading.
+         "Prepare written statement on behalf of Respondent no. 1" — set
+           "defendant" (Respondent is a defendant-side role label, and
+           the numbered suffix "no. 1" does not change that). Do NOT
+           leave this as "none" because the literal word is "Respondent"
+           rather than "Defendant" — both map to the defendant side.
 
    legal_artifact — TRUE specialized legal output request. Use the BEST match
        from the list below; if none clearly applies, use "none".
@@ -1206,6 +1230,18 @@ court, succession-certificate application to District Judge, probate petition).
     "IN THE MATTER OF:", Plaintiff/Petitioner block, "Versus", Defendant/
     Respondent block, bolded SUBJECT HEADING at the end (the assembler
     appends the heading from document_title — do NOT add it yourself).
+  - PARTY NUMBERING in court_details when multiple parties exist:
+    (a) Number plaintiffs/petitioners as 1, 2, 3, ... sequentially.
+    (b) Number defendants/respondents INDEPENDENTLY, starting fresh at
+        1, 2, 3, ... — DO NOT continue the plaintiff numbering into the
+        defendant list (no "Defendant No. 9" when there are 8 plaintiffs).
+    (c) EVERY named party on each side carries a number prefix
+        ("1. NAME"). DO NOT leave the first party unnumbered as a
+        "lead" / "head of family" / "karta" even if the source plaint
+        did so.
+    (d) Aggregate descriptors such as "All Nos. 1 to N R/at <address>"
+        MUST use the actual count N of parties in that list — count
+        the parties you wrote before emitting the descriptor.
   - Prayer / Relief Sought IS the final SUBSTANTIVE section before
     Verification. 5-8 numbered reliefs (one paragraph each).
   - Verification (Order VI Rule 15 CPC) is mandatory after Prayer.

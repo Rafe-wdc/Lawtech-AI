@@ -158,7 +158,11 @@ def _format_intent_directives(intent) -> str:
       - arguments_for_party ("plaintiff" / "defendant" / "both") — forces
         the drafting / arguments LLM to write in the named party's voice.
         Drives both the section text (first-person stance) and the footer
-        signature label.
+        signature label. The directive also tells the LLM to honour the
+        user's LITERAL party label when present in the query (Respondent
+        vs Defendant, Applicant vs Plaintiff, etc.) instead of defaulting
+        to the doc-type-implied synonym — i.e. "WS on behalf of Respondent
+        no. 1" stays as "Respondent", not silently rewritten to "Defendant".
 
     Format and language live in their own layers: synthesis-template picker
     handles wants_table, localize_prompt itself handles the language block.
@@ -186,14 +190,27 @@ def _format_intent_directives(intent) -> str:
             "COMPLAINANT / APPELLANT voice. The document speaks AS that "
             "party. Cause-title still names both sides, but the body, "
             "prayer, verification, and affidavit are the plaintiff-side "
-            "party's pleading. Pick the synonym that matches the document "
-            "type (Plaint→Plaintiff, Writ Petition→Petitioner, Notice→"
-            "Complainant/Sender, Appeal→Appellant). If the document type "
-            "is a Written Statement / Reply / Counter-Affidavit "
-            "(structurally the responsive pleading), treat the user's "
-            "instruction as 'draft the plaintiff's REPLICATION (Order VIII "
-            "Rule 9 CPC) / rejoinder' — DO NOT silently flip and write as "
-            "the defendant."
+            "party's pleading. "
+            "LABEL CHOICE: "
+            "(a) FIRST priority — if the user's query explicitly names a "
+            "party label (e.g. 'on behalf of the Applicant', 'for the "
+            "Complainant', 'arguments for Petitioner no. 2'), use THAT "
+            "EXACT word everywhere it appears in the draft: subject "
+            "heading ('APPLICATION ON BEHALF OF THE APPLICANT'), "
+            "cause-title designation ('.....Applicant'), body voice "
+            "('the Applicant most respectfully submits...'), and any "
+            "numbered references ('Applicant no. 2'). DO NOT silently "
+            "swap it for a doctrinally-implied synonym — honour the "
+            "user's word. "
+            "(b) FALLBACK — only when the user did NOT name a specific "
+            "label, pick the synonym that matches the document type: "
+            "Plaint→Plaintiff, Writ Petition→Petitioner, Notice→"
+            "Complainant/Sender, Appeal→Appellant. "
+            "If the document type is a Written Statement / Reply / "
+            "Counter-Affidavit (structurally the responsive pleading), "
+            "treat the user's instruction as 'draft the plaintiff's "
+            "REPLICATION (Order VIII Rule 9 CPC) / rejoinder' — DO NOT "
+            "silently flip and write as the defendant."
         )
     elif party == "defendant":
         parts.append(
@@ -201,9 +218,23 @@ def _format_intent_directives(intent) -> str:
             "PARTY / ACCUSED voice. The document speaks AS that party. "
             "Cause-title still names both sides, but the body, prayer, "
             "verification, and affidavit are the defendant-side party's "
-            "pleading. Pick the synonym that matches the document type "
-            "(Written Statement→Defendant, Counter-Affidavit→Respondent, "
-            "Bail Application→Accused/Applicant)."
+            "pleading. "
+            "LABEL CHOICE: "
+            "(a) FIRST priority — if the user's query explicitly names a "
+            "party label (e.g. 'on behalf of Respondent no. 1', 'for the "
+            "Opposite Party', 'reply by the Accused'), use THAT EXACT "
+            "word everywhere it appears in the draft: subject heading "
+            "('WRITTEN STATEMENT ON BEHALF OF RESPONDENT NO. 1'), "
+            "cause-title designation ('.....Respondent No. 1'), body "
+            "voice ('the Respondent submits that...'), and any numbered "
+            "references ('Respondent no. 1'). DO NOT silently swap it "
+            "for a doctrinally-implied synonym just because Written "
+            "Statement is usually a Defendant's pleading — honour the "
+            "user's word. "
+            "(b) FALLBACK — only when the user did NOT name a specific "
+            "label, pick the synonym that matches the document type: "
+            "Written Statement→Defendant, Counter-Affidavit→Respondent, "
+            "Bail Application→Accused/Applicant."
         )
     elif party == "both":
         parts.append(

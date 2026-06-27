@@ -770,34 +770,75 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
 
 def _ocr_pdf_at_dpi(
     file_path: str, page_count: int, dpi: int,
+    emit: Optional[Callable[[dict], None]] = None,
+    pass_label: str = "",
 ) -> str:
     """Run Vision OCR over a PDF at a specific DPI. Internal helper for the
     adaptive-DPI logic in _vision_ocr_pdf — separated so the low- and
     high-DPI passes share rendering + batching code.
+
+    Optional ``emit`` callback streams per-batch progress events for the
+    SSE channel — useful for 100+ page scanned PDFs where OCR alone takes
+    1-3 minutes and the user would otherwise see dead silence.
     """
     from core.clients import get_gemini_flash
 
     with log_time(log, "PDF page rendering", pages=page_count, dpi=dpi):
         batches = _render_pdf_pages(file_path, page_count, dpi=dpi)
 
+    total = len(batches)
     llm = get_gemini_flash(temperature=0.0)
     log.info("Starting parallel OCR",
-             batches=len(batches), pages=page_count, dpi=dpi,
+             batches=total, pages=page_count, dpi=dpi,
              batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT)
 
-    with log_time(log, "Parallel Vision OCR", batches=len(batches)):
+    if emit and total:
+        emit({
+            "type": "file_processing",
+            "stage": "ocr_render_done",
+            "message": (
+                f"Rendered {page_count} pages at {dpi} DPI"
+                f"{(' ' + pass_label) if pass_label else ''}; "
+                f"running OCR across {total} batch(es) of {VISION_BATCH_SIZE}..."
+            ),
+            "pages": page_count,
+            "batches": total,
+            "dpi": dpi,
+            "pass": pass_label or "single",
+        })
+
+    with log_time(log, "Parallel Vision OCR", batches=total):
         with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
             futures = [
                 executor.submit(_ocr_batch, llm, batch_images, batch_start)
                 for batch_start, batch_images in batches
             ]
             results = []
+            done = 0
             for future in futures:
                 try:
                     results.append(future.result(timeout=120))
                 except Exception as e:
                     log.warning("OCR batch failed", error=str(e))
                     results.append("")
+                done += 1
+                if emit:
+                    pages_done = min(done * VISION_BATCH_SIZE, page_count)
+                    emit({
+                        "type": "file_processing",
+                        "stage": "ocr_progress",
+                        "message": (
+                            f"OCR batch {done}/{total} done "
+                            f"({pages_done} of {page_count} pages)"
+                            + (f" [{pass_label}]" if pass_label else "")
+                        ),
+                        "done": done,
+                        "total": total,
+                        "pages_done": pages_done,
+                        "pages": page_count,
+                        "dpi": dpi,
+                        "pass": pass_label or "single",
+                    })
 
     return "\n\n".join(r for r in results if r)
 
@@ -813,7 +854,11 @@ def _ocr_pdf_at_dpi(
 LOW_DPI_TEXT_PER_PAGE_FLOOR = 200
 
 
-def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
+def _vision_ocr_pdf(
+    file_path: str, page_count: int,
+    emit: Optional[Callable[[dict], None]] = None,
+    file_name: str = "",
+) -> str:
     """Run Gemini Vision OCR on PDF pages with parallel batch processing.
 
     Adaptive DPI (added 2026-06-23):
@@ -829,16 +874,48 @@ def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
     - Batch size 10 — fewer API calls (was 5)
     - Parallel batch calls — up to 4 concurrent Gemini calls
     - Legal-aware OCR prompt — better extraction of names, dates, sections
+
+    The optional ``emit`` callback streams SSE progress events so users see
+    real activity during the 1-3 minute synchronous OCR on large scanned
+    PDFs (added 2026-06-28).
     """
     # Check cache first (hash uses file content, not DPI — first hit wins
     # regardless of which DPI produced it).
     pdf_hash = _file_hash(file_path)
     cached = _load_ocr_cache(pdf_hash)
     if cached:
+        if emit:
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_cache_hit",
+                "message": (
+                    f"{file_name or os.path.basename(file_path)}: "
+                    f"OCR result reused from cache ({len(cached)} chars)"
+                ),
+                "file": file_name or os.path.basename(file_path),
+                "chars": len(cached),
+            })
         return cached
 
+    label = file_name or os.path.basename(file_path)
     try:
-        text = _ocr_pdf_at_dpi(file_path, page_count, VISION_DPI_LOW)
+        if emit:
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_start",
+                "message": (
+                    f"{label}: starting Vision OCR on {page_count} scanned "
+                    f"page(s) — this may take 1-3 minutes for large documents"
+                ),
+                "file": label,
+                "pages": page_count,
+                "dpi": VISION_DPI_LOW,
+            })
+
+        text = _ocr_pdf_at_dpi(
+            file_path, page_count, VISION_DPI_LOW,
+            emit=emit, pass_label=f"low-DPI {VISION_DPI_LOW}",
+        )
 
         # Adaptive escalation: if the low-DPI pass produced very thin text
         # for a large PDF, retry at high DPI. Cheap heuristic: chars per
@@ -848,12 +925,29 @@ def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
         )
         if thin and VISION_DPI_HIGH > VISION_DPI_LOW:
             log.info("Low-DPI OCR produced thin output — retrying at high DPI",
-                     file=os.path.basename(file_path),
+                     file=label,
                      pages=page_count,
                      low_dpi_chars=len(text.strip()),
                      low_dpi=VISION_DPI_LOW,
                      high_dpi=VISION_DPI_HIGH)
-            high_text = _ocr_pdf_at_dpi(file_path, page_count, VISION_DPI_HIGH)
+            if emit:
+                emit({
+                    "type": "file_processing",
+                    "stage": "ocr_dpi_escalation",
+                    "message": (
+                        f"{label}: low-DPI OCR returned thin text "
+                        f"({len(text.strip())} chars) — retrying at "
+                        f"{VISION_DPI_HIGH} DPI for better fidelity"
+                    ),
+                    "file": label,
+                    "low_dpi_chars": len(text.strip()),
+                    "low_dpi": VISION_DPI_LOW,
+                    "high_dpi": VISION_DPI_HIGH,
+                })
+            high_text = _ocr_pdf_at_dpi(
+                file_path, page_count, VISION_DPI_HIGH,
+                emit=emit, pass_label=f"high-DPI {VISION_DPI_HIGH}",
+            )
             # Keep whichever pass produced more substantive text.
             if len(high_text.strip()) > len(text.strip()):
                 text = high_text
@@ -861,11 +955,30 @@ def _vision_ocr_pdf(file_path: str, page_count: int) -> str:
         # Cache the best result
         if text.strip():
             _save_ocr_cache(pdf_hash, text)
+            if emit:
+                emit({
+                    "type": "file_processing",
+                    "stage": "ocr_done",
+                    "message": (
+                        f"{label}: OCR complete — extracted "
+                        f"{len(text)} chars from {page_count} pages"
+                    ),
+                    "file": label,
+                    "chars": len(text),
+                    "pages": page_count,
+                })
 
         return text
 
     except Exception as e:
         log.error("Vision OCR failed", error=str(e))
+        if emit:
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_failed",
+                "message": f"{label}: OCR failed ({str(e)[:120]})",
+                "file": label,
+            })
         return ""
 
 
@@ -1467,6 +1580,7 @@ async def process_files(
                             ocr_text = await asyncio.wait_for(
                                 asyncio.to_thread(
                                     _vision_ocr_pdf, local_path, page_count,
+                                    emit, pf.original_name,
                                 ),
                                 timeout=900,
                             )
@@ -1533,7 +1647,10 @@ async def process_files(
                              has_gemini_uri=bool(pf.gemini_uri))
                     try:
                         text = await asyncio.wait_for(
-                            asyncio.to_thread(_vision_ocr_pdf, local_path, page_count),
+                            asyncio.to_thread(
+                                _vision_ocr_pdf, local_path, page_count,
+                                emit, pf.original_name,
+                            ),
                             timeout=900,
                         )
                     except asyncio.TimeoutError:

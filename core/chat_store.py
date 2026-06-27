@@ -770,18 +770,15 @@ class _SqliteChatHistoryStore:
     # ------------------------------------------------------------------
 
     def _save_file_context_sync(self, thread_id: str, file_context: dict) -> None:
-        """Persist file context for a thread (inline_text, chromadb_collections, file_names).
+        """Persist file context for a thread (chromadb_collections + file_names).
 
-        Images are NOT persisted — they are too large (base64) and cannot be
-        meaningfully re-used without the original bytes in a follow-up.
+        Phase F (2026-06-28): inline_text channel removed. File content
+        lives in ChromaDB and is read via get_full_attachment.
         """
         self._ensure_schema()
-        # Strip images before saving
         safe_ctx = {
-            "inline_text": file_context.get("inline_text", ""),
             "chromadb_collections": file_context.get("chromadb_collections", []),
             "file_names": file_context.get("file_names", []),
-            "image_data": [],  # intentionally empty — images not persisted
         }
         with self._write_lock:
             conn = self._get_connection()
@@ -797,8 +794,7 @@ class _SqliteChatHistoryStore:
                 log.debug("File context saved",
                           thread_id=thread_id[:12],
                           files=safe_ctx["file_names"],
-                          chromadb=len(safe_ctx["chromadb_collections"]),
-                          inline_chars=len(safe_ctx["inline_text"]))
+                          chromadb=len(safe_ctx["chromadb_collections"]))
             except Exception:
                 conn.rollback()
                 raise
@@ -824,7 +820,7 @@ class _SqliteChatHistoryStore:
                 try:
                     ctx = json.loads(row["file_context_json"])
                     # Only return if it has meaningful content
-                    if ctx.get("inline_text") or ctx.get("chromadb_collections") or ctx.get("file_names"):
+                    if ctx.get("chromadb_collections") or ctx.get("file_names"):
                         return ctx
                 except (json.JSONDecodeError, TypeError) as e:
                     log.error("Corrupted file_context_json",
@@ -1050,8 +1046,8 @@ class _SqliteChatHistoryStore:
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     agent,
-                    query[:1000],
-                    original_query[:1000],
+                    query,
+                    original_query,
                     fallback_tier,
                     response_preview[:600],
                     json.dumps(web_sources),
@@ -2131,12 +2127,11 @@ class _PostgresChatHistoryStore:
     # ------------------------------------------------------------------
 
     def _save_file_context_sync(self, thread_id: str, file_context: dict) -> None:
+        # Phase F (2026-06-28): inline_text channel removed.
         self._ensure_schema()
         safe_ctx = {
-            "inline_text":          file_context.get("inline_text", ""),
             "chromadb_collections": file_context.get("chromadb_collections", []),
             "file_names":           file_context.get("file_names", []),
-            "image_data":           [],
         }
         from psycopg.rows import dict_row
         with self._get_pool().connection() as conn:
@@ -2152,8 +2147,7 @@ class _PostgresChatHistoryStore:
             log.debug("File context saved",
                       thread_id=thread_id[:12],
                       files=safe_ctx["file_names"],
-                      chromadb=len(safe_ctx["chromadb_collections"]),
-                      inline_chars=len(safe_ctx["inline_text"]))
+                      chromadb=len(safe_ctx["chromadb_collections"]))
 
     async def save_file_context(self, thread_id: str, file_context: dict) -> None:
         return await asyncio.to_thread(
@@ -2172,7 +2166,7 @@ class _PostgresChatHistoryStore:
         if row and row["file_context_json"]:
             try:
                 ctx = json.loads(row["file_context_json"])
-                if ctx.get("inline_text") or ctx.get("chromadb_collections") or ctx.get("file_names"):
+                if ctx.get("chromadb_collections") or ctx.get("file_names"):
                     return ctx
             except (json.JSONDecodeError, TypeError) as e:
                 log.error("Corrupted file_context_json",
@@ -2325,8 +2319,8 @@ class _PostgresChatHistoryStore:
                 RETURNING id
             """, (
                 agent,
-                query[:1000],
-                original_query[:1000],
+                query,
+                original_query,
                 fallback_tier,
                 response_preview[:600],
                 json.dumps(web_sources),

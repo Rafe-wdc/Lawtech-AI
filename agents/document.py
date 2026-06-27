@@ -361,280 +361,28 @@ async def document_node(state: LegalAgentState) -> dict:
     user_language = state.get("user_language", "en")
     chat_history = state.get("chat_history", [])
 
-    # Check file_context — prefer Gemini file parts (native PDF reading)
-    # over ChromaDB (OCR'd text chunks) when both are available
+    # Phase D/E (RAG attachment routing plan, 2026-06-28): single text
+    # pipeline — file content always lives in ChromaDB. Gemini Files URI
+    # preference removed (the multimodal handling path is dead code).
     all_collections: list[str] = []
     if not unique_string:
         fc = FileContextData.from_state(state)
-        if fc and fc.all_gemini_parts:
-            # Gemini URIs available — use multimodal path (better quality)
-            pass  # handled below
-        elif fc and fc.chromadb_collections:
+        if fc and fc.chromadb_collections:
             all_collections = fc.chromadb_collections
             unique_string = all_collections[0]
-            log.info("Using inline file collections",
+            log.info("Using file collections from FileContextData",
                      collections=all_collections, primary=unique_string)
 
     progress("document", "Loading uploaded documents...", step="load")
     log.info("Agent started",
              collection=unique_string, query=query[:100])
 
+    # Phase D (RAG attachment routing plan, 2026-06-28): the legacy
+    # "no unique_string" branch (Gemini Files multimodal path + inline-text
+    # path) is removed. Every uploaded file is now stored in ChromaDB
+    # (Phase B), so unique_string is always set when a file is attached.
     if not unique_string:
-        fc = FileContextData.from_state(state)
-
-        # Check for Gemini file parts (images, PDFs, TXT, CSV via Files API)
-        # all_gemini_parts includes legacy base64 images for backward compat
-        if fc and fc.all_gemini_parts:
-            parts = fc.all_gemini_parts
-            log.info("Using Gemini file parts for multimodal document QA",
-                     parts=len(parts), files=fc.file_names)
-            try:
-                with log_time(log, "Gemini file parts document QA"):
-                    intent_obj = state.get("user_intent")
-                    artifact = getattr(intent_obj, "legal_artifact", LegalArtifact.NONE) if intent_obj else LegalArtifact.NONE
-                    llm = get_gemini_pro(**_llm_config_for_artifact(intent_obj))
-
-                    # Build content list: file parts + question text.
-                    # Translate the internal {"file_data": {...}, "name": ...}
-                    # representation into a LangChain media content block — raw
-                    # Gemini-shaped dicts have no "type" key, so langchain-google-genai
-                    # logs "Unrecognized message part format" and stringifies them,
-                    # which silently drops the PDF and lets Gemini hallucinate.
-                    def _build_user_content(active_query: str) -> list:
-                        uc: list = []
-                        for part in parts:
-                            if "file_data" in part:
-                                fd = part["file_data"]
-                                uc.append({
-                                    "type": "media",
-                                    "file_uri": fd["file_uri"],
-                                    "mime_type": fd.get("mime_type", "application/octet-stream"),
-                                })
-                            elif "inline_data" in part:
-                                d = part["inline_data"]
-                                uc.append({
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{d['mime_type']};base64,{d['data']}"
-                                    },
-                                })
-                        uc.append({
-                            "type": "text",
-                            "text": f"Current Date: {date.today()}\n\nQuestion: {active_query}",
-                        })
-                        return uc
-
-                    # Pick the system prompt: specialized one (e.g.
-                    # CROSS_EXAMINATION_PROMPT) when intent surfaced a
-                    # legal_artifact, otherwise the generic file-Q&A prompt.
-                    # Source-language hint: Gemini reads the file directly so
-                    # we lack raw text here; fall back to any inline_text
-                    # OCR companion (e.g. when a scanned PDF was both
-                    # uploaded and OCR-extracted). When unavailable, the
-                    # soft English directive in localize_prompt still
-                    # prevents most code-switching.
-                    _source_langs_gemini = detect_source_languages(
-                        fc.inline_text if fc and fc.inline_text else None
-                    )
-                    _doc_system = localize_prompt(
-                        _pick_specialized_prompt(
-                            intent_obj,
-                            "You are Lawttorney, a legal AI assistant. Analyze the uploaded "
-                            "file(s) carefully based on what you ACTUALLY SEE in them.\n\n"
-                            "CRITICAL RULES:\n"
-                            "1. Describe ONLY what is visible in the uploaded file. Do NOT "
-                            "fabricate or hallucinate content that is not there.\n"
-                            "2. If the file is a legal document (FIR, judgment, petition, "
-                            "agreement, notice), extract: names, dates, section numbers, "
-                            "case numbers, court names, and legal provisions.\n"
-                            "3. If the file is NOT a legal document (e.g., a photo, diagram, "
-                            "receipt, letter, screenshot), describe what you see accurately "
-                            "and answer the user's question based on the actual content.\n"
-                            "4. If the file content does not match the user's question, say so "
-                            "clearly. Do NOT force a legal interpretation on non-legal content.\n"
-                            "5. NEVER generate fake case names, case numbers, or court details "
-                            "that are not visible in the uploaded file.",
-                        ),
-                        user_language,
-                        intent_obj,
-                        source_languages=_source_langs_gemini,
-                    )
-                    history_text = _format_chat_history(chat_history)
-
-                    def _build_messages(active_query: str) -> list:
-                        m: list = [("system", _doc_system)]
-                        if history_text:
-                            m.append(("user", f"Previous conversation:\n{history_text}"))
-                        if fc.inline_text:
-                            m.append(("user", f"Additional document text:\n{fc.inline_text[:40000]}"))
-                        m.append(("user", _build_user_content(active_query)))
-                        return m
-
-                    response = llm.invoke(_build_messages(query))
-
-                # Self-refine: dynamic LLM-driven critic + refiner loop.
-                # Reads the typed UserIntent, surfaces violations, rewrites.
-                # Skips trivial intents internally (no directives / low conf).
-                # Replaces _passes_quality_gate + hardcoded retry preambles.
-                # Pass detected source languages so the critic force-runs
-                # when the file is in a different language than the
-                # response target — the safety net for the prompt-level
-                # English directive emitted by localize_prompt.
-                refined_content, refine_history = await self_refine(
-                    response.content,
-                    user_query=query,
-                    intent=intent_obj,
-                    source_languages=_source_langs_gemini,
-                )
-                if refined_content != response.content:
-                    log.info(
-                        "Self-refine altered response",
-                        artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
-                        iterations=len(refine_history),
-                        original_len=len(response.content),
-                        refined_len=len(refined_content),
-                    )
-                    response.content = refined_content
-
-                from core.token_tracker import record as _record_tokens
-                tokens = _record_tokens("Document", "qa_gemini_files", response)
-
-                log.info("Gemini file parts document QA completed",
-                         response_len=len(response.content), tokens=tokens,
-                         legal_artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact))
-
-                sources = [SourceMetadata(
-                    source_type="document",
-                    title=f"Uploaded: {fn}",
-                    content=["Multimodal file analysis"],
-                    file_name=fn,
-                    agent_name="Document",
-                ) for fn in fc.file_names[:5]]
-
-                return {"agent_results": {"Document": AgentResult(
-                    agent_name="Document",
-                    content=response.content,
-                    sources=sources,
-                    tokens_consumed=tokens,
-                )}}
-
-            except Exception as e:
-                log.error("Gemini file parts document QA failed", error=str(e), exc_info=True)
-                return {"agent_results": {"Document": AgentResult(
-                    agent_name="Document",
-                    content="",
-                    sources=[],
-                    tokens_consumed=0,
-                    error=str(e),
-                )}}
-
-        # Check for inline file text (small files not stored in ChromaDB)
-        if fc and fc.inline_text:
-            log.info("Using inline file text for document QA",
-                     inline_chars=len(fc.inline_text), files=fc.file_names)
-            try:
-                with log_time(log, "Inline document QA"):
-                    intent_obj = state.get("user_intent")
-                    artifact = getattr(intent_obj, "legal_artifact", LegalArtifact.NONE) if intent_obj else LegalArtifact.NONE
-                    llm = get_gemini_pro(**_llm_config_for_artifact(intent_obj))
-                    history_text = _format_chat_history(chat_history)
-                    # Inline-text path: we have the full file text in hand,
-                    # so detect its script directly and pass it as the
-                    # source-language hint. localize_prompt uses this to
-                    # escalate the English directive when the user typed
-                    # English but the file is, say, Marathi.
-                    _source_langs_inline = detect_source_languages(fc.inline_text)
-                    system_prompt = localize_prompt(
-                        _pick_specialized_prompt(
-                            intent_obj,
-                            "You are Lawttorney, a legal AI assistant. Answer questions about "
-                            "the uploaded document(s) using ONLY the provided content. "
-                            "Do NOT fabricate any information not present in the document. "
-                            "If the content is a legal document, cite specific sections, clauses, "
-                            "parties, dates, and legal provisions. If it is not a legal document, "
-                            "describe the actual content accurately.",
-                        ),
-                        user_language,
-                        intent_obj,
-                        source_languages=_source_langs_inline,
-                    )
-                    prompt_messages = [("system", system_prompt)]
-                    if history_text:
-                        prompt_messages.append(("user", "Previous conversation:\n{history}"))
-                    prompt_messages.extend([
-                        ("user", "Document content:\n{docs}"),
-                        ("user", "Current Date: {date}"),
-                        ("user", "Question: {query}"),
-                    ])
-                    prompt = ChatPromptTemplate.from_messages(prompt_messages)
-                    chain = prompt | llm
-
-                    def _run(active_query: str):
-                        args = {
-                            "query": active_query,
-                            "docs": fc.inline_text[:80000],
-                            "date": str(date.today()),
-                        }
-                        if history_text:
-                            args["history"] = history_text
-                        return chain.invoke(args)
-
-                    response = _run(query)
-
-                # Self-refine: same pattern as the Gemini-Files path above.
-                refined_content, refine_history = await self_refine(
-                    response.content,
-                    user_query=query,
-                    intent=intent_obj,
-                    source_languages=_source_langs_inline,
-                )
-                if refined_content != response.content:
-                    log.info(
-                        "Self-refine altered response",
-                        artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact),
-                        iterations=len(refine_history),
-                        original_len=len(response.content),
-                        refined_len=len(refined_content),
-                    )
-                    response.content = refined_content
-
-                from core.token_tracker import record as _record_tokens
-                tokens = _record_tokens("Document", "qa_inline_text", response)
-
-                log.info("Inline document QA completed",
-                         response_len=len(response.content), tokens=tokens,
-                         legal_artifact=artifact.value if isinstance(artifact, LegalArtifact) else str(artifact))
-
-                sources = [SourceMetadata(
-                    source_type="document",
-                    title=f"Uploaded: {fn}",
-                    content=["Inline file analysis"],
-                    file_name=fn,
-                    agent_name="Document",
-                ) for fn in fc.file_names[:5]]
-
-                return {"agent_results": {"Document": AgentResult(
-                    agent_name="Document",
-                    content=response.content,
-                    sources=sources,
-                    tokens_consumed=tokens,
-                )}}
-
-            except Exception as e:
-                log.error("Inline document QA failed", error=str(e), exc_info=True)
-                return {"agent_results": {"Document": AgentResult(
-                    agent_name="Document",
-                    content="",
-                    sources=[],
-                    tokens_consumed=0,
-                    error=str(e),
-                )}}
-
-        log.warning("No file content available for Document agent",
-                    has_fc=fc is not None,
-                    has_gemini=bool(fc and fc.all_gemini_parts),
-                    has_inline=bool(fc and fc.inline_text),
-                    has_chromadb=bool(fc and fc.chromadb_collections))
+        log.warning("No file content available for Document agent")
         return {
             "agent_results": {"Document": AgentResult(
                 agent_name="Document",
@@ -651,65 +399,52 @@ async def document_node(state: LegalAgentState) -> dict:
             )},
         }
 
+
     try:
         # Use chat history from state (loaded by memory node from SQLite)
         history_text = _format_chat_history(chat_history)
 
-        # Step 1: Retrieve from ChromaDB (off-thread; no LLM call yet)
-        n_colls = len(all_collections) if all_collections else 1
-        progress("document", f"Searching across {n_colls} document collections...", found=n_colls, step="search")
-        with log_time(log, "ChromaDB retrieval"):
-            retrieved_docs = await asyncio.wait_for(
-                asyncio.to_thread(
-                    _retrieve_docs, unique_string, query,
-                    collections=all_collections or None,
-                ),
-                timeout=TIMEOUT_CHROMADB_SEC,
-            )
+        # Step 1: Full-document read via get_full_attachment (Phase D default
+        # lossless path). One Document per uploaded collection containing
+        # the entire file text — agents that need it see everything, no
+        # info loss. retrieve_attachment_context (top-K MMR) remains
+        # available as a tool for confidently specific questions.
+        from tools.shared.vectordb_tools import get_full_attachment
+        coll_list = all_collections or [unique_string]
+        n_colls = len(coll_list)
+        progress("document", f"Loading {n_colls} document collection(s)...", found=n_colls, step="search")
+        retrieved_docs: list[Document] = []
+        with log_time(log, "Full-attachment read"):
+            for cid in coll_list:
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            lambda c=cid: get_full_attachment.invoke({"collection_id": c})
+                        ),
+                        timeout=TIMEOUT_CHROMADB_SEC,
+                    )
+                    if result and result.get("full_text"):
+                        retrieved_docs.append(Document(
+                            page_content=result["full_text"],
+                            metadata={
+                                "source": result.get("source_file") or "attached",
+                                "chunk_count": result.get("chunk_count"),
+                            },
+                        ))
+                except Exception as e:
+                    log.warning("get_full_attachment failed",
+                                collection=cid, error=str(e))
 
-        # Step 2: Relevance gate. MMR k=30 always returns 30 chunks regardless
-        # of similarity, so an off-topic question against an uploaded PDF
-        # (e.g. user uploaded a contract, asks about Section 138 NI Act)
-        # would otherwise get 30 unrelated chunks pasted into the prompt and
-        # produce a hallucinated answer. The judge inspects the chunks and
-        # decides whether they actually cover the user's question.
-        if retrieved_docs:
-            progress("document", "Verifying retrieval relevance...",
-                     step="relevance_check")
-            chunks_for_judge = [d.page_content for d in retrieved_docs[:8]]
-            from core.retrieval_relevance import check_retrieval_relevance
-            uploaded_label = "Uploaded Document"
-            try:
-                fc_label = FileContextData.from_state(state)
-                if fc_label and fc_label.file_names:
-                    uploaded_label = f"Uploaded: {fc_label.file_names[0]}"
-            except Exception:
-                pass
-            is_relevant, judge_telemetry = await check_retrieval_relevance(
-                query, chunks_for_judge, uploaded_label, agent_name="Document",
-            )
-            log.info("Document relevance judge verdict",
-                     passed=is_relevant, **judge_telemetry)
-            if not is_relevant:
-                mismatch = judge_telemetry.get("matched_subject") or "different subject"
-                log.warning("Document retrieval failed relevance gate",
-                            **judge_telemetry)
-                progress("document",
-                         f"The uploaded document doesn't appear to cover your question "
-                         f"({mismatch[:60]}).", step="off_topic", substep=True)
-                msg = (
-                    "The uploaded document(s) don't appear to contain information "
-                    f"that answers your question ({mismatch[:80]}). "
-                    "Try asking about content that is in the file, or remove the "
-                    "attachment and ask the question as a general legal query."
-                )
-                return {"agent_results": {"Document": AgentResult(
-                    agent_name="Document",
-                    content=msg,
-                    sources=[],
-                    tokens_consumed=0,
-                    error="off_topic_for_uploaded_document",
-                )}}
+        # Step 2: Relevance gate removed for the full-doc path (Phase D
+        # switched retrieval from MMR top-30 to get_full_attachment, which
+        # returns the entire file as one Document). The old gate was
+        # designed to catch off-topic top-K chunks; against a single
+        # whole-document "chunk" the judge prompt misfires (e.g. flags a
+        # table-of-contents PDF as "off-topic for a summary request"). With
+        # full-doc retrieval there is no off-topic possibility — the user
+        # uploaded a specific file and is asking about it, and the LLM in
+        # Step 3 can correctly say "this document doesn't contain that
+        # information" when the answer truly isn't there.
 
         # Step 3: Generate answer (off-thread; LLM call)
         intent_obj_chromadb = state.get("user_intent")

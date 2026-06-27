@@ -64,13 +64,12 @@ VISION_BATCH_SIZE = 10          # pages per Gemini Vision call (was 5)
 VISION_MAX_CONCURRENT = 4       # max parallel OCR batch calls
 OCR_CACHE_DIR = os.path.join(CHROMA_STORE_ROOT, ".ocr_cache")
 
-# ChromaDB chunk size for evidence PDFs. V2 originally used 1000 char chunks,
-# which produced ~750 chunks for a 524-page PDF — 750 embedding round-trips
-# to the embedding service is most of why ChromaDB writes are the third-
-# largest silent-wait stage. V1 used 15000 chunks (50 embeddings for the
-# same PDF). We compromise at 8000 — 8x fewer round-trips than V2 default
-# but with finer-grained retrieval than V1's 15000.
-CHROMA_CHUNK_SIZE = 8000
+# ChromaDB chunk size for evidence PDFs. Raised to 15000 in the RAG
+# attachment routing plan (docs/rag_attachment_routing_plan.md, Phase A,
+# 2026-06-28) — large chunks pair with Gemini Pro's 1M context window so
+# the default `get_full_attachment` tool returns sensible chunk counts
+# and per-collection MMR (k=5) returns ~75K chars when used.
+CHROMA_CHUNK_SIZE = 15000
 CHROMA_CHUNK_OVERLAP = 200
 
 # PDF compression timeout. PikePDF lossless re-streaming is fast (<10s for
@@ -127,11 +126,12 @@ class ProcessedFile:
 
 @dataclass
 class FileContext:
-    """Aggregated result of processing all uploaded files for one turn."""
+    """Aggregated result of processing all uploaded files for one turn.
+
+    Phase F (2026-06-28): single text pipeline. inline_text and
+    gemini_file_parts fields removed; content lives in ChromaDB.
+    """
     files: list[ProcessedFile] = field(default_factory=list)
-    inline_text: str = ""
-    gemini_file_parts: list[dict] = field(default_factory=list)
-    # [{file_data: {file_uri, mime_type}, name}] — passed to Gemini content
     chromadb_collections: list[str] = field(default_factory=list)
     summary: str = ""
     file_names: list[str] = field(default_factory=list)
@@ -139,8 +139,6 @@ class FileContext:
     def to_dict(self) -> dict:
         """Serialize for LangGraph state (JSON-serializable)."""
         return {
-            "inline_text": self.inline_text,
-            "gemini_file_parts": self.gemini_file_parts,
             "chromadb_collections": self.chromadb_collections,
             "summary": self.summary,
             "file_names": self.file_names,
@@ -1248,8 +1246,6 @@ async def process_files(
     thread_upload_dir = os.path.join(UPLOADS_ROOT, thread_id)
     os.makedirs(thread_upload_dir, exist_ok=True)
 
-    inline_parts: list[str] = []
-
     # --- Phase 1: Validate, copy, and prepare all files ---
     prepared: list[tuple[ProcessedFile, str, str, str, bool]] = []  # (pf, local_path, ext, mime, gemini_ok)
 
@@ -1322,73 +1318,9 @@ async def process_files(
         existing_count += 1
         existing_bytes += size_bytes
 
-    # --- Phase 2: Parallel Gemini Files API uploads ---
-    # Each upload wrapped in asyncio.wait_for so a single stalled upload (e.g.
-    # a 15 MB PDF over a slow Indian → US-region pipe) cannot hang the whole
-    # request indefinitely. Before this guard, a stalled upload would block
-    # asyncio.gather() forever — no exception raised, no timeout, no
-    # recovery. Confirmed root cause of the 1h44m / 600s+ hangs on large
-    # bundles (see Buglist/v2_file_processing_regression_2026-06-23.md).
-    async def _upload_one(pf, local_path, mime):
-        return await asyncio.wait_for(
-            asyncio.to_thread(upload_to_gemini, local_path, mime, pf.original_name),
-            timeout=GEMINI_UPLOAD_TIMEOUT_S,
-        )
-
-    gemini_tasks = []
-    gemini_indices = []  # track which prepared[] index each task maps to
-    for idx, (pf, local_path, ext, mime, gemini_ok) in enumerate(prepared):
-        if gemini_ok:
-            gemini_tasks.append(_upload_one(pf, local_path, mime))
-            gemini_indices.append(idx)
-
-    if gemini_tasks:
-        emit({
-            "type": "file_processing",
-            "stage": "gemini_upload",
-            "message": f"Uploading {len(gemini_tasks)} file(s)...",
-            "count": len(gemini_tasks),
-        })
-        with log_time(log, "Parallel Gemini uploads", count=len(gemini_tasks)):
-            gemini_results = await asyncio.gather(*gemini_tasks, return_exceptions=True)
-
-        ok_uploads = 0
-        for i, result in enumerate(gemini_results):
-            idx = gemini_indices[i]
-            pf = prepared[idx][0]
-            if isinstance(result, asyncio.TimeoutError):
-                log.error("Gemini Files upload timed out — file degraded to extraction-only",
-                          file=pf.original_name, size_mb=round(pf.size_bytes / (1024*1024), 1),
-                          timeout_s=GEMINI_UPLOAD_TIMEOUT_S)
-                pf.error = f"Multimodal upload timed out after {GEMINI_UPLOAD_TIMEOUT_S}s"
-                emit({
-                    "type": "file_processing",
-                    "stage": "gemini_upload_timeout",
-                    "message": f"{pf.original_name}: upload timed out — will use text extraction only",
-                    "file": pf.original_name,
-                })
-            elif isinstance(result, Exception):
-                log.error("Gemini Files upload failed, falling back to extraction",
-                          file=pf.original_name, error=str(result))
-                pf.error = f"Gemini upload failed: {result}"
-            else:
-                uri, gname, expiry = result
-                pf.gemini_uri = uri
-                pf.gemini_name = gname
-                pf.gemini_expiry = expiry
-                ctx.gemini_file_parts.append({
-                    "file_data": {"file_uri": uri, "mime_type": pf.mime_type},
-                    "name": pf.original_name,
-                })
-                ok_uploads += 1
-                log.info("Gemini Files upload OK", file=pf.original_name, mime=pf.mime_type)
-        emit({
-            "type": "file_processing",
-            "stage": "gemini_upload_done",
-            "message": f"Uploads complete ({ok_uploads}/{len(gemini_tasks)} succeeded)",
-            "ok": ok_uploads,
-            "total": len(gemini_tasks),
-        })
+    # --- Phase 2 (Gemini Files API uploads) removed in RAG attachment
+    # routing plan Phase F (2026-06-28). All file content now flows through
+    # the single text pipeline → ChromaDB. ---
 
     # --- Phase 3: Process each file (text extraction, OCR, ChromaDB) ---
     for pf, local_path, ext, mime, gemini_ok in prepared:
@@ -1619,7 +1551,10 @@ async def process_files(
                 # Document agent's Gemini-files path appends fc.inline_text as
                 # "Additional document text" to anchor the model in real
                 # content. Mirrors the small-PDF branch fix (BUG-02).
-                if text.strip() and (page_count > MAX_INLINE_PDF_PAGES or len(text) > MAX_INLINE_TEXT_CHARS):
+                if text.strip():
+                    # Phase B: every PDF with text goes to ChromaDB. Agents
+                    # read content via get_full_attachment(collection_id)
+                    # rather than fc.inline_text. Size threshold removed.
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     emit({
                         "type": "file_processing",
@@ -1634,31 +1569,22 @@ async def process_files(
                         )
                         pf.chromadb_collection = collection_id
                         ctx.chromadb_collections.append(collection_id)
-                        log.info("Large PDF stored in ChromaDB",
-                                 file=pf.original_name, pages=page_count, collection=collection_id)
+                        log.info("PDF stored in ChromaDB",
+                                 file=pf.original_name, pages=page_count,
+                                 chars=len(text), collection=collection_id)
                     except asyncio.TimeoutError:
-                        log.error("ChromaDB storage timed out — proceeding without vector index",
+                        log.error("ChromaDB storage timed out",
                                   file=pf.original_name, pages=page_count,
                                   timeout_s=CHROMA_STORE_TIMEOUT_S)
                         emit({
                             "type": "file_processing",
                             "stage": "chroma_store_timeout",
-                            "message": f"{pf.original_name}: vector embedding timed out — text still usable inline",
+                            "message": f"{pf.original_name}: vector embedding timed out",
                             "file": pf.original_name,
                         })
                     except Exception as e:
                         log.error("ChromaDB storage failed", error=str(e))
-                    pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                    inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
-                elif text.strip():
-                    # Small PDF with text — record inline text so non-multimodal
-                    # downstream agents (Drafting, Scenario, Legislation) can
-                    # consume the document content. Previously we ONLY populated
-                    # inline_text when the Gemini upload failed, but the Drafting
-                    # agent does not use Gemini Files API URIs — it needs the
-                    # raw text to extract case_facts (BUG-02 dependency).
-                    pf.extracted_text = text
-                    inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+                    pf.extracted_text = text  # retained for failure detection only
 
             except asyncio.TimeoutError:
                 # PyMuPDF extract timed out (or any inner wait_for not handled
@@ -1691,9 +1617,10 @@ async def process_files(
                     asyncio.to_thread(_extract_docx_text, local_path),
                     timeout=DOCX_EXTRACT_TIMEOUT_S,
                 )
-                log.debug("DOCX text-only analysis (Gemini Files API does not support .docx)",
+                log.debug("DOCX text extracted",
                           file=pf.original_name, chars=len(text))
-                if len(text) > MAX_INLINE_TEXT_CHARS:
+                if text.strip():
+                    # Phase B: every DOCX goes to ChromaDB. Size threshold removed.
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     try:
                         await asyncio.wait_for(
@@ -1703,21 +1630,15 @@ async def process_files(
                         )
                         pf.chromadb_collection = collection_id
                         ctx.chromadb_collections.append(collection_id)
-                        log.info("Large DOCX stored in ChromaDB",
+                        log.info("DOCX stored in ChromaDB",
                                  file=pf.original_name, chars=len(text),
                                  collection=collection_id)
                     except asyncio.TimeoutError:
                         log.error("ChromaDB storage timed out for DOCX",
                                   file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
-                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
                     except Exception as e:
                         log.error("ChromaDB storage failed for DOCX", error=str(e))
-                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
-                else:
-                    pf.extracted_text = text
-                    inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+                    pf.extracted_text = text  # retained for failure detection only
             except asyncio.TimeoutError:
                 log.error("DOCX extraction timed out", file=pf.original_name,
                           timeout_s=DOCX_EXTRACT_TIMEOUT_S)
@@ -1737,9 +1658,10 @@ async def process_files(
                     asyncio.to_thread(_extract_xlsx_text, local_path),
                     timeout=XLSX_EXTRACT_TIMEOUT_S,
                 )
-                log.debug("XLSX text-only analysis (Gemini Files API does not support .xlsx)",
+                log.debug("XLSX text extracted",
                           file=pf.original_name, chars=len(text))
-                if len(text) > MAX_INLINE_TEXT_CHARS:
+                if text.strip():
+                    # Phase B: every XLSX goes to ChromaDB. Size threshold removed.
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     try:
                         await asyncio.wait_for(
@@ -1749,21 +1671,15 @@ async def process_files(
                         )
                         pf.chromadb_collection = collection_id
                         ctx.chromadb_collections.append(collection_id)
-                        log.info("Large XLSX stored in ChromaDB",
+                        log.info("XLSX stored in ChromaDB",
                                  file=pf.original_name, chars=len(text),
                                  collection=collection_id)
                     except asyncio.TimeoutError:
                         log.error("ChromaDB storage timed out for XLSX",
                                   file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
-                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
                     except Exception as e:
                         log.error("ChromaDB storage failed for XLSX", error=str(e))
-                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                        inline_parts.append(f"[File: {pf.original_name}]\n{pf.extracted_text}")
-                else:
-                    pf.extracted_text = text
-                    inline_parts.append(f"[File: {pf.original_name}]\n{text}")
+                    pf.extracted_text = text  # retained for failure detection only
             except asyncio.TimeoutError:
                 log.error("XLSX extraction timed out", file=pf.original_name,
                           timeout_s=XLSX_EXTRACT_TIMEOUT_S)
@@ -1771,19 +1687,9 @@ async def process_files(
             except Exception as e:
                 pf.error = f"Failed to read XLSX: {e}"
 
-        # Image branch — JPEG / PNG / WebP. We MUST OCR images so non-
-        # multimodal agents (Drafting, Scenario, Legislation) get grounding
-        # text in fc.inline_text. The Gemini URI path stays in place for the
-        # Document agent's multimodal access, but it is NOT a substitute for
-        # inline_text — Drafting consumes inline_text exclusively for fact
-        # extraction (BUG-02 + 2026-06-19 bug report: image-attached drafts
-        # came back as employment-dues template-with-placeholders because
-        # inline_text was empty).
-        #
-        # Future-proof principle: every accepted file format must populate
-        # inline_text whenever its content is extractable. Adding a new file
-        # format = adding a branch here that extracts text; downstream agents
-        # need no changes.
+        # Image branch — JPEG / PNG / WebP. Vision OCR extracts text and
+        # routes it through the single ChromaDB pipeline. Phase B: no more
+        # inline_text population; agents read via get_full_attachment.
         elif ext in (".jpg", ".jpeg", ".png", ".webp"):
             emit({
                 "type": "file_processing",
@@ -1797,32 +1703,26 @@ async def process_files(
                     timeout=120,
                 )
                 if text.strip():
-                    if len(text) > MAX_INLINE_TEXT_CHARS:
-                        # Long OCR output (multi-page photo dump etc.) — also
-                        # stash in ChromaDB so future follow-ups can do
-                        # targeted retrieval rather than re-reading 50k chars
-                        # of inline text every turn.
-                        collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.to_thread(
-                                    _store_in_chromadb, text, collection_id, pf.original_name),
-                                timeout=CHROMA_STORE_TIMEOUT_S,
-                            )
-                            pf.chromadb_collection = collection_id
-                            ctx.chromadb_collections.append(collection_id)
-                        except asyncio.TimeoutError:
-                            log.error("ChromaDB storage timed out for image OCR text",
-                                      file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
-                        except Exception as e:
-                            log.error("ChromaDB storage failed for image OCR text",
-                                      file=pf.original_name, error=str(e))
-                        pf.extracted_text = text[:MAX_INLINE_TEXT_CHARS]
-                    else:
-                        pf.extracted_text = text
-                    inline_parts.append(f"[Image: {pf.original_name}]\n{pf.extracted_text}")
-                    log.info("Image OCR populated inline_text",
-                             file=pf.original_name, chars=len(pf.extracted_text))
+                    # Phase B: every image's OCR text goes to ChromaDB.
+                    collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(
+                                _store_in_chromadb, text, collection_id, pf.original_name),
+                            timeout=CHROMA_STORE_TIMEOUT_S,
+                        )
+                        pf.chromadb_collection = collection_id
+                        ctx.chromadb_collections.append(collection_id)
+                        log.info("Image OCR stored in ChromaDB",
+                                 file=pf.original_name, chars=len(text),
+                                 collection=collection_id)
+                    except asyncio.TimeoutError:
+                        log.error("ChromaDB storage timed out for image OCR text",
+                                  file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
+                    except Exception as e:
+                        log.error("ChromaDB storage failed for image OCR text",
+                                  file=pf.original_name, error=str(e))
+                    pf.extracted_text = text  # retained for failure detection only
                 else:
                     log.warning("Image OCR returned no text",
                                 file=pf.original_name)
@@ -1830,36 +1730,68 @@ async def process_files(
                 log.error("Image OCR timed out",
                           file=pf.original_name)
             except Exception as e:
-                # Image OCR failure is non-fatal when we have a Gemini URI
-                # (the Document agent can still read it multimodally).
-                if not pf.gemini_uri:
-                    pf.error = f"Image OCR failed: {e}"
-                else:
-                    log.warning("Image OCR failed; Gemini URI still available",
-                                file=pf.original_name, error=str(e)[:200])
+                pf.error = f"Image OCR failed: {e}"
 
-        # CSV / TXT / MD: also extract text as inline fallback
-        # (Gemini URI handles primary access; inline text is fallback context)
-        elif ext in (".csv",) and pf.gemini_uri:
+        # CSV: extract → ChromaDB (Phase B: no more dependence on Gemini URI).
+        elif ext == ".csv":
             try:
                 text = await asyncio.wait_for(
                     asyncio.to_thread(_extract_csv_text, local_path),
                     timeout=CSV_EXTRACT_TIMEOUT_S,
                 )
-                pf.extracted_text = text
+                if text.strip():
+                    collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(
+                                _store_in_chromadb, text, collection_id, pf.original_name),
+                            timeout=CHROMA_STORE_TIMEOUT_S,
+                        )
+                        pf.chromadb_collection = collection_id
+                        ctx.chromadb_collections.append(collection_id)
+                        log.info("CSV stored in ChromaDB",
+                                 file=pf.original_name, chars=len(text),
+                                 collection=collection_id)
+                    except asyncio.TimeoutError:
+                        log.error("ChromaDB storage timed out for CSV",
+                                  file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
+                    except Exception as e:
+                        log.error("ChromaDB storage failed for CSV", error=str(e))
+                    pf.extracted_text = text
             except asyncio.TimeoutError:
-                log.warning("CSV inline text extraction timed out (Gemini URI still primary)",
+                log.warning("CSV extraction timed out",
                             file=pf.original_name, timeout_s=CSV_EXTRACT_TIMEOUT_S)
             except Exception as e:
-                log.warning("CSV inline text extraction failed (Gemini URI still primary)",
+                log.warning("CSV extraction failed",
                             file=pf.original_name, error=str(e)[:200])
 
-        elif ext in (".txt", ".md") and pf.gemini_uri:
+        elif ext in (".txt", ".md"):
+            # Phase B: txt/md content goes to ChromaDB. No truncation; users'
+            # no-info-loss principle applies — read the full file.
             try:
                 with open(local_path, "r", encoding="utf-8", errors="replace") as f:
-                    pf.extracted_text = f.read(MAX_INLINE_TEXT_CHARS)
+                    text = f.read()
+                if text.strip():
+                    collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(
+                                _store_in_chromadb, text, collection_id, pf.original_name),
+                            timeout=CHROMA_STORE_TIMEOUT_S,
+                        )
+                        pf.chromadb_collection = collection_id
+                        ctx.chromadb_collections.append(collection_id)
+                        log.info("txt/md stored in ChromaDB",
+                                 file=pf.original_name, chars=len(text),
+                                 collection=collection_id)
+                    except asyncio.TimeoutError:
+                        log.error("ChromaDB storage timed out for txt/md",
+                                  file=pf.original_name, timeout_s=CHROMA_STORE_TIMEOUT_S)
+                    except Exception as e:
+                        log.error("ChromaDB storage failed for txt/md", error=str(e))
+                    pf.extracted_text = text
             except Exception as e:
-                log.warning("txt/md inline read failed (Gemini URI still primary)",
+                log.warning("txt/md read failed",
                             file=pf.original_name, error=str(e)[:200])
 
         # If Gemini upload failed and no text was extracted, mark as error
@@ -1889,12 +1821,6 @@ async def process_files(
                  gemini=bool(pf.gemini_uri), chromadb=bool(pf.chromadb_collection),
                  text_len=len(pf.extracted_text))
 
-    # Build combined inline text (truncated to limit)
-    combined = "\n\n---\n\n".join(inline_parts)
-    if len(combined) > MAX_INLINE_TEXT_CHARS:
-        combined = combined[:MAX_INLINE_TEXT_CHARS] + "\n\n[... text truncated]"
-    ctx.inline_text = combined
-
     # Build summary
     type_counts: dict[str, int] = {}
     for pf in ctx.files:
@@ -1914,8 +1840,6 @@ async def process_files(
 
     log.info("File processing complete",
              total=len(files), summary=ctx.summary,
-             gemini_parts=len(ctx.gemini_file_parts),
-             inline_chars=len(ctx.inline_text),
              chromadb=len(ctx.chromadb_collections))
 
     return ctx

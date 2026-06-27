@@ -181,68 +181,6 @@ def _wants_drafting(intent: UserIntent | None) -> bool:
     return intent.task_intent == "draft"
 
 
-# --- Long Query Extraction ---
-# When users paste 20-30K chars (e.g. a contract + question), we separate
-# the concise question from the pasted context. Classification/routing uses
-# only the question; the generating agent gets the full text as user_context.
-
-_LONG_QUERY_THRESHOLD = 5000  # chars — below this, treat as normal query
-
-_QUERY_EXTRACT_PROMPT = """You are a legal AI assistant. The user has sent a very long message that likely contains a pasted document (contract, notice, agreement, judgment) along with their actual question.
-
-Your task: Extract the user's actual QUESTION or INSTRUCTION from the text. The question is usually at the beginning or end of the message.
-
-If the entire text IS the document with no explicit question, infer the most likely intent (e.g., "Review this document and identify key legal issues").
-
-User message (first 3000 chars):
-{text_start}
-
----
-User message (last 2000 chars):
-{text_end}
-
-Return JSON:
-{{"question": "<the user's actual question/instruction in 1-3 sentences>", "document_type": "<contract|notice|agreement|judgment|legislation|petition|affidavit|other>"}}"""
-
-
-class QueryExtraction(BaseModel):
-    question: str = Field(..., description="The user's actual question or instruction")
-    document_type: str = Field("other", description="Type of document pasted")
-
-
-def _extract_question_from_long_query(query: str) -> tuple[str, str]:
-    """Extract concise question from a long query containing pasted content.
-
-    Returns (concise_question, document_type).
-    Falls back to first 500 chars if extraction fails.
-    """
-    try:
-        with log_time(log, "Long query extraction"):
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(
-                QueryExtraction, include_raw=True,
-            )
-            prompt = ChatPromptTemplate.from_template(_QUERY_EXTRACT_PROMPT)
-            chain = prompt | llm
-            raw_and_parsed = chain.invoke({
-                "text_start": query[:3000],
-                "text_end": query[-2000:],
-            })
-        from core.token_tracker import record as _record_tokens
-        _record_tokens("Orchestrator", "extract_long_query", raw_and_parsed.get("raw"))
-        result = raw_and_parsed["parsed"]
-
-        log.info("Question extracted from long query",
-                 question_len=len(result.question),
-                 doc_type=result.document_type,
-                 original_len=len(query))
-        return result.question, result.document_type
-
-    except Exception as e:
-        log.warning("Long query extraction failed, using truncated query",
-                    error=str(e))
-        return query[:500], "other"
-
-
 # --- Task Classification (migrated from v1 task_identifer.py) ---
 
 class IdentifyTaskSchema(BaseModel):
@@ -1050,36 +988,10 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     _original_query = state.get("original_query", query)
     summary = state.get("summary_text", "")
     user_language = state.get("user_language", "en")
-    user_context = ""  # long-form pasted content, empty for normal queries
     log.info("Plan phase started", query=query[:100],
              has_summary=bool(summary), query_len=len(query))
 
     progress("orchestrator", "Understanding your question...", step="classify")
-
-    # --- Long query extraction: separate question from pasted content ---
-    if len(query) > _LONG_QUERY_THRESHOLD:
-        log.info("Long query detected, extracting question",
-                 query_len=len(query), threshold=_LONG_QUERY_THRESHOLD)
-        progress("orchestrator", "Analyzing your document...", step="extract")
-        try:
-            extracted_question, doc_type = await asyncio.wait_for(
-                asyncio.to_thread(_extract_question_from_long_query, query),
-                timeout=15,
-            )
-            user_context = query  # full text preserved for generating agent
-            query = extracted_question  # route/classify on concise question
-            log.info("Long query split",
-                     question=extracted_question[:100],
-                     doc_type=doc_type,
-                     context_len=len(user_context))
-        except asyncio.TimeoutError:
-            log.warning("Long query extraction timed out, using first 500 chars for routing")
-            user_context = query
-            query = query[:500]
-        except Exception as extract_err:
-            log.warning("Long query extraction failed", error=str(extract_err))
-            user_context = query
-            query = query[:500]
 
     # --- Fast pre-checks (no LLM calls, uses original query) ---
     _GREETING_PREFIXES = (
@@ -1204,10 +1116,10 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         else:
             normalized_query, extracted_intent = results[0]
             # Only adopt the extractor's normalized form when no upstream
-            # step (memory rewrite, long-query extraction, abbreviation
-            # expansion) already changed `query`. The rewriter's expanded
-            # form is a better retrieval target than re-normalizing the
-            # raw 2-word follow-up that the extractor just received.
+            # step (memory rewrite, abbreviation expansion) already
+            # changed `query`. The rewriter's expanded form is a better
+            # retrieval target than re-normalizing the raw 2-word
+            # follow-up that the extractor just received.
             if (
                 normalized_query
                 and normalized_query != query
@@ -1416,9 +1328,9 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # the document text as an explicit FACTS field to outline + section
     # generation. The agent_queries["Drafting"] entry now holds only the
     # user's clean question (used for template search and selection).
-    if "Drafting" in tasks_planned and fc and fc.has_content and fc.inline_text:
+    if "Drafting" in tasks_planned and fc and fc.has_content and fc.chromadb_collections:
         log.info("Drafting will receive uploaded document via file_context",
-                 file_text_len=len(fc.inline_text),
+                 collections=len(fc.chromadb_collections),
                  file_names=fc.file_names)
 
     log.info("Plan phase completed",
@@ -1434,8 +1346,6 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         "agent_queries": agent_queries,
         "response_instructions": response_instructions,
     }
-    if user_context:
-        result["user_context"] = user_context
     # Phase 1: surface the structured intent on state when it was successfully
     # extracted. Downstream consumers can opt in to reading it ahead of Phase 2
     # by checking state.get("user_intent"). Stays None otherwise.
@@ -1517,12 +1427,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # caught the explicit "in Hindi" directive).
     user_language = _resolve_user_language(state)
 
-    # Inject file context into query for synthesis
+    # Phase D (RAG attachment routing plan, 2026-06-28): no longer
+    # pre-pending uploaded file text into the synthesis query. Agents that
+    # need the attachment (Drafting, Document) read it themselves via
+    # get_full_attachment(collection_id). Synthesis only merges results.
     fc = FileContextData.from_state(state)
-    if fc and fc.inline_text:
-        query = f"{query}\n\n--- Uploaded File Content ---\n{fc.inline_text[:50000]}"
-        log.info("File context injected into synthesis",
-                 inline_chars=len(fc.inline_text))
 
     log.info("Synthesize phase started",
              agents_received=list(agent_results.keys()),
@@ -1587,7 +1496,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # Also force synthesis when the user explicitly asked for a comparison table —
     # pass-through would deliver the raw agent prose, bypassing SYNTHESIS_TABLE_PROMPT
     # and leaving the user without the table they requested.
-    has_unprocessed_file = (fc is not None and fc.inline_text
+    has_unprocessed_file = (fc is not None and fc.chromadb_collections
                            and "Document" not in valid_results)
     # Phase 2: prefer structured intent (state["user_intent"]) over the legacy
     # regex when extractor confidence is high. Also force synthesis when the

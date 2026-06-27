@@ -25,6 +25,8 @@ import tempfile
 import time
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 
 # Ensure project root on sys.path so `core.*` imports resolve.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -125,104 +127,6 @@ def test_no_writer_is_backwards_compatible():
     asyncio.run(_inner())
 
 
-def test_gemini_upload_timeout_does_not_hang_request():
-    """If upload_to_gemini stalls, the wait_for must fire and the request must
-    return promptly with a degraded ProcessedFile carrying an error.
-    """
-    from core import file_processor
-
-    async def _inner():
-        original_timeout = file_processor.GEMINI_UPLOAD_TIMEOUT_S
-        file_processor.GEMINI_UPLOAD_TIMEOUT_S = 1.0
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                pdf_path = os.path.join(tmp, "stall.pdf")
-                _make_tiny_pdf(pdf_path, num_pages=1)
-
-                def _stalling_upload(*_args, **_kw):
-                    time.sleep(10)  # would block past the 1-second timeout
-                    return ("gemini://nope", "files/nope", "2099-01-01")
-
-                events: list[dict] = []
-
-                with (
-                    patch.object(file_processor, "upload_to_gemini", _stalling_upload),
-                    patch.object(file_processor, "is_gemini_supported", lambda *a, **k: True),
-                    patch.object(file_processor, "_store_in_chromadb", lambda *a, **k: None),
-                ):
-                    _stub_chat_store()
-                    t0 = time.time()
-                    fc = await file_processor.process_files(
-                        [_file_tuple(pdf_path, "stall.pdf")],
-                        thread_id="test-thread-3",
-                        writer=events.append,
-                    )
-                    elapsed = time.time() - t0
-
-                assert elapsed < 5.0, \
-                    f"process_files hung for {elapsed:.1f}s (expected ~1s)"
-                assert any("Gemini upload timed out" in (pf.error or "")
-                           for pf in fc.files), \
-                    f"Expected timeout error, got: {[pf.error for pf in fc.files]}"
-                timeout_stages = [e.get("stage") for e in events
-                                  if e.get("type") == "file_processing"]
-                assert "gemini_upload_timeout" in timeout_stages, \
-                    f"Expected 'gemini_upload_timeout' stage; got {timeout_stages}"
-        finally:
-            file_processor.GEMINI_UPLOAD_TIMEOUT_S = original_timeout
-
-    asyncio.run(_inner())
-
-
-def test_per_file_isolation_one_stall_does_not_block_others():
-    """One file with a stalling Gemini upload must not prevent the other
-    file from completing.
-    """
-    from core import file_processor
-
-    async def _inner():
-        original_timeout = file_processor.GEMINI_UPLOAD_TIMEOUT_S
-        file_processor.GEMINI_UPLOAD_TIMEOUT_S = 1.0
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                ok_pdf = os.path.join(tmp, "ok.pdf")
-                stall_pdf = os.path.join(tmp, "stall.pdf")
-                _make_tiny_pdf(ok_pdf, num_pages=1)
-                _make_tiny_pdf(stall_pdf, num_pages=1)
-
-                def _selective_upload(local_path, *_args, **_kw):
-                    if "stall" in local_path:
-                        time.sleep(10)
-                    return ("gemini://ok", "files/ok", "2099-01-01")
-
-                with (
-                    patch.object(file_processor, "upload_to_gemini", _selective_upload),
-                    patch.object(file_processor, "is_gemini_supported", lambda *a, **k: True),
-                    patch.object(file_processor, "_store_in_chromadb", lambda *a, **k: None),
-                ):
-                    _stub_chat_store()
-                    t0 = time.time()
-                    fc = await file_processor.process_files(
-                        [_file_tuple(ok_pdf, "ok.pdf"),
-                         _file_tuple(stall_pdf, "stall.pdf")],
-                        thread_id="test-thread-4",
-                        writer=None,
-                    )
-                    elapsed = time.time() - t0
-
-                assert elapsed < 5.0, \
-                    f"Whole batch took {elapsed:.1f}s (expected ~1-2s)"
-                by_name = {pf.original_name: pf for pf in fc.files}
-                assert "ok.pdf" in by_name
-                assert "stall.pdf" in by_name
-                assert by_name["ok.pdf"].gemini_uri, \
-                    "ok.pdf should have uploaded successfully"
-                assert "Gemini upload timed out" in (by_name["stall.pdf"].error or ""), \
-                    f"stall.pdf should carry timeout error, got: {by_name['stall.pdf'].error}"
-        finally:
-            file_processor.GEMINI_UPLOAD_TIMEOUT_S = original_timeout
-
-    asyncio.run(_inner())
 
 
 def test_chroma_store_timeout_does_not_kill_file():

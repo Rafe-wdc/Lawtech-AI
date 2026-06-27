@@ -600,7 +600,7 @@ async def _classify_doc_type(query: str, case_facts: str = "") -> str:
             chain = prompt | llm
             raw_and_parsed = await asyncio.wait_for(
                 chain.ainvoke({
-                    "query": query[:2000],
+                    "query": query,
                     "case_context": (case_facts or "(none)")[:1500],
                 }),
                 timeout=10,
@@ -1075,7 +1075,7 @@ async def _fetch_template_from_web(
     try:
         client = get_genai_client()
         prompt_text = _WEB_TEMPLATE_FETCH_PROMPT.format(
-            query=query[:2000], doc_type=doc_type,
+            query=query, doc_type=doc_type,
         )
 
         _primary = MODELS["scenario_web_grounded"]
@@ -1259,7 +1259,7 @@ async def _verify_template_family(
             chain = prompt | llm
             raw_and_parsed = await asyncio.wait_for(
                 chain.ainvoke({
-                    "query": query[:1500],
+                    "query": query,
                     "doc_type": doc_type,
                     "template_preview": template_preview[:1500],
                     "selector_reason": (selector_reason or "")[:400],
@@ -1348,7 +1348,7 @@ async def _validate_web_template(
             chain = prompt | llm
             raw_and_parsed = await asyncio.wait_for(
                 chain.ainvoke({
-                    "query": query[:2000],
+                    "query": query,
                     "doc_type": doc_type,
                     "template_text": template_text[:4000],
                 }),
@@ -1761,13 +1761,13 @@ async def _generate_outline(
                 sections=[
                     SectionPlan(
                         title="Facts and Background",
-                        description=f"State the facts and background for: {query[:300]}",
+                        description=f"State the facts and background for: {query}",
                         estimated_paragraphs=8,
                         needs_citations=False,
                     ),
                     SectionPlan(
                         title="Legal Arguments and Grounds",
-                        description=f"Present legal arguments and statutory grounds for: {query[:300]}",
+                        description=f"Present legal arguments and statutory grounds for: {query}",
                         estimated_paragraphs=10,
                         needs_citations=True,
                     ),
@@ -4538,12 +4538,23 @@ async def drafting_node(state: LegalAgentState) -> dict:
     # (user's actual instruction) is what we use for template search and
     # selection — keeping the BM25 query small and on-target (BUG-16).
     fact_blocks: list[str] = []
-    if fc and fc.inline_text:
-        # Uploaded document (PDF, DOCX, TXT) extracted text
-        fact_blocks.append(
-            f"[Uploaded document text — {', '.join(fc.file_names) or 'attached'}]\n"
-            f"{fc.inline_text[:30000]}"
-        )
+    # Phase C (RAG attachment routing, 2026-06-28): attachment content comes
+    # from ChromaDB via get_full_attachment(collection_id). Lossless, no
+    # info loss — full document text reaches every drafting section.
+    if fc and fc.chromadb_collections:
+        from tools.shared.vectordb_tools import get_full_attachment
+        for cid in fc.chromadb_collections:
+            try:
+                result = get_full_attachment.invoke({"collection_id": cid})
+                full_text = (result or {}).get("full_text", "")
+                source = (result or {}).get("source_file") or "attached"
+                if full_text:
+                    fact_blocks.append(
+                        f"[Uploaded document — {source}]\n{full_text}"
+                    )
+            except Exception as e:
+                log.warning("get_full_attachment failed",
+                            collection=cid, error=str(e))
     if user_context:
         # Long-form pasted content embedded in the user's typed query
         fact_blocks.append(f"[Pasted context]\n{user_context[:30000]}")
@@ -4554,7 +4565,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
     log.info("Agent started", query=query[:100],
              has_user_context=bool(user_context),
-             has_file_context=bool(fc and fc.inline_text),
+             has_file_context=bool(fc and fc.chromadb_collections),
+             attachment_collections=len(fc.chromadb_collections) if fc else 0,
              has_integration_context=bool(integration_ctx and integration_ctx.has_content),
              facts_chars=len(user_facts),
              using_agent_query="Drafting" in agent_queries)

@@ -265,7 +265,7 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
         lexical_parts.append(respondents[0])
     if year:
         lexical_parts.append(str(year))
-    lexical = " ".join(lexical_parts) if lexical_parts else query[:100]
+    lexical = " ".join(lexical_parts) if lexical_parts else query
 
     # size: narrow if both parties known, else broader
     size = 1 if (petitioners and respondents) else (5 if topics else 10)

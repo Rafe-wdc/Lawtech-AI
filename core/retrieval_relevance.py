@@ -317,7 +317,7 @@ async def check_retrieval_relevance(
     """Public entry point: should the caller proceed with these chunks?
 
     Args:
-        query: User's question (will be truncated to 1500 chars for the judge).
+        query: User's question — passed in full to the judge.
         chunks: Already-extracted page_content strings from top retrieval
                 hits. Pass the same order ES returned. Empty strings/None
                 are tolerated; only the first _RELEVANCE_TOP_N non-empty
@@ -371,7 +371,7 @@ async def check_retrieval_relevance(
         with log_time(log, "Relevance judge LLM", agent=agent_name):
             raw_and_parsed = await asyncio.wait_for(
                 chain.ainvoke({
-                    "query": query[:1500],
+                    "query": query,
                     "n_chunks": n_chunks,
                     "source": source_name or "unknown",
                     "chunks_block": chunks_block,

@@ -237,12 +237,10 @@ async def _restore_file_context(thread_id: str) -> dict | None:
 
     - Gemini URI valid  → use as-is (no upload)
     - Gemini URI expired → re-upload from local_path, update SQLite
-    - DOCX / XLSX       → use extracted_text directly
-    - Large PDFs        → restore chromadb_collection ID
-    - Missing local file → log warning, skip
+    Phase F (2026-06-28): single text pipeline. Only chromadb_collection
+    IDs are restored across turns; agents read content via
+    get_full_attachment(collection_id).
     """
-    from core.gemini_files import is_uri_valid, upload_to_gemini
-
     all_thread_files = await chat_store.load_thread_files(thread_id)
     if not all_thread_files:
         return None
@@ -281,9 +279,11 @@ async def _restore_file_context(thread_id: str) -> dict | None:
              latest_batch_files=len(thread_files),
              latest_ts=latest_ts)
 
-    gemini_file_parts: list[dict] = []
+    # Phase F (RAG attachment routing plan, 2026-06-28): only
+    # chromadb_collections survive across turns. The Gemini Files URI
+    # channel (re-upload on expiry) was removed; agents read attachment
+    # content via get_full_attachment(collection_id) on demand.
     chromadb_collections: list[str] = []
-    inline_parts: list[str] = []
     file_names: list[str] = []
 
     for record in thread_files:
@@ -293,63 +293,14 @@ async def _restore_file_context(thread_id: str) -> dict | None:
         filename = record.get("filename", "")
         file_names.append(filename)
 
-        # Restore Gemini-hosted files (images, PDFs, TXT, CSV, MD)
-        if record.get("gemini_supported"):
-            uri = record.get("gemini_uri", "")
-            expiry = record.get("gemini_expiry", "")
-            mime = record.get("mime_type", "")
-
-            if uri and is_uri_valid(expiry):
-                # URI still good — use directly
-                gemini_file_parts.append({
-                    "file_data": {"file_uri": uri, "mime_type": mime},
-                    "name": filename,
-                })
-            else:
-                # Expired — re-upload from local storage
-                local_path = record.get("local_path", "")
-                if local_path and os.path.exists(local_path):
-                    try:
-                        new_uri, new_name, new_expiry = await asyncio.to_thread(
-                            upload_to_gemini, local_path, mime, filename,
-                        )
-                        await chat_store.update_gemini_uri(
-                            thread_id, record["file_id"],
-                            new_uri, new_name, new_expiry,
-                        )
-                        gemini_file_parts.append({
-                            "file_data": {"file_uri": new_uri, "mime_type": mime},
-                            "name": filename,
-                        })
-                        log.info("Re-uploaded expired Gemini file",
-                                 file=filename, thread=thread_id[:12])
-                    except Exception as e:
-                        log.error("Failed to re-upload file",
-                                  file=filename, error=str(e))
-                else:
-                    log.warning("Local file missing, cannot re-upload",
-                                file=filename, path=local_path)
-
-        # Restore ChromaDB collections for large PDFs
         coll = record.get("chromadb_collection", "")
         if coll and coll not in chromadb_collections:
             chromadb_collections.append(coll)
 
-        # Restore extracted text (DOCX, XLSX, CSV fallback)
-        text = record.get("extracted_text", "")
-        if text:
-            inline_parts.append(f"[File: {filename}]\n{text}")
-
-    if not (gemini_file_parts or chromadb_collections or inline_parts):
+    if not chromadb_collections:
         return None
 
-    combined = "\n\n---\n\n".join(inline_parts)
-    if len(combined) > 100_000:
-        combined = combined[:100_000] + "\n\n[... truncated]"
-
     return {
-        "inline_text": combined,
-        "gemini_file_parts": gemini_file_parts,
         "chromadb_collections": chromadb_collections,
         "summary": f"Restored {len(file_names)} file(s) from thread history",
         "file_names": file_names,
@@ -429,7 +380,6 @@ async def memory_node(state: LegalAgentState) -> dict:
             if restored_file_context:
                 log.info("Restored file context from thread history",
                          files=restored_file_context.get("file_names", []),
-                         gemini_parts=len(restored_file_context.get("gemini_file_parts", [])),
                          chromadb=len(restored_file_context.get("chromadb_collections", [])))
 
             progress("memory", "Rewriting follow-up query...", step="rewrite")

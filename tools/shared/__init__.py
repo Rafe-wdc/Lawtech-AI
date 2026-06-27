@@ -34,6 +34,8 @@ from .elasticsearch_tools import (
 from .vectordb_tools import (
     search_pdf_collection,
     store_pdf_chunks,
+    get_full_attachment,
+    retrieve_attachment_context,
 )
 
 # --- LLM Extraction Tools ---
@@ -167,9 +169,11 @@ ALL_TOOLS = [
     search_constitution,
     search_constitution_by_part,
     search_legal_maxims,
-    # VectorDB — PDF uploads (2)
+    # VectorDB — PDF uploads (4)
     search_pdf_collection,
     store_pdf_chunks,
+    get_full_attachment,
+    retrieve_attachment_context,
     # LLM Extraction (5)
     extract_case_metadata,
     extract_act_metadata,
@@ -310,6 +314,8 @@ AGENT_TOOLS = {
         validate_draft_format,
         translate_draft,
         generate_legal_response,
+        get_full_attachment,
+        retrieve_attachment_context,
     ],
     "scenario": [
         web_search_grounded,
@@ -340,6 +346,8 @@ AGENT_TOOLS = {
         store_pdf_chunks,
         delete_pdf_vectorstore,
         get_collection_metadata,
+        get_full_attachment,
+        retrieve_attachment_context,
     ],
     "sci_judgment": [
         search_by_topic,

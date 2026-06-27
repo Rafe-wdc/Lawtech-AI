@@ -1,0 +1,157 @@
+name: Prod Investigate Pre-Restart Errors (read-only)
+
+# One-off diagnostic. After the 2026-06-28 21:40 UTC deploy/restart, the
+# `/pyapi/health` endpoint went from `unhealthy` (ES + chat_store reporting
+# `error` with empty `detail` — the signature of `asyncio.TimeoutError`) to
+# fully `healthy`. Confirm the failure signature in journalctl for the
+# previous boot to know whether it was:
+#   - stale ES TCP / circuit-breaker open
+#   - exhausted Postgres pool
+#   - resource pressure (memory was at 64.9% pre-restart)
+#
+# Read-only: nothing modified, no restart triggered.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  investigate:
+    name: Pull pre-restart errors from journalctl
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Run diagnostic
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "=========================================================="
+          echo " 1. Service uptime & last restart timestamps"
+          echo "=========================================================="
+          sudo systemctl show lawttorney-v2.service -p ActiveEnterTimestamp,InactiveExitTimestamp,NRestarts,StatusErrno,Result 2>&1
+          echo
+
+          echo "=========================================================="
+          echo " 2. Restart events in last 2 hours"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "2 hours ago" --no-pager 2>/dev/null \
+            | grep -iE "started|stopped|reload|killed|deactivat|failed" | head -20
+          echo
+
+          echo "=========================================================="
+          echo " 3. ES-related errors in PRE-restart window (2h to 5m ago)"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "2 hours ago" --until "5 minutes ago" --no-pager 2>/dev/null \
+            | grep -iE "elasticsearch|opensearch|es_search|es_circuit|TimeoutError|ConnectionTimeout|ReadTimeout|circuit.*open|ping.*fail" \
+            | tail -40
+          echo
+
+          echo "=========================================================="
+          echo " 4. Postgres / chat_store errors in PRE-restart window"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "2 hours ago" --until "5 minutes ago" --no-pager 2>/dev/null \
+            | grep -iE "psycopg|postgres|chat_store|connection pool|pool exhaust|too many connections|PoolTimeout|InterfaceError|OperationalError|server closed|connection reset" \
+            | tail -40
+          echo
+
+          echo "=========================================================="
+          echo " 5. Generic TimeoutError / asyncio errors in PRE-restart window"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "2 hours ago" --until "5 minutes ago" --no-pager 2>/dev/null \
+            | grep -iE "asyncio\.TimeoutError|wait_for.*timeout|Future.*cancel|CancelledError" \
+            | tail -20
+          echo
+
+          echo "=========================================================="
+          echo " 6. Memory / OOM warnings in last 2 hours"
+          echo "=========================================================="
+          sudo journalctl --since "2 hours ago" --no-pager 2>/dev/null \
+            | grep -iE "out of memory|oom-kill|killed process|memory pressure" \
+            | head -10 \
+            || echo "  (no OOM events)"
+          echo
+
+          echo "=========================================================="
+          echo " 7. Health check responses logged in PRE-restart window"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "2 hours ago" --until "5 minutes ago" --no-pager 2>/dev/null \
+            | grep -iE "/pyapi/health|Healthcheck|health.*degraded|health.*unhealthy" \
+            | tail -20
+          echo
+
+          echo "=========================================================="
+          echo " 8. Last 30 ERROR/WARN lines BEFORE the restart"
+          echo "=========================================================="
+          sudo journalctl -u lawttorney-v2.service --since "2 hours ago" --until "5 minutes ago" --no-pager 2>/dev/null \
+            | grep -iE "ERR|WRN|WARNING|ERROR" \
+            | tail -30
+          echo
+
+          echo "=========================================================="
+          echo " 9. PostgreSQL pool config (gunicorn workers x pool size)"
+          echo "=========================================================="
+          # gunicorn config: workers
+          sudo grep -E "^workers|^worker_class|^max_requests|^timeout" /root/Lawtech-AI/gunicorn.conf.py 2>/dev/null \
+            || echo "  (gunicorn.conf.py not found at /root/Lawtech-AI/)"
+          echo
+          # Postgres pool size — check what chat_store.py uses
+          sudo grep -E "min_size|max_size|ConnectionPool|max_pool" /root/Lawtech-AI/core/chat_store.py 2>/dev/null | head -10
+          echo
+
+          echo "=========================================================="
+          echo "10. Current Postgres connection count (if local DB)"
+          echo "=========================================================="
+          # If using local Postgres, count active connections
+          if command -v psql >/dev/null 2>&1; then
+            sudo -u postgres psql -t -c "SELECT state, count(*) FROM pg_stat_activity GROUP BY state;" 2>&1 | head -10 \
+              || echo "  (psql query failed — DB may be remote)"
+          else
+            echo "  (psql not installed locally — DB is likely remote)"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo "11. ES URL configured + reachability test from prod"
+          echo "=========================================================="
+          ES_URL=$(sudo grep "^ES_URL=" /root/Lawtech-AI/.env 2>/dev/null | head -1 | sed 's/^ES_URL=//' | tr -d '"' || echo "")
+          if [ -n "$ES_URL" ]; then
+            echo "  Configured ES_URL: $ES_URL"
+            echo "  Latency from prod box (3 quick pings):"
+            for i in 1 2 3; do
+              T=$(curl -s -o /dev/null -w "%{time_total}s status=%{http_code}\n" --max-time 5 "$ES_URL" 2>&1)
+              echo "    attempt $i: $T"
+            done
+          else
+            echo "  ES_URL not found in .env"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo "12. Free memory + uptime snapshot (current)"
+          echo "=========================================================="
+          free -h
+          echo
+          uptime
+          echo
+
+          echo "=========================================================="
+          echo " DIAGNOSTIC COMPLETE"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

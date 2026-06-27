@@ -1,0 +1,201 @@
+name: Prod Scale-50 Phase 0 Audit (read-only)
+
+# Read-only capacity audit per docs/scale_50_concurrent_users_plan.md §4.
+# Answers the questions Milestone 1 needs:
+#   - vCPU count + memory headroom on current AWS box
+#   - Postgres location, max_connections, current pool usage
+#   - ChromaDB mode (PersistentClient or server)
+#   - Embedding service: local or remote?
+#   - OpenSearch reachability + auth model
+#   - gunicorn config + systemd unit settings
+#   - Sync-blocking hot paths (grep)
+#
+# Nothing is modified. Safe to run anytime.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: Phase 0 read-only capacity audit
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Run audit
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "===================================================="
+          echo " A. Hardware & OS"
+          echo "===================================================="
+          echo "  vCPU count: $(nproc)"
+          echo "  CPU model:  $(grep -m1 'model name' /proc/cpuinfo | sed 's/.*: //')"
+          echo "  Total RAM:  $(free -h | awk '/^Mem:/ {print $2}')"
+          echo "  Available:  $(free -h | awk '/^Mem:/ {print $7}')"
+          echo "  Load avg:   $(uptime | grep -oE 'load average.*')"
+          echo "  Disk free on /: $(df -h / | tail -1 | awk '{print $4 " ("$5" used)"}')"
+          echo "  Disk free on app dir: $(df -h /root | tail -1 | awk '{print $4 " ("$5" used)"}')"
+          echo
+
+          echo "===================================================="
+          echo " B. systemd unit + gunicorn config"
+          echo "===================================================="
+          sudo systemctl cat lawttorney-v2.service 2>&1 | head -30
+          echo
+          echo "  Effective Environment:"
+          sudo systemctl show lawttorney-v2.service -p Environment,EnvironmentFiles 2>&1 | head -5
+          echo
+          echo "  gunicorn.conf.py settings:"
+          sudo grep -E "^workers|^worker_class|^max_requests|^timeout|^keepalive|^worker_connections|^graceful_timeout" /root/Lawtech-AI/gunicorn.conf.py 2>/dev/null \
+            || echo "  (gunicorn.conf.py not found at /root/Lawtech-AI/)"
+          echo
+
+          echo "===================================================="
+          echo " C. Currently running workers + memory each"
+          echo "===================================================="
+          ps -eo pid,ppid,rss,cmd --no-headers 2>/dev/null \
+            | grep -E "gunicorn|uvicorn" \
+            | grep -v grep \
+            | awk '{rss_mb=$3/1024; printf "  pid=%-7s ppid=%-7s rss=%6.1f MB  %s\n", $1, $2, rss_mb, substr($0, index($0,$4))}' \
+            | head -15
+          echo
+
+          echo "===================================================="
+          echo " D. Postgres connection (chat_store)"
+          echo "===================================================="
+          PG_URL=$(sudo grep "^POSTGRES_URL=" /root/Lawtech-AI/.env 2>/dev/null | head -1 | sed 's/^POSTGRES_URL=//' | tr -d '"')
+          if [ -n "$PG_URL" ]; then
+            # Strip password for display
+            DISPLAY=$(echo "$PG_URL" | sed 's|://[^:]*:[^@]*@|://***:***@|')
+            echo "  POSTGRES_URL (sanitized): $DISPLAY"
+            # Extract host:port to determine if local or remote
+            HOST_PORT=$(echo "$PG_URL" | sed -nE 's|.*@([^/]+)/.*|\1|p')
+            echo "  Host:port = $HOST_PORT"
+            # Test reachability
+            HOST=$(echo "$HOST_PORT" | cut -d: -f1)
+            PORT=$(echo "$HOST_PORT" | cut -d: -f2)
+            [ "$PORT" = "$HOST" ] && PORT=5432
+            if [ "$HOST" = "localhost" ] || [ "$HOST" = "127.0.0.1" ]; then
+              echo "  Location: LOCAL (on this box)"
+            else
+              echo "  Location: REMOTE ($HOST:$PORT)"
+            fi
+            # Try a config query via psql if available
+            if command -v psql >/dev/null 2>&1; then
+              echo
+              echo "  Connection config (from psql):"
+              echo "    max_connections:        $(psql "$PG_URL" -t -A -c 'SHOW max_connections;' 2>/dev/null || echo '(query failed)')"
+              echo "    shared_buffers:         $(psql "$PG_URL" -t -A -c 'SHOW shared_buffers;' 2>/dev/null || echo '(query failed)')"
+              echo "    effective_cache_size:   $(psql "$PG_URL" -t -A -c 'SHOW effective_cache_size;' 2>/dev/null || echo '(query failed)')"
+              echo "    work_mem:               $(psql "$PG_URL" -t -A -c 'SHOW work_mem;' 2>/dev/null || echo '(query failed)')"
+              echo
+              echo "  Current connection breakdown:"
+              psql "$PG_URL" -c "SELECT state, count(*) FROM pg_stat_activity GROUP BY state ORDER BY count(*) DESC;" 2>&1 | head -8
+              echo
+              echo "  Connections per application_name:"
+              psql "$PG_URL" -c "SELECT application_name, count(*) FROM pg_stat_activity WHERE state IS NOT NULL GROUP BY application_name;" 2>&1 | head -8
+            else
+              echo "  (psql client not installed locally; install with: sudo apt install postgresql-client)"
+            fi
+          else
+            echo "  POSTGRES_URL not set — using SQLite"
+            ls -la /root/Lawtech-AI/data/ 2>&1 | head -5
+          fi
+          echo
+
+          echo "===================================================="
+          echo " E. ChromaDB mode (PersistentClient vs server)"
+          echo "===================================================="
+          CH=$(sudo grep "^CHROMA_SERVER_HOST=" /root/Lawtech-AI/.env 2>/dev/null | head -1)
+          if [ -n "$CH" ]; then
+            echo "  CHROMA_SERVER_HOST: ${CH#*=}"
+            echo "  Mode: REMOTE chromadb-server"
+          else
+            echo "  CHROMA_SERVER_HOST: (not set)"
+            echo "  Mode: PersistentClient (in-process) — NOT multi-process safe"
+          fi
+          echo "  chroma_store size: $(du -sh /root/Lawtech-AI/chroma_store/ 2>/dev/null | cut -f1)"
+          echo "  chroma_store collection count: $(ls -d /root/Lawtech-AI/chroma_store/*/ 2>/dev/null | wc -l)"
+          echo
+
+          echo "===================================================="
+          echo " F. Embedding service (local or remote)"
+          echo "===================================================="
+          EMB=$(sudo grep "^EMBEDDING_SERVICE_URL=" /root/Lawtech-AI/.env 2>/dev/null | head -1)
+          if [ -n "$EMB" ]; then
+            echo "  EMBEDDING_SERVICE_URL: ${EMB#*=}"
+            echo "  Mode: REMOTE"
+          else
+            echo "  EMBEDDING_SERVICE_URL: (not set)"
+            echo "  Mode: LOCAL (HuggingFace in-process)"
+          fi
+          # Check if a separate embedding-service process is running
+          ps -eo pid,cmd --no-headers 2>/dev/null \
+            | grep -E "embedding_service|services/embedding" \
+            | grep -v grep | head -5 \
+            || echo "  (no separate embedding-service process detected)"
+          echo
+
+          echo "===================================================="
+          echo " G. OpenSearch latency from box (3 attempts)"
+          echo "===================================================="
+          ES_URL=$(sudo grep "^ES_URL=" /root/Lawtech-AI/.env 2>/dev/null | head -1 | sed 's/^ES_URL=//' | tr -d '"')
+          ES_USER=$(sudo grep "^ES_USER=" /root/Lawtech-AI/.env 2>/dev/null | head -1 | sed 's/^ES_USER=//' | tr -d '"')
+          ES_PASS=$(sudo grep "^ES_PASSWORD=" /root/Lawtech-AI/.env 2>/dev/null | head -1 | sed 's/^ES_PASSWORD=//' | tr -d '"')
+          if [ -n "$ES_URL" ]; then
+            echo "  ES_URL: $ES_URL"
+            echo "  ES_USER set: $([ -n "$ES_USER" ] && echo yes || echo no)"
+            for i in 1 2 3; do
+              if [ -n "$ES_USER" ] && [ -n "$ES_PASS" ]; then
+                T=$(curl -s -o /dev/null -w "%{time_total}s status=%{http_code}\n" --max-time 5 -u "$ES_USER:$ES_PASS" "$ES_URL/_cluster/health" 2>&1)
+              else
+                T=$(curl -s -o /dev/null -w "%{time_total}s status=%{http_code}\n" --max-time 5 "$ES_URL" 2>&1)
+              fi
+              echo "    attempt $i: $T"
+            done
+          else
+            echo "  ES_URL not set"
+          fi
+          echo
+
+          echo "===================================================="
+          echo " H. SlowAPI rate limit config"
+          echo "===================================================="
+          sudo grep -E "RATE_LIMIT|@limiter\.limit" /root/Lawtech-AI/core/settings.py /root/Lawtech-AI/core/gateway.py 2>/dev/null | head -10
+          echo
+
+          echo "===================================================="
+          echo " I. In-flight cap status (if any)"
+          echo "===================================================="
+          sudo grep -nE "semaphore|inflight|in_flight|MAX_INFLIGHT" /root/Lawtech-AI/core/gateway.py 2>/dev/null | head -10 \
+            || echo "  (no in-flight cap detected in gateway.py — Phase 3 still needed)"
+          echo
+
+          echo "===================================================="
+          echo " J. Quick health snapshot"
+          echo "===================================================="
+          curl -s --max-time 5 http://localhost:5001/pyapi/health 2>&1 | head -1
+          echo
+
+          echo "===================================================="
+          echo " AUDIT COMPLETE"
+          echo "===================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -128,12 +128,6 @@ class _SqliteChatHistoryStore:
                 CREATE INDEX IF NOT EXISTS idx_feedback_thread
                     ON feedback(thread_id, turn_number);
 
-                CREATE TABLE IF NOT EXISTS draft_continuations (
-                    thread_id   TEXT PRIMARY KEY,
-                    data_json   TEXT NOT NULL,
-                    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-                );
-
                 CREATE TABLE IF NOT EXISTS fallback_log (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp       TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -478,99 +472,6 @@ class _SqliteChatHistoryStore:
         except Exception as e:
             log.error("Summary regeneration failed",
                       thread_id=thread_id[:12], error=str(e))
-
-    # ------------------------------------------------------------------
-    # Draft continuation (incomplete draft metadata)
-    # ------------------------------------------------------------------
-
-    _DRAFT_SCHEMA_VERSION = 1
-
-    def _save_draft_continuation_sync(self, thread_id: str, data: dict) -> None:
-        """Save or update draft continuation data for a thread."""
-        self._ensure_schema()
-        versioned = {**data, "_schema_version": self._DRAFT_SCHEMA_VERSION}
-        with self._write_lock:
-            conn = self._get_connection()
-            try:
-                conn.execute("""
-                    INSERT INTO draft_continuations (thread_id, data_json)
-                    VALUES (?, ?)
-                    ON CONFLICT(thread_id) DO UPDATE SET
-                        data_json = excluded.data_json,
-                        created_at = datetime('now')
-                """, (thread_id, json.dumps(versioned)))
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                log.error("save_draft_continuation failed; rolled back",
-                          thread_id=thread_id[:12], error=str(e)[:200],
-                          exc_info=True)
-                raise
-            finally:
-                conn.close()
-
-    async def save_draft_continuation(self, thread_id: str, data: dict) -> None:
-        return await asyncio.to_thread(
-            self._save_draft_continuation_sync, thread_id, data
-        )
-
-    def _load_draft_continuation_sync(self, thread_id: str) -> dict | None:
-        """Load draft continuation data for a thread."""
-        self._ensure_schema()
-        conn = self._get_connection()
-        try:
-            row = conn.execute(
-                "SELECT data_json FROM draft_continuations WHERE thread_id = ?",
-                (thread_id,),
-            ).fetchone()
-            if row:
-                try:
-                    data = json.loads(row["data_json"])
-                    version = data.get("_schema_version", 0)
-                    if version != self._DRAFT_SCHEMA_VERSION:
-                        log.warning("Draft continuation schema version mismatch, discarding",
-                                    thread_id=thread_id,
-                                    stored_version=version,
-                                    expected=self._DRAFT_SCHEMA_VERSION)
-                        return None
-                    return data
-                except (json.JSONDecodeError, TypeError) as e:
-                    log.error("Corrupted draft continuation JSON",
-                              thread_id=thread_id, error=str(e))
-                    return None
-            return None
-        finally:
-            conn.close()
-
-    async def load_draft_continuation(self, thread_id: str) -> dict | None:
-        return await asyncio.to_thread(
-            self._load_draft_continuation_sync, thread_id
-        )
-
-    def _clear_draft_continuation_sync(self, thread_id: str) -> None:
-        """Remove draft continuation data after successful completion."""
-        self._ensure_schema()
-        with self._write_lock:
-            conn = self._get_connection()
-            try:
-                conn.execute(
-                    "DELETE FROM draft_continuations WHERE thread_id = ?",
-                    (thread_id,),
-                )
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                log.error("clear_draft_continuation failed; rolled back",
-                          thread_id=thread_id[:12], error=str(e)[:200],
-                          exc_info=True)
-                raise
-            finally:
-                conn.close()
-
-    async def clear_draft_continuation(self, thread_id: str) -> None:
-        return await asyncio.to_thread(
-            self._clear_draft_continuation_sync, thread_id
-        )
 
     # ------------------------------------------------------------------
     # Thread Files Registry (ChatGPT-style per-thread file persistence)
@@ -1538,8 +1439,6 @@ class _PostgresChatHistoryStore:
     Public API is identical to _SqliteChatHistoryStore.
     """
 
-    _DRAFT_SCHEMA_VERSION = 1
-
     # LLM cost estimates shared with SQLite class
     _AGENT_COST_PER_1K: dict[str, float] = {
         "Non_legal":      0.00015,
@@ -1622,11 +1521,6 @@ class _PostgresChatHistoryStore:
                         UNIQUE(thread_id, turn_number)
                     )""",
                     "CREATE INDEX IF NOT EXISTS idx_feedback_thread ON feedback(thread_id, turn_number)",
-                    """CREATE TABLE IF NOT EXISTS draft_continuations (
-                        thread_id  TEXT PRIMARY KEY,
-                        data_json  TEXT NOT NULL,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                    )""",
                     """CREATE TABLE IF NOT EXISTS fallback_log (
                         id               BIGSERIAL PRIMARY KEY,
                         timestamp        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1893,76 +1787,6 @@ class _PostgresChatHistoryStore:
                      turns_covered=row["total_turns"])
         else:
             log.warning("Summary generation returned empty result")
-
-    # ------------------------------------------------------------------
-    # Draft continuation
-    # ------------------------------------------------------------------
-
-    def _save_draft_continuation_sync(self, thread_id: str, data: dict) -> None:
-        self._ensure_schema()
-        versioned = {**data, "_schema_version": self._DRAFT_SCHEMA_VERSION}
-        from psycopg.rows import dict_row
-        with self._get_pool().connection() as conn:
-            conn.row_factory = dict_row
-            conn.execute("""
-                INSERT INTO draft_continuations (thread_id, data_json)
-                VALUES (%s, %s)
-                ON CONFLICT(thread_id) DO UPDATE SET
-                    data_json  = EXCLUDED.data_json,
-                    created_at = NOW()
-            """, (thread_id, json.dumps(versioned)))
-            conn.commit()
-
-    async def save_draft_continuation(self, thread_id: str, data: dict) -> None:
-        return await asyncio.to_thread(
-            self._save_draft_continuation_sync, thread_id, data
-        )
-
-    def _load_draft_continuation_sync(self, thread_id: str) -> "dict | None":
-        self._ensure_schema()
-        from psycopg.rows import dict_row
-        with self._get_pool().connection() as conn:
-            conn.row_factory = dict_row
-            row = conn.execute(
-                "SELECT data_json FROM draft_continuations WHERE thread_id = %s",
-                (thread_id,),
-            ).fetchone()
-        if row:
-            try:
-                data = json.loads(row["data_json"])
-                version = data.get("_schema_version", 0)
-                if version != self._DRAFT_SCHEMA_VERSION:
-                    log.warning("Draft continuation schema version mismatch, discarding",
-                                thread_id=thread_id,
-                                stored_version=version,
-                                expected=self._DRAFT_SCHEMA_VERSION)
-                    return None
-                return data
-            except (json.JSONDecodeError, TypeError) as e:
-                log.error("Corrupted draft continuation JSON",
-                          thread_id=thread_id, error=str(e))
-        return None
-
-    async def load_draft_continuation(self, thread_id: str) -> "dict | None":
-        return await asyncio.to_thread(
-            self._load_draft_continuation_sync, thread_id
-        )
-
-    def _clear_draft_continuation_sync(self, thread_id: str) -> None:
-        self._ensure_schema()
-        from psycopg.rows import dict_row
-        with self._get_pool().connection() as conn:
-            conn.row_factory = dict_row
-            conn.execute(
-                "DELETE FROM draft_continuations WHERE thread_id = %s",
-                (thread_id,),
-            )
-            conn.commit()
-
-    async def clear_draft_continuation(self, thread_id: str) -> None:
-        return await asyncio.to_thread(
-            self._clear_draft_continuation_sync, thread_id
-        )
 
     # ------------------------------------------------------------------
     # Thread Files Registry

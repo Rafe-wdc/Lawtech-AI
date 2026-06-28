@@ -540,7 +540,6 @@ async def _generate_followup_suggestions(
 def _build_initial_state(
     query: str, thread_id: str,
     unique_string: str | None = None,
-    draft_continuation: dict | None = None,
     file_context: dict | None = None,
     preferred_language: str | None = None,
     cite_appendix: bool | None = None,
@@ -569,7 +568,6 @@ def _build_initial_state(
         "block_reason": None,
         "file_context": file_context,
         "integration_context": None,
-        "draft_continuation": draft_continuation,
         "cite_appendix": cite_appendix,
         # Sagar bug #5: previous assistant response to refine. The orchestrator
         # short-circuits when this is set — see _refine_existing_response in
@@ -1136,194 +1134,10 @@ async def integration_poll(
     }
 
 
-# ============================================================
-# Continue Draft (retry failed sections)
-# ============================================================
-
-class ContinueDraftRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    globalThreadId: str = Field(..., min_length=1)
-
-
-@app.post("/pyapi/continue_draft", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request)
-async def continue_draft(data: ContinueDraftRequest, request: Request):
-    """Continue an incomplete draft by regenerating failed sections.
-
-    Loads the draft_continuation metadata from the previous turn in chat history,
-    runs only the drafting agent to regenerate failed sections, then re-synthesizes.
-    Returns an SSE stream.
-    """
-    thread_id = data.globalThreadId
-    req_id = set_request_id(thread_id[:8])
-
-    log.info("Continue draft request", thread_id=thread_id)
-
-    # Load continuation metadata from chat_store
-    continuation = await chat_store.load_draft_continuation(thread_id)
-    if not continuation:
-        raise HTTPException(
-            status_code=404,
-            detail="No incomplete draft found for this thread.",
-        )
-
-    query = continuation.get("query", "")
-    log.info("Continuing draft",
-             failed_sections=len(continuation.get("failed_indices", [])),
-             query=query[:80])
-
-    async def event_generator():
-        yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"
-        yield f"data: {json.dumps({'type': 'status', 'agent': 'continue_draft', 'message': 'Retrying incomplete sections...'})}\n\n"
-        yield f"data: {json.dumps({'type': 'agents_planned', 'agents': ['Drafting']})}\n\n"
-
-        # Per-request token tracker — captures every LLM call made by the
-        # continue_draft pipeline (one section regen per failed index).
-        from core.token_tracker import start_request as _start_token_tracking
-        _cd_token_tracker = _start_token_tracking()
-
-        start = time.perf_counter()
-        final_response = ""
-        total_tokens = 0
-        all_source_metadata = []
-        draft_continuation_data = None
-
-        try:
-            from agents.drafting import continue_draft_node
-            from core.state import AgentResult
-
-            # Build a minimal state with continuation data
-            state = _build_initial_state(
-                query, thread_id,
-                draft_continuation=continuation,
-            )
-            state["task"] = "Drafting"
-            state["tasks_planned"] = ["Drafting"]
-
-            # Run the continue_draft_node directly with streaming
-            from langgraph.config import get_stream_writer
-
-            # Use a simple streaming approach: run the node via a mini graph
-            from langgraph.graph import StateGraph, END
-            from core.state import LegalAgentState
-
-            mini_graph = StateGraph(LegalAgentState)
-            mini_graph.add_node("continue_draft", continue_draft_node)
-            mini_graph.set_entry_point("continue_draft")
-            mini_graph.add_edge("continue_draft", END)
-            mini_compiled = mini_graph.compile()
-
-            async for event in mini_compiled.astream(
-                state, config={"configurable": {"thread_id": thread_id}},
-                stream_mode=["updates", "custom"],
-            ):
-                mode, chunk = event
-
-                if mode == "custom":
-                    if isinstance(chunk, dict):
-                        if chunk.get("type") == "token":
-                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['content']})}\n\n"
-                        elif chunk.get("type") == "token_reset":
-                            yield f"data: {json.dumps({'type': 'token_reset'})}\n\n"
-                        elif chunk.get("type") == "drafting_progress":
-                            yield "data: {}\n\n".format(json.dumps({
-                                "type": "drafting_progress",
-                                "section": chunk["section"],
-                                "total": chunk["total"],
-                                "title": chunk["title"],
-                            }))
-                        elif chunk.get("type") == "draft_incomplete":
-                            yield "data: {}\n\n".format(json.dumps({
-                                "type": "draft_incomplete",
-                                "failed_sections": chunk["failed_sections"],
-                                "total_sections": chunk["total_sections"],
-                                "completed_sections": chunk["completed_sections"],
-                            }))
-                        elif chunk.get("type") == "queue_status":
-                            yield f"data: {json.dumps({'type': 'status', 'agent': 'queue', 'message': chunk.get('message', 'Waiting for available slot...')})}\n\n"
-                        elif chunk.get("type") == "progress":
-                            yield f"data: {json.dumps(chunk)}\n\n"
-                    continue
-
-                for node_name, update in chunk.items():
-                    yield f"data: {json.dumps({'type': 'status', 'agent': 'drafting', 'message': 'Generating legal draft...'})}\n\n"
-
-                    if "agent_results" in update:
-                        drafting_result = update["agent_results"].get("Drafting")
-                        if drafting_result and drafting_result.content:
-                            final_response = drafting_result.content
-                            total_tokens += drafting_result.tokens_consumed or 0
-                            if drafting_result.sources:
-                                all_source_metadata = [
-                                    {k: v for k, v in s.__dict__.items() if v}
-                                    for s in drafting_result.sources
-                                ]
-
-                    if "draft_continuation" in update and update["draft_continuation"]:
-                        draft_continuation_data = update["draft_continuation"]
-
-        except (asyncio.CancelledError, GeneratorExit):
-            # Client disconnected mid-stream. Log + re-raise so Starlette
-            # completes the cancellation; the post-stream save_turn / sources
-            # / done event are skipped (the client isn't there to receive them).
-            log.info("SSE client disconnected mid-stream",
-                     endpoint="/pyapi/continue_draft",
-                     thread_id=(thread_id or "")[:12])
-            raise
-        except Exception as e:
-            log.error("Continue draft stream error", error=str(e))
-            from core.redact import redact_brands
-            yield f"data: {json.dumps({'type': 'error', 'data': redact_brands(str(e))})}\n\n"
-
-        # Send final response
-        if final_response:
-            yield f"data: {json.dumps({'type': 'response', 'content': final_response})}\n\n"
-
-        # Send sources
-        if all_source_metadata:
-            yield f"data: {json.dumps({'type': 'sources', 'data': all_source_metadata})}\n\n"
-
-        # Save updated response to chat history
-        conversation_turn = 0
-        if final_response:
-            try:
-                conversation_turn = await chat_store.save_turn(
-                    thread_id, f"[Continue draft] {query[:100]}", final_response
-                )
-            except Exception as e:
-                log.error("Failed to save continued draft", error=str(e))
-
-            # Save or clear continuation data
-            if draft_continuation_data:
-                await chat_store.save_draft_continuation(thread_id, draft_continuation_data)
-            else:
-                await chat_store.clear_draft_continuation(thread_id)
-
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        log.info("Continue draft completed", duration_ms=f"{elapsed_ms:.0f}")
-
-        done_event = {
-            "type": "done",
-            "agents_used": ["Drafting"],
-            "token_usage": _cd_token_tracker.to_dict(include_calls=True),
-            "thread_id": thread_id,
-            "conversation_turn": conversation_turn,
-            "query_rewritten": False,
-            "effective_query": None,
-            "has_draft_continuation": draft_continuation_data is not None,
-        }
-        yield f"data: {json.dumps(done_event)}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
+# /pyapi/continue_draft was removed 2026-06-28 as part of the Drafting
+# Simplification (see docs/drafting_simplification_plan.md). The route was
+# unused in production and the simplified single-pass drafting pipeline
+# does not produce per-section failures that need retrying.
 
 # Legacy /pyapi/mainqa removed — use /pyapi/chat (SSE streaming with file attachments)
 

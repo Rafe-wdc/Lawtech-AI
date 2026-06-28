@@ -187,40 +187,56 @@ the typed intent into that string. See
 
 ## Drafting invariants (do not regress)
 
-The Drafting pipeline has guard rails that protect file-readiness and token
-cost. Before touching `agents/drafting.py`, `agents/orchestrator.py`, or
-`config/prompts.py`, know these:
+The Drafting pipeline was simplified on 2026-06-28 (see
+`docs/drafting_simplification_plan.md`). It is now a two-source / single-pass
+flow with no enums, no skeletons, no doc-type classifier, no mandatory-section
+injection, and no per-section fan-out. Before touching `agents/drafting.py`,
+`agents/orchestrator.py`, or `config/prompts.py`, know these invariants:
 
-1. **Citations appendix is OFF by default.** When `task == "Drafting"`, the
-   orchestrator does NOT fan out Scenario/Legislation/Judgment unless the
-   request passes `cite_appendix: true` (or `DRAFTING_CITE_APPENDIX_DEFAULT=true`
-   in the environment). Tokens go to the draft body, not a 16k-char appendix.
-2. **Doctrinal stance precedes section generation.** `_generate_doctrinal_stance`
-   produces a JSON contract (`property_lane`, `injunction_lane`,
-   `applicable_statutes`, `non_applicable_statutes`, `key_cases`, `must_plead`,
-   `must_not_plead`) that every parallel section call respects. This is what
-   prevents self-acquired vs ancestral contradictions and Sec 38 SRA vs Order
-   XXXIX CPC mis-citations across sections.
-3. **Outline injects mandatory procedural sections.** `_inject_mandatory_sections`
-   guarantees a civil suit outline includes Schedule of Properties, Valuation
-   and Court Fee, List of Documents, Verification, and a notarised Affidavit.
-   When a temporary injunction is prayed for, a separate IA under Order XXXIX
-   Rules 1 & 2 CPC is also injected.
-4. **Pre-return validator runs on every assembled draft.** `validate_draft`
-   auto-fixes cp1252-misread-as-UTF-8 mojibake, strips leftover `[CITE: ...]`
-   placeholders, trims orphan citation tails ("as held in."), and logs
-   warnings for forbidden statute pairings (Sec 38 SRA + temporary injunction;
-   Sec 54 CPC + residential partition).
-5. **`[CITE: ...]` placeholders are forbidden.** Section prompts must cite real
-   case names + citations inline (driven by the stance JSON), or omit the case
-   label entirely. The orchestrator still strips any survivors as a defensive
-   fallback (`_INTERNAL_CITE_MARKER_RE`).
+1. **Reference draft must come from ES first; web only on rejection.** The
+   pipeline runs an ES `match` on the `drafting` index (size 100) →
+   `_pick_reference_source` (single Gemini Flash Lite call) picks the best file
+   path OR returns the literal string `'none'` → if a path is picked, an ES
+   term query on `source.keyword` fetches the full template content; if
+   `'none'` (or empty corpus, or fetch miss), `_acquire_reference_via_web`
+   fires `core.agent_fallback.web_search_fallback` with
+   `DRAFTING_WEB_FALLBACK_PROMPT` to synthesize a reference draft from the
+   open web. Do NOT short-circuit to web search for any other reason.
+2. **Scope critic + self-refine must run before final return.** After
+   single-pass generation, `core.self_refine.self_refine` audits the draft
+   against the typed `UserIntent` and refines on violations. CRITIQUE_PROMPT
+   covers drafting-specific categories (placeholder_marker,
+   orphan_citation_tail, forbidden_statute_pair, cause_title_collapsed,
+   paragraph_numbering_break, prayer_relief_mismatch, etc.). Do NOT add
+   per-rule regex/threshold checks anywhere — extend CRITIQUE_PROMPT instead.
+3. **User query is never truncated or summarized.** The user's drafting
+   instruction flows verbatim into the generation prompt as the "source of
+   truth for what document to produce." This invariant comes from saved
+   feedback and is non-negotiable.
+4. **`validate_draft` is bug-fixes only.** It auto-fixes cp1252-misread-as-UTF-8
+   mojibake, strips HTML tags, strips leftover `[CITE: ...]` placeholders, and
+   removes empty numbered paragraphs. Substantive critique (forbidden statute
+   pairs, orphan citation tails, missing procedural sections, prayer-relief
+   mismatch) lives in `core.self_refine.self_refine`. Do NOT add substantive
+   checks to `validate_draft`.
+5. **No hand-curated taxonomy or skeleton.** The deleted `DOC_TYPES`,
+   `SYNTHETIC_SKELETONS`, `GENERIC_COURT_SKELETONS`, `DOC_TYPE_TO_FOOTER_KIND`,
+   `DRAFT_OUTLINE_RULES_BY_TYPE`, `_inject_mandatory_sections`, and
+   `_generate_doctrinal_stance` MUST NOT be reintroduced. The reference draft
+   is the structural anchor; the user's query shapes scope. If a quality
+   regression surfaces, extend the generation prompt or CRITIQUE_PROMPT —
+   do NOT add an enum gate.
+6. **Per-section fan-out is reserved but not implemented.** Stage 2 is behind
+   a single function `_generate_draft(...) -> str` so a future per-section
+   variant can be added without rewriting the agent. The section list, when
+   added, must be extracted from the reference draft's actual structure (not
+   from an enum).
 
-Regression tests live in `tests/test_drafting_quality.py` (24 unit + 8 e2e).
+Tests live in `tests/test_drafting_simplification.py` (15 unit + 2 e2e).
 Run them via:
 ```bash
-pytest tests/test_drafting_quality.py -v
-DRAFTING_QUALITY_E2E=1 LAWTECH_API_KEY=<key> pytest tests/test_drafting_quality.py::TestPartitionSuitE2E -v
+pytest tests/test_drafting_simplification.py -v
+DRAFTING_SIMPLIFICATION_E2E=1 pytest tests/test_drafting_simplification.py::TestEndToEndSmokes -v
 ```
 
 ## Agent Resilience

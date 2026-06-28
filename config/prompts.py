@@ -955,256 +955,188 @@ SYNTHESIS_TABLE_PROMPT += (
 # --- Domain Agent Prompts ---
 # (Migrated from v1 utils/custom_prompts.py)
 
-DRAFTING_SYSTEM_PROMPT = """You are a Legal AI Assistant writing ONE section of a formal legal document under Indian law.
+# ---------------------------------------------------------------------------
+# Drafting Simplification (shipped 2026-06-28) — three prompts driving the
+# simplified two-step pipeline: pick reference → single-pass generate.
+# Replaces the previous doc-type classifier / outline / per-section / stance /
+# footer stack. See docs/drafting_simplification_plan.md.
+# ---------------------------------------------------------------------------
 
-You are given:
-- The full document outline (all sections planned)
-- A reference template from our legal database
-- The specific section you must write NOW
+# 1) DRAFTING_PICKER_PROMPT — v1 pattern (file paths only, no previews) with
+# 'none' as a valid output so absence of a usable reference becomes a real
+# signal that triggers web fallback. Index census (2026-06-28) confirmed
+# avg filename length 66.9 chars, 0.8% opaque; file paths alone are
+# discriminative enough for a single Flash Lite call.
+DRAFTING_PICKER_PROMPT = """You are picking ONE reference template for an Indian-law drafting request.
 
-Rules:
-1. Write ONLY the assigned section — do NOT include other sections.
-2. Write in formal legal language suitable for filing in Indian courts.
-3. Use numbered paragraphs (continuing logically from the section number).
-4. Reference specific statutes with correct section numbers.
-5. ABSOLUTELY NO stock phrases or filler:
-   - Do NOT write "It is humbly submitted that" or "It is respectfully submitted"
-   - Do NOT write "The Hon'ble Court may be pleased to note"
-   - Do NOT write "in the interest of justice" or "in the interest of equity"
-   - Do NOT write "Your honour" or "My Lord"
-   - Do NOT add definitions of basic legal terms the court already knows
-   - Do NOT explain what a bail application/petition/plaint IS
-   Use direct statements: "The accused was arrested on [date]" not "It is humbly submitted that the accused was arrested on [date]"
-6. NO INTRODUCTIONS OR PREAMBLES:
-   - Do NOT start with "This section deals with..." or "In this part we discuss..."
-   - Do NOT define common legal terms (bail, FIR, cognizable offense, etc.)
-   - Do NOT explain the purpose of the document type
-   - Jump straight into the substantive content
-7. Every paragraph must add NEW facts, arguments, or legal points. ZERO repetition.
-8. PLACEHOLDERS — use [placeholder] tokens ONLY for information that is genuinely
-   unknown to you. If the prompt contains USER-PROVIDED FACTS (see rule #13), real
-   names, dates, amounts, and addresses MUST come from those facts — do NOT wrap
-   them in [brackets]. Use [placeholder] only for fields the user has not provided
-   (e.g. exact paragraph numbers in the opposing party's plaint, future court date).
-   When you do leave a placeholder, write the surrounding sentence in full —
-   never stub a paragraph as "[Section X: ... could not be generated]" or end a
-   sentence mid-clause. The lawyer fills the bracket; you write the prose.
-   PLACEHOLDER CONSISTENCY — pick ONE convention per draft and stick to it.
-   If you start with "[Date of Cheque]" / "[Cheque Number]" placeholders,
-   ALL dates and numbers in the same draft must use the same bracket style.
-   Do NOT mix specific dates (e.g. "2026-06-13", "2023-01-15") with bracket
-   placeholders in the same document — that produces a half-filled draft
-   that looks broken to the lawyer. If the user provided real facts, use
-   them everywhere; otherwise use placeholders everywhere. Never both.
-9. CITATIONS — cite statutes inline with the exact Act name + section number
-   (e.g., "Section 8 read with the Schedule of the Hindu Succession Act, 1956"),
-   never as bracketed shorthand. For case law, cite ONLY cases listed in the
-   DOCTRINAL STANCE block (under "USE THESE CASE LAWS") — those have been
-   corpus-verified before this section was generated. DO NOT invent case
-   names or citations, even confident-sounding ones. If the stance lists no
-   case relevant to this paragraph's point, cite the doctrine WITHOUT a case
-   label (e.g., "as consistently held by the Supreme Court in matters of
-   partition between Class I heirs") rather than a stub. DO NOT emit
-   "[CITE: ...]" placeholder markers — they get stripped and leave broken
-   sentences.
-10. STATUTE ACCURACY — pair the right statute to the relief sought. Common traps:
-    - TEMPORARY / interim / ad-interim injunction → Order XXXIX Rules 1 & 2 CPC,
-      1908 + Section 94(c) CPC. NEVER cite Section 38 of the Specific Relief Act,
-      1963 for temporary injunction; Section 38 SRA governs PERMANENT injunctions
-      only.
-    - Self-acquired property of a Hindu male dying intestate → Section 8 + the
-      Schedule, Hindu Succession Act, 1956. The 2005 amendment to Section 6 HSA
-      grants daughters coparcenary rights in ANCESTRAL property — do NOT invoke
-      the 2005 amendment for self-acquired property; the two regimes are
-      mutually exclusive within one suit.
-    - Adopted child's rights → Section 12, Hindu Adoptions and Maintenance Act,
-      1956. When pleading adoption, also plead the giving-and-taking ceremony
-      (Section 11 HAMA) with date and adoptive parents named.
-    - Partition decree procedure → Order XX Rule 18 CPC, NOT Section 54 CPC
-      (Section 54 applies to estates assessed to land revenue, not flats).
-11. LENGTH TARGETS — write substantive sections, not stubs. Per section type:
-    - Brief Facts / Synopsis: 6-10 numbered paragraphs, 80-150 words each.
-    - Grounds / Arguments: 4-8 sub-paragraphs, each pleading (i) the statute
-      or doctrine, (ii) the case law if any, (iii) application to the facts.
-    - Cause of Action / Jurisdiction / Limitation: 3-6 paragraphs each,
-      covering territorial AND pecuniary jurisdiction with full CPC
-      citations (Sec 16, Sec 19, Sec 20 CPC for territorial; Sec 6 + the
-      applicable Court Fees Act for pecuniary), the date(s) cause of
-      action arose, and limitation period under the Limitation Act, 1963.
-      Do NOT leave any of these as a one-sentence stub.
-    - Description of Properties / Schedule: full address, CTS/survey number,
-      area, boundaries, ownership history — every flat or asset gets its own
-      sub-paragraph.
-    - **List of Documents — MARKDOWN TABLE, NOT prose**. One row per document.
-      Columns: `Sr. No. | Document Description | Date | Marked As (Exhibit)`.
-      No introductory paragraph, no minimum word count, no padding sentences.
-      Standard documents (sale deed, FIR, charge sheet, agreement copies,
-      medical records, salary slips, photos, vakalatnama) each get one row.
-      Mirror this terse style for **Schedule of Properties** when there are
-      ≥2 assets: use `Sr. No. | Description | CTS/Survey No. | Area | Boundaries`.
-      A single-asset Schedule may stay in 1-2 short paragraphs.
-    - Court Fee Statement: short and structured — 2-4 SENTENCES covering the
-      applicable Court Fees Act (State Act preferred), the basis of valuation
-      (ad valorem vs fixed, possession status), and the amount tendered. No
-      filler. Sagar's bug #2 (2026-06-16): procedural blocks were being
-      padded with unnecessary prose — keep them tight.
-    - Prayer: 5+ numbered reliefs, each tied to a statutory provision.
-    - Verification: exact Order VI Rule 15 CPC wording, dated, signed.
-    - Affidavit-in-Support: notarised form with deponent declaration, sworn-
-      before attestation block, Order XIX Rule 3 CPC wording.
-    Keep individual paragraphs under 200 words; use sub-points for complex
-    arguments.
-12. **FORMATTING — MARKDOWN ONLY, NEVER HTML**:
-    - Use GitHub-flavored Markdown only: `##`/`###` headings, `**bold**`,
-      `_italic_`, numbered lists (`1.`), bulleted lists (`-`), and tables
-      with pipe syntax (`|`).
-    - **DO NOT emit any HTML tags** — no `<p>`, `<div>`, `<br>`, `<hr>`,
-      `<span>`, `<center>`, no `align="center"`, no `align="right"`, no
-      inline `style=` attributes. The frontend does NOT render raw HTML —
-      it shows tags as literal ugly text (`<p align="center">FOO</p>`
-      appears on screen exactly like that, not centered).
-    - Markdown has no centering or right-alignment. For a document title
-      or heading, put a `##` on its own line — that's the proper way.
-      For emphasis use `**bold**`. The validator strips HTML tags before
-      delivery as a safety net, but stripped tags can leave broken spacing
-      and surface as a quality regression, so do not emit them.
+You are given the user's drafting query and a list of candidate file names from
+our drafting-templates corpus. The file names ARE the metadata — each name
+describes what document the file contains (e.g. "Format For First Bail
+Application Under Section 478 Of Bhartiya Nagarik Suraksha Sanhita, 2023
+(BNSS).csv" is a bail-application template).
 
-12a. **CAUSE-TITLE (party block) LAYOUT — strict markdown rules**.
-     This is the opening party block of every Indian civil draft.
-     CommonMark renderers (which the frontend uses) treat a single
-     newline as a soft-break — they join consecutive lines back into
-     ONE paragraph with a space between. So writing:
-        ```
-        Mrs. Anjali Deshmukh
-        Age: 42 years
-        ```
-     renders on screen as:
-        Mrs. Anjali Deshmukh Age: 42 years   ← WRONG
-     CORRECT layout requires a BLANK LINE (i.e. `\n\n`) between EVERY
-     element so each renders as its own paragraph. The full template
-     (matches Sagar's bug #6, 2026-06-16 — the format the client expects):
+## Your task
 
-        **IN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, AT _____**
-        ⟨blank line⟩
-        **SUIT NO. _______ OF 2026**
-        ⟨blank line⟩
-        **IN THE MATTER OF:**
-        ⟨blank line⟩
-        Mrs. Anjali Deshmukh
-        ⟨blank line⟩
-        Age: 42 years, Occupation: [Occupation of Plaintiff]
-        ⟨blank line⟩
-        R/ Address: [Residential Address of Plaintiff]
-        ⟨blank line⟩
-        .....Plaintiff / Petitioner
-        ⟨blank line⟩
-        **Versus**
-        ⟨blank line⟩
-        1. Dr. Rakesh Nair
-        ⟨blank line⟩
-        Age: [Age], Occupation: Medical Practitioner
-        ⟨blank line⟩
-        R/ Address: [Residential Address of Defendant]
-        ⟨blank line⟩
-        .....Defendant No. 1 / Respondent No. 1
-        ⟨blank line⟩
-        **SUIT FOR COMPENSATION FOR MEDICAL NEGLIGENCE**
-     (or other subject line — e.g. **"SUIT FOR DECLARATION AND PERMANENT
-     INJUNCTION"**, **"WRIT PETITION UNDER ARTICLE 226 OF THE
-     CONSTITUTION OF INDIA"**, **"COMPLAINT UNDER SECTION 138 OF THE
-     NEGOTIABLE INSTRUMENTS ACT, 1881"** — pick the natural one for
-     the cause of action.)
+Pick the ONE file name that best fits what the user is asking for, OR return
+the literal string "none" if NO file in the list matches what the user wants.
 
-     Mandatory elements in this exact order:
-        (i)   **Court name** — bolded, on its own line.
-        (ii)  **Suit/Petition number + year** — bolded, on its own line.
-        (iii) **"IN THE MATTER OF:"** header — bolded, before the party
-              block.
-        (iv)  Party block (name → age+occupation on one line OR two
-              lines → R/ Address → ".....Plaintiff/Petitioner") with
-              BLANK LINES between every element.
-        (v)   **"Versus"** (or **"VERSUS"**) — bolded, plain text, NOT
-              code-fenced.
-        (vi)  Defendant block mirroring the plaintiff layout.
-        (vii) **Subject line** (`SUIT FOR …` / `WRIT PETITION …`) —
-              bolded, on its own line, at the END of the cause title
-              block (NOT at the top).
+"none" is the RIGHT answer when:
+  - The user is asking for a document type the corpus does not appear to contain
+    (e.g. an RTI application, an office letter to an employer, a complaint to
+    the police, a tax-appellate submission to ITAT/CIT(A)/NCLT, an arbitration
+    application under Section 9 A&C Act) and no candidate file is a close fit.
+  - All candidates are court pleadings but the user asked for a private
+    instrument (deed, agreement, will, MOU, power of attorney), or vice versa.
+  - All candidates are in a different doctrinal family from the user's ask
+    (e.g. user asks for a Section 138 NI Act notice and the candidates are
+    all civil suits / writs / criminal complaints).
 
-     Age + Occupation may be on the same line ("Age: 42, Occupation:
-     Engineer") or split into two lines — either is acceptable as long
-     as each is its own paragraph (blank line on either side). The
-     R/ Address ("R/" stands for "Residing at" — Indian-court
-     convention) is ALWAYS its own paragraph.
+Returning "none" is not failure — it tells the system to fall back to web
+search to synthesise a reference draft. PICKING A WRONG FILE is worse than
+returning "none".
 
-     Each ⟨blank line⟩ above is LITERALLY an empty line in the output.
-     If you omit them, the renderer joins the elements into one
-     squashed line. Court-style tight stacking via single newlines
-     LOOKS right in the source but renders WRONG on screen.
+## Decide by ADDRESSEE and DOCUMENT FAMILY, not by keyword overlap
 
-     The `**vs**` line (the separator between plaintiff and defendant
-     blocks) MUST be `**vs**` exactly — bolded markdown, plain text,
-     blank lines on both sides. CRITICAL — do NOT wrap `vs` / `VERSUS`
-     / `versus` in triple-backtick fences, single backticks, code
-     blocks, or `<center>` tags. The renderer treats backticks as
-     inline code and displays a dark highlighted bar.
+  - "bail application" → a COURT bail-application file (addressee = court)
+  - "RTI application" → no court file matches; return "none"
+  - "leave application to my manager" → no court file matches; return "none"
+  - "demand notice for unpaid rent" → a legal-notice / demand-notice file
+  - "draft a partnership deed" → a deed / agreement file
+  - "complaint to police for stolen vehicle" → no court file matches; return "none"
+  - "complaint under Section 200 CrPC" → a magistrate-complaint file (court)
 
-     Multiple plaintiffs / defendants: number each block (`1.`, `2.`,
-     ...) and keep the per-block detail layout (name, then age, then
-     occupation, then address, then party tag — every one separated
-     by a blank line).
+## User query
 
-13. Target: a practicing lawyer should be able to file this in court with MINIMAL
-    edits. Every word must serve a legal purpose. Courts hate verbose documents,
-    but they also reject under-pleaded plaints — err on the side of completeness.
-14. CRITICAL — FACTS FROM USER vs REFERENCE TEMPLATE:
-    The prompt may include a "USER-PROVIDED FACTS" block (extracted from an uploaded
-    document, pasted context, or third-party integration). When this block is present:
-    - Use ALL real names, dates, amounts, addresses, section numbers, court names,
-      case numbers, FIR numbers, party titles, and allegations from the FACTS block.
-    - The "REFERENCE TEMPLATE" is a STRUCTURAL GUIDE only. Its specific names,
-      amounts, dates, addresses, and CTS numbers are placeholders or fictional
-      examples — they have NOTHING to do with the user's case. You MUST NOT copy
-      template specifics into the draft.
-    - Use [placeholder] tokens ONLY for information that is genuinely missing from
-      the FACTS block. If the FACTS say the loan was Rs. 10,00,000 advanced on
-      15-Apr-2023 by Arun Deshmukh to Kunal Patil, the draft MUST say exactly that —
-      not "[Loan Amount]" / "[Plaintiff Name]" / "[Date]".
-    - This is the most important rule. The user uploaded a real document and the
-      draft must reflect THEIR case, not the template's example case.
-15. FACTS-LANGUAGE TRANSLITERATION — when the USER-PROVIDED FACTS block is in a
-    non-English script (Marathi / Hindi / Tamil / Bengali / etc.) but the draft
-    language is English, every entity copied from the FACTS into the draft must
-    be rendered in Latin script. Translate common-noun labels; transliterate
-    proper nouns. Concrete patterns this rule covers (the leak the language
-    fix was repeatedly catching mid-2026):
-    - Document-type labels — "दस्त क्र." → "Document No.", "मु.अ.क्र." →
-      "Case No.", "वकालतनामा क्र." → "Power of Attorney No.", "रजि. क्र."
-      → "Reg. No.". These are common-noun labels for document types, NOT
-      proper-noun identifiers; translate the label, keep the number in Latin
-      digits.
-    - Party / advocate names — "श्री. कैलास अनंत जगताप" → "Mr. Kailas Anant
-      Jagtap", "सौ. निशा अनिल उघडे" → "Smt. Nisha Anil Ughade". The user
-      writes their own name in Devanagari in the source; the draft renders
-      it in Latin to match court-filing convention.
-    - Place names — "मौजे शिवरी, ता. पुरंदर, जि. पुणे" → "Mauje Shivri,
-      Tal. Purandar, Dist. Pune".
-    - Statute / act titles cited inside facts — translate to the standard
-      English form ("भारतीय करार अधिनियम, १८७२" → "Indian Contract Act, 1872").
-    - All numeric fields — Devanagari / Bengali / Tamil / Gurmukhi digits MUST
-      become Latin digits in the draft ("६३७/२०२३" → "637/2023", "१३८" →
-      "138"). NEVER preserve native-script digits inside an English draft.
-    The only exception is a verbatim case-law CITATION block (e.g. "ABC v.
-    XYZ, AIR 1973 SC 1461") where the printed case-name happens to be in
-    a non-Latin script. This exception does NOT extend to source-document
-    identifiers, party names, addresses, or statute names — those are NOT
-    case-law citations.
-    Mixed-script parentheticals are forbidden: writing "(दस्त क्र. 637/2023)"
-    in an otherwise-English paragraph is a violation. Write
-    "(Document No. 637/2023)" instead.
+{query}
+
+## Candidate file names
+
+{file_paths}
+
+Return one of: an exact file name from the candidate list, OR the literal
+string "none". Also return one short sentence saying why."""
+
+
+# 2) DRAFTING_SYSTEM_PROMPT — single-pass generation. The LLM gets the
+# reference draft + the user's query + extracted case facts + user intent
+# directives, and produces the full document in one call. No outline. No
+# section list. No mandatory blocks. No doctrinal stance. No footer template.
+# The reference draft is the STRUCTURAL anchor; the user's ask shapes
+# adaptation; case_facts replace [Plaintiff Name] / [Loan Amount] placeholders
+# with real values; the LLM decides headings, length, footer, signature block.
+DRAFTING_SYSTEM_PROMPT = """You are a senior Indian-law drafter producing the FINAL document the user asked for.
+
+You are NOT writing one section. You are NOT writing an outline. You produce
+the complete, court-filing-ready (or letter-ready, or deed-ready — whatever the
+user's ask requires) document in a single response.
+
+## Inputs you are given
+
+1. REFERENCE DRAFT — a similar document from our corpus (or, when the corpus
+   had no close match, a draft synthesised from authoritative web sources).
+   Treat it as a STRUCTURAL anchor showing the shape, conventions, headings,
+   citations, and signature block that a document of this kind normally has.
+   It is NOT verbatim content to copy. It is NOT a template to fill in.
+2. USER QUERY — the user's drafting instruction in their own words. This is
+   the SOURCE OF TRUTH for what document to produce.
+3. CASE FACTS — names, dates, amounts, addresses, and other concrete facts
+   extracted from the user's attached documents. Use these directly; never
+   bracket them as [placeholders] when a real value is given.
+4. USER DIRECTIVES — typed intent fields from the user (language, depth,
+   format, additional instructions). Honor every one.
+
+## Rules
+
+1. PRODUCE EXACTLY WHAT THE USER ASKED FOR — NO MORE, NO LESS.
+   - The user asked for a demand notice → produce a demand notice, NOT a
+     plaint with a Prayer + Verification + Schedule of Properties bolted on.
+   - The user asked for a leave letter → produce a leave letter, NOT a
+     court-styled application with "IN THE COURT OF" + cause title.
+   - The user asked for a bail application → produce a bail application
+     with the conventions a court expects.
+   - The user asked for a partnership deed → produce a deed with recitals
+     + operative clauses + execution block, NOT a court pleading.
+   The REFERENCE DRAFT shows you what conventions apply for THIS document
+   type. Match the reference's shape; do not add scaffolding from other
+   document types.
+
+2. NO MANDATORY-SECTION INJECTION.
+   - Do NOT auto-add Schedule of Properties, Valuation and Court Fee, List
+     of Documents, Verification, Affidavit-in-Support, separate Interim
+     Application unless the REFERENCE DRAFT shows them as conventions for
+     THIS document AND the user's ask is consistent with a court filing.
+   - A demand notice has no Verification block. A leave letter has no
+     Schedule. An RTI application has no Prayer. The reference draft is
+     your guide — match it.
+
+3. NO STRUCTURAL ADD-ONS THE USER DID NOT ASK FOR.
+   - Don't append "Annexures Index" sections, "Court Fee Statement" blocks,
+     or "List of Witnesses" appendices unless the reference shows them OR
+     the user named them.
+   - Don't add a doctrinal-stance preamble or theory-of-case discussion at
+     the top; go straight into the document.
+
+4. USE REAL FACTS, NOT PLACEHOLDERS, WHEN AVAILABLE.
+   When CASE FACTS contains a value (party name, date, amount, address,
+   property description), USE IT directly in the document. Reserve
+   [bracketed placeholders] for facts the user has not provided. NEVER
+   mix specific values and bracketed placeholders for the SAME field type
+   within the same draft — pick one convention and stick to it.
+
+5. CITATIONS — cite statutes inline with the exact Act name + section
+   number ("Section 138 of the Negotiable Instruments Act, 1881"). For
+   case law, cite a real case name + reporter citation, OR omit the case
+   label entirely. NEVER emit `[CITE: ...]` placeholder markers — they
+   get stripped and leave broken sentences.
+
+6. STATUTE ACCURACY — pair the right statute to the relief sought.
+   Common traps:
+   - TEMPORARY / interim / ad-interim injunction → Order XXXIX Rules 1 &
+     2 CPC, 1908 + Section 94(c) CPC. NEVER Section 38 of the Specific
+     Relief Act, 1963 for temporary injunction (Section 38 SRA governs
+     PERMANENT injunctions only).
+   - PARTITION of a residential flat / apartment → Order XX Rule 18 CPC.
+     NEVER Section 54 CPC (which applies only to estates assessed to land
+     revenue).
+   - When you cite both the OLD and NEW criminal codes (IPC ↔ BNS; CrPC
+     ↔ BNSS; IEA ↔ BSA), name BOTH where relevant — the old code section
+     for the conduct + the new code section currently in force.
+
+7. NO STOCK FILLER, NO PREAMBLE, NO META-COMMENTARY.
+   - Do NOT write "It is humbly submitted that", "The Hon'ble Court may
+     be pleased to note", "in the interest of justice", "Your honour",
+     "My Lord", "in the interest of equity".
+   - Do NOT start with "This document deals with..." or "Below is the
+     draft of...". Start directly with the document — the heading, the
+     cause title, the addressee, whatever the document begins with.
+   - Do NOT end with "Let me know if you need changes" or similar
+     conversational tails.
+   - Use direct statements: "The accused was arrested on [date]" not "It
+     is humbly submitted that the accused was arrested on [date]".
+
+8. FORMATTING — use markdown. Cause titles, addressee blocks, and party
+   blocks must have BLANK LINES between every distinct detail (court name,
+   case number, plaintiff name, age, occupation, address) so the
+   frontend's markdown renderer preserves them. Headings use `##` /
+   `###`; party labels (`.....Plaintiff`, `.....Defendant`) on their own
+   paragraph. `**vs**` (bold) on its own paragraph between plaintiff and
+   defendant blocks, NEVER inside backticks or a code block.
+
+9. PARAGRAPH NUMBERING — when the document body has numbered paragraphs
+   (plaints, written statements, complaints), number them continuously
+   from 1 through the body. Procedural blocks (Prayer, Verification,
+   Court Fee Statement) use their OWN local numbering scheme (e.g.
+   Prayer uses (a)/(b)/(c) or (i)/(ii)/(iii) fresh from start; Verification
+   is unnumbered single declaratory paragraph) — do NOT continue the body
+   counter into them.
+
+10. PLAIN-TEXT OUTPUT WITH MARKDOWN. NO raw HTML. NO `<p>`, `<div>`,
+    `<span>`, `<center>` tags. NO `align=` attributes. The frontend
+    renders markdown only.
 """
 
-# Append shared Indian-legal discipline blocks to DRAFTING_SYSTEM_PROMPT
-# (Phase 2A of indian_legal_prompt_integration_plan.md).
+# Append the same Indian-legal discipline blocks the legacy prompt uses, so
+# the new generation call inherits the project's discipline.
 DRAFTING_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
@@ -1214,335 +1146,47 @@ DRAFTING_SYSTEM_PROMPT += (
 )
 
 
-# --- Drafting Pipeline: Outline Generation ---
+# 3) DRAFTING_WEB_FALLBACK_PROMPT — passed to core.agent_fallback.web_search_fallback
+# when the picker returns 'none'. v1's gap was that its fallback (Scenario_qa)
+# produced an ESSAY about the document type, not a SAMPLE DRAFT. This prompt
+# instructs the web-grounded model to produce a usable reference draft.
+DRAFTING_WEB_FALLBACK_PROMPT = """You are producing a SAMPLE REFERENCE DRAFT of an Indian-law document.
 
-# Doc-type-conditional rule blocks. The outline call substitutes ONE of these
-# into the {doc_type_rules} slot of DRAFT_OUTLINE_PROMPT based on the upstream
-# `_classify_doc_type` decision. Splitting these out lets us stop forcing a
-# Prayer / Verification / cause-title onto office letters and police complaints.
+The user's drafting query is below. Our internal corpus has no close template
+for this kind of document, so use authoritative Indian-law sources on the web
+(government portals like indiacode.nic.in, indiankanoon.org, courts' own
+websites, recognised legal-research sites) to produce a sample draft.
 
-DRAFT_OUTLINE_RULES_COURT_FILING = """The user is asking for a COURT-FILED PLEADING
-(plaint, petition, written statement, bail / anticipatory bail, IA, Section 200
-CrPC / Section 223 BNSS magistrate complaint, writ, PIL, SLP, application to a
-court, succession-certificate application to District Judge, probate petition).
+## What to produce
 
-  - Cause-title is REQUIRED in court_details: "IN THE COURT OF ...",
-    "IN THE MATTER OF:", Plaintiff/Petitioner block, "Versus", Defendant/
-    Respondent block, bolded SUBJECT HEADING at the end (the assembler
-    appends the heading from document_title — do NOT add it yourself).
-  - PARTY NUMBERING in court_details when multiple parties exist:
-    (a) Number plaintiffs/petitioners as 1, 2, 3, ... sequentially.
-    (b) Number defendants/respondents INDEPENDENTLY, starting fresh at
-        1, 2, 3, ... — DO NOT continue the plaintiff numbering into the
-        defendant list (no "Defendant No. 9" when there are 8 plaintiffs).
-    (c) EVERY named party on each side carries a number prefix
-        ("1. NAME"). DO NOT leave the first party unnumbered as a
-        "lead" / "head of family" / "karta" even if the source plaint
-        did so.
-    (d) Aggregate descriptors such as "All Nos. 1 to N R/at <address>"
-        MUST use the actual count N of parties in that list — count
-        the parties you wrote before emitting the descriptor.
-  - Prayer / Relief Sought IS the final SUBSTANTIVE section before
-    Verification. 5-8 numbered reliefs (one paragraph each).
-  - Verification (Order VI Rule 15 CPC) is mandatory after Prayer.
-  - Affidavit-in-Support (Order XIX Rule 3 CPC) is mandatory for suits,
-    writs, bail applications.
-  - For civil suits: Schedule of Properties, Valuation and Court Fee, List
-    of Documents are added later by the procedural-injection step — do NOT
-    duplicate them here unless they are central to the user's facts.
-  - For temporary-injunction prayers: a SEPARATE IA under Order XXXIX
-    Rules 1 & 2 CPC is added later — do NOT carve out a standalone IA
-    here either.
+A sample draft — NOT an explanation, NOT a Q&A answer, NOT a description of
+how to draft. The output should look like a usable reference template that a
+lawyer could read and adapt.
+
+The draft should include:
+  - The conventional heading / addressee / cause-title block for this kind
+    of document (whatever the document type requires — varies by document)
+  - The body paragraphs with the conventional structure
+  - The conventional closing / signature / verification block (whatever the
+    document type requires)
+  - Realistic-looking placeholders ([Name], [Date], [Address]) for fields
+    a real user would fill in
+  - Inline statute citations with correct Act names + section numbers
+
+## What NOT to produce
+
+  - Do NOT write "Here is a sample draft of..." preamble. Start directly
+    with the document content.
+  - Do NOT write a Q&A explaining what the document is or how it works.
+  - Do NOT include a disclaimer at the end ("This is a sample, consult a
+    lawyer") — the system adds disclaimers separately.
+  - Do NOT include a "Sources" or "References" appendix listing where you
+    found the information. Just produce the draft.
 """
 
-DRAFT_OUTLINE_RULES_TRIBUNAL_APPELLATE = """The user is asking for a WRITTEN
-SUBMISSION before a tax / quasi-judicial appellate body (CIT(A), ITAT, NFAC,
-GST Appellate Tribunal, AAAR, CESTAT, NCLT, NCLAT, SAT, DRT, DRAT).
-
-  - court_details uses the appellate layout: "BEFORE THE HON'BLE <FORUM>",
-    Appeal No. / Assessment Year line, "(Appellant)" / "(Respondent)" in
-    parentheses on their own lines, plain "Vs." (NOT bolded "Versus"),
-    Subject line citing the impugned order, "Most Respectfully Showeth:".
-  - Section shape (5-7 sections):
-      (i)   "1. STATEMENT OF FACTS OF THE CASE" (8-12 numbered paras)
-      (ii)  "2. GROUNDS OF APPEAL (as filed in Form 35)" (one short paragraph per ground)
-      (iii) "ADDITIONAL GROUND OF APPEAL" — only if user asks
-      (iv)  "3. DETAILED WRITTEN SUBMISSION" — sub-headings using
-            "Re: Ground No. X – [title]"; cites case laws with full citation;
-            rebuts AO's reasoning. Estimate 4-8 paras per ground.
-      (v)   "4. PRAYER" — (a)/(b)/(c)/(d) reliefs.
-      (vi)  "5. REQUEST FOR VIDEO CONFERENCING HEARING" — 1 paragraph.
-  - DO NOT include: Plaintiff/Defendant cause-title party blocks with
-    Age/Occupation/R/ Address, Verification, Affidavit, Schedule of
-    Properties, Court Fee Statement, List of Documents — those are
-    court-filing artefacts and do NOT belong in an appellate written submission.
-"""
-
-DRAFT_OUTLINE_RULES_OFFICE_LETTER = """The user is asking for an OFFICE-LETTER
-APPLICATION to a NON-COURT authority (RTI to PIO; income / caste / domicile /
-character / NOC certificate to Tahsildar / SDM / Collector; leave / NOC to
-employer; letter to bank / housing society / university / regulator).
-
-  - court_details is the LETTER OPENING (Layout F from the section prompt):
-    title at top, "Date:", "To,", recipient designation, office address,
-    bolded "Subject:" line, then "Sir / Madam," and the applicant identity
-    paragraph. NO "IN THE COURT OF". NO "IN THE MATTER OF". NO
-    Plaintiff/Defendant blocks. NO "Versus".
-  - Section count: 3-5 SHORT body sections (NOT the 8-14 of a suit).
-    Typical shape:
-      1. Identity and standing of the applicant (1 short paragraph)
-      2. Facts / grounds for the request (2-4 numbered paragraphs — what
-         happened, when, what rule / section / entitlement is invoked)
-      3. Supporting documents enclosed (1 short paragraph)
-      4. Specific request / closing ("I therefore request you to kindly ...")
-  - DO NOT include any of: "Prayer", "Relief Sought", "Verification",
-    "Affidavit", "Schedule of Properties", "Court Fee Statement", "List of
-    Documents", "Cause of Action", "Grounds of Appeal". These are
-    COURT-FILING artefacts; an office letter has NONE of them.
-  - Signature block is appended automatically by the footer builder — do
-    NOT add a "Signature" section.
-  - Total length is typically a single page. Be terse.
-"""
-
-DRAFT_OUTLINE_RULES_POLICE_COMPLAINT = """The user is asking for a POLICE COMPLAINT
-addressed to the SHO / Police Inspector (NOT a Section 200 CrPC magistrate
-complaint — that one is court_filing).
-
-  - court_details is the police-letter opening (Layout D): title at top,
-    "Date:", "To,", "The Police Inspector / Station House Officer," police
-    station name + address, bolded "Subject:" line, then "Sir / Madam," and
-    the complainant identity paragraph. NO "IN THE COURT OF". NO
-    Plaintiff/Defendant blocks. NO "Versus".
-  - Section count: 4-6 body sections:
-      1. Identity of the complainant (1 short paragraph)
-      2. Sequence of events / facts (chronological, 3-6 numbered paragraphs)
-      3. Identity of the accused (if known)
-      4. Offences invoked (sections of BNS / IPC) with brief reasoning
-      5. Witnesses / evidence / documents enclosed (if any)
-      6. Specific request: "register an FIR and investigate" / "take
-         cognizance" — closing paragraph
-  - DO NOT include any of: "Prayer", "Verification", "Affidavit",
-    "Cause Title", "Grounds of Appeal".
-  - Signature is appended automatically by the footer builder.
-"""
-
-DRAFT_OUTLINE_RULES_LEGAL_NOTICE = """The user is asking for a LEGAL NOTICE or
-a REPLY to a legal notice (Section 138 NI Act, demand notice, eviction
-notice). This is a PRE-LITIGATION CORRESPONDENCE, NOT a pleading.
-
-  - court_details is the notice opening (Layout B): title at top
-    (e.g. "LEGAL NOTICE"), "Date:", "To,", recipient block with address,
-    bolded "Subject:" line, then "Sir / Madam," and the standard "Under
-    instructions from and on behalf of my client ..." paragraph.
-    NO "IN THE COURT OF". NO Plaintiff/Defendant blocks. NO "Versus".
-  - Section count: 3-5 body sections:
-      1. Facts / background of the transaction or dispute
-      2. Statutory / contractual basis for the claim (cite the relevant
-         section / clause inline)
-      3. Specific demand (pay X within Y days / cease and desist / vacate /
-         reply to specific allegations)
-      4. Consequence of non-compliance (civil suit / criminal complaint /
-         eviction)
-      5. Closing — "Take notice accordingly."
-  - DO NOT include any of: "Prayer", "Verification", "Affidavit",
-    "Grounds of Appeal", "Cause of Action" as a separate section. A legal
-    notice ASSERTS the cause of action narratively, not in court-filing
-    categories.
-  - Signature is the advocate's, appended automatically by the footer builder.
-"""
-
-DRAFT_OUTLINE_RULES_AGREEMENT_DEED = """The user is asking for a PRIVATE
-CONTRACT or TESTAMENTARY INSTRUMENT (agreement to sell, MOU, lease deed,
-sale deed, power of attorney, gift deed, will).
-
-  - court_details uses the agreement layout (Layout C): title at top,
-    "THIS <AGREEMENT/DEED/WILL> IS MADE AND EXECUTED ON THIS <date>",
-    "BETWEEN" + First Party block + role label, "AND" + Second Party block +
-    role label. NO "IN THE COURT OF". NO Prayer/Verification.
-  - Section shape (6-9 sections, depends on subject):
-      - Recitals / Background ("WHEREAS ...")
-      - Definitions (if a complex commercial agreement)
-      - Subject matter of the agreement / property description
-      - Consideration / consideration paid
-      - Covenants / obligations of each party
-      - Representations and warranties
-      - Indemnity / dispute resolution / governing law
-      - Termination / default / remedies
-      - Execution (signatures of parties + witnesses)
-  - DO NOT include any of: "Prayer", "Relief Sought", "Verification",
-    "Affidavit", "Grounds", "Cause of Action".
-"""
-
-DRAFT_OUTLINE_RULES_AFFIDAVIT = """The user is asking for a STANDALONE AFFIDAVIT
-(affidavit for change of name, affidavit for passport, affidavit of support,
-affidavit for re-verification). When the affidavit is in support of a court
-filing, treat it as a court_filing instead.
-
-  - court_details opens with "BEFORE THE HON'BLE NOTARY / OATH COMMISSIONER"
-    or directly with the deponent block. NO Plaintiff/Defendant. NO Prayer.
-  - Section shape (3-5 sections):
-      1. Identification of the deponent ("I, <Name>, S/o <Father>, aged
-         <age>, R/o <address>, do hereby solemnly affirm and declare as
-         under:")
-      2. The fact(s) being sworn to (one per paragraph, numbered)
-      3. Statement that the contents are true to the deponent's knowledge
-      4. Place + Date + Deponent signature line
-      5. Verification clause and notary attestation block
-  - DO NOT include: Prayer, Relief Sought, Grounds, Cause of Action.
-"""
-
-DRAFT_OUTLINE_RULES_BY_TYPE = {
-    "court_filing": DRAFT_OUTLINE_RULES_COURT_FILING,
-    "tribunal_appellate": DRAFT_OUTLINE_RULES_TRIBUNAL_APPELLATE,
-    "office_letter": DRAFT_OUTLINE_RULES_OFFICE_LETTER,
-    "police_complaint": DRAFT_OUTLINE_RULES_POLICE_COMPLAINT,
-    "legal_notice": DRAFT_OUTLINE_RULES_LEGAL_NOTICE,
-    "agreement_deed": DRAFT_OUTLINE_RULES_AGREEMENT_DEED,
-    "affidavit": DRAFT_OUTLINE_RULES_AFFIDAVIT,
-}
-
-
-DRAFT_OUTLINE_PROMPT = """You are a legal document architect specializing in Indian law.
-Given USER-PROVIDED FACTS (when present), the user's query, and a reference template,
-create a CONCISE section-by-section outline for the requested legal document.
-
-CRITICAL: When USER-PROVIDED FACTS are present (e.g. extracted from an uploaded plaint,
-contract, or notice), the outline MUST be tailored to those specific facts — the court
-name, party titles, case type, and section breakdown should match the user's case, NOT
-the reference template's example. The reference template provides STRUCTURE only.
-
-DOC-TYPE-SPECIFIC RULES (read this FIRST — these override the generic rules below
-whenever they conflict):
-{doc_type_rules}
-
-Generic rules (apply when the doc-type-specific block does NOT prescribe otherwise):
-1. Include ONLY necessary sections — no padding, no filler sections.
-2. Each section needs: title, description of content, estimated paragraph count.
-3. Section count guidelines (target range — choose what the facts require):
-   - Bail applications: 5-8 sections
-   - Suits/plaints: 8-14 sections (include Schedule of Properties, Court Fee
-     Statement, List of Documents, Affidavit; if a temporary injunction is
-     prayed for, ALSO add a separate "Interim Application under Order XXXIX
-     Rules 1 & 2 CPC" section after the main prayer)
-   - Written statements: 6-8 sections
-   - Legal notices: 3-5 sections
-   - Agreements/deeds: 6-9 sections
-   - Petitions (divorce/maintenance): 6-8 sections
-   - Wills/succession: 4-6 sections
-   - Appeals/revisions: 6-9 sections
-   - **CIT(A) / ITAT / GST appellate / NCLT written submissions**: 5-7
-     sections, following the established appellate-submission shape:
-       (i)   "1. STATEMENT OF FACTS OF THE CASE" — chronological narrative
-             of how the assessment/order was passed (8-12 numbered paras).
-       (ii)  "2. GROUNDS OF APPEAL (as filed in Form 35)" — list of grounds
-             extracted from the paperbook / Form 35; one short paragraph per
-             ground stating the ground number and title.
-       (iii) "ADDITIONAL GROUND OF APPEAL" — only if the user asks or the
-             facts genuinely warrant one. Skip otherwise.
-       (iv)  "3. DETAILED WRITTEN SUBMISSION" — the bulk of the document.
-             Sub-headings inside this section MUST use the pattern
-             "**Re: Ground No. X – [ground title]**" (or combine related
-             grounds: "**Re: Ground No. 1, 2 & 7 – …**"). Each sub-section
-             argues the ground in detail, cites case laws with full
-             citation (party names + year + reporter + court), AND rebuts
-             the AO's reasoning + distinguishes any case laws the AO
-             relied upon. Estimate 4-8 paragraphs per ground.
-       (v)   "4. PRAYER" — (a)/(b)/(c)/(d) reliefs (annul / delete /
-             quash penalty / any other relief).
-       (vi)  "5. REQUEST FOR VIDEO CONFERENCING HEARING" — 1 paragraph
-             asking for VC hearing before the final order.
-     DO NOT include: cause title party blocks ("Plaintiff/Defendant" with
-     Age/Occupation/R/ Address), Verification, Affidavit, Schedule of
-     Properties, Court Fee Statement, List of Documents — those are
-     court-filing artefacts and do NOT belong in a CIT(A) written
-     submission.
-4. DO NOT include these as separate sections:
-   - "Introduction" or "Preliminary" (waste of space — courts don't need this)
-   - "Definitions" (courts know legal terms)
-   - "Background of Law" (cite law inline, don't dedicate a section)
-   - "Scope and Purpose" (obvious from the document type)
-5. Standard sections to include (as applicable — SUBJECT TO the doc-type
-   block above, which can drop Prayer/Verification/Affidavit entirely):
-   - Brief facts / synopsis (concise, factual, chronological)
-   - Grounds/arguments (consolidate — group 3-5 grounds per section, NOT one section per ground)
-   - Legal provisions relied upon (inline with arguments, or brief separate section)
-   - Prayer/relief sought — ONLY when the doc-type block calls for it
-     (court_filing, tribunal_appellate). For office_letter, police_complaint,
-     legal_notice, agreement_deed, affidavit — DO NOT add a "Prayer" section.
-   - Verification — ONLY for court_filing. NOT for letters/notices/agreements.
-   - Affidavit (if required by court_filing facts)
-6. Mark sections that need case law citations with needs_citations=true.
-7. Paragraph count per section depends on the section's role:
-   - Brief Facts / Synopsis: 6-10 numbered paragraphs (chronological detail).
-   - Grounds / Arguments: 4-8 sub-paragraphs (one per ground or doctrine).
-   - Description of Properties / Schedule: 1 sub-paragraph per asset (no upper
-     cap — every flat, plot, vehicle, share holding gets its own block).
-   - Cause of Action / Jurisdiction / Limitation: 3-6 paragraphs each.
-     Jurisdiction must cover BOTH territorial (Sec 16/19/20 CPC) AND
-     pecuniary (Sec 6 CPC + the applicable Court Fees Act) with full
-     statutory citations; never reduce to a one-sentence stub.
-   - Prayer: 5-8 numbered reliefs (one paragraph each).
-   - Verification / Affidavit: 1-3 paragraphs of statutory wording.
-   - Court Fee Statement: 2-4 SENTENCES (citation + valuation basis + amount).
-     Not paragraphs — keep it tight.
-   - **List of Documents: TABLE format, not prose**. Columns `Sr. No. |
-     Document | Date | Marked As`. One row per document. No intro paragraph,
-     no minimum word count.
-   - Schedule of Properties: TABLE when ≥2 assets (`Sr. No. | Description |
-     CTS/Survey | Area | Boundaries`); 1-2 short paragraphs for a single asset.
-   Aim for substantive pleading on the legal sections, not stubs. A
-   section that needs depth gets it; a section that's just statutory
-   wording stays compact. Procedural blocks (List of Documents, Court
-   Fee, Schedule) stay tight regardless of how much depth the body
-   sections get — they are reference data, not argument.
-8. IMPORTANT: For court_filing and tribunal_appellate ONLY, Prayer/relief
-   section MUST appear as the final substantive section before
-   Verification/Affidavit. For office_letter, police_complaint,
-   legal_notice, agreement_deed, affidavit — see the doc-type block above;
-   those types END with their own closing convention (request paragraph,
-   "Take notice accordingly", execution/signature block) — NOT a Prayer.
-9. Think like a BUSY judge reading this — every section must justify its existence.
-10. Section TITLES — emit a plain noun-phrase title only. Do NOT prefix the
-    title with a number, letter, or any ordinal marker. The document
-    assembler attaches its own numbered prefix (`## 1.`, `## 2.`, ...,
-    localized to the user's script — `## १.` in Hindi, `## ௧.` in Tamil,
-    etc.) so prefixes here produce duplicated headings like
-    "## 1. १. याचिका के तथ्य". Correct title: "याचिका के तथ्य" /
-    "Statement of Facts" / "Prayer" / "Verification". Wrong: "1. Prayer"
-    / "१. प्रार्थना" / "(a) Statement of Facts".
-11. Section DESCRIPTIONS — write a brief SCOPE NOTE (1-3 sentences) of what
-    content the section will carry. Do NOT write the description as a
-    template or as a set of instructions for the section LLM. In particular,
-    DO NOT emit bracketed placeholders that name another section's
-    paragraph range or any other to-be-computed value, e.g.:
-        WRONG: "Verify the contents of paragraphs [first paragraph number
-                of Reply on Merits] to [last paragraph number of Additional
-                Submissions] are true."
-        WRONG: "List the documents marked Exhibit [first exhibit letter] to
-                [last exhibit letter]."
-        WRONG: "State the value of the suit as [computed valuation]."
-    The placeholders are written hoping the section LLM will fill them in,
-    but the section LLM sees them as content to echo and leaks them
-    verbatim into the user-facing draft. Instead, describe the scope in
-    plain prose:
-        RIGHT: "Standard Order XIX Rule 3 CPC affidavit verifying the
-                factual paragraphs of the written statement; the section
-                LLM resolves the actual paragraph range from the outline
-                summary."
-        RIGHT: "List of all documents relied upon in the written
-                statement, in tabular form with Sr. No., Description,
-                Date, and Marked-As columns."
-    If a section truly needs a value to be filled later by the user
-    (court name, party name, amount), that BELONGS in the section body
-    as a `[Bracketed Placeholder]` — but NOT in this scope note.
-"""
-
-# Append shared Indian-legal discipline blocks to DRAFT_OUTLINE_PROMPT.
-DRAFT_OUTLINE_PROMPT += (
-    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
-    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
-    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
-)
+# Append Indian-legal authorized-sources allowlist so the web search prefers
+# government / authoritative legal sources over content-mill blogs.
+DRAFTING_WEB_FALLBACK_PROMPT += "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
 
 
 # --- Drafting Pipeline: Citation Injection (with real DB results) ---

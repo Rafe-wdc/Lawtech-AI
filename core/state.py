@@ -152,9 +152,6 @@ class LegalAgentState(MessagesState):
     # Third-party integration content (Google Docs, Notion)
     integration_context: dict | None
 
-    # Draft continuation (for incomplete drafts that need retry)
-    draft_continuation: dict[str, Any] | None
-
     # Per-request drafting flag: include the REFERENCES & CITATIONS appendix
     # (fans out Scenario/Legislation/Judgment alongside Drafting). None means
     # "use DRAFTING_CITE_APPENDIX_DEFAULT from settings".

@@ -1,10 +1,18 @@
 # Drafting Intelligence Plan
 
+> **⚠️ SUPERSEDED 2026-06-28** by [`drafting_simplification_plan.md`](drafting_simplification_plan.md).
+>
+> This plan moved the drafting agent toward *more* machinery — 25 forum profiles, evidence RAG with provenance, per-section authority retrieval, self-healing validation. After Rohit's 2026-06-28 review ("our drafting work is useless… users feeling lawttorney's drafting is stupid"), direction was reversed: strip the agent down to a v1-style two-source pipeline (ES drafting picker → web fallback) feeding a single Gemini Pro call. No enums, no skeletons, no mandatory sections, no doctrinal stance. See the simplification plan for the current direction.
+>
+> The diagnoses in §2 of this doc (60 KB guardrail ceiling, `_MAX_SECTIONS = 16` double-cap, paragraph numbering drift) remain factually accurate and may inform Phase B of the simplification plan, but the *prescriptions* in §3 onward (skeleton parser + dynamic router, evidence RAG, per-section authority retrieval, forum profiles) are not being pursued. Kept for historical context only.
+
+---
+
 **Date:** 2026-06-22
 **Author:** Architecture research synthesis
 **Scope:** Reshape `agents/drafting.py` and its supporting infrastructure into a self-orchestrating, evidence-grounded, self-healing legal drafting agent that handles complex user-authored skeletons (e.g. the Avachat Writ of Mandamus) efficiently across all major Indian forums.
 
-**Status:** Plan — not implementation. Awaiting user review before any code changes.
+**Status:** **Superseded.** Original status was "Plan — not implementation. Awaiting user review."
 
 ---
 

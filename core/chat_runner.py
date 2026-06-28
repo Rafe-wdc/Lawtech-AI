@@ -286,7 +286,6 @@ async def run_chat_pipeline(
     all_source_metadata: list[dict] = []
     effective_query = i.query
     query_rewritten = False
-    draft_continuation_data: dict | None = None
 
     try:
         async with async_timeout_cm(300):
@@ -383,9 +382,6 @@ async def run_chat_pipeline(
                     if "source_metadata" in update and update["source_metadata"]:
                         all_source_metadata = update["source_metadata"]
 
-                    if "draft_continuation" in update and update["draft_continuation"]:
-                        draft_continuation_data = update["draft_continuation"]
-
     except TimeoutError:
         log.error("Stream timed out after 300s",
                   endpoint=i.endpoint_name, thread_id=i.thread_id[:12])
@@ -459,13 +455,6 @@ async def run_chat_pipeline(
             log.error("Failed to save chat history",
                       endpoint=i.endpoint_name, error=str(e))
 
-    # Persist draft continuation metadata for incomplete drafts
-    if draft_continuation_data:
-        try:
-            await chat_store.save_draft_continuation(i.thread_id, draft_continuation_data)
-        except Exception as e:
-            log.error("Failed to save draft continuation", error=str(e))
-
     # Compute token usage NOW so it's available for both the cache write
     # and the done event below. Previously this assignment lived AFTER the
     # cache-set block, which crashed every streaming first-turn request
@@ -480,7 +469,6 @@ async def run_chat_pipeline(
         i.enable_cache
         and i.is_first_turn
         and final_response
-        and not draft_continuation_data
         and not i.file_context
         and not integration_context_dict
     )
@@ -505,5 +493,4 @@ async def run_chat_pipeline(
         "conversation_turn": conversation_turn,
         "query_rewritten": query_rewritten,
         "effective_query": effective_query if query_rewritten else None,
-        "has_draft_continuation": draft_continuation_data is not None,
     })

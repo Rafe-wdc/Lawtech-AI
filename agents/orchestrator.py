@@ -766,8 +766,24 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
 
     For single-agent plans, returns empty dict (agent uses original query).
     For multi-agent plans, rewrites the query for each agent's domain.
+
+    Skips when the user's original query is already long enough to be
+    standalone (>=500 chars). The AGENT_QUERY_REWRITE_PROMPT was designed
+    to optimise SHORT user prompts for per-agent retrieval, and it
+    compresses fact-rich drafting prompts (party names, dates, itemised
+    Stridhan lists) into short search queries — which then propagates a
+    facts-less query to drafting_node via agent_queries["Drafting"], and
+    drafting falls back to template example values. Per
+    feedback_preserve_user_query: never lose information from the user's
+    prompt anywhere in the pipeline. Returning {} causes all domain
+    agents to fall back to state["query"] (the full original).
     """
     if len(agents) <= 1:
+        return {}
+
+    if len(query) >= 500:
+        log.debug("Skipping per-agent query rewrite — query already standalone-length",
+                  query_chars=len(query), agents=agents)
         return {}
 
     try:

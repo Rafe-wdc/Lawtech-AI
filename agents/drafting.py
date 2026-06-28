@@ -670,23 +670,38 @@ async def drafting_node(state: LegalAgentState) -> dict:
     await _AGENT_SEMAPHORE.acquire()
 
     try:
-        # --- 4. Extract structured case facts (real names/dates/amounts) ---
-        # Run the extractor against whichever source carries the facts:
-        #   - uploaded files / pasted context / integration content → user_facts
-        #   - or the user query itself when the user pasted facts inline
-        #     (long queries on the drafting path almost always carry case-
-        #     specific facts: party names, dates, amounts, itemised lists)
-        # Without this second branch, the picked reference template's example
-        # values dominated generation and the draft fabricated substitutes.
+        # --- 4. Resolve case_facts (the structured / verbatim block the
+        # generation LLM uses as the SOURCE OF TRUTH for names/dates/amounts).
+        #
+        # Two paths, depending on where the user put the facts:
+        #
+        #   (a) Attachments / pasted context / integration content → user_facts
+        #       can be 30 KB+ of raw document text. Summarise it through the
+        #       Gemini Flash extractor (`_extract_case_facts`) so the
+        #       generation prompt receives a compact, structured bullet list
+        #       instead of a 30 KB blob (which the section LLM would skim
+        #       past).
+        #
+        #   (b) Inline-in-query (no attachments) → use the entire query
+        #       VERBATIM as case_facts. We deliberately do NOT run the
+        #       extractor here: that's an LLM call which itself may compress
+        #       or paraphrase, and the saved feedback `feedback_preserve_user_query`
+        #       is explicit — "no truncation, summarization, or shortening of
+        #       the user's query anywhere in the pipeline." The query is
+        #       already authoritative; pass it through. The same text also
+        #       appears in the USER QUERY block of the generation prompt;
+        #       duplication is intentional reinforcement so the LLM treats
+        #       inline-pasted facts as source-of-truth rather than as
+        #       instructional preamble.
         case_facts = ""
         if user_facts:
             progress("drafting", "Extracting key facts from your document...",
                      step="extract")
             case_facts = await _extract_case_facts(user_facts)
         elif len(query) >= 500:
-            progress("drafting", "Extracting key facts from your prompt...",
+            progress("drafting", "Using your prompt as case facts...",
                      step="extract")
-            case_facts = await _extract_case_facts(query)
+            case_facts = query
 
         # --- 5. Acquire reference draft (ES picker → web fallback if none) ---
         progress("drafting", "Searching for a reference template...",

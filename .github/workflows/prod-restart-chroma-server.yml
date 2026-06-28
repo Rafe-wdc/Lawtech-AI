@@ -1,0 +1,139 @@
+name: Prod — restart chroma server + API (clear stuck pool)
+
+# One-off workflow_dispatch. The lawttorney-chroma server's SQLAlchemy
+# pool is exhausting ("pool timed out while waiting for an open
+# connection"), causing every PDF upload to hit the 180s
+# CHROMA_STORE_TIMEOUT_S. This workflow:
+#
+# 1. Tails lawttorney-chroma's own journalctl (last 5 min) so we see
+#    what the chroma server itself reports
+# 2. Restarts lawttorney-chroma (clears stuck connections)
+# 3. Restarts lawttorney-v2 (workers reconnect with fresh HTTP clients)
+# 4. Waits for both to be healthy
+# 5. Reports new state
+#
+# This is a MITIGATION not a fix. If the pool exhausts again under
+# load, we need a code-level fix (retry-with-backoff or semaphore)
+# and/or chroma pool tuning.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restart:
+    name: Restart chroma + API
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Tail chroma logs + restart both services + verify
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "=================================================="
+          echo " 1. lawttorney-chroma logs (last 5 min, errors only)"
+          echo "=================================================="
+          sudo journalctl -u lawttorney-chroma --since "5 minutes ago" --no-pager 2>/dev/null \
+            | grep -iE "error|exception|warning|timeout|pool|connection|sqlite" \
+            | tail -30 \
+            || echo "  (no error/warning lines)"
+          echo
+          echo "  --- last 10 lines (any level) ---"
+          sudo journalctl -u lawttorney-chroma -n 10 --no-pager 2>/dev/null | sed 's/^/  /'
+          echo
+
+          echo "=================================================="
+          echo " 2. Pre-restart state"
+          echo "=================================================="
+          echo "  lawttorney-chroma: $(sudo systemctl is-active lawttorney-chroma)"
+          echo "  lawttorney-v2:     $(sudo systemctl is-active lawttorney-v2)"
+          echo "  chroma RSS:"
+          ps -eo pid,rss,cmd --no-headers 2>/dev/null \
+            | grep -E "chroma run|chromadb" | grep -v grep \
+            | awk '{rss_mb=$2/1024; printf "    pid=%-7s rss=%7.1f MB  %s\n", $1, rss_mb, substr($0, index($0,$3))}' \
+            | head -5 \
+            || echo "    (no chroma process found)"
+          echo "  chroma listening on :8000?"
+          sudo ss -tlnp 2>/dev/null | grep -E ":8000\s" | head -1 || echo "    (not listening)"
+          echo
+
+          echo "=================================================="
+          echo " 3. Restart lawttorney-chroma"
+          echo "=================================================="
+          sudo systemctl restart lawttorney-chroma
+          echo "  Waiting for chroma on :8000 ..."
+          for i in $(seq 1 24); do
+            sleep 2
+            if curl -sf --max-time 3 http://localhost:8000/api/v1/heartbeat >/dev/null 2>&1 \
+               || curl -sf --max-time 3 http://localhost:8000/api/v2/heartbeat >/dev/null 2>&1; then
+              echo "  Chroma healthy after $((i * 2))s"
+              break
+            fi
+            if [ "$i" = "24" ]; then
+              echo "  WARNING: chroma did not respond to heartbeat in 48s"
+              sudo journalctl -u lawttorney-chroma -n 30 --no-pager
+            fi
+          done
+          echo
+
+          echo "=================================================="
+          echo " 4. Restart lawttorney-v2 (workers reconnect)"
+          echo "=================================================="
+          sudo systemctl restart lawttorney-v2
+          HEALTHY=0
+          CONSECUTIVE_OK=0
+          for i in $(seq 1 36); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/3 consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "3" ]; then
+                HEALTHY=1
+                break
+              fi
+            else
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/36 (HTTP $STATUS, elapsed $((i * 5))s)"
+            fi
+          done
+          if [ "$HEALTHY" != "1" ]; then
+            echo "ERROR: lawttorney-v2 did not become healthy in 180s"
+            sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+            exit 1
+          fi
+          echo
+
+          echo "=================================================="
+          echo " 5. Post-restart state"
+          echo "=================================================="
+          echo "  lawttorney-chroma: $(sudo systemctl is-active lawttorney-chroma)"
+          echo "  lawttorney-v2:     $(sudo systemctl is-active lawttorney-v2)"
+          free -h | head -3
+          echo
+          curl -s --max-time 5 http://localhost:5001/pyapi/health 2>&1 | head -c 400
+          echo
+          echo
+          echo "=================================================="
+          echo " DONE — try uploading a PDF now. If timeouts return"
+          echo " within minutes, the issue is pool overload (not a leak)"
+          echo " and we need the code-level retry + lower timeout fix."
+          echo "=================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

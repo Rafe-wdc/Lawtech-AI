@@ -518,6 +518,95 @@ async def _acquire_reference_via_web(
 
 
 # ---------------------------------------------------------------------------
+# Stage 1.5 — Gather relevant legal context (Newacts / Legislation /
+# Judgments / SCI). Runs the same ES retrievers the domain agents use, in
+# parallel, and packages the top hits into a labelled context bundle the
+# drafting LLM can anchor on. Replaces the "drafting reads a single
+# template" approach with "drafting reads template + relevant statutes +
+# relevant precedents." Heavy on context, light on prompt engineering —
+# Gemini 2.5 Pro has a 1M-token window; we use a few thousand tokens of
+# real grounding instead of begging the model not to hallucinate.
+# ---------------------------------------------------------------------------
+
+async def _gather_relevant_context(query: str) -> dict[str, str]:
+    """Run the domain retrievers in parallel; return labelled blocks.
+
+    Each block is a string ready to drop into the generation prompt.
+    Returns {} when ES is down — generation still proceeds (degraded).
+    """
+    def _safe_invoke(tool, kwargs):
+        try:
+            return tool.invoke(kwargs)
+        except Exception as e:
+            log.warning("Context retriever failed",
+                        tool=getattr(tool, "name", "?"),
+                        error=str(e)[:200])
+            return {"hits": [], "total": 0}
+
+    async def _run(tool, kwargs):
+        return await asyncio.to_thread(_safe_invoke, tool, kwargs)
+
+    from tools.shared.elasticsearch_tools import (
+        search_newacts, search_legislation, search_judgments,
+    )
+    from tools.shared import sci_judgment_tools
+
+    # Run all retrievers in parallel.
+    newacts_t, legis_t, judg_t, sci_t = await asyncio.gather(
+        _run(search_newacts, {"query": query}),
+        _run(search_legislation, {"query": query}),
+        _run(search_judgments, {"query": query}),
+        _run(sci_judgment_tools.search_by_topic, {"query": query, "top_k": 3}),
+        return_exceptions=False,
+    )
+
+    def _format_es_hits(result, label: str, max_hits: int = 3,
+                       max_chars_per_hit: int = 800) -> str:
+        """Format ES-tool hits as a compact bullet block."""
+        hits = (result or {}).get("hits", [])[:max_hits]
+        if not hits:
+            return ""
+        chunks = []
+        for h in hits:
+            src = h.get("source") or h.get("metadata", {}).get("source") or "(unknown)"
+            content = h.get("page_content") or h.get("content") or ""
+            if not content:
+                continue
+            chunks.append(
+                f"- **Source**: `{src}`\n  {content[:max_chars_per_hit].strip()}"
+            )
+        if not chunks:
+            return ""
+        body = "\n\n".join(chunks)
+        return f"## {label}\n{body}\n"
+
+    def _format_sci(result, max_chars: int = 2400) -> str:
+        """SCI tool returns a JSON-stringified result. Trim to a sane size."""
+        if not result:
+            return ""
+        text = result if isinstance(result, str) else str(result)
+        text = text.strip()
+        if not text or text.startswith("No "):
+            return ""
+        return f"## RELEVANT SUPREME COURT JUDGMENTS\n{text[:max_chars]}\n"
+
+    blocks: dict[str, str] = {}
+    n = _format_es_hits(newacts_t, "RELEVANT BNS / BNSS / BSA SECTIONS")
+    if n: blocks["newacts"] = n
+    l = _format_es_hits(legis_t, "RELEVANT LEGISLATION SECTIONS")
+    if l: blocks["legislation"] = l
+    j = _format_es_hits(judg_t, "RELEVANT HIGH COURT JUDGMENTS")
+    if j: blocks["judgments"] = j
+    s = _format_sci(sci_t)
+    if s: blocks["sci"] = s
+
+    log.info("Context gather completed",
+             blocks=list(blocks.keys()),
+             total_chars=sum(len(v) for v in blocks.values()))
+    return blocks
+
+
+# ---------------------------------------------------------------------------
 # Stage 2 — Single-pass draft generation.
 # This function is the seam for future per-section fan-out — the public
 # signature stays `-> str` so callers don't need to change. See
@@ -531,6 +620,7 @@ async def _generate_draft(
     user_intent,
     user_language: str,
     progress_emit,
+    gathered_context: dict[str, str] | None = None,
 ) -> str:
     """Produce the full document in one Gemini 2.5 Pro call.
 
@@ -596,18 +686,31 @@ async def _generate_draft(
     #
     #   (short path) Use the original layout: USER QUERY narrative +
     #     facts_block (which is empty here) + reference template.
+    # Gathered context — relevant statutes / judgments retrieved by the
+    # domain agents' own ES tools. Injected BEFORE the reference / facts
+    # blocks because they are the legal-grounding background; the user-
+    # specific blocks should sit closer to the closing instruction (recency).
+    context_block = ""
+    if gathered_context:
+        parts = []
+        for key in ("newacts", "legislation", "judgments", "sci"):
+            v = gathered_context.get(key)
+            if v:
+                parts.append(v)
+        if parts:
+            context_block = (
+                "## RELEVANT LEGAL CONTEXT (statutes and precedents the "
+                "drafting system retrieved for this matter — use these for "
+                "INLINE STATUTORY CITATIONS and LEGAL REASONING; do NOT "
+                "wholesale copy their party names or case facts into the "
+                "draft)\n"
+                + "\n".join(parts)
+                + "\n"
+            )
+
     if _has_rich_facts:
-        # Two-source layout:
-        #   - CASE FACTS bullet list — labelled structured anchor
-        #   - USER QUERY narrative — same facts in natural-language context,
-        #     placed LAST so the LLM is freshly attending to it. The bullet
-        #     list alone left the LLM unsure which entity went where (e.g.
-        #     "Plaintiff: Jyoti" → "Jyoti is the wife? or just the
-        #     plaintiff?" → falls back to [Wife's Name] placeholder).
-        #     Including the natural-language narrative right before the
-        #     closing instruction resolves the entity binding and produces
-        #     real values in the draft.
         user_block = (
+            f"{context_block}"
             f"{reference_block}"
             f"{facts_block}"
             "## USER QUERY AND CASE NARRATIVE (verbatim — every name, date, "
@@ -616,32 +719,39 @@ async def _generate_draft(
             f"{query.strip()}\n\n"
             "Produce the legal document the user asked for in standard "
             "Indian-law conventions. EVERY party name, date, address, "
-            "monetary amount, ornament / asset description, statutory "
-            "citation, and case-specific detail MUST come VERBATIM from the "
-            "CASE FACTS bullet list OR the USER QUERY NARRATIVE above. Do "
-            "NOT invent, substitute, paraphrase, or carry over canonical-"
-            "sounding Indian-law example values (e.g. 'Priyanka', 'Nashik', "
-            "'29 May 2022', 'Sangamner', 'Sneha', 'Bhausaheb', 'Sakore', "
-            "'Ahmednagar') — using them is a critical error. If a value is "
-            "genuinely absent from both sources above, use a clearly-"
-            "bracketed placeholder (e.g. [Advocate's Address], [Reference "
-            "Number]). Output ONLY the document — no preamble, no "
-            "postscript, no meta-commentary."
+            "monetary amount, ornament / asset description, sequence of "
+            "events, and case-specific detail MUST come VERBATIM from the "
+            "CASE FACTS bullet list OR the USER QUERY NARRATIVE above — "
+            "those are the only sources of fact for this matter. For "
+            "INLINE STATUTORY CITATIONS and LEGAL REASONING, draw on the "
+            "RELEVANT LEGAL CONTEXT (statutes / judgments) above. Do NOT "
+            "invent, substitute, paraphrase, or carry over canonical-"
+            "sounding Indian-law example party-names / places / dates "
+            "(e.g. 'Priyanka', 'Nashik', '29 May 2022', 'Sangamner', "
+            "'Sneha', 'Bhausaheb', 'Sakore', 'Ahmednagar') — those are "
+            "NOT in the case sources and using them is a critical error. "
+            "If a value is genuinely absent from both case sources above, "
+            "use a clearly-bracketed placeholder (e.g. [Advocate's "
+            "Address], [Reference Number]). Output ONLY the document — no "
+            "preamble, no postscript, no meta-commentary."
         )
     else:
         user_block = (
+            f"{context_block}"
             f"{reference_block}"
             "## USER QUERY (the document-type request — what to draft)\n"
             f"{query.strip()}\n\n"
             f"{facts_block}"
             "Produce the complete document the user asked for, in standard "
             "Indian-law conventions for the document type the user named. "
-            "If a value the document needs is not provided by the user, use "
-            "a clearly-bracketed placeholder (e.g. [Address], [Date], "
-            "[Reference Number]); NEVER copy a value from the REFERENCE "
-            "DRAFT — its values belong to a different matter and using "
-            "them is a critical error. Output ONLY the document itself — "
-            "no preamble, no postscript, no meta-commentary."
+            "Cite inline statutes and (where applicable) precedents from "
+            "the RELEVANT LEGAL CONTEXT above. If a value the document "
+            "needs is not provided by the user, use a clearly-bracketed "
+            "placeholder (e.g. [Address], [Date], [Reference Number]); "
+            "NEVER copy a party name / fact value from the REFERENCE DRAFT "
+            "— its values belong to a different matter and using them is "
+            "a critical error. Output ONLY the document itself — no "
+            "preamble, no postscript, no meta-commentary."
         )
 
     # Temperature 0 + larger thinking budget. The previous default
@@ -775,19 +885,32 @@ async def drafting_node(state: LegalAgentState) -> dict:
                      step="extract")
             case_facts = await _extract_case_facts(query)
 
-        # --- 5. Acquire reference draft (ES picker → web fallback if none) ---
-        progress("drafting", "Searching for a reference template...",
+        # --- 5. In parallel: acquire reference draft AND gather relevant
+        # legal context (statutes + judgments retrieved via the same ES
+        # tools the domain agents use). Both are independent retrievals;
+        # running them concurrently saves ~5s wall time vs sequential.
+        progress("drafting", "Searching templates and relevant law...",
                  step="reference")
-        reference_text, reference_source, reference_kind = \
-            await _acquire_reference_draft(
-                query,
-                progress,
-                user_language=user_language,
-                intent=intent_obj,
-                original_query=original_query,
+        (reference_text, reference_source, reference_kind), gathered_ctx = \
+            await asyncio.gather(
+                _acquire_reference_draft(
+                    query,
+                    progress,
+                    user_language=user_language,
+                    intent=intent_obj,
+                    original_query=original_query,
+                ),
+                _gather_relevant_context(query),
+            )
+        if gathered_ctx:
+            progress(
+                "drafting",
+                f"Gathered legal context: {', '.join(gathered_ctx.keys())}",
+                substep=True, step="reference",
+                found=len(gathered_ctx),
             )
 
-        # --- 6. Single-pass generation (Gemini 2.5 Pro) ---
+        # --- 6. Single-pass generation (Gemini 2.5 Pro) with gathered context ---
         draft = await _generate_draft(
             query=query,
             case_facts=case_facts,
@@ -795,6 +918,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             user_intent=intent_obj,
             user_language=user_language,
             progress_emit=progress,
+            gathered_context=gathered_ctx,
         )
 
         # --- 7. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---

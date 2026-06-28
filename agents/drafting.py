@@ -543,15 +543,35 @@ async def _generate_draft(
             f"{case_facts.strip()}\n\n"
         )
 
-    reference_block = (
-        "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
-        "IGNORE every name, date, address, amount, party detail, and case-"
-        "specific value in this block. They belong to a different person's "
-        "matter and MUST NOT appear in your output. Use ONLY the reference's "
-        "shape: section ordering, headings, salutations, conventions, "
-        "phrasing patterns, and statutory-citation style.)\n"
-        f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and case facts alone, following Indian-law conventions for the document type)'}\n\n"
-    )
+    # When the user has provided rich facts (long inline query or
+    # extracted attachment summary), the reference draft becomes net-
+    # negative: it's a fully-formed document with its OWN names / dates /
+    # amounts, and Gemini Pro at temp 0.4 over-attends to those concrete
+    # values and copies them into the output even with explicit "do not
+    # copy" instructions. Drop the reference in that case — the system
+    # prompt (DRAFTING_SYSTEM_PROMPT) already carries Indian-legal
+    # document conventions and the LLM can produce the right shape from
+    # facts alone. The reference is still passed through on short queries
+    # where the LLM genuinely needs a structural anchor.
+    _has_rich_facts = bool(case_facts) and len(case_facts) >= 500
+    if _has_rich_facts:
+        reference_block = (
+            "## REFERENCE DRAFT\n"
+            "(Skipped — the user has provided rich case facts above. "
+            "Produce the document directly from those facts, following "
+            "standard Indian-law conventions for the document type the "
+            "user named in the query.)\n\n"
+        )
+    else:
+        reference_block = (
+            "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
+            "IGNORE every name, date, address, amount, party detail, and case-"
+            "specific value in this block. They belong to a different person's "
+            "matter and MUST NOT appear in your output. Use ONLY the reference's "
+            "shape: section ordering, headings, salutations, conventions, "
+            "phrasing patterns, and statutory-citation style.)\n"
+            f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and case facts alone, following Indian-law conventions for the document type)'}\n\n"
+        )
 
     user_block = (
         "## USER QUERY (the source of truth — every fact in your output "

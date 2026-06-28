@@ -1,0 +1,161 @@
+name: Prod — investigate embed timeout (read-only)
+
+# One-off read-only diagnosis. The PDF upload "vector embedding timed out"
+# error persists in prod despite the Phase 7 thread caps (85b3260) and
+# the eager-load of both models (5ca5e20). Need to confirm what's
+# actually slow inside the 180s CHROMA_STORE_TIMEOUT_S window.
+#
+# Checks, in priority order:
+#   A. Did the eager-load logs print? (validates 5ca5e20 took effect)
+#   B. Are OMP_NUM_THREADS / MKL / OPENBLAS / TOKENIZERS set in worker
+#      env? (validates 85b3260 took effect)
+#   C. Worker process state (R = running, S = sleeping, D = uninterruptible
+#      disk wait — D is the smoking gun for IO bottleneck)
+#   D. ChromaDB mode: HTTP server or PersistentClient?
+#      PersistentClient with 6 workers = SQLite write contention
+#   E. chroma_store size + collection count + recent write activity
+#   F. Recent "vector embedding timed out" + "Stored in ChromaDB" log lines
+#   G. Top-10 CPU consumers right now
+#   H. Disk IO stats (iostat if available)
+#
+# Nothing is modified. Safe to run anytime.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  investigate:
+    name: Investigate embed timeout
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Diagnose
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "=================================================="
+          echo " A. Eager-load logs (did 5ca5e20 take effect?)"
+          echo "=================================================="
+          sudo journalctl -u lawttorney-v2 --since "10 minutes ago" --no-pager 2>/dev/null \
+            | grep -E "Embedding model eager-loaded|eager-load failed|QA embeddings eager" \
+            | tail -20 \
+            || echo "  (no eager-load lines in last 10 minutes — bad sign)"
+          echo
+
+          echo "=================================================="
+          echo " B. Thread-cap env vars in worker processes"
+          echo "=================================================="
+          PIDS=$(pgrep -f "gunicorn.*core.gateway:app" | head -7)
+          if [ -z "$PIDS" ]; then
+            echo "  No gunicorn workers found"
+          else
+            for pid in $PIDS; do
+              echo "  pid=$pid:"
+              sudo cat /proc/$pid/environ 2>/dev/null | tr '\0' '\n' \
+                | grep -E "^(OMP|MKL|OPENBLAS|TOKENIZERS)" \
+                | sed 's/^/    /' \
+                || echo "    (env vars not set)"
+            done
+          fi
+          echo
+
+          echo "=================================================="
+          echo " C. Worker process state (D = disk-wait, smoking gun)"
+          echo "=================================================="
+          ps -eo pid,stat,pcpu,pmem,rss,wchan:30,cmd --no-headers 2>/dev/null \
+            | grep -E "gunicorn.*core.gateway" \
+            | grep -v grep \
+            | awk '{rss_mb=$5/1024; printf "  pid=%-7s stat=%-4s cpu=%5s%% mem=%5s%% rss=%7.1fMB wchan=%-30s %s\n", $1, $2, $3, $4, rss_mb, $6, substr($0, index($0,$7))}' \
+            | head -15
+          echo
+          echo "  Legend: R=running, S=sleeping, D=uninterruptible-wait (disk/IO),"
+          echo "          Z=zombie. D for many seconds means disk is the bottleneck."
+          echo
+
+          echo "=================================================="
+          echo " D. ChromaDB mode (HTTP server vs PersistentClient)"
+          echo "=================================================="
+          CH=$(sudo grep "^CHROMA_SERVER_HOST=" /root/Lawtech-AI/.env 2>/dev/null | head -1)
+          if [ -n "$CH" ]; then
+            echo "  CHROMA_SERVER_HOST: ${CH#*=}"
+            echo "  Mode: HTTP server (writes go through chromadb-server, not SQLite directly)"
+            sudo systemctl is-active lawttorney-chroma 2>/dev/null || echo "  lawttorney-chroma: NOT running"
+          else
+            echo "  CHROMA_SERVER_HOST: (NOT SET)"
+            echo "  Mode: PersistentClient — 6 workers write to a SINGLE SQLite database"
+            echo "  This is the Scale-50 Phase 5 blocker. Writes serialize on SQLite lock."
+          fi
+          echo
+
+          echo "=================================================="
+          echo " E. chroma_store size + collection count + recent activity"
+          echo "=================================================="
+          CS=/root/Lawtech-AI/chroma_store
+          if [ -d "$CS" ]; then
+            echo "  Total size:        $(sudo du -sh $CS 2>/dev/null | cut -f1)"
+            echo "  Collection dirs:   $(sudo ls -d $CS/*/ 2>/dev/null | wc -l)"
+            echo "  chroma.sqlite3:    $(sudo ls -lh $CS/chroma.sqlite3 2>/dev/null | awk '{print $5}')"
+            echo "  Recent writes (mtime in last 5 min):"
+            sudo find $CS -type f -mmin -5 2>/dev/null | head -10 | sed 's/^/    /'
+          else
+            echo "  $CS does not exist"
+          fi
+          echo
+
+          echo "=================================================="
+          echo " F. Recent embed/chroma log lines (last 200 lines)"
+          echo "=================================================="
+          sudo journalctl -u lawttorney-v2 --since "10 minutes ago" --no-pager 2>/dev/null \
+            | grep -E "vector embedding timed out|Stored in ChromaDB|ChromaDB storage|chroma_store_start|chroma_store_done|chroma_store_timeout|_store_in_chromadb|Chroma.from_texts" \
+            | tail -30 \
+            || echo "  (no matching lines)"
+          echo
+
+          echo "=================================================="
+          echo " G. Top-10 CPU consumers right now (snapshot)"
+          echo "=================================================="
+          ps -eo pid,pcpu,pmem,rss,cmd --sort=-pcpu --no-headers 2>/dev/null \
+            | head -10 \
+            | awk '{rss_mb=$4/1024; printf "  pid=%-7s cpu=%5s%% mem=%5s%% rss=%7.1fMB %s\n", $1, $2, $3, rss_mb, substr($0, index($0,$5))}'
+          echo
+
+          echo "=================================================="
+          echo " H. Disk IO stats"
+          echo "=================================================="
+          if command -v iostat >/dev/null 2>&1; then
+            iostat -xm 1 2 2>/dev/null | tail -10
+          else
+            echo "  iostat not installed"
+            echo "  /proc/diskstats (root disk row):"
+            grep -E "^\s*\d+\s+\d+\s+(nvme0n1|xvda|sda|vda)\s" /proc/diskstats 2>/dev/null | head -3
+          fi
+          echo
+
+          echo "=================================================="
+          echo " I. Quick health snapshot"
+          echo "=================================================="
+          curl -s --max-time 5 http://localhost:5001/pyapi/health 2>&1 | head -c 400
+          echo
+
+          echo "=================================================="
+          echo " INVESTIGATION COMPLETE"
+          echo "=================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

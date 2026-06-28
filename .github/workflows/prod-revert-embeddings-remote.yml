@@ -1,0 +1,147 @@
+name: Prod — revert embeddings to REMOTE (microservice)
+
+# One-off workflow_dispatch. Undoes prod-switch-embeddings-local.yml.
+# Finds the latest .embed-bak-* backup for .env and lawttorney-v2.service,
+# restores them, re-enables and starts lawttorney-embed, then restarts the API.
+#
+# Safe to run multiple times: idempotent on the final state (remote mode,
+# embed service running, unit file has Requires=lawttorney-embed.service).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  revert:
+    name: Revert prod embeddings to remote microservice
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Restore env + unit from latest backup
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -uo pipefail
+
+          APP_DIR=/root/Lawtech-AI
+          ENV_FILE=$APP_DIR/.env
+          UNIT_FILE=/etc/systemd/system/lawttorney-v2.service
+          if ! sudo test -f "$UNIT_FILE"; then
+            UNIT_FILE_ALT=$(sudo systemctl show lawttorney-v2 -p FragmentPath --value 2>/dev/null)
+            if [ -n "$UNIT_FILE_ALT" ] && sudo test -f "$UNIT_FILE_ALT"; then
+              UNIT_FILE="$UNIT_FILE_ALT"
+            else
+              echo "FATAL: could not locate lawttorney-v2.service unit file"; exit 1
+            fi
+          fi
+
+          echo "=========================================================="
+          echo " 1. Locate latest .embed-bak-* backups"
+          echo "=========================================================="
+          ENV_BAK=$(sudo ls -1t ${ENV_FILE}.embed-bak-* 2>/dev/null | head -1)
+          UNIT_BAK=$(sudo ls -1t ${UNIT_FILE}.embed-bak-* 2>/dev/null | head -1)
+          echo "  env backup:  ${ENV_BAK:-(none)}"
+          echo "  unit backup: ${UNIT_BAK:-(none)}"
+          if [ -z "$ENV_BAK" ] && [ -z "$UNIT_BAK" ]; then
+            echo "  No backups found. Nothing to revert."
+            echo "  (If you switched manually without the workflow, restore by hand.)"
+            exit 0
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 2. Restore files"
+          echo "=========================================================="
+          if [ -n "$ENV_BAK" ]; then
+            sudo cp "$ENV_BAK" "$ENV_FILE"
+            echo "  Restored $ENV_FILE from $ENV_BAK"
+          fi
+          if [ -n "$UNIT_BAK" ]; then
+            sudo cp "$UNIT_BAK" "$UNIT_FILE"
+            echo "  Restored $UNIT_FILE from $UNIT_BAK"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 3. daemon-reload + bring embed back up"
+          echo "=========================================================="
+          sudo systemctl daemon-reload
+          sudo systemctl enable lawttorney-embed
+          sudo systemctl start lawttorney-embed
+          echo "  Waiting for embed health on :5100 ..."
+          for i in $(seq 1 24); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:5100/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              echo "  Embed healthy after $((i * 5))s"
+              break
+            fi
+            if [ "$i" = "24" ]; then
+              echo "  WARNING: embed did not become healthy in 120s. Continuing — API will still start."
+              sudo journalctl -u lawttorney-embed -n 30 --no-pager
+            fi
+          done
+          echo
+
+          echo "=========================================================="
+          echo " 4. Restart lawttorney-v2"
+          echo "=========================================================="
+          sudo systemctl restart lawttorney-v2
+          HEALTHY=0
+          CONSECUTIVE_OK=0
+          for i in $(seq 1 24); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/3 consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "3" ]; then
+                HEALTHY=1
+                break
+              fi
+            else
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/24 (HTTP $STATUS, elapsed $((i * 5))s)"
+            fi
+          done
+
+          if [ "$HEALTHY" != "1" ]; then
+            echo "ERROR: API did not return 3 consecutive 200s in 120s after revert."
+            sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+            exit 1
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 5. Post-revert state"
+          echo "=========================================================="
+          echo "-- .env embed line:"
+          sudo grep -nE "^EMBEDDING_SERVICE_URL" "$ENV_FILE" || echo "  (not set — still in local mode? check the backup)"
+          echo "-- unit Requires/After:"
+          sudo grep -nE "^(Requires|After)=" "$UNIT_FILE"
+          echo "-- embed service:"
+          sudo systemctl is-active lawttorney-embed 2>&1 || true
+          sudo systemctl is-enabled lawttorney-embed 2>&1 || true
+          echo "-- memory snapshot:"
+          free -h | head -3
+          echo
+
+          echo "=========================================================="
+          echo " REVERT DONE"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

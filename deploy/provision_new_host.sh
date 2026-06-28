@@ -207,11 +207,13 @@ for unit in lawttorney-v2.service lawttorney-embed.service lawttorney-chroma.ser
 done
 systemctl daemon-reload
 
-# Enable embed (needed by API). Do NOT auto-start lawttorney-v2 yet — that
-# happens in Phase 2 after Phase 1.6 smoke test confirms the box is healthy.
+# Embeddings are loaded in-process by the API (default). The embed unit
+# file is installed but NOT enabled — opt in only if you need to scale
+# embedding throughput beyond a single Python process.
+# Do NOT auto-start lawttorney-v2 yet — that happens in Phase 2 after
+# Phase 1.6 smoke test confirms the box is healthy.
 # Do NOT enable lawttorney-chroma — that's Phase 5.
-systemctl enable lawttorney-embed.service
-info "lawttorney-embed enabled (not started)."
+info "lawttorney-embed installed but NOT enabled — in-process embeddings are the default."
 info "lawttorney-v2 installed but NOT enabled — Phase 2 controls cutover."
 info "lawttorney-chroma installed but NOT enabled — Phase 5 controls cutover."
 
@@ -228,11 +230,12 @@ fi
 section "Provisioning complete"
 echo ""
 echo "  Next steps:"
-echo "    1. Start embedding service:    systemctl start lawttorney-embed"
-echo "    2. Smoke-test single worker:   ./start.sh   (uvicorn, single worker)"
-echo "    3. Run runbook §6 verification (curl /pyapi/health, /pyapi/health/detailed)"
-echo "    4. When ready: switch to gunicorn (Phase 2)"
+echo "    1. Smoke-test single worker:   ./start.sh   (uvicorn — loads BGE + MiniLM in-process)"
+echo "    2. Run runbook §6 verification (curl /pyapi/health, /pyapi/health/detailed)"
+echo "    3. When ready: switch to gunicorn (Phase 2)"
+echo "    4. (Optional) Remote embeddings: systemctl enable --now lawttorney-embed,"
+echo "       then set EMBEDDING_SERVICE_URL=http://localhost:5100 in .env, restart lawttorney-v2."
 echo ""
 echo "  Postgres password is at $PG_PW_FILE (chmod 600)."
-echo "  Tail systemd logs:  journalctl -u lawttorney-embed -f"
+echo "  Tail API logs:  journalctl -u lawttorney-v2 -f"
 echo ""

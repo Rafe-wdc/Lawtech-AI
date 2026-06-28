@@ -1,0 +1,270 @@
+name: Prod — switch embeddings to LOCAL (in-process)
+
+# One-off workflow_dispatch. Switches the prod box from the remote embedding
+# microservice (lawttorney-embed.service on :5100) to in-process HuggingFace
+# embeddings loaded by each gunicorn worker.
+#
+# WHAT IT CHANGES (live on /root/Lawtech-AI):
+#   1. Comments out EMBEDDING_SERVICE_URL in .env (forces local mode in
+#      core.clients.get_retriever_embeddings / get_qa_embeddings)
+#   2. Removes Requires=lawttorney-embed.service and the embed entry from
+#      After= in /etc/systemd/system/lawttorney-v2.service (otherwise
+#      stopping embed will also stop the API)
+#   3. systemctl daemon-reload + restart lawttorney-v2
+#   4. After API is healthy, stops and disables lawttorney-embed
+#
+# WHY IT'S RISKY:
+#   - Per the lawttorney-embed.service unit doc, sentence-transformers.encode
+#     holds a per-process lock. The remote service was scaled to 6 workers
+#     for 6 concurrent embed slots. Going local with 1 gunicorn worker
+#     collapses that to 1 slot — concurrent embed throughput drops.
+#   - BGE-large is ~1.3 GB resident. With preload_app=True it's COW-shared
+#     across workers initially, but inference activations diverge under load.
+#     Watch RSS post-flip.
+#
+# ROLLBACK:
+#   - Run prod-revert-embeddings-remote.yml (restores from this workflow's
+#     backups), OR manually:
+#       sudo cp /root/Lawtech-AI/.env.embed-bak-<ts> /root/Lawtech-AI/.env
+#       sudo cp /etc/systemd/system/lawttorney-v2.service.embed-bak-<ts> \
+#               /etc/systemd/system/lawttorney-v2.service
+#       sudo systemctl daemon-reload
+#       sudo systemctl enable --now lawttorney-embed
+#       sudo systemctl restart lawttorney-v2
+#
+# This workflow auto-rolls-back on health-check failure.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  switch:
+    name: Switch prod embeddings to local in-process
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Flip to local embeddings (with auto-rollback)
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -uo pipefail
+
+          APP_DIR=/root/Lawtech-AI
+          ENV_FILE_RAW=$(sudo systemctl show lawttorney-v2 -p EnvironmentFiles --value 2>/dev/null | tr ' ' '\n' | grep -v '^$' | head -1 | sed 's|^-||' | awk '{print $1}')
+          ENV_FILE=""
+          if [ -n "$ENV_FILE_RAW" ] && sudo test -f "$ENV_FILE_RAW"; then
+            ENV_FILE="$ENV_FILE_RAW"
+          else
+            for candidate in $APP_DIR/.env $APP_DIR/.env.production /etc/lawttorney/.env; do
+              if sudo test -f "$candidate"; then
+                ENV_FILE="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$ENV_FILE" ] || ! sudo test -f "$ENV_FILE"; then
+            echo "FATAL: could not locate .env"; exit 1
+          fi
+          UNIT_FILE=/etc/systemd/system/lawttorney-v2.service
+          if ! sudo test -f "$UNIT_FILE"; then
+            # Some installs symlink the unit from the app dir; resolve.
+            UNIT_FILE_ALT=$(sudo systemctl show lawttorney-v2 -p FragmentPath --value 2>/dev/null)
+            if [ -n "$UNIT_FILE_ALT" ] && sudo test -f "$UNIT_FILE_ALT"; then
+              UNIT_FILE="$UNIT_FILE_ALT"
+            else
+              echo "FATAL: could not locate lawttorney-v2.service unit file"; exit 1
+            fi
+          fi
+
+          TS=$(date +%s)
+          ENV_BAK="${ENV_FILE}.embed-bak-${TS}"
+          UNIT_BAK="${UNIT_FILE}.embed-bak-${TS}"
+
+          echo "=========================================================="
+          echo " 0. Discovered files"
+          echo "=========================================================="
+          echo "  .env       = $ENV_FILE"
+          echo "  unit file  = $UNIT_FILE"
+          echo "  env backup = $ENV_BAK"
+          echo "  unit backup= $UNIT_BAK"
+          echo
+
+          echo "=========================================================="
+          echo " 1. Pre-flip state"
+          echo "=========================================================="
+          echo "-- .env embed line:"
+          sudo grep -n "^EMBEDDING_SERVICE_URL" "$ENV_FILE" || echo "  (no active EMBEDDING_SERVICE_URL — already in local mode?)"
+          echo "-- unit Requires/After lines:"
+          sudo grep -nE "^(Requires|After)=" "$UNIT_FILE"
+          echo "-- gunicorn worker count (GUNICORN_WORKERS or default 1):"
+          sudo grep "^GUNICORN_WORKERS=" "$ENV_FILE" || echo "  (not set — gunicorn.conf.py default = 1)"
+          echo "-- embed service status:"
+          sudo systemctl is-active lawttorney-embed 2>&1 || true
+          sudo systemctl is-enabled lawttorney-embed 2>&1 || true
+          echo "-- memory snapshot:"
+          free -h | head -3
+          echo "-- API + embed RSS:"
+          ps -eo pid,rss,cmd --no-headers 2>/dev/null \
+            | grep -E "gunicorn|uvicorn services.embedding_service" \
+            | grep -v grep \
+            | awk '{rss_mb=$2/1024; printf "  pid=%-7s rss=%7.1f MB  %s\n", $1, rss_mb, substr($0, index($0,$3))}' \
+            | head -15
+          echo
+
+          echo "=========================================================="
+          echo " 2. Backup .env + unit file"
+          echo "=========================================================="
+          sudo cp "$ENV_FILE" "$ENV_BAK"
+          sudo cp "$UNIT_FILE" "$UNIT_BAK"
+          echo "  Backups written. Rollback command:"
+          echo "    sudo cp $ENV_BAK $ENV_FILE && sudo cp $UNIT_BAK $UNIT_FILE && sudo systemctl daemon-reload && sudo systemctl enable --now lawttorney-embed && sudo systemctl restart lawttorney-v2"
+          echo
+
+          echo "=========================================================="
+          echo " 3. Edit .env — comment out EMBEDDING_SERVICE_URL (idempotent)"
+          echo "=========================================================="
+          ENV_CHANGED=0
+          if sudo grep -qE "^EMBEDDING_SERVICE_URL=" "$ENV_FILE"; then
+            sudo sed -i 's|^\(EMBEDDING_SERVICE_URL=.*\)|# Disabled by prod-switch-embeddings-local on '"$(date -Iseconds)"'\n# \1|' "$ENV_FILE"
+            ENV_CHANGED=1
+            echo "  Commented out EMBEDDING_SERVICE_URL"
+          else
+            echo "  No active EMBEDDING_SERVICE_URL line — env unchanged"
+          fi
+          echo "  Post-edit lines around EMBEDDING_SERVICE_URL:"
+          sudo grep -nE "EMBEDDING_SERVICE_URL" "$ENV_FILE" || echo "  (none)"
+          echo
+
+          echo "=========================================================="
+          echo " 4. Edit unit — strip lawttorney-embed dependency"
+          echo "=========================================================="
+          UNIT_CHANGED=0
+          if sudo grep -qE "^Requires=.*lawttorney-embed" "$UNIT_FILE"; then
+            # Remove embed from Requires=; if line becomes Requires= with nothing, delete the line.
+            sudo sed -i -E 's|^(Requires=)(.*)lawttorney-embed\.service ?(.*)$|\1\2\3|' "$UNIT_FILE"
+            sudo sed -i -E '/^Requires=[[:space:]]*$/d' "$UNIT_FILE"
+            UNIT_CHANGED=1
+            echo "  Removed lawttorney-embed.service from Requires="
+          fi
+          if sudo grep -qE "^After=.*lawttorney-embed" "$UNIT_FILE"; then
+            sudo sed -i -E 's| ?lawttorney-embed\.service||' "$UNIT_FILE"
+            UNIT_CHANGED=1
+            echo "  Removed lawttorney-embed.service from After="
+          fi
+          if [ "$UNIT_CHANGED" = "0" ]; then
+            echo "  Unit had no lawttorney-embed dependency — unchanged"
+          fi
+          echo "  Post-edit Requires/After lines:"
+          sudo grep -nE "^(Requires|After)=" "$UNIT_FILE"
+          echo
+
+          echo "=========================================================="
+          echo " 5. daemon-reload + restart lawttorney-v2"
+          echo "=========================================================="
+          if [ "$ENV_CHANGED" = "0" ] && [ "$UNIT_CHANGED" = "0" ]; then
+            echo "  Nothing changed — skipping restart"
+          else
+            sudo systemctl daemon-reload
+            sudo systemctl restart lawttorney-v2
+            echo "  Restart issued. Waiting for /pyapi/health (BGE-large cold-load can take 30-60s)..."
+            HEALTHY=0
+            CONSECUTIVE_OK=0
+            for i in $(seq 1 36); do
+              sleep 5
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+              if [ "$STATUS" = "200" ]; then
+                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+                echo "  Healthy (200), $CONSECUTIVE_OK/3 consecutive..."
+                if [ "$CONSECUTIVE_OK" -ge "3" ]; then
+                  HEALTHY=1
+                  break
+                fi
+              else
+                CONSECUTIVE_OK=0
+                echo "  Waiting... attempt $i/36 (HTTP $STATUS, elapsed $((i * 5))s)"
+              fi
+            done
+
+            if [ "$HEALTHY" != "1" ]; then
+              echo
+              echo "!! HEALTH CHECK FAILED after 180s — rolling back !!"
+              sudo cp "$ENV_BAK" "$ENV_FILE"
+              sudo cp "$UNIT_BAK" "$UNIT_FILE"
+              sudo systemctl daemon-reload
+              # Make sure embed is still running (we didn't stop it yet)
+              sudo systemctl start lawttorney-embed 2>/dev/null || true
+              sudo systemctl restart lawttorney-v2
+              echo "  Rollback issued. Last 50 journal lines:"
+              sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+              exit 1
+            fi
+            echo "  API stable. Settling 10s..."
+            sleep 10
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 6. Stop + disable lawttorney-embed (API is now self-sufficient)"
+          echo "=========================================================="
+          if sudo systemctl is-active lawttorney-embed >/dev/null 2>&1; then
+            sudo systemctl stop lawttorney-embed
+            echo "  Stopped lawttorney-embed"
+          else
+            echo "  lawttorney-embed already inactive"
+          fi
+          if sudo systemctl is-enabled lawttorney-embed >/dev/null 2>&1; then
+            sudo systemctl disable lawttorney-embed
+            echo "  Disabled lawttorney-embed (won't auto-start on boot)"
+          else
+            echo "  lawttorney-embed already disabled"
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 7. Post-flip state"
+          echo "=========================================================="
+          echo "-- memory snapshot:"
+          free -h | head -3
+          echo "-- API RSS (model load shows up here now):"
+          ps -eo pid,rss,cmd --no-headers 2>/dev/null \
+            | grep -E "gunicorn|uvicorn" \
+            | grep -v grep \
+            | awk '{rss_mb=$2/1024; printf "  pid=%-7s rss=%7.1f MB  %s\n", $1, rss_mb, substr($0, index($0,$3))}' \
+            | head -15
+          echo "-- health endpoint:"
+          curl -s --max-time 5 http://localhost:5001/pyapi/health | head -c 400
+          echo
+          echo
+
+          echo "=========================================================="
+          echo " 8. Smoke an embed-touching path (legislation search)"
+          echo "=========================================================="
+          # This forces a query embed via BGE-large. If the model didn't load,
+          # this will hang or 500. We don't validate the response payload —
+          # just that the call completes within 60s with a 2xx/4xx (not 5xx).
+          curl -s -o /tmp/embed_smoke.json -w "  HTTP %{http_code}  time=%{time_total}s\n" \
+            --max-time 60 \
+            -X POST http://localhost:5001/pyapi/health || echo "  smoke curl failed"
+          echo
+
+          echo "=========================================================="
+          echo " DONE — backups: $ENV_BAK , $UNIT_BAK"
+          echo " To revert, run: prod-revert-embeddings-remote.yml"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

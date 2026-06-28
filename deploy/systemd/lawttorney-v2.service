@@ -1,9 +1,11 @@
 [Unit]
 Description=Lawttorney v2 API (gunicorn + uvicorn workers, multi-worker)
 Documentation=file:///root/Lawtech-AI/docs/scale_50_concurrent_users_plan.md
-After=network-online.target postgresql.service lawttorney-embed.service
+After=network-online.target postgresql.service
 Wants=network-online.target
-Requires=lawttorney-embed.service
+# Embeddings are loaded in-process by each gunicorn worker (see
+# core.clients.get_retriever_embeddings). The lawttorney-embed service
+# is kept available for opt-in remote mode but is not a hard dependency.
 # Phase 5 will add: Requires=lawttorney-chroma.service
 
 [Service]

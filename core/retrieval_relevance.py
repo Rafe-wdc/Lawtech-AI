@@ -285,8 +285,11 @@ async def _coarse_semantic_floor_async(query: str, chunks: list[str]) -> tuple[b
     ≈ 50 in-flight embed calls) and the queue depth was the throughput cliff.
 
     Gracefully falls back to the sync path when the configured embeddings
-    object doesn't implement the async methods (e.g. dev HuggingFaceEmbeddings
-    where the base ABC default would just thread-wrap the sync call anyway).
+    object doesn't implement the async methods. HuggingFaceEmbeddings (the
+    default in-process backend) inherits the ABC default which runs the sync
+    encode in a thread pool — that's the same hop the sync path would take,
+    so there's no regression in local mode. RemoteEmbeddings overrides both
+    methods with real httpx async calls when EMBEDDING_SERVICE_URL is set.
     """
     if not chunks:
         return False, 0.0
@@ -295,9 +298,9 @@ async def _coarse_semantic_floor_async(query: str, chunks: list[str]) -> tuple[b
         non_empty = [(c or "")[:_RELEVANCE_CHUNK_CHARS] for c in chunks if c]
         if not non_empty:
             return False, 0.0
-        # If the embeddings object overrides aembed_query (RemoteEmbeddings does),
-        # this is a real async HTTP call. Otherwise the ABC default runs the
-        # sync version in a thread pool — same as before, no regression.
+        # RemoteEmbeddings overrides aembed_* with real httpx calls. The
+        # in-process HuggingFaceEmbeddings backend (default prod path)
+        # inherits the ABC default which thread-pools the sync encode.
         q_vec = await embeddings.aembed_query(query)
         c_vecs = await embeddings.aembed_documents(non_empty[:_RELEVANCE_TOP_N])
         max_sim = max(sum(a * b for a, b in zip(q_vec, cv)) for cv in c_vecs)

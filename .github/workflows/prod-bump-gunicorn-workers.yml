@@ -1,0 +1,155 @@
+name: Prod — bump GUNICORN_WORKERS (6 → 8)
+
+# One-off workflow_dispatch. Increases the gunicorn worker count on
+# prod from 6 to 8 (matching the box's 8 vCPU). Idempotent — if
+# GUNICORN_WORKERS=8 is already set, the .env edit is a no-op and
+# the workflow still restarts to verify.
+#
+# Memory math at 8 workers under PDF load (per investigation
+# 28315903516):
+#   8 × ~2 GB worker RSS + 1.2 GB master + 1-2 GB chroma server
+#   + 2 GB postgres/OS = ~22-23 GB. MemoryMax=24G unit cap holds.
+#
+# Prerequisite: chromadb retry-with-backoff + lowered timeout
+# (CHROMA_STORE_TIMEOUT_S=30) must already be deployed. Without it,
+# more workers = more concurrent chroma writes = higher chance of
+# pool exhaustion. Ship the code fix first via deploy-prod.yml.
+#
+# Auto-rolls back on health failure.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bump:
+    name: Bump GUNICORN_WORKERS to 8
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Bump workers + restart + verify
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -uo pipefail
+
+          APP_DIR=/root/Lawtech-AI
+          ENV_FILE_RAW=$(sudo systemctl show lawttorney-v2 -p EnvironmentFiles --value 2>/dev/null | tr ' ' '\n' | grep -v '^$' | head -1 | sed 's|^-||' | awk '{print $1}')
+          ENV_FILE=""
+          if [ -n "$ENV_FILE_RAW" ] && sudo test -f "$ENV_FILE_RAW"; then
+            ENV_FILE="$ENV_FILE_RAW"
+          else
+            for candidate in $APP_DIR/.env $APP_DIR/.env.production; do
+              if sudo test -f "$candidate"; then
+                ENV_FILE="$candidate"
+                break
+              fi
+            done
+          fi
+          [ -z "$ENV_FILE" ] && { echo "FATAL: .env not found"; exit 1; }
+
+          TS=$(date +%s)
+          ENV_BAK="${ENV_FILE}.workers-bak-${TS}"
+
+          echo "=========================================================="
+          echo " 1. Pre-bump state"
+          echo "=========================================================="
+          echo "  .env: $ENV_FILE"
+          echo "  Current GUNICORN_WORKERS line:"
+          sudo grep -n "^GUNICORN_WORKERS=" "$ENV_FILE" 2>/dev/null \
+            | sed 's/^/    /' \
+            || echo "    (not set — gunicorn.conf.py default = 1, but unit may override)"
+          echo
+          echo "  Current worker count (processes):"
+          ps -eo pid,cmd --no-headers 2>/dev/null \
+            | grep -E "gunicorn.*core.gateway" | grep -v grep | wc -l
+          echo
+          echo "  Memory snapshot:"
+          free -h | head -3
+          echo
+
+          echo "=========================================================="
+          echo " 2. Backup .env + edit GUNICORN_WORKERS (idempotent)"
+          echo "=========================================================="
+          sudo cp "$ENV_FILE" "$ENV_BAK"
+          echo "  Backup: $ENV_BAK"
+          if sudo grep -qE "^GUNICORN_WORKERS=" "$ENV_FILE"; then
+            sudo sed -i 's|^GUNICORN_WORKERS=.*|GUNICORN_WORKERS=8|' "$ENV_FILE"
+            echo "  Replaced existing GUNICORN_WORKERS line"
+          else
+            echo "GUNICORN_WORKERS=8" | sudo tee -a "$ENV_FILE" >/dev/null
+            echo "  Appended GUNICORN_WORKERS=8"
+          fi
+          echo "  Post-edit line:"
+          sudo grep -n "^GUNICORN_WORKERS=" "$ENV_FILE" | sed 's/^/    /'
+          echo
+
+          echo "=========================================================="
+          echo " 3. Restart lawttorney-v2 + wait for healthy"
+          echo "=========================================================="
+          sudo systemctl restart lawttorney-v2
+          HEALTHY=0
+          CONSECUTIVE_OK=0
+          for i in $(seq 1 36); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/3 consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "3" ]; then
+                HEALTHY=1
+                break
+              fi
+            else
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/36 (HTTP $STATUS, elapsed $((i * 5))s)"
+            fi
+          done
+          if [ "$HEALTHY" != "1" ]; then
+            echo "!! HEALTH CHECK FAILED — rolling back !!"
+            sudo cp "$ENV_BAK" "$ENV_FILE"
+            sudo systemctl restart lawttorney-v2
+            sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+            exit 1
+          fi
+          echo "  Settling 10s..."
+          sleep 10
+          echo
+
+          echo "=========================================================="
+          echo " 4. Post-bump state"
+          echo "=========================================================="
+          echo "  New worker count (should be 8 + 1 master = 9 processes):"
+          ps -eo pid,rss,cmd --no-headers 2>/dev/null \
+            | grep -E "gunicorn.*core.gateway" | grep -v grep \
+            | awk '{rss_mb=$2/1024; printf "    pid=%-7s rss=%7.1fMB  %s\n", $1, rss_mb, substr($0, index($0,$3))}' \
+            | head -10
+          echo
+          echo "  Memory snapshot:"
+          free -h | head -3
+          echo
+          echo "  Health:"
+          curl -s --max-time 5 http://localhost:5001/pyapi/health | head -c 300
+          echo
+          echo
+
+          echo "=========================================================="
+          echo " DONE — backup at $ENV_BAK"
+          echo " To revert: sudo cp $ENV_BAK $ENV_FILE && sudo systemctl restart lawttorney-v2"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

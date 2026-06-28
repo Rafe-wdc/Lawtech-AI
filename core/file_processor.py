@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -93,7 +94,16 @@ PDF_EXTRACT_TIMEOUT_S = 120          # per-file PyMuPDF per-page extraction
 DOCX_EXTRACT_TIMEOUT_S = 60          # per-file DOCX text extraction
 XLSX_EXTRACT_TIMEOUT_S = 60          # per-file XLSX text extraction
 CSV_EXTRACT_TIMEOUT_S = 30           # per-file CSV text extraction
-CHROMA_STORE_TIMEOUT_S = 180         # per-file embedding + Chroma write
+CHROMA_STORE_TIMEOUT_S = 30          # per-file embedding + Chroma write
+# Lowered from 180s on 2026-06-28: the chromadb HTTP server's default
+# SQLAlchemy pool (~5 conns, 30s pool_timeout) exhausts under 6+
+# concurrent worker writes. The inner SQLAlchemy "pool timed out"
+# fires at ~30s anyway; waiting another 150s past that just makes
+# the user stare at a spinner for 3 min before degraded fallback.
+# The text is preserved in pf.extracted_text so the Document agent
+# still has grounding even if chroma write fails — degraded but
+# functional. _store_in_chromadb retries 3× with backoff to absorb
+# transient pool bursts before giving up.
 SQLITE_SAVE_TIMEOUT_S = 30           # per-file thread_files row insert
 
 ALLOWED_EXTENSIONS = {
@@ -1105,7 +1115,15 @@ def _compress_pdf(input_path: str) -> tuple[str, dict]:
 
 
 def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
-    """Chunk text and store in ChromaDB collection."""
+    """Chunk text and store in ChromaDB collection.
+
+    Retries up to 3 times with exponential backoff (1s, 2s) on transient
+    chromadb errors — most commonly SQLAlchemy "pool timed out while
+    waiting for an open connection" when concurrent writes exhaust
+    chromadb's default 5-connection pool. Each retry first deletes any
+    partial collection from a prior attempt to avoid duplicate chunks
+    on eventual success.
+    """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import Chroma
     from core.clients import get_qa_embeddings, get_chroma_client
@@ -1121,16 +1139,52 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
         raise ValueError("No text chunks produced")
 
     embeddings = get_qa_embeddings()
-
+    client = get_chroma_client()
     metadatas = [{"source": filename, "chunk": i} for i in range(len(chunks))]
-    Chroma.from_texts(
-        texts=chunks,
-        embedding=embeddings,
-        collection_name=collection_id,
-        client=get_chroma_client(),
-        metadatas=metadatas,
-    )
-    log.info("Stored in ChromaDB", collection=collection_id, chunks=len(chunks))
+
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):  # 3 attempts: 1, 2, 3
+        try:
+            # On retry, drop any partial collection from a prior failed
+            # attempt so we don't accumulate duplicate chunks if attempt
+            # N-1 wrote some chunks before erroring.
+            if attempt > 1:
+                try:
+                    client.delete_collection(name=collection_id)
+                except Exception:
+                    pass  # collection may not exist; that's fine
+            Chroma.from_texts(
+                texts=chunks,
+                embedding=embeddings,
+                collection_name=collection_id,
+                client=client,
+                metadatas=metadatas,
+            )
+            log.info("Stored in ChromaDB", collection=collection_id,
+                     chunks=len(chunks), attempt=attempt)
+            return
+        except Exception as e:
+            last_exc = e
+            err_msg = str(e)[:200]
+            if attempt < 3:
+                backoff_s = 2 ** (attempt - 1)  # 1s, 2s
+                log.warning(
+                    "ChromaDB write failed; retrying",
+                    collection=collection_id, attempt=attempt,
+                    max_attempts=3, backoff_s=backoff_s, error=err_msg,
+                )
+                time.sleep(backoff_s)
+            else:
+                log.error(
+                    "ChromaDB write failed after retries",
+                    collection=collection_id, attempts=attempt, error=err_msg,
+                )
+
+    # All retries exhausted; surface the last exception to the caller
+    # (which logs + emits the chroma_store_timeout event and continues
+    # with pf.extracted_text as grounding).
+    if last_exc is not None:
+        raise last_exc
 
 
 async def _background_ocr_and_store(

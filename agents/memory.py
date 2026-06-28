@@ -101,6 +101,21 @@ def _rewrite_query(
             log.debug("Skipping rewrite — fresh chat placeholder")
             return query
 
+        # Skip when the query is already long enough to be standalone.
+        # The REWRITE_PROMPT is tuned for SHORT follow-ups ("find related
+        # cases", "what does the law say"); its rule "Keep concise — a
+        # search query, not a paragraph" compresses fact-rich drafting
+        # prompts (party names, dates, amounts, itemised lists) into a
+        # generic search query, and downstream agents then fabricate
+        # substitutes from template examples. Per feedback_preserve_user_query:
+        # never lose information from the user's prompt anywhere in the
+        # pipeline. A standalone query needs no rewrite; an existing thread
+        # is irrelevant when the user wrote a self-contained ask.
+        if len(query) >= 500:
+            log.debug("Skipping rewrite — query already standalone-length",
+                      query_chars=len(query))
+            return query
+
         # Skip if only 2 messages and the summary is trivially short
         if len(chat_history) <= 2:
             summary_content = ""

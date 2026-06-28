@@ -23,6 +23,17 @@ Environment=PROMETHEUS_MULTIPROC_DIR=/run/lawtech-prom
 RuntimeDirectory=lawtech-prom
 RuntimeDirectoryMode=0755
 
+# Phase 7 mitigation for the torch.nn.Linear deadlock under encode
+# pressure (originally on lawttorney-embed.service). Now that embeddings
+# run in-process per gunicorn worker, the same caps apply here — without
+# them, 6 workers × 8 OpenMP threads oversubscribe the 8-vCPU box and
+# wedge under sustained load. core/clients.py also sets these via
+# os.environ.setdefault as a safety net for non-systemd contexts.
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=TOKENIZERS_PARALLELISM=false
+
 ExecStart=/root/Lawtech-AI/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app
 # Graceful reload (SIGHUP) — gunicorn rotates workers without dropping connections.
 ExecReload=/bin/kill -HUP $MAINPID

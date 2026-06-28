@@ -17,6 +17,18 @@ import threading
 import time
 from functools import lru_cache
 
+# Cap BLAS / OpenMP / tokenizer threads BEFORE PyTorch is imported.
+# Without this, every gunicorn worker's PyTorch tries to use all 8 vCPUs
+# via OpenMP. With 6 workers, that's 48 threads fighting for 8 cores —
+# the torch.nn.Linear deadlock Phase 7 observed (workers wedged at
+# 110-150% CPU for 15 min after load stopped). True parallelism comes
+# from the 6 worker PROCESSES; each worker should do one matmul thread
+# at a time. setdefault preserves anything the systemd unit already set.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 # Try opensearch-py first (for AWS OpenSearch), fall back to elasticsearch
 try:
     from opensearchpy import OpenSearch as _SearchClient

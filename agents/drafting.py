@@ -81,29 +81,38 @@ def _sanitize_es_input(text: str, max_length: int = 500) -> str:
 
 _CASE_FACTS_PROMPT = """You are a legal entity extractor. Read the user-provided
 document/context and produce a CONCISE list of the case-specific entities the
-drafter MUST use verbatim. Pull only what is present; do NOT invent.
+drafter MUST use VERBATIM in the output document. Pull only what is present;
+do NOT invent.
 
 INPUT:
 {facts_text}
 
-Return a Markdown bullet list with these labels (omit any that are absent):
-- **Court**: full court name as stated
-- **Case Number**: case/suit number as stated
-- **Plaintiff**: full name(s) — first occurrence's wording
-- **Plaintiff Address**: as stated (one line)
-- **Defendant**: full name(s)
-- **Defendant Address**: as stated (one line)
-- **Cause of Action / Claim**: 1-line summary (e.g. "recovery of Rs. 10L friendly loan")
+Return a Markdown bullet list with these labels (omit any that are absent).
+Labels are intentionally generic so the downstream drafter binds them to
+whichever party-role the requested document uses (Client / Sender / Plaintiff /
+Petitioner / Appellant on one side; Recipient / Other Party / Defendant /
+Respondent on the other):
+
+- **Forum / Court**: full court / tribunal / authority name as stated
+- **Case Number**: case/suit/appeal number as stated
+- **Client (sender / first party — the person on whose behalf this document is being prepared)**: full name(s)
+- **Client Address**: as stated (one line)
+- **Other Party (recipient / second party — the person this is addressed to / against)**: full name(s)
+- **Other Party Address**: as stated (one line)
+- **Relationship between parties**: e.g. "husband and wife", "lender and borrower", "lessor and lessee"
+- **What the client wants from the document**: 1-line summary of the reliefs / asks (e.g. "return of Stridhan + divorce on cruelty + permanent alimony")
 - **Principal Amount**: with figure and words as stated
 - **Interest Rate**: as claimed
-- **Key Date - Loan/Agreement**: DD-Mon-YYYY
-- **Key Date - Demand/Notice**: DD-Mon-YYYY
-- **Key Date - Cause of Action accrual**: DD-Mon-YYYY
-- **Witnesses**: comma-separated names
-- **Statutory Provisions invoked**: e.g. "Order VII Rule 1 CPC"
+- **Key Date - first transaction / marriage / agreement**: DD-Mon-YYYY
+- **Key Date - last demand / notice / breach**: DD-Mon-YYYY
+- **Key Date - dispute arose / separation / cause of action accrual**: DD-Mon-YYYY
+- **Witnesses / third parties named**: comma-separated names
+- **Statutory provisions invoked**: e.g. "Section 13B HMA, Section 125 CrPC"
 - **Counsel**: as stated
-- **Filing/Verification Date**: DD-Mon-YYYY
-- **Other key facts**: any other specific details (sections, addresses, IDs)
+- **Other concrete facts** (verbatim from the source — itemised lists of
+  assets/ornaments/documents, addresses of properties, account numbers,
+  reference numbers, specific dates of events not captured above):
+  preserve each in its original wording
 
 Output ONLY the bullet list. No preamble, no explanations.
 """

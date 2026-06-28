@@ -537,26 +537,38 @@ async def _generate_draft(
     facts_block = ""
     if case_facts and case_facts.strip():
         facts_block = (
-            "## CASE FACTS (extracted from user-attached document — use these "
-            "real values directly; do NOT bracket them as placeholders)\n"
+            "## CASE FACTS (extracted from the user's prompt / attachments — "
+            "these are the ONLY real values; use them directly in the draft "
+            "and do NOT bracket them as placeholders)\n"
             f"{case_facts.strip()}\n\n"
         )
 
     reference_block = (
-        "## REFERENCE DRAFT (structural anchor — adapt to the user's specific "
-        "ask; do NOT copy verbatim; use the conventions but write fresh prose)\n"
+        "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
+        "IGNORE every name, date, address, amount, party detail, and case-"
+        "specific value in this block. They belong to a different person's "
+        "matter and MUST NOT appear in your output. Use ONLY the reference's "
+        "shape: section ordering, headings, salutations, conventions, "
+        "phrasing patterns, and statutory-citation style.)\n"
         f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and case facts alone, following Indian-law conventions for the document type)'}\n\n"
     )
 
     user_block = (
-        "## USER QUERY (the source of truth for what document to produce)\n"
+        "## USER QUERY (the source of truth — every fact in your output "
+        "must come from HERE or from CASE FACTS, NEVER from the REFERENCE "
+        "DRAFT)\n"
         f"{query.strip()}\n\n"
         f"{facts_block}"
         f"{reference_block}"
-        "Produce the complete document the user asked for, using the reference "
-        "as a structural anchor, the case facts as real values, and the user's "
-        "query as the source of truth for scope. Output ONLY the document "
-        "itself — no preamble, no postscript, no meta-commentary."
+        "Produce the complete document the user asked for. EVERY party name, "
+        "date, address, monetary amount, ornament / asset description, sequence "
+        "of events, statutory section invoked, and case-specific detail in "
+        "your output MUST come from the USER QUERY or CASE FACTS above. If a "
+        "value isn't given by the user, use a clearly-bracketed placeholder "
+        "(e.g. [Address], [Date], [Reference Number]); NEVER copy a value "
+        "from the REFERENCE DRAFT — its values belong to a different matter "
+        "and using them is a critical error. Output ONLY the document itself "
+        "— no preamble, no postscript, no meta-commentary."
     )
 
     llm = get_gemini_pro(
@@ -659,11 +671,22 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
     try:
         # --- 4. Extract structured case facts (real names/dates/amounts) ---
+        # Run the extractor against whichever source carries the facts:
+        #   - uploaded files / pasted context / integration content → user_facts
+        #   - or the user query itself when the user pasted facts inline
+        #     (long queries on the drafting path almost always carry case-
+        #     specific facts: party names, dates, amounts, itemised lists)
+        # Without this second branch, the picked reference template's example
+        # values dominated generation and the draft fabricated substitutes.
         case_facts = ""
         if user_facts:
             progress("drafting", "Extracting key facts from your document...",
                      step="extract")
             case_facts = await _extract_case_facts(user_facts)
+        elif len(query) >= 500:
+            progress("drafting", "Extracting key facts from your prompt...",
+                     step="extract")
+            case_facts = await _extract_case_facts(query)
 
         # --- 5. Acquire reference draft (ES picker → web fallback if none) ---
         progress("drafting", "Searching for a reference template...",

@@ -573,37 +573,67 @@ async def _generate_draft(
             f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and case facts alone, following Indian-law conventions for the document type)'}\n\n"
         )
 
-    # Prompt ordering matters. Transformer attention is biased toward the
-    # END of the prompt (recency); whatever the model reads last most
-    # strongly shapes the output. Order the blocks so the user's facts are
-    # the very last thing before the closing instruction:
-    #   1. (system prompt — DRAFTING_SYSTEM_PROMPT, set separately)
-    #   2. REFERENCE DRAFT (or its "skipped" marker) — earliest, weakest
-    #      influence on output values
-    #   3. USER QUERY — the document-type request + narrative
-    #   4. CASE FACTS — the verbatim source-of-truth, immediately before
-    #      the closing instruction so the model is freshly attending to
-    #      the real facts when it starts producing
-    #   5. Closing instruction with the strict "use ONLY these facts" rule
-    user_block = (
-        f"{reference_block}"
-        "## USER QUERY (the document-type request — what to draft)\n"
-        f"{query.strip()}\n\n"
-        f"{facts_block}"
-        "Produce the complete document the user asked for, in standard "
-        "Indian-law conventions for the document type the user named. "
-        "EVERY party name, date, address, monetary amount, ornament / asset "
-        "description, sequence of events, and case-specific detail in your "
-        "output MUST be taken VERBATIM from the CASE FACTS above. Do NOT "
-        "invent, substitute, paraphrase, or carry over canonical-sounding "
-        "Indian-law example names / places / dates (e.g. 'Priyanka', "
-        "'Nashik', '29 May 2022', 'Sangamner', 'Sneha') — those are not "
-        "in the CASE FACTS and using them is a critical error. If a value "
-        "the document needs is genuinely absent from the CASE FACTS, use a "
-        "clearly-bracketed placeholder (e.g. [Advocate's Address], "
-        "[Reference Number]). Output ONLY the document itself — no "
-        "preamble, no postscript, no meta-commentary."
-    )
+    # Prompt assembly. Two shapes depending on whether the user has
+    # provided rich extractable facts:
+    #
+    #   (rich-facts path) The extractor produced a tight bullet list. Pass
+    #     ONLY that as the LLM's source of truth — DROP the raw query
+    #     narrative. Empirically (2026-06-28), keeping the 6.6 KB raw query
+    #     alongside the bullet list caused the model to over-attend to the
+    #     narrative and substitute canonical Indian-law example values
+    #     (Sneha / Priyanka / Nashik) for the user's real facts. With just
+    #     the structured bullet list + reliefs / statute call-outs, the
+    #     model has no narrative noise to wander into.
+    #
+    #   (short path) Use the original layout: USER QUERY narrative +
+    #     facts_block (which is empty here) + reference template.
+    if _has_rich_facts:
+        # Two-source layout:
+        #   - CASE FACTS bullet list — labelled structured anchor
+        #   - USER QUERY narrative — same facts in natural-language context,
+        #     placed LAST so the LLM is freshly attending to it. The bullet
+        #     list alone left the LLM unsure which entity went where (e.g.
+        #     "Plaintiff: Jyoti" → "Jyoti is the wife? or just the
+        #     plaintiff?" → falls back to [Wife's Name] placeholder).
+        #     Including the natural-language narrative right before the
+        #     closing instruction resolves the entity binding and produces
+        #     real values in the draft.
+        user_block = (
+            f"{reference_block}"
+            f"{facts_block}"
+            "## USER QUERY AND CASE NARRATIVE (verbatim — every name, date, "
+            "address, amount, and event below is real and must appear in "
+            "your output where the document calls for it)\n"
+            f"{query.strip()}\n\n"
+            "Produce the legal document the user asked for in standard "
+            "Indian-law conventions. EVERY party name, date, address, "
+            "monetary amount, ornament / asset description, statutory "
+            "citation, and case-specific detail MUST come VERBATIM from the "
+            "CASE FACTS bullet list OR the USER QUERY NARRATIVE above. Do "
+            "NOT invent, substitute, paraphrase, or carry over canonical-"
+            "sounding Indian-law example values (e.g. 'Priyanka', 'Nashik', "
+            "'29 May 2022', 'Sangamner', 'Sneha', 'Bhausaheb', 'Sakore', "
+            "'Ahmednagar') — using them is a critical error. If a value is "
+            "genuinely absent from both sources above, use a clearly-"
+            "bracketed placeholder (e.g. [Advocate's Address], [Reference "
+            "Number]). Output ONLY the document — no preamble, no "
+            "postscript, no meta-commentary."
+        )
+    else:
+        user_block = (
+            f"{reference_block}"
+            "## USER QUERY (the document-type request — what to draft)\n"
+            f"{query.strip()}\n\n"
+            f"{facts_block}"
+            "Produce the complete document the user asked for, in standard "
+            "Indian-law conventions for the document type the user named. "
+            "If a value the document needs is not provided by the user, use "
+            "a clearly-bracketed placeholder (e.g. [Address], [Date], "
+            "[Reference Number]); NEVER copy a value from the REFERENCE "
+            "DRAFT — its values belong to a different matter and using "
+            "them is a critical error. Output ONLY the document itself — "
+            "no preamble, no postscript, no meta-commentary."
+        )
 
     # Temperature 0 + larger thinking budget. The previous default
     # (temperature 0.4) was producing creative deviations from the CASE
@@ -712,38 +742,29 @@ async def drafting_node(state: LegalAgentState) -> dict:
     await _AGENT_SEMAPHORE.acquire()
 
     try:
-        # --- 4. Resolve case_facts (the structured / verbatim block the
-        # generation LLM uses as the SOURCE OF TRUTH for names/dates/amounts).
+        # --- 4. Resolve case_facts (the structured anchor the generation LLM
+        # uses as the source of truth for names/dates/amounts).
         #
-        # Two paths, depending on where the user put the facts:
-        #
-        #   (a) Attachments / pasted context / integration content → user_facts
-        #       can be 30 KB+ of raw document text. Summarise it through the
-        #       Gemini Flash extractor (`_extract_case_facts`) so the
-        #       generation prompt receives a compact, structured bullet list
-        #       instead of a 30 KB blob (which the section LLM would skim
-        #       past).
-        #
-        #   (b) Inline-in-query (no attachments) → use the entire query
-        #       VERBATIM as case_facts. We deliberately do NOT run the
-        #       extractor here: that's an LLM call which itself may compress
-        #       or paraphrase, and the saved feedback `feedback_preserve_user_query`
-        #       is explicit — "no truncation, summarization, or shortening of
-        #       the user's query anywhere in the pipeline." The query is
-        #       already authoritative; pass it through. The same text also
-        #       appears in the USER QUERY block of the generation prompt;
-        #       duplication is intentional reinforcement so the LLM treats
-        #       inline-pasted facts as source-of-truth rather than as
-        #       instructional preamble.
+        # ALWAYS run the Gemini Flash extractor when there's substantive
+        # content (attachments OR long inline query). Empirically, passing
+        # a 6.6K-char raw narrative through a 25K-char context window leads
+        # Gemini Pro to fall back to its prior — substituting canonical
+        # Indian-law example values (Sneha / Priyanka / Nashik / 29 May 2022)
+        # for the user's actual party names and dates. A compact bullet
+        # list ("- **Plaintiff**: Jyoti Narendra Amrutkar; - **Marriage
+        # Date**: 16 May 2013; ...") gives the LLM crisp anchors the model
+        # can lock onto. The raw query still appears in USER QUERY for the
+        # narrative context, but the bullet list is what carries the
+        # authoritative facts.
         case_facts = ""
         if user_facts:
             progress("drafting", "Extracting key facts from your document...",
                      step="extract")
             case_facts = await _extract_case_facts(user_facts)
         elif len(query) >= 500:
-            progress("drafting", "Using your prompt as case facts...",
+            progress("drafting", "Extracting key facts from your prompt...",
                      step="extract")
-            case_facts = query
+            case_facts = await _extract_case_facts(query)
 
         # --- 5. Acquire reference draft (ES picker → web fallback if none) ---
         progress("drafting", "Searching for a reference template...",

@@ -1072,10 +1072,24 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             "in gujarati", "in punjabi", "in urdu", "in odia",
             "hindi mein", "hindi me", "batao", "samjhao", "kaise",
         )
+        # Skip query normalization when:
+        #   - SHORT English query (< 500 chars) with no format keyword —
+        #     nothing to normalize, original behaviour.
+        #   - LONG English query (>= 1500 chars) — already standalone
+        #     prose; the intent extractor's `normalized_query` field
+        #     compresses fact-rich drafting prompts (party names, dates,
+        #     amounts, itemised lists) into a shorter "clean English"
+        #     summary, and the line below (`query = normalized_query`)
+        #     then propagates that loss-y summary to every downstream
+        #     agent. Per feedback_preserve_user_query: never lose
+        #     information from the user's prompt anywhere in the pipeline.
+        # Mid-length (500-1499) still normalizes as before — that range
+        # is mostly conversational queries where normalization helps
+        # retrieval without dropping facts.
         skip_normalize = (
             user_language == "en"
-            and len(query) < 500
             and not any(k in _orig_lower for k in _FORMAT_KEYWORDS)
+            and (len(query) < 500 or len(query) >= 1500)
         )
 
         if skip_normalize:

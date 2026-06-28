@@ -351,25 +351,35 @@ def get_qa_embeddings():
     return _qa_embeddings
 
 
-# --- Eager-load MiniLM in local mode ---
-# In remote mode the model lives in the embed microservice; nothing to load
+# --- Eager-load both embedding models in local mode ---
+# In remote mode the models live in the embed microservice; nothing to load
 # here. In local mode (the prod default since 2026-06-28), we must load
-# MiniLM at module import so that gunicorn's preload_app=True puts it in
-# the master's address space BEFORE workers fork — each forked worker then
-# inherits the ~80 MB resident model via copy-on-write, so MiniLM is
-# always hot from request #1 on every worker. Without this, the first
-# PDF upload to land on a freshly-forked worker pays a 3-5s model load
-# inside the request hot path (file_processor's _store_in_chromadb).
+# both BGE-large (retriever) and MiniLM (QA) at module import so that
+# gunicorn's preload_app=True puts them in the master's address space
+# BEFORE workers fork — each forked worker then inherits the resident
+# models via copy-on-write. Resident memory: ~1.3 GB BGE + ~80 MB MiniLM
+# = ~1.4 GB shared across master + all 6 workers (single copy, not 7
+# copies). Both models are hot from request #1 on every worker.
 #
-# Guarded by EMBEDDING_SERVICE_URL so dev/test environments using the
-# remote service still skip the local load.
+# Without this, the first request that triggers an embed path pays the
+# 3-15s model load inside the request hot path — counting against
+# CHROMA_STORE_TIMEOUT_S (180s) for PDFs and against the relevance-gate
+# budget for ES queries.
+#
+# Guarded by EMBEDDING_SERVICE_URL so remote-mode deployments skip
+# the local load. Per-model try/except so a BGE failure doesn't block
+# MiniLM (or vice versa). Eager-load failure falls back to lazy on
+# first call — never blocks startup.
 if not EMBEDDING_SERVICE_URL:
-    try:
-        _t0 = time.time()
-        get_qa_embeddings()
-        _log.info("QA embeddings eager-loaded at import",
-                  load_s=round(time.time() - _t0, 2))
-    except Exception as _e:
-        # Fall back to lazy load on first request — never block startup.
-        _log.warning("QA embeddings eager-load failed; will lazy-load",
-                     error=str(_e)[:200])
+    for _name, _loader in (
+        ("retriever (BGE-large)", get_retriever_embeddings),
+        ("QA (MiniLM)", get_qa_embeddings),
+    ):
+        try:
+            _t0 = time.time()
+            _loader()
+            _log.info("Embedding model eager-loaded at import",
+                      model=_name, load_s=round(time.time() - _t0, 2))
+        except Exception as _e:
+            _log.warning("Embedding model eager-load failed; will lazy-load",
+                         model=_name, error=str(_e)[:200])

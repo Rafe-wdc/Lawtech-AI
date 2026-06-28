@@ -349,3 +349,27 @@ def get_qa_embeddings():
                 model_kwargs={"device": "cpu"},
             )
     return _qa_embeddings
+
+
+# --- Eager-load MiniLM in local mode ---
+# In remote mode the model lives in the embed microservice; nothing to load
+# here. In local mode (the prod default since 2026-06-28), we must load
+# MiniLM at module import so that gunicorn's preload_app=True puts it in
+# the master's address space BEFORE workers fork — each forked worker then
+# inherits the ~80 MB resident model via copy-on-write, so MiniLM is
+# always hot from request #1 on every worker. Without this, the first
+# PDF upload to land on a freshly-forked worker pays a 3-5s model load
+# inside the request hot path (file_processor's _store_in_chromadb).
+#
+# Guarded by EMBEDDING_SERVICE_URL so dev/test environments using the
+# remote service still skip the local load.
+if not EMBEDDING_SERVICE_URL:
+    try:
+        _t0 = time.time()
+        get_qa_embeddings()
+        _log.info("QA embeddings eager-loaded at import",
+                  load_s=round(time.time() - _t0, 2))
+    except Exception as _e:
+        # Fall back to lazy load on first request — never block startup.
+        _log.warning("QA embeddings eager-load failed; will lazy-load",
+                     error=str(_e)[:200])

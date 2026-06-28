@@ -573,28 +573,50 @@ async def _generate_draft(
             f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and case facts alone, following Indian-law conventions for the document type)'}\n\n"
         )
 
+    # Prompt ordering matters. Transformer attention is biased toward the
+    # END of the prompt (recency); whatever the model reads last most
+    # strongly shapes the output. Order the blocks so the user's facts are
+    # the very last thing before the closing instruction:
+    #   1. (system prompt — DRAFTING_SYSTEM_PROMPT, set separately)
+    #   2. REFERENCE DRAFT (or its "skipped" marker) — earliest, weakest
+    #      influence on output values
+    #   3. USER QUERY — the document-type request + narrative
+    #   4. CASE FACTS — the verbatim source-of-truth, immediately before
+    #      the closing instruction so the model is freshly attending to
+    #      the real facts when it starts producing
+    #   5. Closing instruction with the strict "use ONLY these facts" rule
     user_block = (
-        "## USER QUERY (the source of truth — every fact in your output "
-        "must come from HERE or from CASE FACTS, NEVER from the REFERENCE "
-        "DRAFT)\n"
+        f"{reference_block}"
+        "## USER QUERY (the document-type request — what to draft)\n"
         f"{query.strip()}\n\n"
         f"{facts_block}"
-        f"{reference_block}"
-        "Produce the complete document the user asked for. EVERY party name, "
-        "date, address, monetary amount, ornament / asset description, sequence "
-        "of events, statutory section invoked, and case-specific detail in "
-        "your output MUST come from the USER QUERY or CASE FACTS above. If a "
-        "value isn't given by the user, use a clearly-bracketed placeholder "
-        "(e.g. [Address], [Date], [Reference Number]); NEVER copy a value "
-        "from the REFERENCE DRAFT — its values belong to a different matter "
-        "and using them is a critical error. Output ONLY the document itself "
-        "— no preamble, no postscript, no meta-commentary."
+        "Produce the complete document the user asked for, in standard "
+        "Indian-law conventions for the document type the user named. "
+        "EVERY party name, date, address, monetary amount, ornament / asset "
+        "description, sequence of events, and case-specific detail in your "
+        "output MUST be taken VERBATIM from the CASE FACTS above. Do NOT "
+        "invent, substitute, paraphrase, or carry over canonical-sounding "
+        "Indian-law example names / places / dates (e.g. 'Priyanka', "
+        "'Nashik', '29 May 2022', 'Sangamner', 'Sneha') — those are not "
+        "in the CASE FACTS and using them is a critical error. If a value "
+        "the document needs is genuinely absent from the CASE FACTS, use a "
+        "clearly-bracketed placeholder (e.g. [Advocate's Address], "
+        "[Reference Number]). Output ONLY the document itself — no "
+        "preamble, no postscript, no meta-commentary."
     )
 
+    # Temperature 0 + larger thinking budget. The previous default
+    # (temperature 0.4) was producing creative deviations from the CASE
+    # FACTS — Gemini Pro was substituting cliché Indian-law example
+    # values (Sneha / Priyanka / Nashik / 29 May 2022) for the user's
+    # actual party names and dates. Drafting is a fact-transcription task,
+    # not a creative one — zero temperature forces strict instruction
+    # following; the larger thinking budget gives the model headroom to
+    # cross-reference each emitted entity back to the CASE FACTS block.
     llm = get_gemini_pro(
-        temperature=0.4,
+        temperature=0.0,
         max_output_tokens=65535,
-        thinking_budget=2048,
+        thinking_budget=4096,
     )
 
     progress_emit("drafting", "Generating your draft...", step="generate")

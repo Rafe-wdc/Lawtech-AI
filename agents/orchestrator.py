@@ -391,11 +391,12 @@ Rules:
 3. COMPLEX SCENARIO QUERIES: When a query describes a factual situation AND asks for arguments, defences, provisions, or citations, use MULTIPLE agents:
    - Scenario + Judgment + Legislation/Newacts as appropriate
 4. When a query mentions BOTH constitutional concept AND legal maxim → [Constitution, Maxim]
-5. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
-6. For drafting requests: ONLY include Drafting when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document. Questions ABOUT documents (format, structure, essential elements, requirements, how to file, difference between X and Y) are NOT drafting — route to Legal_Concepts / Legislation / Scenario.
-7. Never use more than 3 agents.
-8. "Other" task always maps to Scenario agent.
-9. For Non_legal: agents should be ["Non_legal"].
+5. **CASE LAW / CITATIONS**: When the user asks for case laws, citations, precedents, or supporting judgments — even generically ("with case laws", "with supporting citations") — INCLUDE BOTH `Judgment` (High Court / general) AND `SCI_Judgment` (Supreme Court) in the agent list. The HC corpus has regional / recent cases; the SC corpus has the substantive-law landmarks (Jacob Mathew for medical negligence, Kesavananda Bharati for constitutional, etc.). Only use one of them alone when the user EXPLICITLY scopes to "High Court only" or "Supreme Court only" or names a specific HC / SC case.
+6. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
+7. For drafting requests: ONLY include Drafting when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document. Questions ABOUT documents (format, structure, essential elements, requirements, how to file, difference between X and Y) are NOT drafting — route to Legal_Concepts / Legislation / Scenario.
+8. Never use more than 4 agents.
+9. "Other" task always maps to Scenario agent.
+10. For Non_legal: agents should be ["Non_legal"].
 
 User Query: {query}
 Chat Summary (Optional): {chat_summary}
@@ -425,7 +426,7 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
         result = raw_and_parsed["parsed"]
 
         task = result.task
-        agents = result.agents[:3]  # cap at 3
+        agents = result.agents[:4]  # cap at 4 (bumped from 3 on 2026-06-30 to allow Scenario + Legislation + Judgment + SCI_Judgment fan-out)
         if not agents:
             agents = [task]
 
@@ -509,9 +510,29 @@ def _detect_multi_intent(intent: UserIntent | None, task: str) -> list[str]:
     if intent is None or intent.confidence < 0.5:
         return []
     extra: list[str] = []
-    if intent.include_case_law and task not in ("Judgment", "SCI_Judgment"):
-        # SCI takes priority when the user names the apex court.
-        extra.append("SCI_Judgment" if intent.wants_supreme_court else "Judgment")
+    if intent.include_case_law:
+        # Fan out to BOTH High Court (Judgment) AND Supreme Court (SCI_Judgment)
+        # when case law is requested, regardless of whether the user explicitly
+        # named the apex court.
+        #
+        # Why both, not either: substantive Indian-law topics (medical
+        # negligence, consumer protection, fundamental rights, family law,
+        # service matters) have their landmark precedents at the Supreme
+        # Court — Jacob Mathew, Indian Medical Association v V.P. Shantha,
+        # Kesavananda Bharati, etc. The HC index has the regional / recent
+        # case law that supplements them. The previous "SCI OR Judgment"
+        # gate, keyed only on `wants_supreme_court`, silently dropped SC
+        # cases whenever the user phrased the request generically ("with
+        # supporting case laws"), and the HC agent's relevance gate would
+        # then fall through to web search when the HC corpus didn't have
+        # on-point hits — surfacing "AI-Generated" placeholders instead of
+        # the real SC PDFs the SCI corpus had ready.
+        #
+        # The 4-agent cap downstream still bounds fan-out cost.
+        if task != "Judgment":
+            extra.append("Judgment")
+        if task != "SCI_Judgment":
+            extra.append("SCI_Judgment")
     if intent.wants_statute_text and task not in ("Legislation", "Newacts"):
         extra.append("Legislation")
     if intent.wants_constitution and task != "Constitution":
@@ -1304,7 +1325,14 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             log.info("Drafting citation appendix skipped",
                      source="request" if _flag is not None else "env_default")
     else:
-        tasks_planned = tasks_planned[:3]
+        # Bumped from [:3] to [:4] on 2026-06-30 so multi-intent enrichment
+        # can fan out to BOTH SCI_Judgment AND Judgment alongside the
+        # primary task (e.g. Scenario+Legislation+Judgment+SCI_Judgment for
+        # an "arguments with case laws" prompt). The previous 3-cap silently
+        # dropped SCI_Judgment whenever 4 agents were planned, which is why
+        # generic case-law requests on substantive Indian-law topics never
+        # surfaced real Supreme Court precedents from the SCI corpus.
+        tasks_planned = tasks_planned[:4]
         _tax_appellate_detected = False
 
     # Intent-driven plan validation (Newacts/Legislation veto + SCI/GST enrich)

@@ -192,15 +192,27 @@ class FileContextData:
     File content lives in ChromaDB; agents read via get_full_attachment.
     The legacy inline_text + gemini_file_parts + image_data channels were
     removed in this phase.
+
+    2026-06-29: ``extracted_texts`` carries the raw per-file text the file
+    processor already extracted (before chunking + Chroma embedding). It is
+    the Chroma-independent path agents should prefer for full-document use
+    cases like Drafting — and the only path that survives when the Chroma
+    embed step times out under pool exhaustion.
     """
     chromadb_collections: list[str] = field(default_factory=list)
     file_names: list[str] = field(default_factory=list)
     summary: str = ""
+    extracted_texts: list[dict] = field(default_factory=list)
 
     @property
     def has_content(self) -> bool:
-        """True if any file content is available."""
-        return bool(self.chromadb_collections)
+        """True if any file content is available (via Chroma or raw text)."""
+        return bool(self.chromadb_collections) or bool(self.extracted_texts)
+
+    @property
+    def has_extracted_text(self) -> bool:
+        """True if the raw per-file extracted text is available in state."""
+        return any((e.get("text") or "").strip() for e in self.extracted_texts)
 
     @classmethod
     def from_state(cls, state: dict) -> FileContextData | None:

@@ -815,21 +815,60 @@ async def drafting_node(state: LegalAgentState) -> dict:
     fc = FileContextData.from_state(state)
 
     # --- 2. Build user_facts blob from attachments / pasted context / integrations ---
+    #
+    # Source priority for uploaded-document facts:
+    #
+    #   1. ``fc.extracted_texts`` — the raw per-file text PyMuPDF/python-docx
+    #      produced before chunking. Carries the *whole* document, has no
+    #      Chroma dependency, and survives the Chroma pool-exhaustion failure
+    #      mode (2026-06-28 incident) where ``chromadb_collections`` ends up
+    #      empty. Drafting wants every fact in the document — semantic-search
+    #      chunks lose information by design — so the raw text is preferred
+    #      even when Chroma is healthy.
+    #
+    #   2. ``get_full_attachment`` over ``chromadb_collections`` — used only
+    #      as a fallback when no raw text was retained (e.g. legacy state
+    #      written before extracted_texts was added, or future file types
+    #      that route directly to Chroma without staging through
+    #      ``pf.extracted_text``).
+    #
+    # Per-file resolution is tracked in ``seen_names`` so we never duplicate
+    # a document's text into the prompt when both paths happen to surface it.
     fact_blocks: list[str] = []
+    seen_names: set[str] = set()
+    facts_source = "none"   # "extracted" | "chroma" | "mixed" | "none"
+
+    if fc and fc.extracted_texts:
+        for entry in fc.extracted_texts:
+            text = (entry.get("text") or "").strip()
+            name = entry.get("name") or "attached"
+            if not text:
+                continue
+            fact_blocks.append(f"[Uploaded document — {name}]\n{text}")
+            seen_names.add(name)
+        if fact_blocks:
+            facts_source = "extracted"
+
     if fc and fc.chromadb_collections:
+        chroma_added = False
         from tools.shared.vectordb_tools import get_full_attachment
         for cid in fc.chromadb_collections:
             try:
                 attached = get_full_attachment.invoke({"collection_id": cid})
                 full_text = (attached or {}).get("full_text", "")
                 source_file = (attached or {}).get("source_file") or "attached"
-                if full_text:
+                if full_text and source_file not in seen_names:
                     fact_blocks.append(
                         f"[Uploaded document — {source_file}]\n{full_text}"
                     )
+                    seen_names.add(source_file)
+                    chroma_added = True
             except Exception as e:
                 log.warning("get_full_attachment failed",
                             collection=cid, error=str(e))
+        if chroma_added:
+            facts_source = "mixed" if facts_source == "extracted" else "chroma"
+
     if user_context:
         fact_blocks.append(f"[Pasted context]\n{user_context[:30000]}")
     if integration_ctx and integration_ctx.has_content:
@@ -840,8 +879,10 @@ async def drafting_node(state: LegalAgentState) -> dict:
         "Agent started",
         query=query[:100],
         has_user_context=bool(user_context),
-        has_file_context=bool(fc and fc.chromadb_collections),
+        has_file_context=bool(fc and (fc.chromadb_collections or fc.extracted_texts)),
         attachment_collections=len(fc.chromadb_collections) if fc else 0,
+        extracted_text_files=len(fc.extracted_texts) if fc else 0,
+        facts_source=facts_source,
         has_integration_context=bool(integration_ctx and integration_ctx.has_content),
         facts_chars=len(user_facts),
         using_agent_query="Drafting" in agent_queries,

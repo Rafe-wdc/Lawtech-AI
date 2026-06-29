@@ -104,7 +104,28 @@ CHROMA_STORE_TIMEOUT_S = 30          # per-file embedding + Chroma write
 # still has grounding even if chroma write fails — degraded but
 # functional. _store_in_chromadb retries 3× with backoff to absorb
 # transient pool bursts before giving up.
+#
+# 2026-06-29: paired with the Drafting agent fallback (agents/drafting.py
+# now prefers FileContextData.extracted_texts over Chroma), this timeout
+# can stay aggressive — drafting still gets full facts when Chroma fails.
+CHROMA_WRITE_CONCURRENCY = max(1, int(os.getenv("CHROMA_WRITE_CONCURRENCY", "2")))
+# Per-worker cap on concurrent _store_in_chromadb invocations. ChromaDB's
+# default SQLAlchemy pool is 5 connections; without a client-side cap,
+# asyncio.to_thread's default executor can park many writes against a
+# single worker (default thread pool = min(32, cpu+4)). Each parked write
+# burns a Chroma pool slot for up to pool_timeout (~30s) before raising.
+# With 6 gunicorn workers × 2 concurrent writes = 12 max in-flight
+# requests against a 5-slot pool — still over but bounded; combined with
+# _store_in_chromadb's retry-with-backoff the success rate is high enough
+# to keep the Document agent useful. Drafting itself no longer depends on
+# Chroma succeeding (extracted_text fallback).
 SQLITE_SAVE_TIMEOUT_S = 30           # per-file thread_files row insert
+
+# Per-worker bounded semaphore guarding the chromadb HTTP server's
+# connection pool. threading.BoundedSemaphore (not asyncio.Semaphore)
+# because _store_in_chromadb runs inside asyncio.to_thread, so the
+# blocking acquire keeps the worker thread parked until a slot is free.
+_CHROMA_WRITE_SEMAPHORE = threading.BoundedSemaphore(CHROMA_WRITE_CONCURRENCY)
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".jpg", ".jpeg", ".png", ".webp",
@@ -140,6 +161,15 @@ class FileContext:
 
     Phase F (2026-06-28): single text pipeline. inline_text and
     gemini_file_parts fields removed; content lives in ChromaDB.
+
+    2026-06-29: ``to_dict()`` also surfaces ``extracted_texts`` so that
+    downstream agents (notably Drafting, which wants the *entire* uploaded
+    document — not semantic-search chunks) have a Chroma-independent path
+    to the facts. When the ChromaDB embed step times out (the documented
+    pool-exhaustion incident from 2026-06-28), ``chromadb_collections`` is
+    empty but ``extracted_texts`` still carries the PDF/DOCX/XLSX/CSV text
+    that PyMuPDF/python-docx/etc. already produced — so the Drafting prompt
+    has factual anchors instead of falling back to placeholder boilerplate.
     """
     files: list[ProcessedFile] = field(default_factory=list)
     chromadb_collections: list[str] = field(default_factory=list)
@@ -148,10 +178,16 @@ class FileContext:
 
     def to_dict(self) -> dict:
         """Serialize for LangGraph state (JSON-serializable)."""
+        extracted_texts = [
+            {"name": pf.original_name, "text": pf.extracted_text}
+            for pf in self.files
+            if pf.extracted_text
+        ]
         return {
             "chromadb_collections": self.chromadb_collections,
             "summary": self.summary,
             "file_names": self.file_names,
+            "extracted_texts": extracted_texts,
         }
 
 
@@ -1114,6 +1150,21 @@ def _compress_pdf(input_path: str) -> tuple[str, dict]:
     return input_path, stats
 
 
+def _is_pool_timeout(err: Exception) -> bool:
+    """Detect chromadb's underlying SQLAlchemy pool-exhaustion exception
+    by message shape (the exception class lives inside chromadb's vendored
+    SQLAlchemy and is awkward to import). Used to widen retry backoff so
+    we don't burn the whole CHROMA_STORE_TIMEOUT_S budget on rapid retries
+    that hit the same exhausted pool."""
+    msg = str(err).lower()
+    return (
+        "pool timed out" in msg
+        or "pool timeout" in msg
+        or "queuepool limit" in msg
+        or "timed out while waiting for an open connection" in msg
+    )
+
+
 def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     """Chunk text and store in ChromaDB collection.
 
@@ -1123,6 +1174,12 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     chromadb's default 5-connection pool. Each retry first deletes any
     partial collection from a prior attempt to avoid duplicate chunks
     on eventual success.
+
+    2026-06-29: gated by `_CHROMA_WRITE_SEMAPHORE` so each worker can only
+    have CHROMA_WRITE_CONCURRENCY (default 2) writes in flight at once.
+    Without this, asyncio.to_thread's default executor parks many writes
+    in parallel against a single worker, each holding a chromadb pool
+    slot until it errors — making pool exhaustion self-reinforcing.
     """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import Chroma
@@ -1142,43 +1199,67 @@ def _store_in_chromadb(text: str, collection_id: str, filename: str) -> None:
     client = get_chroma_client()
     metadatas = [{"source": filename, "chunk": i} for i in range(len(chunks))]
 
-    last_exc: Exception | None = None
-    for attempt in range(1, 4):  # 3 attempts: 1, 2, 3
-        try:
-            # On retry, drop any partial collection from a prior failed
-            # attempt so we don't accumulate duplicate chunks if attempt
-            # N-1 wrote some chunks before erroring.
-            if attempt > 1:
-                try:
-                    client.delete_collection(name=collection_id)
-                except Exception:
-                    pass  # collection may not exist; that's fine
-            Chroma.from_texts(
-                texts=chunks,
-                embedding=embeddings,
-                collection_name=collection_id,
-                client=client,
-                metadatas=metadatas,
-            )
-            log.info("Stored in ChromaDB", collection=collection_id,
-                     chunks=len(chunks), attempt=attempt)
-            return
-        except Exception as e:
-            last_exc = e
-            err_msg = str(e)[:200]
-            if attempt < 3:
-                backoff_s = 2 ** (attempt - 1)  # 1s, 2s
-                log.warning(
-                    "ChromaDB write failed; retrying",
-                    collection=collection_id, attempt=attempt,
-                    max_attempts=3, backoff_s=backoff_s, error=err_msg,
+    # Bounded acquire — block this thread until a slot frees, but cap the
+    # wait so wedged threads don't pile up. asyncio.wait_for cancels the
+    # awaitable but cannot cancel a Python thread already running here, so
+    # an unbounded blocking acquire could leave threads stuck indefinitely
+    # behind a hung semaphore holder. The acquire timeout matches the
+    # outer CHROMA_STORE_TIMEOUT_S — if we can't even get a slot in that
+    # window, the surrounding asyncio.wait_for has already given up.
+    acquired = _CHROMA_WRITE_SEMAPHORE.acquire(
+        blocking=True, timeout=CHROMA_STORE_TIMEOUT_S,
+    )
+    if not acquired:
+        raise TimeoutError(
+            "ChromaDB write semaphore: no slot free within "
+            f"{CHROMA_STORE_TIMEOUT_S}s ({CHROMA_WRITE_CONCURRENCY} concurrent writers)"
+        )
+    try:
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):  # 3 attempts: 1, 2, 3
+            try:
+                # On retry, drop any partial collection from a prior failed
+                # attempt so we don't accumulate duplicate chunks if attempt
+                # N-1 wrote some chunks before erroring.
+                if attempt > 1:
+                    try:
+                        client.delete_collection(name=collection_id)
+                    except Exception:
+                        pass  # collection may not exist; that's fine
+                Chroma.from_texts(
+                    texts=chunks,
+                    embedding=embeddings,
+                    collection_name=collection_id,
+                    client=client,
+                    metadatas=metadatas,
                 )
-                time.sleep(backoff_s)
-            else:
-                log.error(
-                    "ChromaDB write failed after retries",
-                    collection=collection_id, attempts=attempt, error=err_msg,
-                )
+                log.info("Stored in ChromaDB", collection=collection_id,
+                         chunks=len(chunks), attempt=attempt)
+                return
+            except Exception as e:
+                last_exc = e
+                err_msg = str(e)[:200]
+                pool_timeout = _is_pool_timeout(e)
+                if attempt < 3:
+                    # Pool-timeout errors: the pool is saturated *right now*,
+                    # so a 1s wait will likely hit the same condition. Use a
+                    # longer backoff to let in-flight writes drain.
+                    backoff_s = (2 ** attempt) if pool_timeout else (2 ** (attempt - 1))
+                    log.warning(
+                        "ChromaDB write failed; retrying",
+                        collection=collection_id, attempt=attempt,
+                        max_attempts=3, backoff_s=backoff_s,
+                        pool_timeout=pool_timeout, error=err_msg,
+                    )
+                    time.sleep(backoff_s)
+                else:
+                    log.error(
+                        "ChromaDB write failed after retries",
+                        collection=collection_id, attempts=attempt,
+                        pool_timeout=pool_timeout, error=err_msg,
+                    )
+    finally:
+        _CHROMA_WRITE_SEMAPHORE.release()
 
     # All retries exhausted; surface the last exception to the caller
     # (which logs + emits the chroma_store_timeout event and continues

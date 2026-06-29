@@ -58,20 +58,64 @@ async def _load_chat_history(thread_id: str) -> tuple[list, str]:
 
 REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query that incorporates relevant context from the conversation history.
 
+Two distinct followup shapes to recognise:
+
+  (A) SEARCH followups — short, broad references to a topic in the history
+      ("find related cases", "what does the law say", "supreme court cases on
+      this"). Output a concise search query that names the specific
+      topic/section/act/doctrine from history. Compressed, search-engine style.
+
+  (B) DIRECTIVE followups — the user is refining a PRIOR PRODUCTION TASK from
+      the conversation. Examples: "in marathi", "in English", "in Hindi", "in
+      a table", "more concise prayer", "for Magistrate Court not Sessions",
+      "translate to Tamil", "मराठीत द्या", "Hindi mein", "Marathi madhe sanga".
+      The user is NOT asking a new question — they are saying "do the previous
+      thing again, with this change". For these:
+        - Reconstruct the FULL prior request with the directive applied.
+        - Preserve EVERY substantive detail from the prior turn: document
+          type, parties, dates, amounts, grounds, prayer, statute references,
+          facts.
+        - Do NOT compress to a search query.
+        - The rewritten query should READ like a complete drafting / analysis
+          / generation request, the way the user originally phrased their
+          first ask (with the new directive folded in).
+
 Rules:
 1. The rewritten query must be understandable WITHOUT the conversation history.
-2. Preserve all legal specificity: section numbers, act names, party names, dates.
+2. Preserve all legal specificity: section numbers, act names, party names, dates, amounts, grounds.
 3. If the user refers to something from the conversation (e.g., "that section", "the same act", "find cases on this", "related cases"), resolve the reference using the conversation history.
-4. IMPORTANT: If the latest query is broad or generic (e.g., "find related cases", "what about supreme court cases", "more details"), it is almost certainly a follow-up. You MUST incorporate the specific topic/section/act from the conversation history into the rewritten query.
+4. **Branch on shape:**
+   - For SEARCH followups (shape A): produce a concise search query naming the specific topic/section/act/doctrine from history.
+   - For DIRECTIVE followups (shape B): produce a FULL self-contained reconstruction of the prior request with the directive applied. Length is whatever it takes — do not compress.
 5. Only return the query as-is if it is BOTH grammatically standalone AND contains specific legal terms that need no context.
 6. Do NOT answer the query. Only rewrite it.
-7. Keep concise — a search query, not a paragraph.
+7. **Length policy**: concise for SEARCH followups (a search query); full reconstruction for DIRECTIVE followups (a paragraph or more is fine).
 8. Return ONLY the rewritten query text.
 
 Examples:
+
+SEARCH followups:
 - History: "User asked about Section 35 of BNS" + Query: "find relevant cases from supreme court" → "Supreme Court cases on right of private defence under Section 35 of Bharatiya Nyaya Sanhita 2023"
 - History: "User asked about anticipatory bail" + Query: "what does the law say" → "Legal provisions on anticipatory bail"
 - History: "User asked about Section 498A IPC" + Query: "related judgments" → "Supreme Court judgments on Section 498A IPC cruelty and dowry"
+
+DIRECTIVE followups (language switch):
+- History: "User asked: Prepare an NDPS bail application for an accused in judicial custody for 7 months under Section 20(b) NDPS Act on grounds of Section 42(2) non-compliance, panch contradictions, FSL delay. Assistant produced a Hindi draft."
+  + Query: "In marathi"
+  → "Prepare an NDPS bail application in Marathi language for an accused who has been in judicial custody for seven months under Section 20(b) of the NDPS Act, on grounds of non-compliance with Section 42(2), contradictions in panch witness statements, and delay in sending samples to the Forensic Science Laboratory. Maintain all the same facts, grounds, and prayer structure as previously discussed."
+
+- History: "User asked: Prepare an NDPS bail application... Assistant produced a Marathi draft on the previous turn."
+  + Query: "in English"
+  → "Prepare the same NDPS bail application in English language for an accused in judicial custody for seven months under Section 20(b) of the NDPS Act, on the same grounds discussed (Section 42(2) non-compliance, panch witness contradictions, FSL sample delay) and the same prayer structure as previously discussed."
+
+DIRECTIVE followups (format / scope):
+- History: "User asked to compare Section 130 and Section 131 of Indian Evidence Act."
+  + Query: "as a table"
+  → "Compare Section 130 and Section 131 of the Indian Evidence Act in a markdown table format."
+
+- History: "User asked for a partition suit plaint between two brothers over an ancestral property in Pune."
+  + Query: "make the prayer more concise"
+  → "Prepare the same partition suit plaint between the two brothers over the ancestral property in Pune, with a more concise prayer paragraph but all other content (cause title, parties, facts, grounds) unchanged."
 
 Conversation History:
 {chat_history_text}
@@ -151,10 +195,14 @@ def _rewrite_query(
         _record_tokens("Memory", "rewrite_query", response)
         rewritten = response.content.strip()
 
-        if not rewritten or len(rewritten) > 1000:
-            log.debug("Rewrite result discarded",
-                      reason="empty" if not rewritten else "too_long",
-                      result_len=len(rewritten) if rewritten else 0)
+        # Empty output is the only thing we can't recover from. The previous
+        # hardcoded length cap (1000 → bumped to 5000 → removed on 2026-06-30)
+        # was killing directive-followup rewrites that legitimately need to
+        # reconstruct the prior task in full. The provenance check below is
+        # the real safety net — it catches hallucinated legal anchors, which
+        # is the failure mode that actually matters.
+        if not rewritten:
+            log.debug("Rewrite result discarded — empty output")
             return query
 
         # Provenance check — every specific legal anchor (section number,

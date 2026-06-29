@@ -1288,12 +1288,17 @@ async def health(request: Request):
     checks: dict[str, dict] = {}
     overall = "healthy"  # healthy | degraded | unhealthy
 
+    # Probes share one budget. Event-loop scheduling delays under load can
+    # starve a sub-second timeout even when the upstream is healthy, so the
+    # probe must outlast plausible event-loop hiccups, not just upstream RTT.
+    probe_timeout_s = float(os.getenv("HEALTH_PROBE_TIMEOUT_S", "10.0"))
+
     # --- 1. Elasticsearch ---
     try:
         t0 = time.time()
-        es = get_es_client(max_retries=1, timeout=3)
+        es = get_es_client(max_retries=1, timeout=int(probe_timeout_s))
         reachable = await asyncio.wait_for(
-            asyncio.to_thread(es.ping), timeout=3.0
+            asyncio.to_thread(es.ping), timeout=probe_timeout_s
         )
         latency_ms = round((time.time() - t0) * 1000)
         if reachable:
@@ -1302,7 +1307,9 @@ async def health(request: Request):
             checks["elasticsearch"] = {"status": "error", "detail": "ping returned False"}
             overall = "unhealthy"
     except Exception as e:
-        checks["elasticsearch"] = {"status": "error", "detail": str(e)[:120]}
+        # Include type name — asyncio.TimeoutError stringifies to "", which
+        # would otherwise leave `detail` empty and undiagnosable.
+        checks["elasticsearch"] = {"status": "error", "detail": f"{type(e).__name__}: {e}"[:200]}
         overall = "unhealthy"
 
     # --- 2. OpenAI API key ---
@@ -1378,7 +1385,7 @@ async def health(request: Request):
                 pool = _cs._get_pool()
                 with pool.connection() as conn:
                     conn.execute("SELECT 1")
-            await asyncio.wait_for(asyncio.to_thread(_pg_probe), timeout=3.0)
+            await asyncio.wait_for(asyncio.to_thread(_pg_probe), timeout=probe_timeout_s)
             latency_ms = round((time.time() - t0) * 1000)
             checks["chat_store"] = {"status": "ok", "backend": "postgresql", "latency_ms": latency_ms}
         else:
@@ -1388,11 +1395,11 @@ async def health(request: Request):
                 conn = sqlite3.connect(db_path, timeout=2.0)
                 conn.execute("SELECT 1")
                 conn.close()
-            await asyncio.wait_for(asyncio.to_thread(_sqlite_probe), timeout=3.0)
+            await asyncio.wait_for(asyncio.to_thread(_sqlite_probe), timeout=probe_timeout_s)
             latency_ms = round((time.time() - t0) * 1000)
             checks["chat_store"] = {"status": "ok", "backend": "sqlite", "latency_ms": latency_ms}
     except Exception as e:
-        checks["chat_store"] = {"status": "error", "detail": str(e)[:120]}
+        checks["chat_store"] = {"status": "error", "detail": f"{type(e).__name__}: {e}"[:200]}
         if overall == "healthy":
             overall = "degraded"
 

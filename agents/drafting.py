@@ -770,21 +770,89 @@ async def _generate_draft(
 
     progress_emit("drafting", "Generating your draft...", step="generate")
 
+    # Gemini occasionally trips the RECITATION safety filter on redraft
+    # prompts (it thinks the model is reciting the source document too
+    # directly). When that happens, `response.content` is "" and
+    # `response_metadata.finish_reason` is "RECITATION". On a single retry,
+    # we append an instruction asking the model to substantially paraphrase
+    # — that usually clears the filter. If the retry also comes back empty,
+    # we surface a clean error instead of leaking the LangChain AIMessage
+    # repr (which used to ship as the final response, looking like
+    # "content='' additional_kwargs={} response_metadata={...}").
+    async def _invoke_once(extra_instruction: str = "") -> "object":
+        final_user_block = (
+            user_block + "\n\n" + extra_instruction if extra_instruction
+            else user_block
+        )
+        return await asyncio.to_thread(
+            llm.invoke,
+            [SystemMessage(content=system_prompt),
+             HumanMessage(content=final_user_block)],
+        )
+
+    from core.token_tracker import record as _record_tokens
+
+    def _finish_reason(r) -> str:
+        meta = getattr(r, "response_metadata", None) or {}
+        return str(meta.get("finish_reason") or "").upper()
+
     try:
         with log_time(log, "Single-pass draft generation"):
-            response = await asyncio.to_thread(
-                llm.invoke,
-                [SystemMessage(content=system_prompt), HumanMessage(content=user_block)],
-            )
+            response = await _invoke_once()
     except Exception as e:
         log.error("Draft generation LLM call failed",
                   error=str(e)[:200], exc_info=True)
         raise
 
-    from core.token_tracker import record as _record_tokens
     _record_tokens("Drafting", "generate", response)
+    text = getattr(response, "content", "") or ""
 
-    text = getattr(response, "content", None) or str(response)
+    if not text:
+        reason = _finish_reason(response)
+        log.warning(
+            "Draft generation produced empty content — Gemini block",
+            finish_reason=reason or "unknown",
+        )
+
+        if reason in ("RECITATION", "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"):
+            paraphrase_instruction = (
+                "IMPORTANT: Your previous draft response was empty because "
+                f"Gemini's {reason.title()} filter flagged it. Rewrite the "
+                "document so that, while every party name, date, monetary "
+                "amount, and case-specific fact still comes VERBATIM from "
+                "the CASE FACTS and USER QUERY NARRATIVE above (those are "
+                "non-negotiable), the surrounding LEGAL PROSE, statutory "
+                "phrasing, headings, and structural language are "
+                "substantially paraphrased in your own words — do not copy "
+                "long verbatim passages from the REFERENCE DRAFT or the "
+                "uploaded source document. Vary sentence structure, choose "
+                "synonyms for non-fact language, and re-order grounds and "
+                "sub-clauses where it does not change meaning."
+            )
+            try:
+                with log_time(log, "Draft generation retry (paraphrase)"):
+                    response = await _invoke_once(paraphrase_instruction)
+                _record_tokens("Drafting", "generate_retry", response)
+                text = getattr(response, "content", "") or ""
+            except Exception as e:
+                log.error("Draft generation retry failed",
+                          error=str(e)[:200], exc_info=True)
+                # Keep text="" so we surface the error below.
+
+        if not text:
+            second_reason = _finish_reason(response)
+            log.error(
+                "Draft generation blocked twice; surfacing clean error",
+                first_reason=reason or "unknown",
+                second_reason=second_reason or "unknown",
+            )
+            raise RuntimeError(
+                "Draft generation was blocked by the language model's "
+                f"safety filter ({second_reason or reason or 'unknown'}). "
+                "Please try rephrasing your request or removing direct "
+                "copies of source-document text from the prompt."
+            )
+
     log.info("Draft generated", length=len(text))
     return text
 

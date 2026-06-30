@@ -129,8 +129,8 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
                     if name:
                         tools_used.append(name)
 
-            if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                raw = msg.content
+            if hasattr(msg, "type") and msg.type == "ai" and msg.text:
+                raw = msg.text
                 if isinstance(raw, list):
                     answer = "\n".join(
                         p.get("text", str(p)) if isinstance(p, dict) else str(p)
@@ -141,8 +141,8 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
 
         if not answer and messages:
             last_msg = messages[-1]
-            if hasattr(last_msg, "content") and last_msg.content:
-                raw = last_msg.content
+            if hasattr(last_msg, "content") and last_msg.text:
+                raw = last_msg.text
                 if isinstance(raw, list):
                     answer = "\n".join(
                         p.get("text", str(p)) if isinstance(p, dict) else str(p)
@@ -181,8 +181,8 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
                     answer = ""
                     tools_used = ["gst_search_by_topic (fallback)"]
                     for msg in retry_messages:
-                        if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                            answer = msg.content
+                        if hasattr(msg, "type") and msg.type == "ai" and msg.text:
+                            answer = msg.text
                     if not answer:
                         answer = f"Here are relevant GST AAAR orders:\n\n{fallback_result}"
                     log.info("Fallback search completed", response_len=len(answer))
@@ -196,8 +196,8 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
 
         # Parse tool response messages for structured order data
         for msg in messages:
-            if hasattr(msg, "type") and msg.type == "tool" and msg.content:
-                sources.extend(_parse_gst_blocks(msg.content))
+            if hasattr(msg, "type") and msg.type == "tool" and msg.text:
+                sources.extend(_parse_gst_blocks(msg.text))
 
         # Deduplicate by db_id
         seen_ids: set[str] = set()

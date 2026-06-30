@@ -93,7 +93,7 @@ async def fix_draft(
                 ),
             )
 
-        revised = sanitize_output(response.content.strip())
+        revised = sanitize_output(response.text.strip())
 
         # Sanity: revised should be at least 50% of original (we're fixing, not deleting)
         if len(revised) < len(original_draft) * 0.5:

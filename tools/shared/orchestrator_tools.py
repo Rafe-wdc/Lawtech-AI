@@ -291,7 +291,7 @@ def merge_results(
             tokens = response.usage_metadata.get("total_tokens", 0)
 
         return {
-            "merged_content": response.content,
+            "merged_content": response.text,
             "agents_merged": agent_names,
             "tokens_consumed": tokens,
         }

@@ -454,7 +454,7 @@ class _SqliteChatHistoryStore:
                 "new_turns": new_turns_text,
             })
 
-            new_summary = result.content.strip()
+            new_summary = result.text.strip()
             if new_summary and len(new_summary) > 10:
                 conn.execute("""
                     UPDATE threads
@@ -1766,7 +1766,7 @@ class _PostgresChatHistoryStore:
                 "existing_summary": existing,
                 "new_turns": new_turns_text,
             })
-            new_summary = result.content.strip()
+            new_summary = result.text.strip()
         except Exception as e:
             log.error("Summary LLM call failed", thread_id=thread_id[:12], error=str(e))
             return

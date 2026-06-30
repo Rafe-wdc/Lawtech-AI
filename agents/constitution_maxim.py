@@ -230,9 +230,9 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
 
     # Check if LLM apologized (docs were irrelevant) — fall back to web search.
     # Uses the shared head+tail scanner so end-of-response hedges don't slip through.
-    if head_tail_apology_detected(response.content):
+    if head_tail_apology_detected(response.text):
         log.warning("LLM response is an apology or too short, using web fallback",
-                    task=task, response_preview=response.content[:100])
+                    task=task, response_preview=response.text[:100])
         # Emit token_reset so frontend clears the sorry text
         try:
             from langgraph.config import get_stream_writer
@@ -254,7 +254,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
 
     log.info("Task completed",
              task=task, source=source_name,
-             response_len=len(response.content), tokens=tokens)
+             response_len=len(response.text), tokens=tokens)
 
     sources = []
     for d in docs[:5]:
@@ -269,7 +269,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
 
     return AgentResult(
         agent_name=task,
-        content=response.content,
+        content=response.text,
         sources=sources,
         tokens_consumed=tokens,
     )

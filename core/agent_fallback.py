@@ -85,7 +85,7 @@ def rewrite_query_for_domain(query: str, agent_name: str) -> str:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Original query: {query}"},
             ])
-            rewritten = response.content.strip()
+            rewritten = response.text.strip()
 
         if rewritten and rewritten != query:
             log.info("Query rewritten",

@@ -146,7 +146,7 @@ async def generate_toa(
                 ),
             )
 
-        toa_md = sanitize_output(response.content.strip())
+        toa_md = sanitize_output(response.text.strip())
         log.info("TOA generated",
                  query=query[:80],
                  toa_len=len(toa_md),

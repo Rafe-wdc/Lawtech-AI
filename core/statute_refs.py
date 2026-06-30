@@ -131,7 +131,7 @@ async def add_statute_references(text: str) -> str:
                 STATUTE_REF_PROMPT.format(text=text),
             )
 
-        enhanced = sanitize_output(response.content.strip())
+        enhanced = sanitize_output(response.text.strip())
 
         # Sanity check: enhanced text should be at least as long as original
         # (we're only adding, not removing)

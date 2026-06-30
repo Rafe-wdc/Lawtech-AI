@@ -193,7 +193,7 @@ def _rewrite_query(
             response = chain.invoke({"query": query, "chat_history_text": chat_history_text})
         from core.token_tracker import record as _record_tokens
         _record_tokens("Memory", "rewrite_query", response)
-        rewritten = response.content.strip()
+        rewritten = response.text.strip()
 
         # Empty output is the only thing we can't recover from. The previous
         # hardcoded length cap (1000 → bumped to 5000 → removed on 2026-06-30)

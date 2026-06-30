@@ -510,7 +510,7 @@ async def _generate_followup_suggestions(
     })
 
     # Parse JSON array from response — handle various LLM output formats
-    text = result.content.strip()
+    text = result.text.strip()
     # Strip markdown code fences if present (``` or single `)
     if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()

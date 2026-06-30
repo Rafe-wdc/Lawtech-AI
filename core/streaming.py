@@ -152,7 +152,10 @@ async def _stream_with_writer(chain, inputs: dict, writer):
     runaway_dropped = 0   # for log telemetry
     stream = chain.astream(inputs)
     async for chunk in stream:
-        token = chunk.content or ""
+        # `.text` normalizes Gemini 3.x list-of-content-blocks to a string and
+        # leaves Gemini 2.5 plain string content unchanged. AIMessageChunk
+        # exposes the same `.text` property as AIMessage.
+        token = (chunk.text or "") if hasattr(chunk, "text") else (chunk.content or "")
         if not token:
             continue
 

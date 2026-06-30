@@ -345,6 +345,6 @@ def generate_legal_response(
         tokens = token_usage.get("total_tokens", 0)
 
     return {
-        "content": response.content,
+        "content": response.text,
         "tokens_consumed": tokens,
     }

@@ -225,7 +225,7 @@ def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1)
                 }
             ]
             resp = llm.invoke(content)
-            return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.content.strip()}"
+            return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.text.strip()}"
 
         for i in range(start_page, end_page + 1):
             page = doc[i]

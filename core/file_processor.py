@@ -716,7 +716,7 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
         }
     ]
     resp = llm.invoke(content)
-    return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.content.strip()}"
+    return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.text.strip()}"
 
 
 def _vision_ocr_image(file_path: str, filename: str = "") -> str:
@@ -801,7 +801,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
         }]
         with log_time(log, "Image Vision OCR", file=filename or "image"):
             resp = llm.invoke(content)
-        text = (resp.content or "").strip()
+        text = (resp.text or "").strip()
 
         if text:
             _save_ocr_cache(img_hash, text)

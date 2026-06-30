@@ -339,7 +339,7 @@ def _generate_from_docs(
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Document", "qa_chromadb", response)
 
-    return response.content, tokens
+    return response.text, tokens
 
 
 # --- Agent Node ---

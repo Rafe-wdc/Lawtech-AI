@@ -163,7 +163,7 @@ async def check_compliance(
                 ),
             )
 
-        report = sanitize_output(response.content.strip())
+        report = sanitize_output(response.text.strip())
 
         log.info("Compliance check complete",
                  doc_len=len(text),

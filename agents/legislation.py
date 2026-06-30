@@ -494,9 +494,9 @@ async def legislation_node(state: LegalAgentState) -> dict:
         # Check if LLM apologized (ES hits were irrelevant) — fall back to web search.
         # Uses the shared head+tail scanner so end-of-response hedges (after a
         # dutiful write-up of irrelevant retrievals) don't slip through.
-        if head_tail_apology_detected(response.content):
+        if head_tail_apology_detected(response.text):
             log.warning("LLM response is an apology or too short, using web fallback",
-                        response_preview=response.content[:100], search_mode=search_mode)
+                        response_preview=response.text[:100], search_mode=search_mode)
             try:
                 from langgraph.config import get_stream_writer
                 writer = get_stream_writer()
@@ -509,7 +509,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
             return {"agent_results": {"Legislation": fallback_result}}
 
         log.info("Agent completed",
-                 source=source_display, response_len=len(response.content),
+                 source=source_display, response_len=len(response.text),
                  tokens=tokens, search_mode=search_mode)
 
         # Step 6: Build source metadata
@@ -531,7 +531,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
 
         result = AgentResult(
             agent_name="Legislation",
-            content=response.content,
+            content=response.text,
             sources=sources,
             tokens_consumed=tokens,
         )

@@ -94,8 +94,8 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                         tools_used.append(name)
 
             # Get the last AI message with content as the answer
-            if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                raw = msg.content
+            if hasattr(msg, "type") and msg.type == "ai" and msg.text:
+                raw = msg.text
                 # Gemini may return content as list of parts; normalize to string
                 if isinstance(raw, list):
                     answer = "\n".join(
@@ -107,8 +107,8 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
 
         if not answer and messages:
             last_msg = messages[-1]
-            if hasattr(last_msg, "content") and last_msg.content:
-                raw = last_msg.content
+            if hasattr(last_msg, "content") and last_msg.text:
+                raw = last_msg.text
                 if isinstance(raw, list):
                     answer = "\n".join(
                         p.get("text", str(p)) if isinstance(p, dict) else str(p)
@@ -176,8 +176,8 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                     answer = ""
                     tools_used = ["search_by_topic (fallback)"]
                     for msg in retry_messages:
-                        if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                            answer = msg.content
+                        if hasattr(msg, "type") and msg.type == "ai" and msg.text:
+                            answer = msg.text
                     if not answer:
                         answer = f"Here are relevant Supreme Court cases found:\n\n{fallback_result}"
                     log.info("Fallback search completed",
@@ -193,8 +193,8 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
 
         # Parse tool response messages to extract structured case data
         for msg in messages:
-            if hasattr(msg, "type") and msg.type == "tool" and msg.content:
-                text = msg.content
+            if hasattr(msg, "type") and msg.type == "tool" and msg.text:
+                text = msg.text
                 # Split on case headers: **Parties** (DB ID: 123)
                 case_blocks = re.split(r'\n\n(?=\*\*)', text)
                 for block in case_blocks:

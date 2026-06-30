@@ -163,7 +163,7 @@ async def generate_memo(
                 ),
             )
 
-        memo_md = sanitize_output(response.content.strip())
+        memo_md = sanitize_output(response.text.strip())
 
         log.info("Research memo generated",
                  query=query[:80],

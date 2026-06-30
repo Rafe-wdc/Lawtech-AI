@@ -821,7 +821,7 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
         _record_tokens("Orchestrator", "rewrite_per_agent_queries", response)
 
         # Parse JSON from response
-        text = response.content.strip()
+        text = response.text.strip()
         # Strip markdown code fences if present
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -957,7 +957,7 @@ async def _refine_existing_response(
             {"query": query, "previous_response": previous_response},
             timeout=180,
         )
-    refined = response.content
+    refined = response.text
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Orchestrator", "refine", response)
     return refined, tokens
@@ -1853,7 +1853,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "response_instructions": response_instructions or "Standard legal response with proper citations and markdown formatting.",
             }, timeout=180)  # Multi-agent synthesis needs more time
 
-        synthesized = response.content
+        synthesized = response.text
         from core.token_tracker import record as _record_tokens
         synth_tokens = _record_tokens("Orchestrator", "synthesize", response)
 
@@ -1947,9 +1947,9 @@ async def _inject_citations_into_draft(
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Orchestrator", "inject_citations", response)
     log.info("Citation injection completed",
-             draft_len=len(draft), enriched_len=len(response.content),
+             draft_len=len(draft), enriched_len=len(response.text),
              tokens=tokens)
-    return response.content, tokens
+    return response.text, tokens
 
 
 async def _auto_cite_draft(
@@ -1981,6 +1981,6 @@ async def _auto_cite_draft(
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Orchestrator", "auto_cite", response)
     log.info("Auto-citation completed",
-             draft_len=len(draft), enriched_len=len(response.content),
+             draft_len=len(draft), enriched_len=len(response.text),
              tokens=tokens)
-    return response.content, tokens
+    return response.text, tokens

@@ -136,7 +136,7 @@ def _is_transport_failure(exc: BaseException) -> bool:
     return False
 
 
-def _es_search(index: str, body: dict) -> dict:
+def _es_search(index: str, body: dict, request_timeout: int = 30) -> dict:
     """Execute an ES search with circuit breaker protection.
 
     - If circuit is open (ES recently failed 3+ times), raises ESBackendUnavailable
@@ -158,7 +158,7 @@ def _es_search(index: str, body: dict) -> dict:
         )
     try:
         _client = get_es_client()
-        result = _client.search(index=index, body=body, request_timeout=30)
+        result = _client.search(index=index, body=body, request_timeout=request_timeout)
         record_es_success()
         return result
     except ESBackendUnavailable:
@@ -1610,7 +1610,7 @@ def translate_draft(draft: str, target_language: str) -> dict:
             tokens = response.usage_metadata.get("total_tokens", 0)
 
         return {
-            "translated": response.content,
+            "translated": response.text,
             "language": target_language,
             "tokens_consumed": tokens,
         }

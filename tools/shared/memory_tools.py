@@ -126,7 +126,7 @@ def rewrite_query(query: str, chat_history_text: str) -> str:
         chain = prompt | llm
 
         response = chain.invoke({"query": query, "chat_history_text": chat_history_text})
-        rewritten = response.content.strip()
+        rewritten = response.text.strip()
 
         if not rewritten or len(rewritten) > 1000:
             return query
@@ -175,7 +175,7 @@ def summarize_conversation(conversation_text: str, task: str = "General") -> str
         chain = prompt | llm
 
         response = chain.invoke({"conversation": conversation_text[:5000]})
-        return response.content.strip()
+        return response.text.strip()
 
     except Exception as e:
         log.error(f"[Memory] Summarization failed: {e}")

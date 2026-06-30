@@ -64,7 +64,7 @@ async def non_legal_node(state: LegalAgentState) -> dict:
         with log_time(log, "Non-legal response generation"):
             response = await chain.ainvoke({"query": query})
 
-        content = response.content if hasattr(response, "content") else str(response)
+        content = response.text if hasattr(response, "text") else str(response)
         from core.token_tracker import record as _record_tokens
         tokens = _record_tokens("Non_legal", "respond", response)
 

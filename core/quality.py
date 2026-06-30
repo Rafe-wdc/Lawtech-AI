@@ -85,7 +85,7 @@ async def score_response(
             llm.ainvoke(prompt),
             timeout=30.0,
         )
-        text = raw.content.strip()
+        text = raw.text.strip()
 
         # Parse JSON — strip markdown fences if present
         if text.startswith("```"):

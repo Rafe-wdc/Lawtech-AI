@@ -138,7 +138,7 @@ async def _extract_case_facts(user_facts: str) -> str:
             )
         from core.token_tracker import record as _record_tokens
         _record_tokens("Drafting", "extract_case_facts", response)
-        extracted = response.content.strip()
+        extracted = response.text.strip()
         log.info("Case facts extracted",
                  chars=len(extracted), bullets=extracted.count("- **"))
         return extracted
@@ -805,7 +805,10 @@ async def _generate_draft(
         raise
 
     _record_tokens("Drafting", "generate", response)
-    text = getattr(response, "content", "") or ""
+    # `.text` flattens Gemini 3.x list-of-content-blocks into a string and
+    # returns the plain `.content` for Gemini 2.5 unchanged. See LangChain
+    # docs on "Gemini 3 series models return a list of content blocks".
+    text = getattr(response, "text", "") or ""
 
     if not text:
         reason = _finish_reason(response)
@@ -833,7 +836,7 @@ async def _generate_draft(
                 with log_time(log, "Draft generation retry (paraphrase)"):
                     response = await _invoke_once(paraphrase_instruction)
                 _record_tokens("Drafting", "generate_retry", response)
-                text = getattr(response, "content", "") or ""
+                text = getattr(response, "text", "") or ""
             except Exception as e:
                 log.error("Draft generation retry failed",
                           error=str(e)[:200], exc_info=True)

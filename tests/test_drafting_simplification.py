@@ -29,6 +29,12 @@ from agents.drafting import (
     _pick_reference_source,
     _acquire_reference_draft,
     validate_draft,
+    _Section,
+    _FanoutStrategy,
+    _reference_excerpt,
+    _judge_fanout,
+    _generate_sectionwise,
+    _generate_draft,
 )
 
 
@@ -306,6 +312,376 @@ class TestValidateDraft:
 
 
 # ---------------------------------------------------------------------------
+# Fan-out judge + section-wise generation — unit tests
+# ---------------------------------------------------------------------------
+
+class TestReferenceExcerpt:
+    """`_reference_excerpt` formats the reference for the judge's view."""
+
+    def test_empty_reference_returns_placeholder(self):
+        out = _reference_excerpt("")
+        assert "no reference draft" in out.lower()
+
+    def test_short_reference_passes_through(self):
+        ref = "A short reference draft body."
+        out = _reference_excerpt(ref)
+        assert out == ref
+
+    def test_long_reference_keeps_head_and_tail(self):
+        head = "HEAD_MARKER " * 400        # ~4800 chars
+        middle = "MIDDLE_NOISE " * 500      # ~6500 chars — should be elided
+        tail = "TAIL_MARKER " * 100        # ~1200 chars
+        ref = head + middle + tail
+        out = _reference_excerpt(ref, head=3000, tail=1000)
+        assert "HEAD_MARKER" in out
+        assert "TAIL_MARKER" in out
+        assert "MIDDLE_NOISE" not in out
+        assert "omitted for brevity" in out
+
+
+class TestJudgeFanout:
+    """`_judge_fanout` is a Flash-Lite call; we mock the chain to test wiring."""
+
+    def test_returns_strategy_from_llm(self):
+        strategy = _FanoutStrategy(
+            should_fanout=True,
+            sections=[
+                _Section(id="cause_title", heading="CAUSE TITLE", summary="court + parties block"),
+                _Section(id="facts", heading="FACTS", summary="numbered facts"),
+                _Section(id="grounds", heading="GROUNDS", summary="numbered grounds"),
+                _Section(id="prayer", heading="PRAYER", summary="reliefs sought"),
+            ],
+            reasoning="Long writ — 4-section fan-out.",
+        )
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(return_value={
+            "raw": MagicMock(usage_metadata={"total_tokens": 200}),
+            "parsed": strategy,
+        })
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            with patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+                mock_prompt.from_template.return_value.__or__ = MagicMock(return_value=mock_chain)
+                got = _run(_judge_fanout(
+                    query="Draft a writ petition for quashing FIR No. 123/2024.",
+                    reference_draft="LONG REFERENCE DRAFT BODY ...",
+                    user_language="en",
+                    user_intent=None,
+                ))
+        assert got.should_fanout is True
+        assert len(got.sections) == 4
+        assert got.sections[0].id == "cause_title"
+
+    def test_llm_failure_defaults_to_single_pass(self):
+        with patch("langchain.chat_models.init_chat_model",
+                   side_effect=RuntimeError("LLM blip")):
+            got = _run(_judge_fanout(
+                query="Draft a notice", reference_draft="ref",
+                user_language="en", user_intent=None,
+            ))
+        assert got.should_fanout is False
+        assert got.sections == []
+        assert "failed" in got.reasoning.lower()
+
+    def test_marathi_language_flows_into_judge_call(self):
+        """The judge must receive the user's target language so it emits
+        headings in the right script."""
+        captured: dict = {}
+
+        async def _capture_invoke(payload):
+            captured.update(payload)
+            return {
+                "raw": MagicMock(usage_metadata={"total_tokens": 100}),
+                "parsed": _FanoutStrategy(should_fanout=False, reasoning="short"),
+            }
+
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            with patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+                mock_prompt.from_template.return_value.__or__ = MagicMock(return_value=mock_chain)
+                _run(_judge_fanout(
+                    query="मसुदा तयार करा", reference_draft="REF",
+                    user_language="mr", user_intent=None,
+                ))
+        assert captured.get("user_language_name") == "Marathi"
+
+
+class TestGenerateSectionwise:
+    """`_generate_sectionwise` walks pairs and threads prior_text through."""
+
+    @staticmethod
+    def _silent_progress(*args, **kwargs):
+        pass
+
+    def test_walks_pairs_and_threads_prior_text(self):
+        sections = [
+            _Section(id="cause_title", heading="CAUSE TITLE", summary="court + parties"),
+            _Section(id="facts", heading="FACTS", summary="numbered facts"),
+            _Section(id="grounds", heading="GROUNDS", summary="numbered grounds"),
+            _Section(id="prayer", heading="PRAYER", summary="reliefs"),
+            _Section(id="verification", heading="VERIFICATION", summary="declaration"),
+        ]
+
+        calls: list[dict] = []
+
+        async def _fake_pair(
+            *, sections_to_write, section_position_start, total_sections,
+            query, case_facts, reference_draft, prior_text,
+            gathered_context, user_intent, user_language,
+        ):
+            calls.append({
+                "sections_to_write": list(sections_to_write),
+                "position_start": section_position_start,
+                "total": total_sections,
+                "prior_len": len(prior_text or ""),
+            })
+            return "\n".join(
+                f"## {s.heading}\nBody of {s.id}." for s in sections_to_write
+            )
+
+        with patch("agents.drafting._generate_section_pair",
+                   side_effect=_fake_pair):
+            out = _run(_generate_sectionwise(
+                sections=sections,
+                query="Draft a writ petition",
+                case_facts="",
+                reference_draft="REF",
+                user_intent=None,
+                user_language="en",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+
+        # 5 sections → 3 pair calls: [s1,s2], [s3,s4], [s5 solo]
+        assert len(calls) == 3
+        assert [c["position_start"] for c in calls] == [1, 3, 5]
+        assert len(calls[0]["sections_to_write"]) == 2
+        assert len(calls[2]["sections_to_write"]) == 1  # solo last
+        # All calls see the same total
+        assert all(c["total"] == 5 for c in calls)
+        # prior_text grows: pair 1 has no prior, pair 2 has pair-1 output, etc.
+        assert calls[0]["prior_len"] == 0
+        assert calls[1]["prior_len"] > 0
+        assert calls[2]["prior_len"] > calls[1]["prior_len"]
+        # Final assembly contains every section's body
+        for s in sections:
+            assert f"Body of {s.id}." in out
+
+    def test_failed_pair_is_skipped_loop_continues(self):
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+            _Section(id="c", heading="C", summary=""),
+            _Section(id="d", heading="D", summary=""),
+        ]
+
+        async def _flaky_pair(*, sections_to_write, **kwargs):
+            ids = "+".join(s.id for s in sections_to_write)
+            if "a+b" in ids:
+                raise RuntimeError("Gemini blip")
+            return "\n".join(
+                f"## {s.heading}\nBody of {s.id}." for s in sections_to_write
+            )
+
+        with patch("agents.drafting._generate_section_pair",
+                   side_effect=_flaky_pair):
+            out = _run(_generate_sectionwise(
+                sections=sections,
+                query="Draft", case_facts="",
+                reference_draft="REF",
+                user_intent=None, user_language="en",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+
+        # First pair raised → skipped silently; remaining pair drafted.
+        assert "Body of c." in out
+        assert "Body of d." in out
+        assert "Body of a." not in out
+
+    def test_empty_pair_output_does_not_append(self):
+        """A section pair that returns empty text (e.g. Gemini blocked twice)
+        is skipped — the final assembly does not contain an empty entry."""
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+        ]
+
+        async def _empty_pair(**kwargs):
+            return ""
+
+        with patch("agents.drafting._generate_section_pair",
+                   side_effect=_empty_pair):
+            out = _run(_generate_sectionwise(
+                sections=sections,
+                query="Draft", case_facts="",
+                reference_draft="REF",
+                user_intent=None, user_language="en",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+        assert out == ""
+
+    def test_progress_event_per_section(self):
+        """One progress event per section (not per pair) — frontend needs
+        section-level granularity for the per-section checklist UI."""
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+            _Section(id="c", heading="C", summary=""),
+        ]
+        events: list[tuple] = []
+
+        def _capture_progress(*args, **kwargs):
+            events.append((args, kwargs))
+
+        async def _fake_pair(*, sections_to_write, **kwargs):
+            return "ok"
+
+        with patch("agents.drafting._generate_section_pair",
+                   side_effect=_fake_pair):
+            _run(_generate_sectionwise(
+                sections=sections,
+                query="Draft", case_facts="",
+                reference_draft="REF",
+                user_intent=None, user_language="en",
+                progress_emit=_capture_progress,
+                gathered_context=None,
+            ))
+        # One event per section (3 events for 3 sections).
+        assert len(events) == 3
+        # Each event carries a section-specific `step` identifier so the
+        # frontend can route per-section UI updates without re-parsing the
+        # human-readable message.
+        steps = [e[1].get("step") for e in events]
+        assert steps == ["section:1", "section:2", "section:3"]
+        # The message embeds the human-readable position + heading.
+        messages = [e[0][1] if len(e[0]) > 1 else "" for e in events]
+        assert all(
+            f"section {i} of 3" in m for i, m in zip([1, 2, 3], messages)
+        )
+
+
+class TestGenerateDraftDispatcher:
+    """`_generate_draft` routes between single-pass and sectionwise based
+    on `_judge_fanout`'s decision."""
+
+    @staticmethod
+    def _silent_progress(*args, **kwargs):
+        pass
+
+    def test_should_fanout_false_routes_to_single_pass(self):
+        single_called: list[bool] = []
+        section_called: list[bool] = []
+
+        async def _fake_single_pass(**kwargs):
+            single_called.append(True)
+            return "SINGLE_PASS_OUTPUT"
+
+        async def _fake_sectionwise(**kwargs):
+            section_called.append(True)
+            return "SECTIONWISE_OUTPUT"
+
+        async def _fake_judge(**kwargs):
+            return _FanoutStrategy(
+                should_fanout=False,
+                reasoning="short notice — single-pass",
+            )
+
+        with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting._generate_single_pass",
+                   side_effect=_fake_single_pass), \
+             patch("agents.drafting._generate_sectionwise",
+                   side_effect=_fake_sectionwise):
+            out = _run(_generate_draft(
+                query="Draft a Section 138 NI Act notice",
+                case_facts="", reference_draft="short ref",
+                user_intent=None, user_language="en",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+        assert out == "SINGLE_PASS_OUTPUT"
+        assert single_called == [True]
+        assert section_called == []
+
+    def test_should_fanout_true_routes_to_sectionwise(self):
+        single_called: list[bool] = []
+        section_called: list[bool] = []
+
+        async def _fake_single_pass(**kwargs):
+            single_called.append(True)
+            return "SINGLE_PASS_OUTPUT"
+
+        async def _fake_sectionwise(**kwargs):
+            section_called.append(True)
+            return "SECTIONWISE_OUTPUT"
+
+        async def _fake_judge(**kwargs):
+            return _FanoutStrategy(
+                should_fanout=True,
+                sections=[
+                    _Section(id="a", heading="A", summary=""),
+                    _Section(id="b", heading="B", summary=""),
+                ],
+                reasoning="long writ — 2-section fan-out",
+            )
+
+        with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting._generate_single_pass",
+                   side_effect=_fake_single_pass), \
+             patch("agents.drafting._generate_sectionwise",
+                   side_effect=_fake_sectionwise):
+            out = _run(_generate_draft(
+                query="Draft a writ petition for quashing FIR 123/2024.",
+                case_facts="", reference_draft="LONG REFERENCE",
+                user_intent=None, user_language="en",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+        assert out == "SECTIONWISE_OUTPUT"
+        assert section_called == [True]
+        assert single_called == []
+
+    def test_fanout_true_with_empty_sections_falls_back_to_single_pass(self):
+        """Defensive: should_fanout=True but sections=[] should NOT crash —
+        dispatcher falls through to single-pass."""
+        single_called: list[bool] = []
+
+        async def _fake_single_pass(**kwargs):
+            single_called.append(True)
+            return "SINGLE_PASS_OUTPUT"
+
+        async def _fake_sectionwise(**kwargs):
+            return "SECTIONWISE_OUTPUT"
+
+        async def _fake_judge(**kwargs):
+            return _FanoutStrategy(
+                should_fanout=True, sections=[],
+                reasoning="judge returned empty list",
+            )
+
+        with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting._generate_single_pass",
+                   side_effect=_fake_single_pass), \
+             patch("agents.drafting._generate_sectionwise",
+                   side_effect=_fake_sectionwise):
+            out = _run(_generate_draft(
+                query="Draft", case_facts="", reference_draft="ref",
+                user_intent=None, user_language="en",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+        assert out == "SINGLE_PASS_OUTPUT"
+        assert single_called == [True]
+
+
+# ---------------------------------------------------------------------------
 # Optional end-to-end smokes — gated behind DRAFTING_SIMPLIFICATION_E2E=1
 # (live Gemini + ES required; ~30s per smoke).
 # ---------------------------------------------------------------------------
@@ -381,3 +757,88 @@ class TestEndToEndSmokes:
         # Reference came from the web (corpus had no RTI template).
         assert result.meta.get("reference_kind") == "web"
         assert result.fallback_used is True
+
+    def test_long_writ_petition_exercises_sectionwise_path(self):
+        """Long writ petition → judge fans out → sectionwise loop produces
+        a multi-section document with multiple `## ` headings.
+
+        We don't assert on internal strategy state (the public signature is
+        `str`) — we verify the output shape that section-wise generation
+        produces: long body + several distinct section headings + the
+        expected legal scaffolding (Article 226, Prayer)."""
+        from agents.drafting import drafting_node
+        from config.intent import default_intent
+        query = (
+            "Draft a detailed writ petition under Article 226 of the "
+            "Constitution of India before the Bombay High Court for "
+            "quashing FIR No. 145/2024 registered at Vile Parle Police "
+            "Station, Mumbai, against the Petitioner Mr. Suresh Patil "
+            "(resident of 12 MG Road, Mumbai, age 45, occupation: "
+            "Managing Director of XYZ Constructions Pvt. Ltd.) under "
+            "Sections 420 and 406 of the IPC. The FIR is a malicious "
+            "complaint by a disgruntled contractor over a contractual "
+            "dispute that is already pending in arbitration. Include "
+            "Cause Title, Brief Facts, Questions of Law, multiple "
+            "Grounds, Prayer, Verification, and Affidavit. Cite the "
+            "State of Haryana v. Bhajan Lal guidelines for quashing."
+        )
+        state: dict = {
+            "query": query, "original_query": query,
+            "agent_queries": {"Drafting": query},
+            "user_context": "", "user_language": "en",
+            "user_intent": default_intent(),
+            "chat_history": [], "agent_results": {},
+        }
+        out = _run(drafting_node(state))
+        result = out["agent_results"]["Drafting"]
+        assert result.error is None
+        # Long writ — sectionwise output should be substantial.
+        assert len(result.content) > 2000, (
+            f"expected >2000 chars, got {len(result.content)}"
+        )
+        # Section-wise emits a `## ` heading per section. A writ this size
+        # should have at least 4 distinct top-level sections.
+        heading_count = result.content.count("\n## ") + (
+            1 if result.content.startswith("## ") else 0
+        )
+        assert heading_count >= 4, (
+            f"expected ≥4 `## ` headings, got {heading_count}"
+        )
+        # Core legal scaffolding present.
+        assert "Article 226" in result.content
+        # User-named party survives into the output.
+        assert "Suresh Patil" in result.content
+
+    def test_marathi_demand_notice_renders_in_devanagari(self):
+        """Marathi-language drafting query → output dominantly in
+        Devanagari script (the localize_prompt strict directive flows
+        through both single-pass and section-pair generation)."""
+        from agents.drafting import drafting_node
+        from config.intent import default_intent
+        query = (
+            "मराठीत कलम १३८ निगोशिएबल इंस्ट्रुमेंट्स कायद्याअंतर्गत "
+            "मागणी नोटीस तयार करा. श्री राजेश कुमार यांनी श्री अनिल "
+            "शर्मा यांना दिनांक १५ मार्च २०२६ रोजी ५,००,००० रुपयांचा "
+            "धनादेश दिला होता, जो अपुऱ्या निधीच्या कारणावरून परत आला."
+        )
+        state: dict = {
+            "query": query, "original_query": query,
+            "agent_queries": {"Drafting": query},
+            "user_context": "", "user_language": "mr",
+            "user_intent": default_intent(),
+            "chat_history": [], "agent_results": {},
+        }
+        out = _run(drafting_node(state))
+        result = out["agent_results"]["Drafting"]
+        assert result.error is None
+        assert len(result.content) > 300
+        # Devanagari dominates the output — count chars in the Devanagari
+        # Unicode block (U+0900–U+097F) vs Latin letters. Verbatim
+        # case-name citations may have some Latin; cause title party
+        # names are transliterated to Devanagari per the strict directive.
+        deva = sum(1 for c in result.content if "ऀ" <= c <= "ॿ")
+        latin = sum(1 for c in result.content if c.isascii() and c.isalpha())
+        assert deva > latin, (
+            f"expected Devanagari dominant in Marathi draft; "
+            f"got {deva} Devanagari vs {latin} Latin"
+        )

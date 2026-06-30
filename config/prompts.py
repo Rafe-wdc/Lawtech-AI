@@ -1189,6 +1189,175 @@ The draft should include:
 DRAFTING_WEB_FALLBACK_PROMPT += "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
 
 
+# 4) DRAFTING_FANOUT_JUDGE_PROMPT — runs ONCE per drafting request, BEFORE
+# generation. Decides whether to single-pass the document or fan out into
+# sequential per-section generation. When fanning out, also returns the
+# section list with headings already adapted to the user's matter and
+# rendered in the user's target output language.
+#
+# Drives `_judge_fanout` (Gemini Flash Lite, structured output).
+# The section list is reference-derived — no enum, no taxonomy. Soft cap
+# of 15 sections is enforced at the PROMPT level (the model is told to
+# collapse semantically-adjacent sections); there is no code-level cap.
+DRAFTING_FANOUT_JUDGE_PROMPT = """You are deciding whether an Indian-law document should be generated in a SINGLE pass or built SECTION-BY-SECTION (one or two sections per LLM call).
+
+Your job is to look at the user's drafting query and the reference draft we have acquired, then return three things:
+
+  1. should_fanout: true / false
+  2. sections (only when should_fanout=true): an ordered list of the document's sections, with headings ADAPTED to THIS user's matter
+  3. reasoning: one short sentence on the choice
+
+## When to set should_fanout=true
+
+ONLY when the document the user is asking for is a structurally LONG, multi-section legal instrument that benefits from being written one section at a time. Typical fan-out candidates:
+
+  - Writ petitions (Parts I/II/III + Grounds + Prayer + Verification)
+  - Plaints / civil suits (Cause Title + Facts + Issues + Grounds + Prayer + Verification + Schedule)
+  - Written statements / counter-affidavits (preliminary objections + para-wise reply + additional pleas + verification)
+  - Detailed bail / anticipatory-bail applications (grounds + parity + medical / family + prayer)
+  - Long SCN / departmental-appeal replies with multiple grounds
+  - Detailed petitions for quashing / revision / review
+
+## When to keep single-pass (should_fanout=false)
+
+  - Short notices and letters (Section 138 NI Act notice, Section 80 CPC notice, demand letter, legal notice, lawyer's letter)
+  - Single-page applications (RTI, leave application, simple affidavit, short adjournment application)
+  - Short transactional instruments (basic agreement, single-clause deed, NOC)
+  - Office letters and correspondence
+  - Anything where the reference draft is under ~1500 words AND has fewer than 6 natural sections
+
+When in doubt, prefer single-pass — the section-wise loop is for LONG documents only.
+
+## Section list rules (only when should_fanout=true)
+
+  - Use the REFERENCE DRAFT's structural shape — ordering of Parts, pattern of headings, placement of Prayer / Verification / Affidavit / Schedule — as your SKELETON.
+  - ADAPT the section headings to the USER's actual matter. Example: if the reference is a "Petition for Quashing FIR" and the user asked for an "Anticipatory Bail Application", reuse the structural shape but rewrite headings to fit anticipatory-bail conventions (e.g. "Grounds for Anticipatory Bail", not "Grounds for Quashing"). Honour any party label the user explicitly named in their query.
+  - List AT MOST 15 sections. If the natural shape has more, COLLAPSE semantically-adjacent ones into combined sections (e.g. "Facts and Background", "Verification and Affidavit", "Cause Title and Parties") so the list stays at or below 15.
+  - The FIRST section's heading should match what the document actually opens with (cause title block / addressee block / heading line) — not a generic "Introduction".
+  - The LAST section's heading should match what the document actually ends with (Prayer / Verification / Signature block).
+  - Each section needs three fields:
+      id      — short English slug (e.g. "cause_title", "facts", "grounds", "prayer", "verification"). Internal control field; English regardless of output language.
+      heading — display heading for the FINAL draft, written in the user's target output language and script.
+      summary — one short sentence (English) describing what content goes in this section. Internal brief for the section writer; not user-visible.
+
+## Output language for headings
+
+The user's target output language is: {user_language_name}
+
+Emit each section's `heading` in {user_language_name}. When the language uses a non-Latin script (Devanagari for Hindi / Marathi / Sanskrit, Bengali for Bengali / Assamese, Tamil, Telugu, Kannada, Malayalam, Gujarati, Gurmukhi for Punjabi, Odia, Arabic-script for Urdu), write the heading IN that script — do NOT transliterate to Latin.
+
+`id` and `summary` stay in English regardless — they are internal control fields the section writer reads.
+
+## Reasoning
+
+One short sentence. Examples:
+  - "Single-pass — short Section 138 demand notice, no Part structure."
+  - "Fan out — 9 sections; writ petition with Part I/II/III + Grounds + Prayer."
+  - "Fan out — 11 sections; plaint with Facts, Issues, multiple Grounds, Prayer, Verification, Schedule."
+
+## Inputs
+
+USER QUERY:
+{query}
+
+REFERENCE DRAFT (sample document — use ONLY for structural shape; ignore its party names, dates, and case-specific values):
+{reference_excerpt}
+
+Return the structured object — no preamble, no postscript, no commentary."""
+
+
+# 5) DRAFTING_SECTION_PAIR_PROMPT — the per-section generation prompt. Used
+# only when `_judge_fanout` returns should_fanout=true. Drafts 1 or 2
+# consecutive sections per call, given the reference, case facts, the
+# document-so-far context, and the specific section briefs to write.
+#
+# Drives `_generate_section_pair` (Gemini Pro). Goes through
+# `localize_prompt` like DRAFTING_SYSTEM_PROMPT so the same language /
+# numeral / ceremonial-block directives flow through for Hindi, Marathi,
+# Gujarati, Kannada, Tamil, Telugu, Malayalam, Bengali, Punjabi, Urdu,
+# Odia, Assamese, Sanskrit drafts.
+DRAFTING_SECTION_PAIR_PROMPT = """You are a senior Indian-law drafter producing PART of a legal document — specifically the 1 or 2 sections named at the end of this prompt under "## SECTIONS YOU MUST WRITE NOW".
+
+You are NOT writing the full document. You are NOT writing an outline. You produce ONLY the section bodies named, in order, with their adapted headings — nothing else.
+
+## Inputs you are given
+
+1. REFERENCE DRAFT — a similar full document from our corpus (or synthesised from authoritative web sources). STRUCTURAL anchor only — shows shape, conventions, citation style, signature block. Its party names, dates, addresses, and case-specific values belong to a DIFFERENT matter and MUST NOT appear in your output.
+2. USER QUERY — the user's drafting instruction in their own words. SOURCE OF TRUTH for what document to produce.
+3. CASE FACTS — names, dates, amounts, addresses, statutory references extracted from the user's attached documents and narrative. Use these VERBATIM; never bracket them as `[placeholders]` when a real value is given.
+4. RELEVANT LEGAL CONTEXT — statutes (BNS / BNSS / BSA / Legislation / Newacts) and precedents (High Court / Supreme Court) retrieved for this matter. Use these for INLINE STATUTORY CITATIONS and LEGAL REASONING. Do NOT copy their party names, dates, or case facts into the draft.
+5. DOCUMENT SO FAR — the sections of THIS document that have already been drafted before yours. Use this for:
+   - Continuity of numbering (paragraph counter, list prefixes, page-break feel).
+   - Continuity of party labels (whatever label the cause title established — Petitioner / Plaintiff / Applicant / Complainant — stays consistent).
+   - Continuity of tone, voice, and tense.
+   - Avoiding re-emission of content already pled earlier (cause title, parties block, facts already on record).
+6. USER DIRECTIVES — typed intent (language, depth, format, additional instructions, arguments-for-party). Honour every one.
+
+## Rules
+
+1. WRITE ONLY THE SECTIONS NAMED UNDER "## SECTIONS YOU MUST WRITE NOW".
+   - Do NOT re-emit any section that already appears in DOCUMENT SO FAR.
+   - Do NOT preview later sections that aren't on your list.
+   - Do NOT add a preamble like "Here is the next section:" or a postscript like "[Next section follows]" or "[Continued in next section]".
+
+2. USE THE EXACT HEADING TEXT GIVEN FOR EACH SECTION.
+   - The judge has already adapted each heading to the user's matter and rendered it in the user's target language. Use the heading exactly as given.
+   - Format each heading as `## ` followed by the heading text. Sub-headings inside a section use `### `.
+
+3. CONTINUE NUMBERING FROM DOCUMENT SO FAR.
+   - If the prior sections' numbered paragraphs ended at 12, your first numbered paragraph in a body section is 13 — do NOT restart at 1.
+   - Procedural blocks have their OWN local numbering schemes (see Rule 9).
+   - When DOCUMENT SO FAR is empty (you are writing the first section[s]), start the global counter at 1 where appropriate.
+
+4. USE CASE FACTS VERBATIM.
+   - Every party name, date, address, monetary amount, ornament / asset description, statutory provision, sequence of events MUST come VERBATIM from CASE FACTS or the user's narrative — NEVER substitute canonical-sounding Indian-law example values (e.g. "Priyanka", "Sneha", "Bhausaheb", "Sakore", "Nashik", "Sangamner", "Ahmednagar", "29 May 2022").
+   - When a fact is genuinely absent, use a clearly-bracketed placeholder (e.g. `[Advocate's Address]`, `[Reference Number]`). NEVER mix a real value and a placeholder for the SAME field within the draft.
+
+5. CITATIONS — cite statutes inline with the exact Act name + section number ("Section 138 of the Negotiable Instruments Act, 1881"). For case law, use a real case name + reporter citation, OR omit the case label entirely. NEVER emit `[CITE: ...]` placeholder markers.
+
+6. STATUTE ACCURACY — pair the right statute to the relief sought.
+   - TEMPORARY / interim / ad-interim injunction → Order XXXIX Rules 1 & 2 CPC, 1908 + Section 94(c) CPC. NEVER Section 38 of the Specific Relief Act, 1963 (Section 38 SRA = PERMANENT injunctions only).
+   - PARTITION of a residential flat / apartment → Order XX Rule 18 CPC. NEVER Section 54 CPC.
+   - When citing both the OLD and NEW criminal codes (IPC ↔ BNS, CrPC ↔ BNSS, IEA ↔ BSA), name BOTH where relevant.
+
+7. NO STOCK FILLER, NO PREAMBLE, NO META-COMMENTARY.
+   - Do NOT write "It is humbly submitted that", "The Hon'ble Court may be pleased to note", "in the interest of justice", "Your honour", "My Lord", "in the interest of equity".
+   - Do NOT start with "This section deals with...", "Below is the section...", "Continuing the document...". Start directly with the section heading and body.
+   - Do NOT end with "Let me know if you need changes" or any conversational tail.
+
+8. FORMATTING — markdown only.
+   - Cause titles, addressee blocks, party blocks: BLANK LINES between every distinct detail (court name, case number, plaintiff name, age, occupation, address) so the frontend markdown renderer preserves them.
+   - Party labels (`.....Plaintiff`, `.....Defendant`, `.....Petitioner`, `.....Respondent`) on their own paragraph.
+   - `**vs**` (bold) on its own paragraph between plaintiff/petitioner block and defendant/respondent block, NEVER inside backticks or a code block.
+   - NO raw HTML. NO `<p>`, `<div>`, `<span>`, `<center>` tags. NO `align=` attributes.
+
+9. PARAGRAPH NUMBERING BY SECTION TYPE.
+   - Body sections (facts, grounds, preliminary objections, para-wise reply, etc.): continue the global counter from DOCUMENT SO FAR.
+   - Prayer / Reliefs: fresh local numbering — (a) / (b) / (c) or (i) / (ii) / (iii) — restarting at the first item.
+   - Verification: unnumbered single declaratory paragraph.
+   - Cause title / addressee / heading block: not numbered.
+   - Schedule / List of Documents: own local numbering, restarting at 1.
+
+10. WHEN WRITING TWO SECTIONS IN ONE CALL.
+    - Emit them in the order given. One blank line between the closing of section N and the `## ` heading of section N+1.
+    - Do NOT add a separator line ("---") or any transition text ("Moving on to...") between them.
+    - Each section starts with its own `## ` heading line.
+
+11. OUTPUT ONLY THE SECTION BODIES — no preamble, no postscript, no meta-commentary, no markdown fences. The orchestrator concatenates your output to DOCUMENT SO FAR verbatim.
+"""
+
+# Append the same Indian-legal discipline blocks DRAFTING_SYSTEM_PROMPT uses,
+# so the section writer inherits jurisdiction guardrails, citation format,
+# language register, output format, and behavioural discipline.
+DRAFTING_SECTION_PAIR_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+)
+
+
 # --- Drafting Pipeline: Citation Injection (with real DB results) ---
 DRAFT_SYNTHESIS_PROMPT = """You are a legal document compiler. Your task is to enrich
 a complete legal draft with real citations from our legal database.

@@ -607,13 +607,33 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Single-pass draft generation.
-# This function is the seam for future per-section fan-out — the public
-# signature stays `-> str` so callers don't need to change. See
-# `docs/drafting_simplification_plan.md` §2 "Generation seam".
+# Stage 2 — Generation.
+#
+# Public entry: `_generate_draft(...) -> str`. Thin DISPATCHER — asks
+# `_judge_fanout` whether the document benefits from section-by-section
+# generation, then runs one of:
+#
+#   - `_generate_single_pass` — one Gemini 2.5 Pro call for the whole
+#     document. Used for short letters, notices, single-page applications,
+#     simple transactional instruments.
+#
+#   - `_generate_sectionwise` — sequential per-section loop, two sections
+#     per Pro call, each call seeing the document drafted so far. Used for
+#     long multi-section instruments (writs, plaints, written statements,
+#     detailed bail applications).
+#
+# Multilingual: both paths flow `user_language` through `localize_prompt`,
+# so Hindi, Marathi, Gujarati, Kannada, Tamil, Telugu, Malayalam, Bengali,
+# Punjabi, Urdu, Odia, Assamese, Sanskrit drafts inherit the same script /
+# numeral / ceremonial-block directives. The judge call ALSO emits each
+# section's heading in the user's target language and script, so the
+# section pair generator gets a localized heading directly.
+#
+# The public `_generate_draft` signature stays `-> str` so callers (i.e.
+# `drafting_node`) don't change.
 # ---------------------------------------------------------------------------
 
-async def _generate_draft(
+async def _generate_single_pass(
     query: str,
     case_facts: str,
     reference_draft: str,
@@ -858,6 +878,455 @@ async def _generate_draft(
 
     log.info("Draft generated", length=len(text))
     return text
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 — Fan-out judge + section-by-section generator.
+#
+# The judge runs ONCE per drafting request to decide single-pass vs
+# section-wise. When section-wise, it also emits the section list with
+# headings already adapted to the user's matter and rendered in the
+# user's target output language. The section pair generator then walks
+# the list in pairs of two (last is solo if odd), each pair seeing the
+# document drafted so far for continuity of numbering / party labels /
+# tone.
+# ---------------------------------------------------------------------------
+
+
+class _Section(BaseModel):
+    """One section of a fan-out section list. Emitted by `_judge_fanout`."""
+    id: str = Field(
+        ...,
+        description=(
+            "Short English slug for internal control (e.g. 'cause_title', "
+            "'facts', 'grounds', 'prayer', 'verification'). NOT user-visible."
+        ),
+    )
+    heading: str = Field(
+        ...,
+        description=(
+            "Display heading for the FINAL draft, written in the user's "
+            "target output language and script."
+        ),
+    )
+    summary: str = Field(
+        "",
+        description=(
+            "One short sentence (English) of what content goes in this "
+            "section. Used internally to brief the section writer."
+        ),
+    )
+
+
+class _FanoutStrategy(BaseModel):
+    """Structured output from `_judge_fanout`."""
+    should_fanout: bool = Field(
+        ...,
+        description=(
+            "True iff the document benefits from sequential per-section "
+            "generation. False = single-pass for short documents."
+        ),
+    )
+    sections: list[_Section] = Field(
+        default_factory=list,
+        description=(
+            "Ordered section list — only meaningful when should_fanout=True. "
+            "Soft-capped at 15 by the prompt; no code-level cap."
+        ),
+    )
+    reasoning: str = Field(
+        "",
+        description="One short sentence explaining the decision.",
+    )
+
+
+def _reference_excerpt(
+    reference_draft: str, head: int = 3000, tail: int = 1000,
+) -> str:
+    """Format a reference draft for the judge's view.
+
+    For short references (<= head+tail), pass the whole thing. For long
+    references, take the head (cause title + opening Parts) and tail
+    (Prayer + Verification + signature) so the judge sees the structural
+    bookends without paying for the full middle.
+    """
+    if not reference_draft:
+        return "(no reference draft available — fan-out is unlikely)"
+    text = reference_draft.strip()
+    if len(text) <= head + tail:
+        return text
+    return (
+        f"{text[:head]}\n\n"
+        f"[...middle of reference omitted for brevity — "
+        f"{len(text) - head - tail} chars elided...]\n\n"
+        f"{text[-tail:]}"
+    )
+
+
+async def _judge_fanout(
+    query: str,
+    reference_draft: str,
+    user_language: str,
+    user_intent,
+) -> _FanoutStrategy:
+    """Decide single-pass vs section-by-section. Always falls back to
+    single-pass on any error so traffic never breaks.
+    """
+    try:
+        from langchain.chat_models import init_chat_model
+        from core.language import language_name
+        from config.prompts import DRAFTING_FANOUT_JUDGE_PROMPT
+
+        lang_name = language_name(user_language)
+        excerpt = _reference_excerpt(reference_draft)
+
+        llm = init_chat_model(
+            "google_genai:gemini-2.5-flash-lite",
+            temperature=0.0,
+        ).with_structured_output(_FanoutStrategy, include_raw=True)
+
+        prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)
+        chain = prompt | llm
+
+        with log_time(log, "Fan-out judge"):
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({
+                    "query": query[:2000],
+                    "reference_excerpt": excerpt,
+                    "user_language_name": lang_name,
+                }),
+                timeout=15,
+            )
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "fanout_judge", raw_and_parsed.get("raw"))
+
+        parsed = raw_and_parsed["parsed"]
+        log.info(
+            "Fan-out judge decided",
+            should_fanout=parsed.should_fanout,
+            sections=len(parsed.sections),
+            reasoning=parsed.reasoning[:160],
+        )
+        return parsed
+    except Exception as e:
+        log.warning(
+            "Fan-out judge failed; defaulting to single-pass",
+            error=str(e).splitlines()[0][:200],
+        )
+        return _FanoutStrategy(
+            should_fanout=False,
+            reasoning="judge call failed; defaulted to single-pass",
+        )
+
+
+async def _generate_section_pair(
+    *,
+    sections_to_write: list[_Section],
+    section_position_start: int,
+    total_sections: int,
+    query: str,
+    case_facts: str,
+    reference_draft: str,
+    prior_text: str,
+    gathered_context: dict[str, str] | None,
+    user_intent,
+    user_language: str,
+) -> str:
+    """Produce 1 or 2 consecutive sections of the document in one Gemini
+    2.5 Pro call. Mirrors the safety / retry pattern of single-pass.
+    """
+    from config.prompts import DRAFTING_SECTION_PAIR_PROMPT
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    system_prompt = localize_prompt(
+        DRAFTING_SECTION_PAIR_PROMPT, user_language, user_intent,
+    )
+
+    section_lines: list[str] = []
+    for offset, sec in enumerate(sections_to_write):
+        position = section_position_start + offset
+        section_lines.append(
+            f"{offset + 1}. **{sec.heading}** — {sec.summary or '(see structure in reference)'}\n"
+            f"   (Section {position} of {total_sections} in the full document; "
+            f"slug: `{sec.id}`)"
+        )
+    sections_block = "\n\n".join(section_lines)
+
+    facts_block = (
+        "## CASE FACTS (extracted entities — these are the ONLY real values; "
+        "use them VERBATIM and do NOT bracket them as placeholders)\n"
+        f"{case_facts.strip()}\n\n"
+    ) if case_facts and case_facts.strip() else ""
+
+    context_block = ""
+    if gathered_context:
+        parts = []
+        for key in ("newacts", "legislation", "judgments", "sci"):
+            v = gathered_context.get(key)
+            if v:
+                parts.append(v)
+        if parts:
+            context_block = (
+                "## RELEVANT LEGAL CONTEXT (statutes and precedents retrieved "
+                "for this matter — use these for INLINE STATUTORY CITATIONS "
+                "and LEGAL REASONING; do NOT wholesale copy their party names "
+                "or case facts into the draft)\n"
+                + "\n".join(parts)
+                + "\n"
+            )
+
+    reference_block = (
+        "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
+        "IGNORE every name, date, address, amount, party detail in this block. "
+        "Use ONLY the reference's shape: section ordering, headings, conventions, "
+        "phrasing patterns, and statutory-citation style.)\n"
+        f"{reference_draft.strip() if reference_draft else '(no reference draft available — follow Indian-law conventions for the document type)'}\n\n"
+    )
+
+    if prior_text and prior_text.strip():
+        prior_block = (
+            "## DOCUMENT SO FAR (sections of THIS document already drafted — "
+            "continue numbering and party labels from here; do NOT re-emit "
+            "any of this content)\n"
+            f"{prior_text.strip()}\n\n"
+        )
+    else:
+        prior_block = (
+            "## DOCUMENT SO FAR\n"
+            "(This is the FIRST section batch — no prior content. Start the "
+            "global paragraph counter at 1 where appropriate.)\n\n"
+        )
+
+    user_block = (
+        f"{context_block}"
+        f"{reference_block}"
+        f"{prior_block}"
+        f"{facts_block}"
+        "## USER QUERY (the full document the user asked for — your section(s) "
+        "are part of this larger document)\n"
+        f"{query.strip()}\n\n"
+        "## SECTIONS YOU MUST WRITE NOW\n"
+        f"{sections_block}\n\n"
+        "Produce ONLY the section bodies named above, in order, each starting "
+        "with its own `## ` heading line. No preamble. No postscript. No "
+        "transition text between two sections. Continue paragraph numbering "
+        "from DOCUMENT SO FAR. Use CASE FACTS verbatim. Cite statutes inline "
+        "from RELEVANT LEGAL CONTEXT where applicable."
+    )
+
+    llm = get_gemini_pro(
+        temperature=0.0,
+        max_output_tokens=32768,
+        thinking_budget=2048,
+    )
+
+    async def _invoke_once(extra_instruction: str = "") -> object:
+        final_user_block = (
+            user_block + "\n\n" + extra_instruction if extra_instruction
+            else user_block
+        )
+        return await asyncio.to_thread(
+            llm.invoke,
+            [SystemMessage(content=system_prompt),
+             HumanMessage(content=final_user_block)],
+        )
+
+    from core.token_tracker import record as _record_tokens
+
+    def _finish_reason(r) -> str:
+        meta = getattr(r, "response_metadata", None) or {}
+        return str(meta.get("finish_reason") or "").upper()
+
+    if len(sections_to_write) == 1:
+        section_label = f"section {section_position_start}"
+    else:
+        end = section_position_start + len(sections_to_write) - 1
+        section_label = f"sections {section_position_start}-{end}"
+
+    try:
+        with log_time(log, f"Section pair gen ({section_label})"):
+            response = await _invoke_once()
+    except Exception as e:
+        log.error(
+            "Section pair LLM call failed",
+            section_label=section_label,
+            error=str(e)[:200], exc_info=True,
+        )
+        raise
+
+    _record_tokens("Drafting", "generate_section_pair", response)
+    text = getattr(response, "text", "") or ""
+
+    if not text:
+        reason = _finish_reason(response)
+        log.warning(
+            "Section pair produced empty content",
+            section_label=section_label, finish_reason=reason or "unknown",
+        )
+        if reason in ("RECITATION", "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"):
+            paraphrase_instruction = (
+                f"IMPORTANT: Your previous response was empty because Gemini's "
+                f"{reason.title()} filter flagged it. Rewrite the section(s) "
+                f"so that the surrounding LEGAL PROSE, statutory phrasing, "
+                f"headings, and structural language are substantially "
+                f"paraphrased in your own words — do not copy long verbatim "
+                f"passages from the REFERENCE DRAFT or any source document. "
+                f"Every party name, date, monetary amount, and case-specific "
+                f"fact still comes VERBATIM from CASE FACTS and the USER "
+                f"QUERY (those are non-negotiable). Vary sentence structure, "
+                f"choose synonyms for non-fact language, and re-order "
+                f"sub-clauses where it does not change meaning."
+            )
+            try:
+                with log_time(log, f"Section pair retry ({section_label})"):
+                    response = await _invoke_once(paraphrase_instruction)
+                _record_tokens(
+                    "Drafting", "generate_section_pair_retry", response,
+                )
+                text = getattr(response, "text", "") or ""
+            except Exception as e:
+                log.error(
+                    "Section pair retry failed",
+                    section_label=section_label,
+                    error=str(e)[:200], exc_info=True,
+                )
+
+        if not text:
+            log.error(
+                "Section pair blocked twice; emitting empty section",
+                section_label=section_label,
+            )
+            return ""
+
+    log.info(
+        "Section pair generated",
+        section_label=section_label, length=len(text),
+    )
+    return text
+
+
+async def _generate_sectionwise(
+    *,
+    sections: list[_Section],
+    query: str,
+    case_facts: str,
+    reference_draft: str,
+    user_intent,
+    user_language: str,
+    progress_emit,
+    gathered_context: dict[str, str] | None,
+) -> str:
+    """Walk the section list in pairs of two (last is solo if odd).
+
+    Each pair is one Gemini Pro call seeing the document so far. A
+    failed pair is logged and skipped — the loop continues so the user
+    gets a partial draft instead of a hard failure.
+    """
+    completed: list[str] = []
+    total = len(sections)
+    i = 0
+    while i < total:
+        pair = sections[i:i + 2]
+        position_start = i + 1
+
+        for offset, sec in enumerate(pair):
+            position = position_start + offset
+            progress_emit(
+                "drafting",
+                f"Drafting section {position} of {total}: {sec.heading}",
+                substep=True,
+                step=f"section:{position}",
+            )
+
+        prior_text = "\n\n".join(completed)
+
+        try:
+            pair_text = await _generate_section_pair(
+                sections_to_write=pair,
+                section_position_start=position_start,
+                total_sections=total,
+                query=query,
+                case_facts=case_facts,
+                reference_draft=reference_draft,
+                prior_text=prior_text,
+                gathered_context=gathered_context,
+                user_intent=user_intent,
+                user_language=user_language,
+            )
+        except Exception as e:
+            log.warning(
+                "Section pair generation failed; continuing to next pair",
+                position_start=position_start,
+                error=str(e).splitlines()[0][:200],
+            )
+            pair_text = ""
+
+        if pair_text.strip():
+            completed.append(pair_text.strip())
+
+        i += 2
+
+    return "\n\n".join(completed)
+
+
+async def _generate_draft(
+    query: str,
+    case_facts: str,
+    reference_draft: str,
+    user_intent,
+    user_language: str,
+    progress_emit,
+    gathered_context: dict[str, str] | None = None,
+) -> str:
+    """Thin dispatcher: judge call decides single-pass vs section-wise.
+
+    Public signature unchanged from earlier — returns a single assembled
+    string regardless of which generation strategy ran.
+    """
+    strategy = await _judge_fanout(
+        query=query,
+        reference_draft=reference_draft,
+        user_language=user_language,
+        user_intent=user_intent,
+    )
+
+    if not strategy.should_fanout or not strategy.sections:
+        log.info(
+            "Drafting: single-pass selected",
+            should_fanout=strategy.should_fanout,
+            section_count=len(strategy.sections),
+            reasoning=strategy.reasoning[:200],
+        )
+        return await _generate_single_pass(
+            query=query,
+            case_facts=case_facts,
+            reference_draft=reference_draft,
+            user_intent=user_intent,
+            user_language=user_language,
+            progress_emit=progress_emit,
+            gathered_context=gathered_context,
+        )
+
+    log.info(
+        "Drafting: section-wise selected",
+        sections=len(strategy.sections),
+        reasoning=strategy.reasoning[:200],
+    )
+    progress_emit(
+        "drafting",
+        f"Drafting {len(strategy.sections)} sections one by one...",
+        step="generate",
+    )
+    return await _generate_sectionwise(
+        sections=strategy.sections,
+        query=query,
+        case_facts=case_facts,
+        reference_draft=reference_draft,
+        user_intent=user_intent,
+        user_language=user_language,
+        progress_emit=progress_emit,
+        gathered_context=gathered_context,
+    )
 
 
 # ---------------------------------------------------------------------------

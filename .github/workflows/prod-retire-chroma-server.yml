@@ -1,0 +1,126 @@
+name: Prod — retire chroma-server service
+
+# One-shot workflow_dispatch. After commit 1d0bbdb (`clients: revert to
+# PersistentClient for ChromaDB`), lawttorney-v2 no longer talks to the
+# lawttorney-chroma HTTP server — every worker uses its own PersistentClient
+# view of /root/Lawtech-AI/chroma_store on disk.
+#
+# lawttorney-chroma is dead weight now:
+#   - port 8000 held for no consumer
+#   - ~500 MB RSS carrying the chromadb runtime
+#   - keeps auto-restarting on any glitch, adding noise to journalctl
+#
+# This workflow:
+#   1. Reports current state (is-active, RSS, port :8000, chroma_store size)
+#   2. Stops + disables lawttorney-chroma
+#   3. Confirms port :8000 is free and lawttorney-v2 is still healthy
+#   4. Reports post state
+#
+# lawttorney-v2 is NOT restarted — it's already running the PersistentClient
+# code and doesn't depend on the server. If /pyapi/health flaps during the
+# stop, ssh to the box and `sudo systemctl restart lawttorney-v2`.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  retire:
+    name: Stop + disable lawttorney-chroma
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Retire chroma server + verify v2 still healthy
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          echo "=================================================="
+          echo " 1. Pre-stop state"
+          echo "=================================================="
+          echo "  lawttorney-chroma: $(sudo systemctl is-active lawttorney-chroma)"
+          echo "  lawttorney-chroma enabled: $(sudo systemctl is-enabled lawttorney-chroma 2>/dev/null || echo 'unknown')"
+          echo "  lawttorney-v2:     $(sudo systemctl is-active lawttorney-v2)"
+          echo "  chroma RSS:"
+          ps -eo pid,rss,cmd --no-headers 2>/dev/null \
+            | grep -E "chroma run|chromadb" | grep -v grep \
+            | awk '{rss_mb=$2/1024; printf "    pid=%-7s rss=%7.1f MB  %s\n", $1, rss_mb, substr($0, index($0,$3))}' \
+            | head -5 \
+            || echo "    (no chroma process found)"
+          echo "  chroma listening on :8000?"
+          sudo ss -tlnp 2>/dev/null | grep -E ":8000\s" | head -1 || echo "    (not listening)"
+          echo "  chroma_store on disk:"
+          sudo du -sh /root/Lawtech-AI/chroma_store 2>/dev/null | sed 's/^/    /' || echo "    (missing)"
+          echo
+
+          echo "=================================================="
+          echo " 2. Stop + disable lawttorney-chroma"
+          echo "=================================================="
+          sudo systemctl stop lawttorney-chroma 2>&1 | sed 's/^/  /' || true
+          sudo systemctl disable lawttorney-chroma 2>&1 | sed 's/^/  /' || true
+          sleep 2
+          echo "  lawttorney-chroma: $(sudo systemctl is-active lawttorney-chroma)"
+          echo "  lawttorney-chroma enabled: $(sudo systemctl is-enabled lawttorney-chroma 2>/dev/null || echo 'disabled')"
+          echo "  port :8000 still bound?"
+          sudo ss -tlnp 2>/dev/null | grep -E ":8000\s" | head -1 || echo "    (free)"
+          echo
+
+          echo "=================================================="
+          echo " 3. Verify lawttorney-v2 is still healthy"
+          echo "=================================================="
+          HEALTHY=0
+          CONSECUTIVE_OK=0
+          for i in $(seq 1 12); do
+            sleep 3
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/3 consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "3" ]; then
+                HEALTHY=1
+                break
+              fi
+            else
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/12 (HTTP $STATUS)"
+            fi
+          done
+          if [ "$HEALTHY" != "1" ]; then
+            echo "WARN: v2 not stable in 36s; tail last 30 log lines"
+            sudo journalctl -u lawttorney-v2 -n 30 --no-pager | sed 's/^/  /'
+            # Not exiting non-zero — v2 unaffected by chroma stop should be
+            # a code invariant, not a deploy-blocker. But surface it loudly.
+          fi
+          echo
+
+          echo "=================================================="
+          echo " 4. Post state"
+          echo "=================================================="
+          echo "  lawttorney-chroma: $(sudo systemctl is-active lawttorney-chroma)"
+          echo "  lawttorney-v2:     $(sudo systemctl is-active lawttorney-v2)"
+          echo "  port :8000: $(sudo ss -tlnp 2>/dev/null | grep -qE ':8000\s' && echo 'still bound' || echo 'free')"
+          echo "  chroma processes:"
+          ps -eo pid,rss,cmd --no-headers 2>/dev/null \
+            | grep -E "chroma run|chromadb" | grep -v grep \
+            | awk '{rss_mb=$2/1024; printf "    pid=%-7s rss=%7.1f MB  %s\n", $1, rss_mb, substr($0, index($0,$3))}' \
+            | head -5 \
+            || echo "    (none — good)"
+          echo
+          echo "DONE"
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

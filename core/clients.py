@@ -259,43 +259,40 @@ def get_genai_client() -> genai.Client:
     )
 
 
-# --- ChromaDB client (Phase 5 — multi-process safe via server mode) ---
+# --- ChromaDB client (PersistentClient — v1 behaviour restored 2026-07-01) ---
 #
-# Production: CHROMA_SERVER_HOST is set, we connect to the local Chroma
-# server (started by lawttorney-chroma.service). The server serialises
-# writes across all gunicorn workers, eliminating the data-corruption
-# window that PersistentClient has under concurrent PDF uploads.
+# Every process/worker uses its own PersistentClient view of the on-disk
+# chroma_store. Matches how v1 shipped for a year without incident and
+# how huge PDFs were handled without timing out.
 #
-# Dev fallback: when CHROMA_SERVER_HOST is unset, PersistentClient still
-# works for a single-process developer setup. Production MUST set this.
+# History: an intermediate "chroma-server" mode (lawttorney-chroma.service
+# HttpClient) was tried during the scale-50 work under the assumption that
+# multi-worker writes to the same SQLite file would race. In practice it
+# introduced a shared SQLAlchemy pool (~5 connections) that gunicorn's
+# workers can exhaust in seconds, producing the misleading
+# "vector embedding timed out" event and leaving collections empty.
+# The theoretical corruption never surfaced; the pool exhaustion did,
+# repeatedly. We're reverting to PersistentClient permanently. If real
+# corruption is ever observed, we'll fix it locally (SQLite WAL mode,
+# per-collection locks) rather than reintroducing a shared server.
+#
+# CHROMA_SERVER_HOST is intentionally ignored — the mode is baked in
+# so it can't be re-enabled by a stale env var.
 
 _chroma_client = None
 
 
 def get_chroma_client():
-    """Singleton ChromaDB client. HTTP in prod, PersistentClient in dev."""
+    """Singleton ChromaDB client — always PersistentClient (v1 mode)."""
     import chromadb
     global _chroma_client
     if _chroma_client is None:
-        host = os.getenv("CHROMA_SERVER_HOST", "").strip()
-        port_str = os.getenv("CHROMA_SERVER_PORT", "8000").strip()
-        if host:
-            try:
-                port = int(port_str)
-            except ValueError:
-                port = 8000
-            _chroma_client = chromadb.HttpClient(host=host, port=port)
-            _log.info(
-                "ChromaDB HTTP client initialized",
-                host=host, port=port,
-            )
-        else:
-            from .settings import CHROMA_STORE_ROOT
-            _chroma_client = chromadb.PersistentClient(path=CHROMA_STORE_ROOT)
-            _log.warning(
-                "CHROMA_SERVER_HOST not set — using PersistentClient. "
-                "NOT multi-process safe; set CHROMA_SERVER_HOST=localhost in prod."
-            )
+        from .settings import CHROMA_STORE_ROOT
+        _chroma_client = chromadb.PersistentClient(path=CHROMA_STORE_ROOT)
+        _log.info(
+            "ChromaDB PersistentClient initialized",
+            path=CHROMA_STORE_ROOT,
+        )
     return _chroma_client
 
 

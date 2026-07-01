@@ -365,8 +365,8 @@ async def document_node(state: LegalAgentState) -> dict:
     # pipeline — file content always lives in ChromaDB. Gemini Files URI
     # preference removed (the multimodal handling path is dead code).
     all_collections: list[str] = []
+    fc = FileContextData.from_state(state)
     if not unique_string:
-        fc = FileContextData.from_state(state)
         if fc and fc.chromadb_collections:
             all_collections = fc.chromadb_collections
             unique_string = all_collections[0]
@@ -375,13 +375,15 @@ async def document_node(state: LegalAgentState) -> dict:
 
     progress("document", "Loading uploaded documents...", step="load")
     log.info("Agent started",
-             collection=unique_string, query=query[:100])
+             collection=unique_string, query=query[:100],
+             has_extracted_texts=bool(fc and fc.has_extracted_text))
 
-    # Phase D (RAG attachment routing plan, 2026-06-28): the legacy
-    # "no unique_string" branch (Gemini Files multimodal path + inline-text
-    # path) is removed. Every uploaded file is now stored in ChromaDB
-    # (Phase B), so unique_string is always set when a file is attached.
-    if not unique_string:
+    # Bail only when BOTH the Chroma path and the raw-text path are empty.
+    # When Chroma embed timed out (2026-06-28 pool-exhaustion pattern) the
+    # file processor still surfaces the extracted OCR/PyMuPDF text via
+    # fc.extracted_texts — reading that survives a Chroma outage and is what
+    # Drafting already does (agents/drafting.py source-priority comment).
+    if not unique_string and not (fc and fc.has_extracted_text):
         log.warning("No file content available for Document agent")
         return {
             "agent_results": {"Document": AgentResult(
@@ -410,7 +412,9 @@ async def document_node(state: LegalAgentState) -> dict:
         # info loss. retrieve_attachment_context (top-K MMR) remains
         # available as a tool for confidently specific questions.
         from tools.shared.vectordb_tools import get_full_attachment
-        coll_list = all_collections or [unique_string]
+        coll_list = all_collections if all_collections else (
+            [unique_string] if unique_string else []
+        )
         n_colls = len(coll_list)
         progress("document", f"Loading {n_colls} document collection(s)...", found=n_colls, step="search")
         retrieved_docs: list[Document] = []
@@ -434,6 +438,33 @@ async def document_node(state: LegalAgentState) -> dict:
                 except Exception as e:
                     log.warning("get_full_attachment failed",
                                 collection=cid, error=str(e))
+
+        # Chroma-independent fallback: use the raw per-file text PyMuPDF /
+        # DOCX / OCR wrote to fc.extracted_texts BEFORE Chroma embed ran
+        # (see core/file_processor.py: `pf.extracted_text = text` after
+        # each store attempt). Under Chroma pool exhaustion,
+        # chromadb_collections is empty but extracted_texts still carries
+        # every uploaded document verbatim. Without this fallback the
+        # synthesizer receives an errored Document result, treats
+        # valid_results as empty, and runs web_search_fallback on the raw
+        # query — surfacing a generic "please provide a specific query"
+        # reply instead of an answer grounded in the file the user just
+        # uploaded.
+        if not retrieved_docs and fc and fc.has_extracted_text:
+            seen: set[str] = set()
+            for entry in fc.extracted_texts:
+                text = (entry.get("text") or "").strip()
+                name = entry.get("name") or "attached"
+                if not text or name in seen:
+                    continue
+                seen.add(name)
+                retrieved_docs.append(Document(
+                    page_content=text,
+                    metadata={"source": name},
+                ))
+            log.info("Using extracted_texts fallback (Chroma path empty)",
+                     files=len(retrieved_docs),
+                     chroma_collections=len(coll_list))
 
         # Step 2: Relevance gate removed for the full-doc path (Phase D
         # switched retrieval from MMR top-30 to get_full_attachment, which

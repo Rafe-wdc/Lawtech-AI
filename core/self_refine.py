@@ -425,6 +425,42 @@ violations specific to Indian drafting practice:
     or a separate Interim Application under Order XXXIX Rules 1 & 2
     CPC when a temporary injunction is prayed for. MAJOR.
 
+  duplicate_section_block — the draft contains two structurally-equivalent
+    blocks that a real filing has only once. Common patterns to detect:
+       (a) Two "Prayer" / "Prayer for Relief" / "PRAYER" blocks, each
+           with its own (a)/(b)/(c) clauses. A single filing has ONE
+           prayer.
+       (b) Two "Verification" blocks, each opening with "I, <deponent>,
+           do hereby verify that the contents of paragraphs...". A single
+           filing has ONE verification.
+       (c) Two full signature / place-date footer blocks ("Place: X /
+           Date: Y / APPLICANT / THROUGH / [ADVOCATE FOR APPLICANT]"),
+           each followed by more body text.
+       (d) A second full document heading repeating after the first one
+           has already concluded — e.g. "## AN APPLICATION FOR THE GRANT
+           OF BAIL U/S 437 OF THE CRIMINAL PROCEDURE CODE, 1973" appearing
+           15+ paragraphs AFTER the first bail-application caption and
+           first Prayer / signature / Verification have already ended.
+       (e) A second cause title block (court name + case number + party
+           details + "vs" + party details) appearing mid-document after
+           the opening cause title has already been established, typically
+           introduced by a `---` separator or a fresh heading.
+       (f) A second "IN THE MATTER OF:" header stranded before a body
+           block that ALREADY sits under the initial cause title.
+    These duplications arise when the section fan-out generator emits
+    redundant section bodies that overlap with earlier sections. Flag
+    MAJOR. Suggested_fix: KEEP the FIRST occurrence (embedded in the
+    natural flow of the document) and REMOVE the second occurrence
+    entirely, along with any transition / separator markup ("---",
+    "Continued below", stranded "IN THE MATTER OF:") that introduces
+    it. Do NOT merge the two blocks — they are duplicates, not distinct
+    variants. Be lenient: if paragraphs 20+ genuinely continue argument
+    that was cut short at paragraph 10 (e.g. numbered facts 1-9, then a
+    procedural interlude, then facts 10-15), that's continuation, not
+    duplication — do NOT flag. The signature is (a) same section-type
+    header repeating, or (b) numbered-paragraph counter resetting to 1
+    mid-document.
+
   raw_html — `<p>`, `<div>`, `<span>`, `<center>`, `align="center"`,
     `align="right"` attributes inside the body. The frontend renders
     markdown only; raw HTML shows up as literal text. MAJOR.

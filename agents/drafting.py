@@ -1,25 +1,36 @@
-"""Drafting Agent — simplified two-source pipeline (2026-06-28).
+"""Drafting Agent — raw-source pipeline (2026-07-02).
 
 Flow:
   1. Build `user_facts` blob from attachments / pasted context / integrations.
-  2. Extract structured case facts via `_extract_case_facts`.
-  3. Acquire a reference draft:
+     This is the RAW text of every uploaded document, passed straight
+     through to generation. No extraction / bullet-summary middleman.
+  2. Acquire a reference draft:
        a. ES `match` on the `drafting` index for candidate file names.
        b. Single LLM picker call — returns the best path OR 'none'.
        c. If 'none' or empty corpus → web fallback (Gemini 2.5 Flash + Google
           Search grounding) synthesises a reference draft using
           `DRAFTING_WEB_FALLBACK_PROMPT`.
-  4. Single-pass generation: one Gemini 2.5 Pro call given
-     (user_query + case_facts + reference_draft + user_intent).
-  5. Mechanical cleanup: `validate_draft` strips mojibake / HTML tags /
+  3. Generation: Gemini 2.5 Pro given
+     (user_query + reference_draft + UPLOADED SOURCE DOCUMENTS + user_intent).
+     Dispatcher picks single-pass or per-section fan-out via `_judge_fanout`.
+     Raw source documents are threaded into EVERY section-pair call so any
+     section that needs to walk the source paragraph-by-paragraph
+     (para-wise reply, rejoinder para-wise denials, counter-affidavit)
+     has direct access.
+  4. Mechanical cleanup: `validate_draft` strips mojibake / HTML tags /
      leftover `[CITE: ...]` placeholders / empty numbered paragraphs.
-  6. `core.self_refine.self_refine` audits the draft against typed UserIntent
-     and refines on violations. (This is the scope critic.)
-  7. Return `AgentResult` with source attribution (`reference_kind`: 'es' | 'web').
+  5. `core.self_refine.self_refine` audits the draft against typed UserIntent
+     and refines on violations. Includes `canonical_example_substitution`
+     category to catch training-set-artefact names (Sneha / Priyanka /
+     Nashik / Sangamner / etc.) leaking into a draft whose sources named
+     different real parties.
+  6. Return `AgentResult` with source attribution (`reference_kind`: 'es' | 'web').
 
 No doc-type classifier, no synthetic skeletons, no doctrinal-stance JSON,
-no per-section fan-out, no mandatory-section injection, no footer template.
-The reference draft is the structural anchor; the user's query shapes scope.
+no mandatory-section injection, no footer template, no case-fact bullet
+extraction. The reference draft is the structural anchor; the user's query
+shapes scope; the uploaded source documents provide para structure and
+authoritative facts.
 
 See `docs/drafting_simplification_plan.md` for the full design and rationale.
 """
@@ -39,7 +50,7 @@ from core.state import (
     IntegrationContextData, FileContextData,
 )
 from core.clients import (
-    get_es_client, get_gemini_flash, get_gemini_pro,
+    get_es_client, get_gemini_pro,
 )
 from core.settings import ES_INDICES
 from core.language import localize_prompt, detect_source_languages
@@ -71,81 +82,6 @@ def _sanitize_es_input(text: str, max_length: int = 500) -> str:
     text = text[:max_length]
     text = _LUCENE_SPECIAL.sub(r"\\\1", text)
     return text
-
-
-# ---------------------------------------------------------------------------
-# Case-fact extraction — pulls structured entities from user-attached docs.
-# Used by `drafting_node` BEFORE generation so the LLM substitutes real
-# names / dates / amounts directly instead of leaving [bracketed] placeholders.
-# ---------------------------------------------------------------------------
-
-_CASE_FACTS_PROMPT = """You are a legal entity extractor. Read the user-provided
-document/context and produce a CONCISE list of the case-specific entities the
-drafter MUST use VERBATIM in the output document. Pull only what is present;
-do NOT invent.
-
-INPUT:
-{facts_text}
-
-Return a Markdown bullet list with these labels (omit any that are absent).
-Labels are intentionally generic so the downstream drafter binds them to
-whichever party-role the requested document uses (Client / Sender / Plaintiff /
-Petitioner / Appellant on one side; Recipient / Other Party / Defendant /
-Respondent on the other):
-
-- **Forum / Court**: full court / tribunal / authority name as stated
-- **Case Number**: case/suit/appeal number as stated
-- **Client (sender / first party — the person on whose behalf this document is being prepared)**: full name(s)
-- **Client Address**: as stated (one line)
-- **Other Party (recipient / second party — the person this is addressed to / against)**: full name(s)
-- **Other Party Address**: as stated (one line)
-- **Relationship between parties**: e.g. "husband and wife", "lender and borrower", "lessor and lessee"
-- **What the client wants from the document**: 1-line summary of the reliefs / asks (e.g. "return of Stridhan + divorce on cruelty + permanent alimony")
-- **Principal Amount**: with figure and words as stated
-- **Interest Rate**: as claimed
-- **Key Date - first transaction / marriage / agreement**: DD-Mon-YYYY
-- **Key Date - last demand / notice / breach**: DD-Mon-YYYY
-- **Key Date - dispute arose / separation / cause of action accrual**: DD-Mon-YYYY
-- **Witnesses / third parties named**: comma-separated names
-- **Statutory provisions invoked**: e.g. "Section 13B HMA, Section 125 CrPC"
-- **Counsel**: as stated
-- **Other concrete facts** (verbatim from the source — itemised lists of
-  assets/ornaments/documents, addresses of properties, account numbers,
-  reference numbers, specific dates of events not captured above):
-  preserve each in its original wording
-
-Output ONLY the bullet list. No preamble, no explanations.
-"""
-
-
-async def _extract_case_facts(user_facts: str) -> str:
-    """Pull structured entities from the user-provided document/context.
-
-    Returns a markdown bullet list of case-specific facts (names, amounts,
-    dates, court, etc.) for the generation LLM to use verbatim. Empty string
-    on failure (caller treats as no extracted facts).
-    """
-    if not user_facts.strip():
-        return ""
-    try:
-        with log_time(log, "Case-fact extraction"):
-            llm = get_gemini_flash(temperature=0.0)
-            prompt = ChatPromptTemplate.from_template(_CASE_FACTS_PROMPT)
-            chain = prompt | llm
-            response = await asyncio.wait_for(
-                chain.ainvoke({"facts_text": user_facts[:30000]}),
-                timeout=20,
-            )
-        from core.token_tracker import record as _record_tokens
-        _record_tokens("Drafting", "extract_case_facts", response)
-        extracted = response.text.strip()
-        log.info("Case facts extracted",
-                 chars=len(extracted), bullets=extracted.count("- **"))
-        return extracted
-    except Exception as e:
-        log.warning("Case-fact extraction failed; falling back to raw text",
-                    error=str(e)[:200])
-        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -635,7 +571,7 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
 
 async def _generate_single_pass(
     query: str,
-    case_facts: str,
+    user_facts: str,
     reference_draft: str,
     user_intent,
     user_language: str,
@@ -644,72 +580,50 @@ async def _generate_single_pass(
 ) -> str:
     """Produce the full document in one Gemini 2.5 Pro call.
 
-    Inputs: (system_prompt + user_query + case_facts + reference_draft).
-    The LLM decides headings, sections, length, footer, signature block
-    based on the reference and the user's ask.
+    Inputs: (system_prompt + user_query + UPLOADED SOURCE DOCUMENTS +
+    reference_draft + gathered legal context). The LLM decides headings,
+    sections, length, footer, signature block based on the reference and
+    the user's ask.
+
+    `user_facts` is the RAW extracted text of uploaded documents, passed
+    verbatim — no bullet-summary middleman. Gemini 2.5 Pro's 2M-token
+    window can consume multi-100K-char PDFs; a raw source is required for
+    tasks like rejoinder / para-wise reply where the model must walk the
+    source document paragraph-by-paragraph.
     """
     from config.prompts import DRAFTING_SYSTEM_PROMPT
     from langchain_core.messages import SystemMessage, HumanMessage
 
     system_prompt = localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language, user_intent)
 
-    facts_block = ""
-    if case_facts and case_facts.strip():
-        facts_block = (
-            "## CASE FACTS (extracted from the user's prompt / attachments — "
-            "these are the ONLY real values; use them directly in the draft "
-            "and do NOT bracket them as placeholders)\n"
-            f"{case_facts.strip()}\n\n"
+    source_docs_block = ""
+    if user_facts and user_facts.strip():
+        source_docs_block = (
+            "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every "
+            "party name, date, address, amount, statutory reference, and "
+            "paragraph-level assertion in your output MUST be sourced "
+            "from this block or the USER QUERY below. Do NOT compress, "
+            "summarise, or skip content. When a section requires walking "
+            "the source paragraph-by-paragraph — a rejoinder, para-wise "
+            "reply, counter-affidavit, or written statement — use the "
+            "paragraph structure and numbering from this block directly.)\n"
+            f"{user_facts.strip()}\n\n"
         )
 
-    # When the user has provided rich facts (long inline query or
-    # extracted attachment summary), the reference draft becomes net-
-    # negative: it's a fully-formed document with its OWN names / dates /
-    # amounts, and Gemini Pro at temp 0.4 over-attends to those concrete
-    # values and copies them into the output even with explicit "do not
-    # copy" instructions. Drop the reference in that case — the system
-    # prompt (DRAFTING_SYSTEM_PROMPT) already carries Indian-legal
-    # document conventions and the LLM can produce the right shape from
-    # facts alone. The reference is still passed through on short queries
-    # where the LLM genuinely needs a structural anchor.
-    _has_rich_facts = bool(case_facts) and len(case_facts) >= 500
-    if _has_rich_facts:
-        reference_block = (
-            "## REFERENCE DRAFT\n"
-            "(Skipped — the user has provided rich case facts above. "
-            "Produce the document directly from those facts, following "
-            "standard Indian-law conventions for the document type the "
-            "user named in the query.)\n\n"
-        )
-    else:
-        reference_block = (
-            "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
-            "IGNORE every name, date, address, amount, party detail, and case-"
-            "specific value in this block. They belong to a different person's "
-            "matter and MUST NOT appear in your output. Use ONLY the reference's "
-            "shape: section ordering, headings, salutations, conventions, "
-            "phrasing patterns, and statutory-citation style.)\n"
-            f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and case facts alone, following Indian-law conventions for the document type)'}\n\n"
-        )
+    reference_block = (
+        "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
+        "IGNORE every name, date, address, amount, party detail, and case-"
+        "specific value in this block. They belong to a different person's "
+        "matter and MUST NOT appear in your output. Use ONLY the reference's "
+        "shape: section ordering, headings, salutations, conventions, "
+        "phrasing patterns, and statutory-citation style.)\n"
+        f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and uploaded source documents alone, following Indian-law conventions for the document type)'}\n\n"
+    )
 
-    # Prompt assembly. Two shapes depending on whether the user has
-    # provided rich extractable facts:
-    #
-    #   (rich-facts path) The extractor produced a tight bullet list. Pass
-    #     ONLY that as the LLM's source of truth — DROP the raw query
-    #     narrative. Empirically (2026-06-28), keeping the 6.6 KB raw query
-    #     alongside the bullet list caused the model to over-attend to the
-    #     narrative and substitute canonical Indian-law example values
-    #     (Sneha / Priyanka / Nashik) for the user's real facts. With just
-    #     the structured bullet list + reliefs / statute call-outs, the
-    #     model has no narrative noise to wander into.
-    #
-    #   (short path) Use the original layout: USER QUERY narrative +
-    #     facts_block (which is empty here) + reference template.
     # Gathered context — relevant statutes / judgments retrieved by the
-    # domain agents' own ES tools. Injected BEFORE the reference / facts
-    # blocks because they are the legal-grounding background; the user-
-    # specific blocks should sit closer to the closing instruction (recency).
+    # domain agents' own ES tools. Injected BEFORE the reference / source
+    # blocks because it's legal-grounding background; the user-specific
+    # blocks sit closer to the closing instruction (recency).
     context_block = ""
     if gathered_context:
         parts = []
@@ -728,51 +642,31 @@ async def _generate_single_pass(
                 + "\n"
             )
 
-    if _has_rich_facts:
-        user_block = (
-            f"{context_block}"
-            f"{reference_block}"
-            f"{facts_block}"
-            "## USER QUERY AND CASE NARRATIVE (verbatim — every name, date, "
-            "address, amount, and event below is real and must appear in "
-            "your output where the document calls for it)\n"
-            f"{query.strip()}\n\n"
-            "Produce the legal document the user asked for in standard "
-            "Indian-law conventions. EVERY party name, date, address, "
-            "monetary amount, ornament / asset description, sequence of "
-            "events, and case-specific detail MUST come VERBATIM from the "
-            "CASE FACTS bullet list OR the USER QUERY NARRATIVE above — "
-            "those are the only sources of fact for this matter. For "
-            "INLINE STATUTORY CITATIONS and LEGAL REASONING, draw on the "
-            "RELEVANT LEGAL CONTEXT (statutes / judgments) above. Do NOT "
-            "invent, substitute, paraphrase, or carry over canonical-"
-            "sounding Indian-law example party-names / places / dates "
-            "(e.g. 'Priyanka', 'Nashik', '29 May 2022', 'Sangamner', "
-            "'Sneha', 'Bhausaheb', 'Sakore', 'Ahmednagar') — those are "
-            "NOT in the case sources and using them is a critical error. "
-            "If a value is genuinely absent from both case sources above, "
-            "use a clearly-bracketed placeholder (e.g. [Advocate's "
-            "Address], [Reference Number]). Output ONLY the document — no "
-            "preamble, no postscript, no meta-commentary."
-        )
-    else:
-        user_block = (
-            f"{context_block}"
-            f"{reference_block}"
-            "## USER QUERY (the document-type request — what to draft)\n"
-            f"{query.strip()}\n\n"
-            f"{facts_block}"
-            "Produce the complete document the user asked for, in standard "
-            "Indian-law conventions for the document type the user named. "
-            "Cite inline statutes and (where applicable) precedents from "
-            "the RELEVANT LEGAL CONTEXT above. If a value the document "
-            "needs is not provided by the user, use a clearly-bracketed "
-            "placeholder (e.g. [Address], [Date], [Reference Number]); "
-            "NEVER copy a party name / fact value from the REFERENCE DRAFT "
-            "— its values belong to a different matter and using them is "
-            "a critical error. Output ONLY the document itself — no "
-            "preamble, no postscript, no meta-commentary."
-        )
+    user_block = (
+        f"{context_block}"
+        f"{reference_block}"
+        f"{source_docs_block}"
+        "## USER QUERY (the document-type request — what to draft)\n"
+        f"{query.strip()}\n\n"
+        "Produce the complete document the user asked for, in standard "
+        "Indian-law conventions for the document type the user named. "
+        "EVERY party name, date, address, monetary amount, statutory "
+        "reference, and case-specific detail MUST come VERBATIM from the "
+        "UPLOADED SOURCE DOCUMENTS block or the USER QUERY above — those "
+        "are the only sources of fact for this matter. Cite inline statutes "
+        "and (where applicable) precedents from the RELEVANT LEGAL CONTEXT "
+        "above. Do NOT invent, substitute, paraphrase, or carry over "
+        "canonical-sounding Indian-law example values from your training "
+        "data (e.g. 'Priyanka', 'Sneha', 'Bhausaheb', 'Sakore', 'Anjali "
+        "Deshmukh', 'Nashik', 'Sangamner', 'Ahmednagar', '29 May 2022', "
+        "'1 June 2020') — using any of those when the source names "
+        "different real parties is a CRITICAL error. If a value is "
+        "genuinely absent from both case sources above, use a clearly-"
+        "bracketed placeholder (e.g. [Advocate's Address], [Reference "
+        "Number]). NEVER copy a party name / fact value from the REFERENCE "
+        "DRAFT — its values belong to a different matter. Output ONLY the "
+        "document itself — no preamble, no postscript, no meta-commentary."
+    )
 
     # Temperature 0 + larger thinking budget. The previous default
     # (temperature 0.4) was producing creative deviations from the CASE
@@ -1025,7 +919,7 @@ async def _generate_section_pair(
     section_position_start: int,
     total_sections: int,
     query: str,
-    case_facts: str,
+    user_facts: str,
     reference_draft: str,
     prior_text: str,
     gathered_context: dict[str, str] | None,
@@ -1034,6 +928,12 @@ async def _generate_section_pair(
 ) -> str:
     """Produce 1 or 2 consecutive sections of the document in one Gemini
     2.5 Pro call. Mirrors the safety / retry pattern of single-pass.
+
+    `user_facts` is the RAW extracted text of uploaded documents, threaded
+    into every section-pair call so any section that walks the source
+    paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-
+    affidavit response) has direct access to the source's paragraph
+    structure and numbering.
     """
     from config.prompts import DRAFTING_SECTION_PAIR_PROMPT
     from langchain_core.messages import SystemMessage, HumanMessage
@@ -1052,11 +952,17 @@ async def _generate_section_pair(
         )
     sections_block = "\n\n".join(section_lines)
 
-    facts_block = (
-        "## CASE FACTS (extracted entities — these are the ONLY real values; "
-        "use them VERBATIM and do NOT bracket them as placeholders)\n"
-        f"{case_facts.strip()}\n\n"
-    ) if case_facts and case_facts.strip() else ""
+    source_docs_block = (
+        "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every party "
+        "name, date, address, amount, statutory reference, and paragraph-"
+        "level assertion in your output MUST be sourced from this block or "
+        "the USER QUERY below. When your section requires walking the "
+        "source paragraph-by-paragraph — para-wise reply, rejoinder "
+        "denials, counter-affidavit response — use the paragraph structure "
+        "and numbering from this block directly, quoting or paraphrasing "
+        "the specific assertions your section is responding to.)\n"
+        f"{user_facts.strip()}\n\n"
+    ) if user_facts and user_facts.strip() else ""
 
     context_block = ""
     if gathered_context:
@@ -1101,7 +1007,7 @@ async def _generate_section_pair(
         f"{context_block}"
         f"{reference_block}"
         f"{prior_block}"
-        f"{facts_block}"
+        f"{source_docs_block}"
         "## USER QUERY (the full document the user asked for — your section(s) "
         "are part of this larger document)\n"
         f"{query.strip()}\n\n"
@@ -1110,8 +1016,14 @@ async def _generate_section_pair(
         "Produce ONLY the section bodies named above, in order, each starting "
         "with its own `## ` heading line. No preamble. No postscript. No "
         "transition text between two sections. Continue paragraph numbering "
-        "from DOCUMENT SO FAR. Use CASE FACTS verbatim. Cite statutes inline "
-        "from RELEVANT LEGAL CONTEXT where applicable."
+        "from DOCUMENT SO FAR. Every party name, date, address, monetary "
+        "amount, and case-specific detail MUST come VERBATIM from the "
+        "UPLOADED SOURCE DOCUMENTS or the USER QUERY. Do NOT substitute "
+        "canonical Indian-legal example values (e.g. 'Priyanka', 'Sneha', "
+        "'Bhausaheb', 'Sakore', 'Anjali Deshmukh', 'Nashik', 'Sangamner', "
+        "'Ahmednagar', '29 May 2022', '1 June 2020') for the real parties "
+        "and dates named in the source — that is a CRITICAL error. Cite "
+        "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
     )
 
     llm = get_gemini_pro(
@@ -1209,7 +1121,7 @@ async def _generate_sectionwise(
     *,
     sections: list[_Section],
     query: str,
-    case_facts: str,
+    user_facts: str,
     reference_draft: str,
     user_intent,
     user_language: str,
@@ -1218,9 +1130,13 @@ async def _generate_sectionwise(
 ) -> str:
     """Walk the section list in pairs of two (last is solo if odd).
 
-    Each pair is one Gemini Pro call seeing the document so far. A
-    failed pair is logged and skipped — the loop continues so the user
-    gets a partial draft instead of a hard failure.
+    Each pair is one Gemini Pro call seeing the document so far AND the
+    uploaded source documents. `user_facts` is threaded into every pair
+    call (not just the first) so any section that needs to walk the source
+    paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-
+    affidavit response) has direct access. A failed pair is logged and
+    skipped — the loop continues so the user gets a partial draft instead
+    of a hard failure.
     """
     completed: list[str] = []
     total = len(sections)
@@ -1246,7 +1162,7 @@ async def _generate_sectionwise(
                 section_position_start=position_start,
                 total_sections=total,
                 query=query,
-                case_facts=case_facts,
+                user_facts=user_facts,
                 reference_draft=reference_draft,
                 prior_text=prior_text,
                 gathered_context=gathered_context,
@@ -1271,7 +1187,7 @@ async def _generate_sectionwise(
 
 async def _generate_draft(
     query: str,
-    case_facts: str,
+    user_facts: str,
     reference_draft: str,
     user_intent,
     user_language: str,
@@ -1280,8 +1196,9 @@ async def _generate_draft(
 ) -> str:
     """Thin dispatcher: judge call decides single-pass vs section-wise.
 
-    Public signature unchanged from earlier — returns a single assembled
-    string regardless of which generation strategy ran.
+    `user_facts` is the RAW extracted text of uploaded documents, passed
+    verbatim through to whichever generation strategy runs. Returns a
+    single assembled string regardless of the strategy.
     """
     strategy = await _judge_fanout(
         query=query,
@@ -1299,7 +1216,7 @@ async def _generate_draft(
         )
         return await _generate_single_pass(
             query=query,
-            case_facts=case_facts,
+            user_facts=user_facts,
             reference_draft=reference_draft,
             user_intent=user_intent,
             user_language=user_language,
@@ -1320,7 +1237,7 @@ async def _generate_draft(
     return await _generate_sectionwise(
         sections=strategy.sections,
         query=query,
-        case_facts=case_facts,
+        user_facts=user_facts,
         reference_draft=reference_draft,
         user_intent=user_intent,
         user_language=user_language,
@@ -1442,34 +1359,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
     await _AGENT_SEMAPHORE.acquire()
 
     try:
-        # --- 4. Resolve case_facts (the structured anchor the generation LLM
-        # uses as the source of truth for names/dates/amounts).
-        #
-        # ALWAYS run the Gemini Flash extractor when there's substantive
-        # content (attachments OR long inline query). Empirically, passing
-        # a 6.6K-char raw narrative through a 25K-char context window leads
-        # Gemini Pro to fall back to its prior — substituting canonical
-        # Indian-law example values (Sneha / Priyanka / Nashik / 29 May 2022)
-        # for the user's actual party names and dates. A compact bullet
-        # list ("- **Plaintiff**: Jyoti Narendra Amrutkar; - **Marriage
-        # Date**: 16 May 2013; ...") gives the LLM crisp anchors the model
-        # can lock onto. The raw query still appears in USER QUERY for the
-        # narrative context, but the bullet list is what carries the
-        # authoritative facts.
-        case_facts = ""
-        if user_facts:
-            progress("drafting", "Extracting key facts from your document...",
-                     step="extract")
-            case_facts = await _extract_case_facts(user_facts)
-        elif len(query) >= 500:
-            progress("drafting", "Extracting key facts from your prompt...",
-                     step="extract")
-            case_facts = await _extract_case_facts(query)
-
-        # --- 5. In parallel: acquire reference draft AND gather relevant
+        # --- 4. In parallel: acquire reference draft AND gather relevant
         # legal context (statutes + judgments retrieved via the same ES
         # tools the domain agents use). Both are independent retrievals;
         # running them concurrently saves ~5s wall time vs sequential.
+        #
+        # No case-fact extraction step. The raw `user_facts` blob (verbatim
+        # extracted text of every uploaded document) flows straight into
+        # generation — Gemini 2.5 Pro's 2M-token window can consume
+        # multi-100K-char PDFs, and the raw source is required for tasks
+        # like rejoinder / para-wise reply where the model must walk the
+        # source paragraph-by-paragraph.
         progress("drafting", "Searching templates and relevant law...",
                  step="reference")
         (reference_text, reference_source, reference_kind), gathered_ctx = \
@@ -1491,10 +1391,12 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 found=len(gathered_ctx),
             )
 
-        # --- 6. Single-pass generation (Gemini 2.5 Pro) with gathered context ---
+        # --- 5. Generation (Gemini 2.5 Pro) with raw source + gathered context.
+        # The dispatcher picks single-pass or per-section fan-out based on
+        # `_judge_fanout`. Raw `user_facts` is threaded through both paths.
         draft = await _generate_draft(
             query=query,
-            case_facts=case_facts,
+            user_facts=user_facts,
             reference_draft=reference_text,
             user_intent=intent_obj,
             user_language=user_language,
@@ -1502,11 +1404,11 @@ async def drafting_node(state: LegalAgentState) -> dict:
             gathered_context=gathered_ctx,
         )
 
-        # --- 7. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
+        # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
         progress("drafting", "Cleaning up draft...", step="cleanup")
         draft, draft_warnings = validate_draft(draft)
 
-        # --- 8. self_refine — the scope critic + audit pass against UserIntent ---
+        # --- 7. self_refine — the scope critic + audit pass against UserIntent ---
         if draft and intent_obj is not None:
             try:
                 progress(
@@ -1514,7 +1416,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     "Auditing draft against your directives...",
                     step="self_refine",
                 )
-                source_langs = detect_source_languages(user_facts, case_facts)
+                source_langs = detect_source_languages(user_facts)
                 refined_draft, refine_history = await self_refine(
                     draft,
                     user_query=query,

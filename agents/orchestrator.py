@@ -1609,7 +1609,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 
         # When the user attached a file, the Document agent's analysis is
         # redundant with the drafting agent's content (drafting already
-        # consumed the file via case_facts + raw text). Including it in the
+        # consumed the file's raw text directly). Including it in the
         # citation block can dilute the response with template-style language.
         fc_check = FileContextData.from_state(state)
         if fc_check and fc_check.has_content and "Document" in citation_results:

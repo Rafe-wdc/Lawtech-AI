@@ -495,6 +495,26 @@ violations specific to Indian drafting practice:
     `stance.key_cases` is suspect — flag MAJOR and ask the refiner
     to either replace with a stance case or remove the citation lead-in.
 
+  canonical_example_substitution — the draft uses canonical Indian-legal
+    example names / places / dates from LLM training data as if they were
+    the user's real facts. Substitution set to flag: "Priyanka", "Sneha",
+    "Bhausaheb", "Sakore", "Anjali Deshmukh", "Rakesh Sharma", "Ram Kumar",
+    "Sita Devi", "Jyoti Narendra Amrutkar", "Nashik", "Sangamner",
+    "Ahmednagar", "Pune Civil Court", "Sangamner Taluka", "29 May 2022",
+    "1 June 2020", "16 May 2013". These are training-set artefacts, not
+    case facts. When the user's query or an uploaded source document
+    names DIFFERENT real parties/places/dates, appearance of any of these
+    canonical values in the draft is CRITICAL — the model substituted
+    its prior for a real fact. The refiner MUST replace each canonical
+    value with the corresponding real value from the query or source.
+    Do NOT flag when the user's own query/source ACTUALLY contains one
+    of these names (e.g. a real client happens to be named "Priyanka" and
+    the source PDF confirms it) — the check is context-sensitive:
+    compare against the query + source, not against the substitution
+    list alone. Suggested_fix: "Replace 'Priyanka' in paragraphs 3, 7,
+    12 with the client name from the source ('<real name>'); replace
+    'Nashik' with '<real place>'."
+
   date_placeholder_inconsistency — the same draft mixes specific dates
     ("2026-06-13", "2023-01-15") AND placeholder forms ("[Date]",
     "[Date of Cheque]"). A real draft uses ONE convention throughout:

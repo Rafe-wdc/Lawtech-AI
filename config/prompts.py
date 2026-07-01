@@ -1039,9 +1039,14 @@ user's ask requires) document in a single response.
    It is NOT verbatim content to copy. It is NOT a template to fill in.
 2. USER QUERY — the user's drafting instruction in their own words. This is
    the SOURCE OF TRUTH for what document to produce.
-3. CASE FACTS — names, dates, amounts, addresses, and other concrete facts
-   extracted from the user's attached documents. Use these directly; never
-   bracket them as [placeholders] when a real value is given.
+3. UPLOADED SOURCE DOCUMENTS — the RAW extracted text of every file the
+   user attached. Party names, dates, addresses, amounts, statutory
+   references, and paragraph-level assertions come VERBATIM from this
+   block. When the requested document is a rejoinder, para-wise reply,
+   counter-affidavit, or written statement that responds to a document
+   the user has uploaded, walk the source's paragraph structure directly —
+   quote or paraphrase the specific assertions your response is addressing.
+   Never bracket a value as [placeholder] when the source provides it.
 4. USER DIRECTIVES — typed intent fields from the user (language, depth,
    format, additional instructions). Honor every one.
 
@@ -1076,12 +1081,23 @@ user's ask requires) document in a single response.
    - Don't add a doctrinal-stance preamble or theory-of-case discussion at
      the top; go straight into the document.
 
-4. USE REAL FACTS, NOT PLACEHOLDERS, WHEN AVAILABLE.
-   When CASE FACTS contains a value (party name, date, amount, address,
-   property description), USE IT directly in the document. Reserve
-   [bracketed placeholders] for facts the user has not provided. NEVER
-   mix specific values and bracketed placeholders for the SAME field type
-   within the same draft — pick one convention and stick to it.
+4. USE REAL FACTS FROM THE SOURCE, NOT PLACEHOLDERS OR TRAINING-SET NAMES.
+   Every party name, date, address, amount, property description,
+   statutory reference, and case-specific fact in your output MUST come
+   VERBATIM from UPLOADED SOURCE DOCUMENTS or USER QUERY. Reserve
+   [bracketed placeholders] only for facts genuinely absent from both
+   sources. NEVER mix specific values and bracketed placeholders for the
+   SAME field type within the same draft — pick one convention.
+
+   CRITICAL — do NOT substitute canonical Indian-legal example values
+   from your training data when the source names different real parties.
+   Common substitution set to reject: "Priyanka", "Sneha", "Bhausaheb",
+   "Sakore", "Anjali Deshmukh", "Rakesh Sharma", "Ram Kumar", "Sita
+   Devi", "Nashik", "Sangamner", "Ahmednagar", "Pune Civil Court",
+   "29 May 2022", "1 June 2020", "16 May 2013". These are training-set
+   artefacts, not case facts. Using any of them when the source names
+   different real parties is a CRITICAL error the self-refine critic
+   will catch and reject.
 
 5. CITATIONS — cite statutes inline with the exact Act name + section
    number ("Section 138 of the Negotiable Instruments Act, 1881"). For
@@ -1284,7 +1300,7 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 
 1. REFERENCE DRAFT — a similar full document from our corpus (or synthesised from authoritative web sources). STRUCTURAL anchor only — shows shape, conventions, citation style, signature block. Its party names, dates, addresses, and case-specific values belong to a DIFFERENT matter and MUST NOT appear in your output.
 2. USER QUERY — the user's drafting instruction in their own words. SOURCE OF TRUTH for what document to produce.
-3. CASE FACTS — names, dates, amounts, addresses, statutory references extracted from the user's attached documents and narrative. Use these VERBATIM; never bracket them as `[placeholders]` when a real value is given.
+3. UPLOADED SOURCE DOCUMENTS — the RAW extracted text of every file the user attached. Party names, dates, addresses, amounts, statutory references, and paragraph-level assertions come VERBATIM from this block. When your section responds to the source paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-affidavit response, written statement), use the source's paragraph structure and numbering directly — quote or paraphrase the specific assertions your section is responding to. Never bracket a value as `[placeholder]` when the source provides it.
 4. RELEVANT LEGAL CONTEXT — statutes (BNS / BNSS / BSA / Legislation / Newacts) and precedents (High Court / Supreme Court) retrieved for this matter. Use these for INLINE STATUTORY CITATIONS and LEGAL REASONING. Do NOT copy their party names, dates, or case facts into the draft.
 5. DOCUMENT SO FAR — the sections of THIS document that have already been drafted before yours. Use this for:
    - Continuity of numbering (paragraph counter, list prefixes, page-break feel).
@@ -1309,9 +1325,10 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
    - Procedural blocks have their OWN local numbering schemes (see Rule 9).
    - When DOCUMENT SO FAR is empty (you are writing the first section[s]), start the global counter at 1 where appropriate.
 
-4. USE CASE FACTS VERBATIM.
-   - Every party name, date, address, monetary amount, ornament / asset description, statutory provision, sequence of events MUST come VERBATIM from CASE FACTS or the user's narrative — NEVER substitute canonical-sounding Indian-law example values (e.g. "Priyanka", "Sneha", "Bhausaheb", "Sakore", "Nashik", "Sangamner", "Ahmednagar", "29 May 2022").
-   - When a fact is genuinely absent, use a clearly-bracketed placeholder (e.g. `[Advocate's Address]`, `[Reference Number]`). NEVER mix a real value and a placeholder for the SAME field within the draft.
+4. USE SOURCE FACTS VERBATIM.
+   - Every party name, date, address, monetary amount, ornament / asset description, statutory provision, sequence of events, and paragraph-level assertion MUST come VERBATIM from UPLOADED SOURCE DOCUMENTS or the USER QUERY. When your section walks the source paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-affidavit response), mirror the source's paragraph numbering — respond to Reply Para 1 with your Reply-to-Para-1, respond to Reply Para 5 with your Reply-to-Para-5, and so on.
+   - NEVER substitute canonical Indian-legal example values from your training data. Common substitution set to reject: "Priyanka", "Sneha", "Bhausaheb", "Sakore", "Anjali Deshmukh", "Rakesh Sharma", "Ram Kumar", "Sita Devi", "Nashik", "Sangamner", "Ahmednagar", "Pune Civil Court", "29 May 2022", "1 June 2020", "16 May 2013". Any of these appearing when the source names different real parties is a CRITICAL error the self-refine critic will catch and reject.
+   - When a fact is genuinely absent from both sources, use a clearly-bracketed placeholder (e.g. `[Advocate's Address]`, `[Reference Number]`). NEVER mix a real value and a placeholder for the SAME field within the draft.
 
 5. CITATIONS — cite statutes inline with the exact Act name + section number ("Section 138 of the Negotiable Instruments Act, 1881"). For case law, use a real case name + reporter citation, OR omit the case label entirely. NEVER emit `[CITE: ...]` placeholder markers.
 

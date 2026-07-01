@@ -188,10 +188,15 @@ the typed intent into that string. See
 ## Drafting invariants (do not regress)
 
 The Drafting pipeline was simplified on 2026-06-28 (see
-`docs/drafting_simplification_plan.md`). It is now a two-source / single-pass
-flow with no enums, no skeletons, no doc-type classifier, no mandatory-section
-injection, and no per-section fan-out. Before touching `agents/drafting.py`,
-`agents/orchestrator.py`, or `config/prompts.py`, know these invariants:
+`docs/drafting_simplification_plan.md`) and further simplified on 2026-07-02
+(the case-fact bullet-extraction middleman was removed — see the memory
+project doc `project_drafting_raw_source_2026_07_02.md`). It is now a
+raw-source / dispatcher-pick flow with no enums, no skeletons, no
+doc-type classifier, no mandatory-section injection, and no case-fact
+extraction. Per-section fan-out IS implemented (commit 03014fe) behind a
+judge call that decides single-pass vs per-section. Before touching
+`agents/drafting.py`, `agents/orchestrator.py`, `core/self_refine.py`, or
+`config/prompts.py`, know these invariants:
 
 1. **Reference draft must come from ES first; web only on rejection.** The
    pipeline runs an ES `match` on the `drafting` index (size 100) →
@@ -203,34 +208,49 @@ injection, and no per-section fan-out. Before touching `agents/drafting.py`,
    `DRAFTING_WEB_FALLBACK_PROMPT` to synthesize a reference draft from the
    open web. Do NOT short-circuit to web search for any other reason.
 2. **Scope critic + self-refine must run before final return.** After
-   single-pass generation, `core.self_refine.self_refine` audits the draft
-   against the typed `UserIntent` and refines on violations. CRITIQUE_PROMPT
-   covers drafting-specific categories (placeholder_marker,
-   orphan_citation_tail, forbidden_statute_pair, cause_title_collapsed,
-   paragraph_numbering_break, prayer_relief_mismatch, etc.). Do NOT add
+   generation, `core.self_refine.self_refine` audits the draft against the
+   typed `UserIntent` and refines on violations. CRITIQUE_PROMPT covers
+   drafting-specific categories (placeholder_marker, orphan_citation_tail,
+   forbidden_statute_pair, cause_title_collapsed, paragraph_numbering_break,
+   prayer_relief_mismatch, canonical_example_substitution, etc.). Do NOT add
    per-rule regex/threshold checks anywhere — extend CRITIQUE_PROMPT instead.
-3. **User query is never truncated or summarized.** The user's drafting
-   instruction flows verbatim into the generation prompt as the "source of
-   truth for what document to produce." This invariant comes from saved
-   feedback and is non-negotiable.
+3. **User query AND uploaded source documents flow verbatim into generation.**
+   The user's drafting instruction is passed unchanged. The raw extracted
+   text of every uploaded PDF/docx (`user_facts`) is passed as the
+   `## UPLOADED SOURCE DOCUMENTS` block — no bullet-summary extraction, no
+   truncation, no per-file cap. Gemini 2.5 Pro's 2M-token window absorbs it.
+   This invariant comes from saved feedback (`feedback_no_mechanical_patterns`,
+   `feedback_preserve_user_query`) and is non-negotiable. Anti-substitution
+   discipline (do not swap in canonical example names like Sneha/Priyanka/
+   Nashik/Sangamner) lives in the DRAFTING_SYSTEM_PROMPT and
+   DRAFTING_SECTION_PAIR_PROMPT anti-substitution paragraphs plus the
+   CRITIQUE_PROMPT `canonical_example_substitution` category.
 4. **`validate_draft` is bug-fixes only.** It auto-fixes cp1252-misread-as-UTF-8
    mojibake, strips HTML tags, strips leftover `[CITE: ...]` placeholders, and
    removes empty numbered paragraphs. Substantive critique (forbidden statute
    pairs, orphan citation tails, missing procedural sections, prayer-relief
-   mismatch) lives in `core.self_refine.self_refine`. Do NOT add substantive
-   checks to `validate_draft`.
+   mismatch, canonical example substitution) lives in
+   `core.self_refine.self_refine`. Do NOT add substantive checks to
+   `validate_draft`.
 5. **No hand-curated taxonomy or skeleton.** The deleted `DOC_TYPES`,
    `SYNTHETIC_SKELETONS`, `GENERIC_COURT_SKELETONS`, `DOC_TYPE_TO_FOOTER_KIND`,
-   `DRAFT_OUTLINE_RULES_BY_TYPE`, `_inject_mandatory_sections`, and
-   `_generate_doctrinal_stance` MUST NOT be reintroduced. The reference draft
-   is the structural anchor; the user's query shapes scope. If a quality
-   regression surfaces, extend the generation prompt or CRITIQUE_PROMPT —
-   do NOT add an enum gate.
-6. **Per-section fan-out is reserved but not implemented.** Stage 2 is behind
-   a single function `_generate_draft(...) -> str` so a future per-section
-   variant can be added without rewriting the agent. The section list, when
-   added, must be extracted from the reference draft's actual structure (not
-   from an enum).
+   `DRAFT_OUTLINE_RULES_BY_TYPE`, `_inject_mandatory_sections`,
+   `_generate_doctrinal_stance`, `_extract_case_facts`, and
+   `_CASE_FACTS_PROMPT` MUST NOT be reintroduced. The reference draft is the
+   structural anchor; the user's query shapes scope; the uploaded source
+   documents supply the paragraph structure and authoritative facts. If a
+   quality regression surfaces, extend the generation prompt or
+   CRITIQUE_PROMPT — do NOT add an enum gate or a facts-extraction step.
+6. **Per-section fan-out is implemented and threads raw source into every
+   pair-call.** `_generate_draft` dispatches to either `_generate_single_pass`
+   or `_generate_sectionwise` based on `_judge_fanout`'s decision. The
+   sectionwise path walks section pairs (last is solo if odd), each pair
+   seeing (a) the document drafted so far via `prior_text`, (b) the raw
+   uploaded source documents via `user_facts`. Raw source is threaded into
+   EVERY pair-call (not just the first) so any section that walks the source
+   paragraph-by-paragraph — para-wise reply, rejoinder denials, counter-
+   affidavit response — has direct access to the source's paragraph
+   structure and numbering.
 
 Tests live in `tests/test_drafting_simplification.py` (15 unit + 2 e2e).
 Run them via:

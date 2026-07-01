@@ -432,7 +432,7 @@ class TestGenerateSectionwise:
 
         async def _fake_pair(
             *, sections_to_write, section_position_start, total_sections,
-            query, case_facts, reference_draft, prior_text,
+            query, user_facts, reference_draft, prior_text,
             gathered_context, user_intent, user_language,
         ):
             calls.append({
@@ -450,7 +450,7 @@ class TestGenerateSectionwise:
             out = _run(_generate_sectionwise(
                 sections=sections,
                 query="Draft a writ petition",
-                case_facts="",
+                user_facts="",
                 reference_draft="REF",
                 user_intent=None,
                 user_language="en",
@@ -493,7 +493,7 @@ class TestGenerateSectionwise:
                    side_effect=_flaky_pair):
             out = _run(_generate_sectionwise(
                 sections=sections,
-                query="Draft", case_facts="",
+                query="Draft", user_facts="",
                 reference_draft="REF",
                 user_intent=None, user_language="en",
                 progress_emit=self._silent_progress,
@@ -520,7 +520,7 @@ class TestGenerateSectionwise:
                    side_effect=_empty_pair):
             out = _run(_generate_sectionwise(
                 sections=sections,
-                query="Draft", case_facts="",
+                query="Draft", user_facts="",
                 reference_draft="REF",
                 user_intent=None, user_language="en",
                 progress_emit=self._silent_progress,
@@ -548,7 +548,7 @@ class TestGenerateSectionwise:
                    side_effect=_fake_pair):
             _run(_generate_sectionwise(
                 sections=sections,
-                query="Draft", case_facts="",
+                query="Draft", user_facts="",
                 reference_draft="REF",
                 user_intent=None, user_language="en",
                 progress_emit=_capture_progress,
@@ -601,7 +601,7 @@ class TestGenerateDraftDispatcher:
                    side_effect=_fake_sectionwise):
             out = _run(_generate_draft(
                 query="Draft a Section 138 NI Act notice",
-                case_facts="", reference_draft="short ref",
+                user_facts="", reference_draft="short ref",
                 user_intent=None, user_language="en",
                 progress_emit=self._silent_progress,
                 gathered_context=None,
@@ -639,7 +639,7 @@ class TestGenerateDraftDispatcher:
                    side_effect=_fake_sectionwise):
             out = _run(_generate_draft(
                 query="Draft a writ petition for quashing FIR 123/2024.",
-                case_facts="", reference_draft="LONG REFERENCE",
+                user_facts="", reference_draft="LONG REFERENCE",
                 user_intent=None, user_language="en",
                 progress_emit=self._silent_progress,
                 gathered_context=None,
@@ -672,7 +672,7 @@ class TestGenerateDraftDispatcher:
              patch("agents.drafting._generate_sectionwise",
                    side_effect=_fake_sectionwise):
             out = _run(_generate_draft(
-                query="Draft", case_facts="", reference_draft="ref",
+                query="Draft", user_facts="", reference_draft="ref",
                 user_intent=None, user_language="en",
                 progress_emit=self._silent_progress,
                 gathered_context=None,

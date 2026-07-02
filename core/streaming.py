@@ -199,4 +199,13 @@ async def _stream_with_writer(chain, inputs: dict, writer):
         log.info("Stream completed with pad-char runaway suppression",
                  chars_dropped=runaway_dropped, emitted_chars=len(full))
 
-    return SimpleNamespace(content=full, usage_metadata=usage)
+    # Expose both `.content` and `.text` so call sites that use either attribute
+    # work uniformly. AIMessage (returned by chain.ainvoke in batch context)
+    # already carries both — `.content: str` and `.text: property → content`.
+    # Historically the SimpleNamespace returned here only carried `.content`,
+    # so any `.text` reader (Judgment, Legislation, Newacts, Constitution/Maxim,
+    # orchestrator citation injection, orchestrator synthesis) silently
+    # AttributeError'd in streaming context, got caught by the outer try/except,
+    # and the agent returned an empty AgentResult. Aliasing `.text = content`
+    # here is a one-line pipeline-level fix that closes all those latent bugs.
+    return SimpleNamespace(content=full, text=full, usage_metadata=usage)

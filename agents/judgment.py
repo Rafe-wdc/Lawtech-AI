@@ -573,9 +573,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
 
         # Check if LLM apologized (ES hits were irrelevant) — fall back to web search.
         # Uses the shared head+tail scanner so end-of-response hedges don't slip through.
-        if head_tail_apology_detected(llm_response.text):
+        if head_tail_apology_detected(llm_response.content):
             log.warning("LLM response is an apology or too short, using web fallback",
-                        response_preview=llm_response.text[:100], strategy=strategy)
+                        response_preview=llm_response.content[:100], strategy=strategy)
             try:
                 from langgraph.config import get_stream_writer
                 writer = get_stream_writer()
@@ -588,13 +588,13 @@ async def judgment_node(state: LegalAgentState) -> dict:
             return {"agent_results": {"Judgment": fallback_result}}
 
         log.info("Agent completed",
-                 cases=len(hits), response_len=len(llm_response.text),
+                 cases=len(hits), response_len=len(llm_response.content),
                  tokens=tokens, strategy=strategy,
                  first_case=first_title[:60])
 
         result = AgentResult(
             agent_name="Judgment",
-            content=llm_response.text,
+            content=llm_response.content,
             sources=sources,
             tokens_consumed=tokens,
         )

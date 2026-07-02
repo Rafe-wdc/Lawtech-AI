@@ -1243,22 +1243,34 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             log.info("Multi-intent enrichment via UserIntent",
                      extra=extra, all_agents=tasks_planned)
 
-    # Drafting false-positive strip (post multi-intent): if the primary task
-    # is not Drafting but Drafting ended up in tasks_planned, drop it unless
-    # the user explicitly requested a draft (task_intent="draft") with a
-    # file context (file-attached drafting flow). The cite-appendix-OFF
-    # logic below otherwise strips ALL non-drafting agents the moment
-    # Drafting is in the plan, which silently hijacks primary execution.
-    if (
-        task != "Drafting"
-        and "Drafting" in tasks_planned
-        and not (fc and fc.has_content and _wants_drafting(extracted_intent))
-    ):
-        tasks_planned = [a for a in tasks_planned if a != "Drafting"]
-        if not tasks_planned:
-            tasks_planned = [task]
-        log.info("Drafting stripped (post multi-intent) — primary task is non-drafting",
-                 task=task, agents=tasks_planned)
+    # Drafting reconciliation (post multi-intent): when Drafting appears in
+    # the plan but wasn't the primary task, the typed UserIntent from the
+    # extractor is the authoritative signal on whether the user actually
+    # wants a draft. Two branches:
+    #  (a) `_wants_drafting(intent)` True — the intent extractor confidently
+    #      says task_intent="draft". The initial classifier misclassified
+    #      (e.g. as Scenario). Promote Drafting to primary and let the
+    #      dedicated Drafting pipeline (ES reference lookup + Gemini 2.5 Pro
+    #      + self_refine) run instead of the multi-agent fan-out. This
+    #      restores the previously-broken flow where a "draft a plaint for
+    #      partition" request routed to Scenario+Legislation+Judgment and
+    #      never touched the Drafting agent.
+    #  (b) `_wants_drafting(intent)` False — Drafting arrived from the LLM
+    #      planner without intent-extractor backing (classifier
+    #      hallucination). Strip it so the cite-appendix-OFF branch below
+    #      doesn't silently drop the true primary agents.
+    if task != "Drafting" and "Drafting" in tasks_planned:
+        if _wants_drafting(extracted_intent):
+            log.info("Drafting promoted to primary via typed intent",
+                     prior_task=task, agents=tasks_planned)
+            task = "Drafting"
+            tasks_planned = ["Drafting"] + [a for a in tasks_planned if a != "Drafting"]
+        else:
+            tasks_planned = [a for a in tasks_planned if a != "Drafting"]
+            if not tasks_planned:
+                tasks_planned = [task]
+            log.info("Drafting stripped (post multi-intent) — typed intent does not confirm draft",
+                     task=task, agents=tasks_planned)
 
     # Drafting citation agents
     # Phase 1: gated behind cite_appendix flag (per-request) + env default.
@@ -1721,26 +1733,16 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         primary = primary_result.content.rstrip()
         all_serialized_sources = _serialize_sources(primary_result)
         total_tokens = primary_result.tokens_consumed
-        appendix_parts: list[str] = []
+        kept_supporting: dict[str, AgentResult] = {}
         skipped_redundant: list[str] = []
 
-        # Unique-token dedup: keep a supporting agent's appendix iff it
+        # Unique-token dedup: keep a supporting agent's content iff it
         # contributes a meaningful number of UNIQUE informational tokens
-        # beyond the primary. Replaces the prior overlap-ratio threshold
-        # which dropped genuinely complementary content (Maxim explaining
-        # audi alteram partem alongside Constitution Article 14 share
-        # 50%+ tokens through common legal vocabulary — "natural", "justice",
-        # "principles", "court" — even when Maxim adds substantive new
-        # material). Measuring NEW tokens directly catches the actual
+        # beyond the primary. Measuring NEW tokens directly catches the
         # signal we care about: does the supporting agent add information?
-        #
-        # Thresholds:
-        #   - Supporting must add >= MIN_UNIQUE new informational tokens.
-        #     30 is conservative — a 200-word response paraphrasing the
-        #     primary typically has 10-15 unique informational tokens
-        #     after stop-word filtering.
-        #   - Skip the gate entirely for very short supporting responses
-        #     (< 50 tokens total): nothing to dedup, just keep.
+        # Even when we drop the supporter's prose, we still merge its
+        # sources — citations are valuable even when the surrounding prose
+        # is redundant.
         primary_tokens = _content_token_set(primary)
         MIN_UNIQUE_TOKENS_TO_KEEP = 30
 
@@ -1759,34 +1761,123 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                     f"{name}(unique={len(unique_to_supporting)}, "
                     f"overlap={overlap_ratio:.0%})"
                 )
-                # Still merge the sources — the supporting agent's
-                # citations are valuable even when its prose is redundant.
                 all_serialized_sources.extend(_serialize_sources(result))
                 total_tokens += result.tokens_consumed
                 continue
-            heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
-            appendix_parts.append(f"\n\n---\n\n{heading}\n\n{result.content.strip()}")
-            total_tokens += result.tokens_consumed
+            kept_supporting[name] = result
             all_serialized_sources.extend(_serialize_sources(result))
+            total_tokens += result.tokens_consumed
 
         if skipped_redundant:
             log.info("Dropped redundant supporting agents from synthesis",
                      skipped=skipped_redundant,
                      reason=f"unique tokens < {MIN_UNIQUE_TOKENS_TO_KEEP}")
 
-        final_response = primary + "".join(appendix_parts)
+        # Fast path — no supporting content survived dedup. Return primary
+        # as-is; the primary agent already streamed its tokens to the
+        # frontend, no merge cost, no token_reset.
+        if not kept_supporting:
+            log.info("Primary-only response — no non-redundant supporters",
+                     task=primary_task_state, primary_agent=primary_agent_name,
+                     final_len=len(primary), total_tokens=total_tokens)
+            return {
+                "final_response": primary,
+                "source_metadata": all_serialized_sources,
+                "tokens_consumed": total_tokens,
+            }
 
-        log.info("Primary-task-aware synthesis completed (append-only)",
+        # LLM merge path — replaces append-only concat. Primary is anchor
+        # for layout/shape; supporters contribute case law, statutes, or
+        # complementary analysis. Merger produces ONE coherent response
+        # (no `## Supporting X` / `## Related Y` cliff-edges, no
+        # cross-agent duplication of the same case treatment, no language
+        # leak when supporters write in English and primary is Gujarati).
+        # SYNTHESIS_PROMPT already carries all the merge rules — organize
+        # by legal argument (not by agent source), don't repeat, don't
+        # mention "agents", respond in target language, preserve citations.
+        log.info("Primary-task-aware merge (LLM) starting",
                  task=primary_task_state, primary_agent=primary_agent_name,
-                 final_len=len(final_response),
-                 supporting_agents=list(supporting_results.keys()),
-                 total_tokens=total_tokens)
+                 primary_len=len(primary),
+                 supporting_agents=list(kept_supporting.keys()))
 
-        return {
-            "final_response": final_response,
-            "source_metadata": all_serialized_sources,
-            "tokens_consumed": total_tokens,
-        }
+        # Primary's tokens have already streamed to the frontend during
+        # its own generation. The merger will restream; emit token_reset
+        # so the frontend clears its buffer before we push merged tokens.
+        try:
+            from langgraph.config import get_stream_writer
+            _writer = get_stream_writer()
+            _writer({"type": "token_reset"})
+        except RuntimeError:
+            pass
+
+        try:
+            # Build merge input — flag primary as anchor so the LLM
+            # recognises which agent owns layout/shape for THIS task.
+            _MAX_AGENT_CONTENT = 12000
+            _primary_clip = primary if len(primary) <= _MAX_AGENT_CONTENT else \
+                primary[:_MAX_AGENT_CONTENT] + "\n\n[... truncated for merge]"
+            merge_input = (
+                f"\n\n### PRIMARY AGENT ({primary_agent_name}) "
+                f"— anchor for output shape and layout:\n{_primary_clip}"
+            )
+            for name, result in kept_supporting.items():
+                content = result.content
+                if len(content) > _MAX_AGENT_CONTENT:
+                    content = content[:_MAX_AGENT_CONTENT] + "\n\n[... truncated for merge]"
+                merge_input += f"\n\n### SUPPORTING AGENT ({name}):\n{content}"
+
+            llm = get_gemini_flash_full(
+                temperature=0.2,
+                max_output_tokens=12288,
+                thinking_budget=0,
+            )
+            prompt = ChatPromptTemplate.from_template(
+                localize_prompt(SYNTHESIS_PROMPT, user_language, state.get("user_intent"))
+            )
+            chain = prompt | llm
+            from core.streaming import stream_chain_response
+            response = await stream_chain_response(chain, {
+                "query": query,
+                "agent_results": merge_input,
+                "response_instructions": response_instructions or
+                    "Standard legal response with proper citations and markdown formatting.",
+            }, timeout=180)
+
+            merged = response.content
+            from core.token_tracker import record as _record_tokens
+            merge_tokens = _record_tokens("Orchestrator", "merge_synthesis", response)
+            total_tokens += merge_tokens
+
+            log.info("Primary-task-aware merge (LLM) completed",
+                     task=primary_task_state, primary_agent=primary_agent_name,
+                     final_len=len(merged),
+                     supporting_agents=list(kept_supporting.keys()),
+                     total_tokens=total_tokens)
+
+            return {
+                "final_response": merged,
+                "source_metadata": all_serialized_sources,
+                "tokens_consumed": total_tokens,
+            }
+
+        except Exception as e:
+            # Merge failure — fall back to append-only so the user still
+            # gets a response. Primary's already-streamed tokens remain
+            # visible to the frontend; the final response event carries
+            # the append-only concatenation.
+            log.error("Merge synthesis failed — falling back to append-only",
+                      error=str(e), primary_agent=primary_agent_name,
+                      supporting_agents=list(kept_supporting.keys()))
+            appendix_parts = []
+            for name, result in kept_supporting.items():
+                heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
+                appendix_parts.append(f"\n\n---\n\n{heading}\n\n{result.content.strip()}")
+            final_response = primary + "".join(appendix_parts)
+            return {
+                "final_response": final_response,
+                "source_metadata": all_serialized_sources,
+                "tokens_consumed": total_tokens,
+            }
 
     # --- Generic Multi-Agent Synthesis (non-drafting) ---
     progress("orchestrator", "Composing final response...", step="synthesize")

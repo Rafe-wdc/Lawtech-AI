@@ -117,8 +117,70 @@ async def scenario_node(state: LegalAgentState) -> dict:
 
             # Extract response text (guard against empty candidates/parts/null text)
             if not response.candidates or not response.candidates[0].content.parts:
-                log.warning("Gemini returned empty candidates/parts")
-                content = ""
+                # Diagnose why the grounded call returned nothing. Common
+                # causes: safety filter on the prompt or response, Google
+                # Search finding no verifiable sources on Indic-script
+                # queries, or the search step exhausting the token budget.
+                _finish_reason = None
+                _safety_ratings = None
+                _block_reason = None
+                try:
+                    if response.candidates:
+                        _finish_reason = getattr(response.candidates[0], "finish_reason", None)
+                        _safety_ratings = getattr(response.candidates[0], "safety_ratings", None)
+                    _prompt_feedback = getattr(response, "prompt_feedback", None)
+                    if _prompt_feedback is not None:
+                        _block_reason = getattr(_prompt_feedback, "block_reason", None)
+                except Exception:
+                    pass
+                log.warning("Gemini + Google Search returned empty candidates/parts — "
+                            "will retry once WITHOUT grounding as a rescue",
+                            finish_reason=str(_finish_reason) if _finish_reason else None,
+                            block_reason=str(_block_reason) if _block_reason else None,
+                            safety_ratings=[
+                                f"{getattr(r, 'category', '?')}={getattr(r, 'probability', '?')}"
+                                for r in (_safety_ratings or [])
+                            ] if _safety_ratings else None,
+                            user_language=user_language)
+                # Rescue: retry once without Google Search grounding. The
+                # grounded call sometimes returns empty on Indic-script
+                # queries because Google Search struggles to verify
+                # legal-domain claims with Indic sources. Falling back to
+                # plain Gemini preserves the response (with the caveat
+                # that it isn't web-grounded).
+                try:
+                    with log_time(log, "Gemini Flash rescue (no grounding)"):
+                        rescue_resp = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                client.models.generate_content,
+                                model=MODELS["scenario_web_grounded"],
+                                contents=[full_prompt],
+                                config={
+                                    "max_output_tokens": 8000,
+                                    "temperature": 0.5,
+                                    "top_p": 0.95,
+                                },
+                            ),
+                            timeout=TIMEOUT_WEB_SEARCH_SEC,
+                        )
+                    if (rescue_resp.candidates
+                            and rescue_resp.candidates[0].content.parts):
+                        content = getattr(
+                            rescue_resp.candidates[0].content.parts[0],
+                            "text", None,
+                        ) or ""
+                        # Preserve the grounded call's usage; add rescue tokens
+                        response = rescue_resp  # rebind for grounding-metadata below
+                        log.info("Rescue succeeded — non-grounded response",
+                                 rescue_len=len(content))
+                    else:
+                        content = ""
+                        log.warning("Rescue also returned empty candidates — "
+                                    "returning empty scenario content")
+                except Exception as rescue_err:
+                    content = ""
+                    log.warning("Rescue call failed — returning empty scenario content",
+                                error=str(rescue_err)[:200])
             else:
                 content = getattr(response.candidates[0].content.parts[0], "text", None) or ""
             tokens = getattr(response.usage_metadata, "total_token_count", 0)

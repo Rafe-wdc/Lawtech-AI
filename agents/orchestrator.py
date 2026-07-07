@@ -1786,6 +1786,35 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "tokens_consumed": total_tokens,
             }
 
+        # Case-lookup short-circuit: SCI_Judgment and Judgment primaries
+        # ship a mandated structural template (### Detailed Narrative,
+        # ### Court Observations, **PDF Links:** block with clickable URLs
+        # — see SCI_JUDGMENT_SYSTEM_PROMPT). The LLM merge path below
+        # rewrites via SYNTHESIS_PROMPT, which has no rule to preserve
+        # URLs or those exact headings — the merged output loses every
+        # PDF link and renames the mandatory sections. Append-only concat
+        # keeps primary verbatim so the user still gets clickable links
+        # and the mandated structure, while supporting content lands
+        # under its own labelled heading.
+        if primary_agent_name in ("SCI_Judgment", "Judgment"):
+            appendix_parts = []
+            for name, result in kept_supporting.items():
+                heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
+                appendix_parts.append(
+                    f"\n\n---\n\n{heading}\n\n{result.content.strip()}"
+                )
+            final_response = primary + "".join(appendix_parts)
+            log.info("Primary-task-aware append-only (case-lookup primary)",
+                     task=primary_task_state, primary_agent=primary_agent_name,
+                     primary_len=len(primary),
+                     supporting_agents=list(kept_supporting.keys()),
+                     final_len=len(final_response), total_tokens=total_tokens)
+            return {
+                "final_response": final_response,
+                "source_metadata": all_serialized_sources,
+                "tokens_consumed": total_tokens,
+            }
+
         # LLM merge path — replaces append-only concat. Primary is anchor
         # for layout/shape; supporters contribute case law, statutes, or
         # complementary analysis. Merger produces ONE coherent response

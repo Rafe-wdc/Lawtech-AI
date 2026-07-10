@@ -796,17 +796,53 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
     facts-less query to drafting_node via agent_queries["Drafting"], and
     drafting falls back to template example values. Per
     feedback_preserve_user_query: never lose information from the user's
-    prompt anywhere in the pipeline. Returning {} causes all domain
-    agents to fall back to state["query"] (the full original).
+    prompt anywhere in the pipeline.
+
+    Exception — Drafting + citation agents on a long query. When Drafting is
+    co-planned with a citation agent (SCI_Judgment / Judgment / Legislation /
+    Newacts / Constitution / Maxim) and the raw query is a full drafting
+    template (>=500 chars, e.g. a party-labelled writ-petition scaffold), the
+    unrewrote-everyone skip propagates the whole template to the citation
+    agent's ReAct step too. The citation agent's LLM then treats the template
+    as a "draft this" instruction and produces a SECOND full drafted
+    document, which the orchestrator's Drafting-primary append-only synth
+    glues under `### <AGENT> CITATIONS:` — the "double draft" the user sees.
+    In this case we rewrite ONLY for the non-Drafting agents; Drafting is
+    NOT emitted in the returned dict, so drafting_node's own fallback to
+    state["query"] preserves the raw prompt verbatim (invariant intact).
     """
     if len(agents) <= 1:
         return {}
 
     if len(query) >= 500:
+        # Long drafting-scenario: rewrite ONLY for the non-Drafting agents.
+        # Drafting is intentionally omitted from the target list so the
+        # drafting_node falls back to state["query"] (raw, untouched).
+        if "Drafting" in agents:
+            citation_agents = [a for a in agents if a != "Drafting"]
+            if not citation_agents:
+                return {}
+            log.info(
+                "Per-agent query rewrite — Drafting co-planned with citation "
+                "agents; rewriting citation agents only (Drafting reads raw)",
+                query_chars=len(query),
+                citation_agents=citation_agents,
+            )
+            return _run_rewrite_llm(query, citation_agents)
+
         log.debug("Skipping per-agent query rewrite — query already standalone-length",
                   query_chars=len(query), agents=agents)
         return {}
 
+    return _run_rewrite_llm(query, agents)
+
+
+def _run_rewrite_llm(query: str, agents: list[str]) -> dict[str, str]:
+    """Invoke the LLM query rewriter for the given agent list.
+
+    Returns {} on any failure — callers fall back to state["query"] in that
+    case, so a rewriter failure never truncates the user's prompt.
+    """
     try:
         with log_time(log, "Per-agent query rewriting"):
             llm = get_gemini_flash(temperature=0.1)
@@ -820,9 +856,7 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "rewrite_per_agent_queries", response)
 
-        # Parse JSON from response
         text = response.text.strip()
-        # Strip markdown code fences if present
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
             if text.endswith("```"):
@@ -830,7 +864,6 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
             text = text.strip()
 
         parsed = _json.loads(text)
-        # Validate: only keep queries for planned agents
         agent_queries = {k: v for k, v in parsed.items() if k in agents and isinstance(v, str)}
 
         log.info("Per-agent queries generated",

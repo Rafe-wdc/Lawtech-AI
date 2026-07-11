@@ -223,6 +223,41 @@ Examples of how intent fields translate to checks:
           cite) as before. Surrounding clause stays in the target
           language.
 
+      (f) ENGLISH-ANCHOR-IN-CODE-FENCE — the English anchors above
+          (statutory references, act/code names, article numbers, order
+          rules, case-law citations, monetary amounts, dates, and
+          numerals) MUST be emitted as PLAIN TEXT. Wrapping ANY of them
+          in Markdown inline-code backticks or triple-backtick code
+          fences is a MAJOR violation because the frontend renders that
+          span in a monospaced typewriter font, breaking visual
+          uniformity with the surrounding proportional-font body prose.
+          Concrete patterns to flag:
+             "`Section 138 of the Negotiable Instruments Act, 1881`"
+                                      ← MAJOR. Must be plain text:
+                "Section 138 of the Negotiable Instruments Act, 1881"
+             "``Indian Contract Act, 1872``"
+                                      ← MAJOR. Must be plain text.
+             "`Article 226 of the Constitution of India`"
+                                      ← MAJOR.
+             "`Code on Wages, 2019`"
+                                      ← MAJOR.
+             "`Section 17(2)`"        ← MAJOR (bare Section-N label).
+             "`Rs. 5,00,000`"         ← MAJOR (monetary amount).
+             "`2024`" / "`15 May 2024`" ← MAJOR (year/date wrapped).
+             "```\nSection 138 ...\n```" ← MAJOR (triple-fenced anchor).
+             "<code>Section 138</code>" ← MAJOR (HTML code tag).
+          BOLD (**...**) and ITALIC (*...*) around headings / subject
+          lines / party-role emphasis are FINE and are NOT the same
+          thing as inline-code — do not flag them. The violation is
+          strictly backtick-based inline code, triple-backtick code
+          fences, and <code> HTML tags around any English anchor.
+          Suggested_fix: "Remove the backticks (or code fence, or
+          <code> tags) surrounding <specific anchor span> in <paragraph
+          N> — emit that span as plain running text so it renders in
+          the same proportional font as the surrounding {lang} prose;
+          preserve any adjacent bold/italic markdown, only the code
+          formatting is being stripped."
+
       strict_language=True additionally forbids stray English narrative
       clauses in body prose (see the strict_language section below), but
       the FIXED-ENGLISH ANCHOR rules above apply in BOTH strict and
@@ -785,6 +820,34 @@ EACH violation — and changes nothing else.
    "as per", "in accordance with"), translate the narrative clause into
    the target language while KEEPING the statutory reference and any
    digits in their English/Latin form.
+
+7. ENGLISH-ANCHOR-IN-CODE-FENCE STRIPPING. If the auditor flagged an
+   `english_anchor_in_code_fence` violation (or the prior response wraps
+   any English anchor — statutory reference, act/code name, article
+   number, order rule, case-law citation, monetary amount, date, or bare
+   numeral — in Markdown inline-code backticks, triple-backtick fences,
+   or HTML `<code>` tags), STRIP the wrapping markup while leaving the
+   anchor text and every character of the surrounding native-language
+   clause unchanged. Concrete rewrites:
+     - "`Section 138 of the Negotiable Instruments Act, 1881`" →
+       "Section 138 of the Negotiable Instruments Act, 1881"
+     - "``Indian Contract Act, 1872``" →
+       "Indian Contract Act, 1872"
+     - "`Code on Wages, 2019`" →
+       "Code on Wages, 2019"
+     - "`Section 17(2)`" →
+       "Section 17(2)"
+     - "```\nSection 138 of the Negotiable Instruments Act, 1881\n```" →
+       "Section 138 of the Negotiable Instruments Act, 1881" (inlined
+       back into the surrounding sentence — do not leave a stranded
+       standalone paragraph where a code-fenced block used to be).
+     - "<code>Section 138 of the NI Act</code>" →
+       "Section 138 of the NI Act"
+   PRESERVE any adjacent bold (**...**) or italic (*...*) markdown —
+   only the backticks / code fences / <code> tags are removed. Do NOT
+   translate the anchor into the target language while stripping the
+   fence; the anchor stays English by policy (Rule 6). Do NOT introduce
+   new anchor content — only unwrap what was already there.
 
 ## Inputs
 

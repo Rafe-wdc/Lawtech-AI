@@ -422,6 +422,90 @@ class TestRefinePromptReversal:
 
 
 # ---------------------------------------------------------------------------
+# 6b) No-code-fence rule around English anchors
+#     (2026-07-12 follow-up: client screenshot showed the LLM occasionally
+#     wrapping the English statutory reference in `` ` `` inline code, which
+#     the frontend renders as monospaced typewriter font. Fix is prompt-only:
+#     new anchor rule + critique category + refiner instruction.)
+# ---------------------------------------------------------------------------
+
+class TestNoCodeFenceAroundAnchors:
+    """The four enforcement layers must all carry the no-backticks rule."""
+
+    @pytest.mark.parametrize("lang", ["hi", "mr", "ta", "bn", "gu"])
+    def test_localize_prompt_strict_forbids_backticks(self, lang):
+        intent = UserIntent(
+            language=lang, language_explicit=True, strict_language=True,
+            confidence=0.9,
+        )
+        out = localize_prompt(BASE, lang, intent)
+        # Anchor block must call out plain-text emission
+        assert "PLAIN-TEXT EMISSION" in out
+        # And explicitly name backticks + code fences + <code> tags as bad
+        assert "backticks" in out
+        assert "code fences" in out or "code fence" in out
+
+    @pytest.mark.parametrize("lang", ["hi", "mr", "ta"])
+    def test_localize_prompt_non_strict_forbids_backticks(self, lang):
+        intent = UserIntent(
+            language=lang, language_explicit=True, strict_language=False,
+            confidence=0.9,
+        )
+        out = localize_prompt(BASE, lang, intent)
+        assert "PLAIN-TEXT EMISSION" in out
+        assert "backticks" in out
+
+    def test_shared_register_forbids_backticks(self):
+        assert "PLAIN-TEXT EMISSION" in INDIAN_LEGAL_LANGUAGE_REGISTER
+        assert "backticks" in INDIAN_LEGAL_LANGUAGE_REGISTER
+
+    def test_shared_register_explicitly_names_monospace(self):
+        # The rule must explain WHY (frontend renders backticks as
+        # monospace) so the LLM understands the reason, not just the rule.
+        assert "monospace" in INDIAN_LEGAL_LANGUAGE_REGISTER.lower() or (
+            "typewriter" in INDIAN_LEGAL_LANGUAGE_REGISTER.lower()
+        )
+
+    def test_critic_has_english_anchor_in_code_fence_category(self):
+        assert "ENGLISH-ANCHOR-IN-CODE-FENCE" in CRITIQUE_PROMPT
+        # And the critic gives concrete anti-examples
+        assert "`Section 138 of the Negotiable Instruments Act, 1881`" in CRITIQUE_PROMPT
+        assert "``Indian Contract Act, 1872``" in CRITIQUE_PROMPT
+        assert "`Code on Wages, 2019`" in CRITIQUE_PROMPT
+        # <code> HTML tag also called out
+        assert "<code>Section 138</code>" in CRITIQUE_PROMPT
+
+    def test_critic_preserves_bold_italic_carve_out(self):
+        """Bold (**...**) and italics (*...*) around headings are FINE — the
+        rule must explicitly say so to avoid the refiner stripping them."""
+        assert "BOLD" in CRITIQUE_PROMPT
+        assert "ITALIC" in CRITIQUE_PROMPT
+        # The carve-out phrasing
+        assert "are FINE" in CRITIQUE_PROMPT
+
+    def test_refiner_told_to_strip_backticks(self):
+        assert "ENGLISH-ANCHOR-IN-CODE-FENCE STRIPPING" in REFINE_PROMPT
+        # And gives concrete before → after examples
+        assert "`Code on Wages, 2019`" in REFINE_PROMPT
+        assert "``Indian Contract Act, 1872``" in REFINE_PROMPT
+        # Triple-fence variant
+        assert "```" in REFINE_PROMPT
+
+    def test_refiner_told_to_preserve_bold_italic(self):
+        """Adjacent bold/italic markdown must survive; only code formatting
+        is stripped."""
+        assert "PRESERVE any adjacent bold" in REFINE_PROMPT
+
+    def test_refiner_told_not_to_translate_while_stripping(self):
+        """Stripping the backticks must NOT collapse to translating the
+        anchor — the anchor stays English by policy."""
+        assert (
+            "Do NOT translate the anchor" in REFINE_PROMPT
+            or "anchor stays English" in REFINE_PROMPT
+        )
+
+
+# ---------------------------------------------------------------------------
 # 7) End-to-end tests — gated behind ENGLISH_ANCHORS_E2E=1
 # ---------------------------------------------------------------------------
 
@@ -551,4 +635,45 @@ class TestE2ELiveDrafting:
             f"Draft has only {devanagari_count} Devanagari code points — "
             f"body prose looks like it collapsed to English. Full body:\n"
             f"{draft[:800]}"
+        )
+
+    @pytest.mark.parametrize("lang,query", [
+        ("hi", "मेरे मुवक्किल के employment contract को गलत तरीके से "
+               "समाप्त कर दिया गया है — एक rejoinder draft करें जिसमें "
+               "Indian Contract Act, 1872 और Code on Wages, 2019 का "
+               "reference हो।"),
+        ("mr", "माझ्या पक्षकाराचा रोजगार करार चुकीच्या पद्धतीने संपुष्टात "
+               "आणला गेला — Indian Contract Act, 1872 आणि Code on Wages, "
+               "2019 चा संदर्भ असलेला rejoinder draft करा."),
+    ])
+    def test_no_backticks_around_english_anchors(self, lang, query):
+        """Client screenshot (2026-07-12) showed the model wrapping
+        'Indian Contract Act, 1872' and 'Code on Wages, 2019' + 'Section
+        17(2)' in `` ` `` inline-code backticks — frontend rendered them
+        in monospace. Verify the LLM no longer emits backticks around any
+        English anchor after the no-code-fence prompt directive was added."""
+        draft = self._draft(query, lang)
+        assert len(draft) > 500, "Draft too short — pipeline likely errored."
+        # Any Section N of Y Act, YYYY / Article N of ... / Act name
+        # wrapped in one-or-more backticks is a violation.
+        # Scan for the exact patterns most often flagged.
+        patterns_to_reject = [
+            # Backtick-wrapped English statutory span, either single or
+            # double-backtick. Match any run that starts with a backtick
+            # then Latin-capital ("Section", "Article", "Order", "Indian",
+            # "Code", "Bharatiya", "Constitution", etc.).
+            r"`{1,3}(?:Section|Article|Order|Rule|Indian|Code|"
+            r"Bharatiya|Constitution|Negotiable|Hindu|Muslim|Companies|"
+            r"Consumer|Specific|Limitation|Prevention|Protection)\b[^`]*`{1,3}",
+            # HTML <code> tag around an English anchor
+            r"<code>[^<]*(?:Section|Article|Order|Act|Code)[^<]*</code>",
+        ]
+        offending = []
+        for pat in patterns_to_reject:
+            for m in re.finditer(pat, draft):
+                offending.append(m.group(0))
+        assert not offending, (
+            f"[{lang}] Draft contains code-fenced English anchor(s):\n"
+            + "\n".join(f"  - {o!r}" for o in offending[:5])
+            + f"\n\nFirst 800 chars of draft:\n{draft[:800]}"
         )

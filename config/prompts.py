@@ -187,6 +187,24 @@ INDIAN_LEGAL_LANGUAGE_REGISTER = """\
     language. Grouping stays Indian ("5,00,000" not "500,000").
 - Case-law citations (party names + reporter cite) stay English:
   "Kesavananda Bharati v. State of Kerala, AIR 1973 SC 1461".
+- PLAIN-TEXT EMISSION for English anchors — numerals, statutory
+  references, and case-law citations are emitted as PLAIN TEXT running
+  inside the surrounding prose. Do NOT wrap them in Markdown inline-code
+  backticks (single `like this` or double ``like this``), triple-
+  backtick code fences (```like this```), HTML `<code>` tags, or any
+  other verbatim / literal formatting. They must render in the SAME
+  proportional font as the surrounding body prose — NOT in a monospaced /
+  typewriter font. The rule that anchors travel "verbatim in English"
+  or "as one span" is a LANGUAGE instruction, NOT a typography
+  instruction; do not reach for code-fence syntax to signal "do not
+  translate". Bold (`**...**`) for a subject heading is fine; italics
+  for emphasis are fine; but the statutory-reference span itself is
+  unformatted running text.
+    ✓ "Section 138 of the Negotiable Instruments Act, 1881 च्या
+       तरतुदींनुसार, ..."
+    ✗ "`Section 138 of the Negotiable Instruments Act, 1881` च्या
+       तरतुदींनुसार, ..." (renders monospace — wrong)
+    ✗ "``Indian Contract Act, 1872`` च्या ..." (also monospace — wrong)
 - Latin tags used sparingly: inter alia, prima facie, res judicata,
   ex parte, audi alteram partem, sine qua non, suo motu.
 - One averment per numbered paragraph; self-contained paragraphs.

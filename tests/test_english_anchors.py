@@ -442,7 +442,7 @@ class TestNoCodeFenceAroundAnchors:
         # Anchor block must call out plain-text emission
         assert "PLAIN-TEXT EMISSION" in out
         # And explicitly name backticks + code fences + <code> tags as bad
-        assert "backticks" in out
+        assert "backtick" in out
         assert "code fences" in out or "code fence" in out
 
     @pytest.mark.parametrize("lang", ["hi", "mr", "ta"])
@@ -453,11 +453,11 @@ class TestNoCodeFenceAroundAnchors:
         )
         out = localize_prompt(BASE, lang, intent)
         assert "PLAIN-TEXT EMISSION" in out
-        assert "backticks" in out
+        assert "backtick" in out
 
     def test_shared_register_forbids_backticks(self):
         assert "PLAIN-TEXT EMISSION" in INDIAN_LEGAL_LANGUAGE_REGISTER
-        assert "backticks" in INDIAN_LEGAL_LANGUAGE_REGISTER
+        assert "backtick" in INDIAN_LEGAL_LANGUAGE_REGISTER
 
     def test_shared_register_explicitly_names_monospace(self):
         # The rule must explain WHY (frontend renders backticks as

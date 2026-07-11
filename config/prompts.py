@@ -188,23 +188,30 @@ INDIAN_LEGAL_LANGUAGE_REGISTER = """\
 - Case-law citations (party names + reporter cite) stay English:
   "Kesavananda Bharati v. State of Kerala, AIR 1973 SC 1461".
 - PLAIN-TEXT EMISSION for English anchors — numerals, statutory
-  references, and case-law citations are emitted as PLAIN TEXT running
-  inside the surrounding prose. Do NOT wrap them in Markdown inline-code
-  backticks (single `like this` or double ``like this``), triple-
-  backtick code fences (```like this```), HTML `<code>` tags, or any
-  other verbatim / literal formatting. They must render in the SAME
-  proportional font as the surrounding body prose — NOT in a monospaced /
-  typewriter font. The rule that anchors travel "verbatim in English"
-  or "as one span" is a LANGUAGE instruction, NOT a typography
-  instruction; do not reach for code-fence syntax to signal "do not
-  translate". Bold (`**...**`) for a subject heading is fine; italics
-  for emphasis are fine; but the statutory-reference span itself is
-  unformatted running text.
-    ✓ "Section 138 of the Negotiable Instruments Act, 1881 च्या
-       तरतुदींनुसार, ..."
-    ✗ "`Section 138 of the Negotiable Instruments Act, 1881` च्या
-       तरतुदींनुसार, ..." (renders monospace — wrong)
-    ✗ "``Indian Contract Act, 1872`` च्या ..." (also monospace — wrong)
+  references (label + Act/Code name + year), act/code titles, article
+  numbers, order/rule numbers, and case-law citations are emitted as
+  ORDINARY RUNNING PROSE. They are NOT literals, keywords, or code
+  identifiers. STRICTLY FORBIDDEN wrappers around ANY English anchor:
+  * The backtick character U+0060 immediately before or after the
+    anchor (single-backtick, double-backtick, whatever count) — this
+    is Markdown inline code and the frontend renders it monospaced.
+    Do NOT put a backtick next to the words "Section", "Article",
+    "Order", "Rule", "Indian", "Code", "Bharatiya", "Constitution",
+    "Act", or any statutory phrase.
+  * Triple-backtick code fences around the anchor.
+  * HTML "<code>" and "</code>" tags around the anchor.
+  * Any other verbatim / literal-content formatting.
+  Permitted formatting AROUND anchors: bold (double-asterisk pairs)
+  when the anchor sits inside a subject heading; italic (single-
+  asterisk pairs) for emphasis; ordinary punctuation.
+  The rule that an anchor travels "verbatim in English" or "as one
+  span" is a LANGUAGE instruction — NOT a typography instruction. Do
+  NOT reach for code-fence syntax to signal "do not translate".
+  Correct emission (Marathi example): the sentence "..., Section 138
+  of the Negotiable Instruments Act, 1881 च्या तरतुदींनुसार, ..."
+  contains ZERO backtick characters and ZERO angle-bracket code tags.
+  The anchor sits inline as seven English words + comma + year,
+  rendered in the SAME font as the surrounding Marathi words.
 - Latin tags used sparingly: inter alia, prima facie, res judicata,
   ex parte, audi alteram partem, sine qua non, suo motu.
 - One averment per numbered paragraph; self-contained paragraphs.
@@ -1179,6 +1186,19 @@ user's ask requires) document in a single response.
    paragraph. `**vs**` (bold) on its own paragraph between plaintiff and
    defendant blocks, NEVER inside backticks or a code block.
 
+   NO INLINE-CODE FORMATTING AROUND STATUTORY REFERENCES OR ACT NAMES.
+   Statutory anchors such as "Section 138 of the Negotiable Instruments
+   Act, 1881", "Article 226 of the Constitution of India", "Indian
+   Contract Act, 1872", "Code on Wages, 2019", "Section 17(2)" are
+   ordinary running prose — emit them as plain text between commas /
+   spaces / native-language connectors, WITHOUT wrapping them in
+   backtick characters (single or double), triple-backtick code fences,
+   or HTML "<code>" tags. The frontend renders any backtick-wrapped or
+   code-fenced span in a monospaced typewriter font that visually
+   breaks the paragraph. This is a MAJOR error; the self-refine critic
+   will flag it and reject the draft. Bold + italics around anchors
+   are fine; only code formatting is forbidden.
+
 9. PARAGRAPH NUMBERING — when the document body has numbered paragraphs
    (plaints, written statements, complaints), number them continuously
    from 1 through the body. Procedural blocks (Prayer, Verification,
@@ -1393,6 +1413,7 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
    - Party labels (`.....Plaintiff`, `.....Defendant`, `.....Petitioner`, `.....Respondent`) on their own paragraph.
    - `**vs**` (bold) on its own paragraph between plaintiff/petitioner block and defendant/respondent block, NEVER inside backticks or a code block.
    - NO raw HTML. NO `<p>`, `<div>`, `<span>`, `<center>` tags. NO `align=` attributes.
+   - NO INLINE-CODE FORMATTING AROUND STATUTORY REFERENCES OR ACT NAMES. Statutory anchors like "Section 138 of the Negotiable Instruments Act, 1881", "Article 226 of the Constitution of India", "Indian Contract Act, 1872", "Code on Wages, 2019", "Section 17(2)" are ordinary running prose — emit them as plain text between commas / spaces / native-language connectors, WITHOUT wrapping them in backtick characters (single or double), triple-backtick code fences, or HTML "<code>" tags. The frontend renders any backtick-wrapped or code-fenced span in a monospaced typewriter font that visually breaks the paragraph. Bold + italics around anchors are fine; only code formatting is forbidden.
 
 9. PARAGRAPH NUMBERING BY SECTION TYPE.
    - Body sections (facts, grounds, preliminary objections, para-wise reply, etc.): continue the global counter from DOCUMENT SO FAR.

@@ -211,11 +211,17 @@ class UserIntent(BaseModel):
                     "('only in Marathi', 'purely in Hindi', 'fakta marathit', "
                     "'मराठीतच', 'सिर्फ हिंदी में'). When True AND language is "
                     "non-English, downstream localize_prompt emits a stronger "
-                    "instruction: use native-script numerals (१, २, ३ instead "
-                    "of 1, 2, 3), translate act names + placeholder labels to "
-                    "the target language, and keep ONLY case names and section "
-                    "numbers in English (proper-noun identifiers). Default "
-                    "False preserves the legal-citation-in-English convention.",
+                    "instruction: no English NARRATIVE clauses in body prose "
+                    "(no 'It is submitted that', 'as per', 'in accordance "
+                    "with'), no English ceremonial-block labels, and no "
+                    "English placeholder brackets — the target language must "
+                    "carry the whole narrative. NUMERALS (Latin digits) and "
+                    "FULL STATUTORY REFERENCES ('Section 138 of the Negotiable "
+                    "Instruments Act, 1881') and CASE-LAW CITATIONS stay "
+                    "English regardless of strict_language — those are the "
+                    "fixed English anchors that apply in both strict and "
+                    "non-strict mode. Default False permits English narrative "
+                    "clauses to appear alongside the target-language body.",
     )
 
     # — Depth / length

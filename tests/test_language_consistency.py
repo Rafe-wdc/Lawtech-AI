@@ -105,8 +105,10 @@ class TestEnglishDirective:
 
 class TestNonEnglishDirective:
     def test_marathi_strict_directive_preserved(self):
-        """Regression: the existing Marathi strict-language directive
-        (ceremonial blocks + numerals) must still appear when target=mr."""
+        """Regression: the Marathi strict-language directive must still
+        include ceremonial-block translations AND the fixed-English
+        anchors block (numerals stay Latin; statutory references stay
+        English inline — 2026-07-11 policy)."""
         intent = UserIntent(
             language="mr", language_explicit=True, strict_language=True,
             confidence=0.9,
@@ -114,8 +116,12 @@ class TestNonEnglishDirective:
         out = localize_prompt(BASE, "mr", intent)
         # Marathi ceremonial-block markers from the existing directive
         assert "वादी" in out
-        # Devanagari numerals must be mentioned
-        assert "१" in out or "Devanagari" in out
+        # Fixed-English anchor block must be present
+        assert "FIXED-ENGLISH ANCHORS" in out
+        # Latin digits mandated (via the "0-9" range in the anchor block)
+        assert "Latin" in out
+        # Full statutory-reference example — English form must be shown
+        assert "Section 138 of the Negotiable Instruments Act, 1881" in out
 
     def test_hindi_with_marathi_source_appends_cross_warning(self):
         """When the user wants Hindi but the source is Marathi, the

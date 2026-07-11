@@ -159,11 +159,34 @@ INDIAN_LEGAL_LANGUAGE_REGISTER = """\
 - Pleading phrasing: "It is submitted that…", "the said property",
   "the cause of action arose on…", "the suit is within limitation" —
   use the equivalent pleading phrasing in the response language.
-- Indian numbering: "Rs. 5,00,000/- (Rupees Five Lakh only)" — figures
-  AND words, lakh/crore with grouping "5,00,000". Render the figures
-  and the words in the response language's native script when that
-  language uses a distinct digit family (Devanagari, Bengali, Tamil,
-  etc.).
+- FIXED-ENGLISH ANCHORS (apply to every response, every language):
+  * ALL NUMERALS are Latin digits (0-9). Paragraph numbers, list-item
+    prefixes, dates ("15 May 2024"), years ("2023"), monetary amounts
+    ("Rs. 5,00,000/-"), addresses, cheque numbers, case numbers, ages,
+    quantities — every digit stays Latin. Do NOT transliterate to
+    Devanagari (०-९), Bengali (০-৯), Tamil (௦-௯), Telugu (౦-౯), Kannada
+    (೦-೯), Malayalam (൦-൯), Gujarati (૦-૯), Gurmukhi (੦-੯), Odia (୦-୯),
+    or Eastern-Arabic (۰-۹) digits.
+  * FULL STATUTORY / STATUTE / ACT / CODE REFERENCES stay English
+    inline as one uninterrupted span, even inside a Hindi/Marathi/Tamil
+    body: "Section 138 of the Negotiable Instruments Act, 1881",
+    "Article 226 of the Constitution of India", "Order XXXIX Rules 1
+    and 2 of the Code of Civil Procedure, 1908", "Section 480 of the
+    Bharatiya Nagarik Suraksha Sanhita, 2023". Do NOT translate the
+    label (Section / Article / Order / Rule), the Act / Code title, or
+    the year to native script (कलम, धारा, अनुच्छेद, अध्याय, नियम, आदेश,
+    भारतीय करार अधिनियम, १८७२ are all WRONG when the response is in a
+    regional Indian language — the label + name + year travel as one
+    English chunk). The surrounding native-language clause stays native:
+      ✓ "... Section 138 of the Negotiable Instruments Act, 1881 च्या
+         तरतुदींनुसार, ..."
+      ✗ "... परक्राम्य लिखत अधिनियम, १८८१ च्या कलम १३८ च्या तरतुदींनुसार, ..."
+  * "Rs. 5,00,000/- (Rupees Five Lakh only)" style — figures Latin, the
+    word portion ("Rupees Five Lakh only") in English inside the same
+    parenthetical even when the surrounding clause is in a regional
+    language. Grouping stays Indian ("5,00,000" not "500,000").
+- Case-law citations (party names + reporter cite) stay English:
+  "Kesavananda Bharati v. State of Kerala, AIR 1973 SC 1461".
 - Latin tags used sparingly: inter alia, prima facie, res judicata,
   ex parte, audi alteram partem, sine qua non, suo motu.
 - One averment per numbered paragraph; self-contained paragraphs.
@@ -1262,6 +1285,11 @@ The user's target output language is: {user_language_name}
 
 Emit each section's `heading` in {user_language_name}. When the language uses a non-Latin script (Devanagari for Hindi / Marathi / Sanskrit, Bengali for Bengali / Assamese, Tamil, Telugu, Kannada, Malayalam, Gujarati, Gurmukhi for Punjabi, Odia, Arabic-script for Urdu), write the heading IN that script — do NOT transliterate to Latin.
 
+FIXED-ENGLISH ANCHORS inside the heading (apply regardless of `user_language_name`):
+  - Any DIGIT inside a heading stays Latin: "भाग 1: तथ्य", "Part 3 — Grounds", "Prayer Clause 1" — NEVER "भाग १", "Part ३", "Prayer Clause १".
+  - Any STATUTORY REFERENCE that would naturally appear inside a heading stays English inline: "आदेश XXXIX नियम 1 और 2 सीपीसी के तहत अंतरिम राहत" is WRONG — write "Order XXXIX Rules 1 and 2 CPC के तहत अंतरिम राहत" (label + Act/Code abbreviation + number stay English; the surrounding native words wrap them).
+  - Do NOT translate the section / article / rule / order label ("Section", "Article", "Rule", "Order") to native (कलम, धारा, अनुच्छेद, नियम, आदेश) inside headings.
+
 `id` and `summary` stay in English regardless — they are internal control fields the section writer reads.
 
 ## Reasoning
@@ -1630,7 +1658,12 @@ skilled in both legal drafting and legal research.
 
 3. **If the user asks for a specific language** (Marathi, Hindi, etc.):
    - Use formal legal terminology appropriate to that language.
-   - Devanagari numerals where the script calls for them (Marathi/Hindi).
+   - ALL numerals stay Latin (1, 2, 3, 2023, Rs. 5,00,000) — do NOT
+     transliterate to Devanagari (०, १, २) or any other native digit family.
+   - Full statutory references stay English inline ("Section 138 of the
+     Negotiable Instruments Act, 1881") — do NOT translate the section
+     label, act name, or year to native script. The surrounding clause
+     remains in the target language.
 
 Never fabricate cases, statutes, or legal provisions. When citing legal
 authorities, ensure they are real and verifiable.

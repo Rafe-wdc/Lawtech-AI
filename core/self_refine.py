@@ -21,9 +21,10 @@ Why this design vs. the old hardcoded gates:
       intent field tomorrow and the critic checks it without code edits.
     - The refiner derives WHAT to fix from the violations the critic
       surfaces. No hardcoded "stronger preamble" per artifact.
-    - When the user invents a new directive (e.g. "use Devanagari
-      numerals only"), the critic catches Latin digits and the refiner
-      replaces them — without me adding a regex.
+    - When the user invents a new directive (e.g. "keep all numerals
+      and section names in English"), the critic catches native-script
+      digit leakage and translated Act names, and the refiner rewrites
+      them — without me adding a regex.
 
 Cost: 1 critique call (Flash, ~$0.0001) per iteration. Refine call only
 when violations found. Max 2 iterations.
@@ -78,9 +79,10 @@ class Violation(BaseModel):
         ...,
         description="One-sentence concrete description of what's wrong. "
                     "Be specific: cite the offending substring or pattern. "
-                    "Example: \"Paragraph numbers use Latin digits ('1.', "
-                    "'2.', '3.') but strict_language=True with language=mr "
-                    "requires Devanagari ('१.', '२.', '३.').\"",
+                    "Example: \"Paragraph numbers use Devanagari digits "
+                    "('१.', '२.', '३.') but the fixed-English-anchor "
+                    "policy requires Latin ('1.', '2.', '3.') even when "
+                    "language=mr.\"",
     )
     severity: Literal["critical", "major", "minor"] = Field(
         ...,
@@ -93,10 +95,13 @@ class Violation(BaseModel):
     suggested_fix: str = Field(
         ...,
         description="Actionable rewrite guidance the refiner can act on. "
-                    "Example: 'Replace every Latin digit in body paragraph "
-                    "numbers and dates with the corresponding Devanagari "
-                    "numeral; keep section/article numbers in citation "
-                    "context as printed.'",
+                    "Example: 'Replace every Devanagari digit in paragraph "
+                    "numbers, dates, and amounts with its Latin counterpart "
+                    "(०→0, १→1, २→2, ...). Rewrite the translated statutory "
+                    "reference \"कलम १३८ परक्राम्य लिखत अधिनियम, १८८१\" as "
+                    "the standard English span \"Section 138 of the "
+                    "Negotiable Instruments Act, 1881\"; keep the surrounding "
+                    "Marathi clause in Marathi.'",
     )
 
 
@@ -154,27 +159,74 @@ For EACH non-default field in the intent, check whether the response complies.
 Examples of how intent fields translate to checks:
 
   language!='en' (any non-English target — Marathi, Hindi, Tamil, Bengali, …)
-    → Response prose must be in the target language's native script.
-      The ONLY content that may stay in English is a verbatim case-law
-      citation block — the printed party names + reporter cite of a real
-      decided case (e.g. "Mohan Lal v. State of Punjab, (2018) 17 SCC 627").
-      Surrounding clause stays in the target language.
-      The following are MAJOR violations regardless of strict_language:
-        (a) English citation tails appended to target-language sentences,
-            e.g. "...काही मराठी वाक्य, as per Section 480 of the Bharatiya
-            Nagarik Suraksha Sanhita, 2023." — the act title + section
-            label MUST be translated inline ("...भारतीय नागरिक सुरक्षा
-            संहिता, २०२३ चे कलम ४८० नुसार.").
-        (b) English act / code / statute titles inside running prose
-            ("the Code of Criminal Procedure, 1973", "the Indian Evidence
-            Act, 1872", "the NDPS Act, 1985") — translate to the target
-            language's standard rendering of the act name.
-        (c) English connector clauses like "as per", "in accordance with",
-            "under the provisions of", "as per the provisions of" tacked
-            onto target-language sentences — every such tail is MAJOR.
-      strict_language=True additionally requires native-script numerals
-      and translation of placeholder brackets / signature labels (see
-      the strict_language section below).
+    → RESPONSE PROSE — must be in the target language's native script.
+      Body prose, ceremonial blocks (party role labels, courtroom forms
+      of address), placeholder brackets, and signature labels are in the
+      target language.
+
+      FIXED-ENGLISH ANCHORS (audit for VIOLATIONS of the anchor rules;
+      these apply regardless of strict_language):
+
+      (a) NUMERALS — every digit in the response body MUST be Latin
+          (0-9). Any Devanagari (०-९), Bengali (০-৯), Tamil (௦-௯),
+          Telugu (౦-౯), Kannada (೦-೯), Malayalam (൦-൯), Gujarati (૦-૯),
+          Gurmukhi (੦-੯), Odia (୦-୯), or Eastern-Arabic (۰-۹) digit is
+          a MAJOR violation. Concrete leak patterns to flag:
+             "१. वादीचे कथन ..."       ← MAJOR. Must be "1. वादीचे कथन ..."
+             "२०२३ मध्ये"              ← MAJOR. Must be "2023 मध्ये"
+             "रु. ५,००,०००"           ← MAJOR. Must be "Rs. 5,00,000"
+             "पृष्ठ क्र. १५"           ← MAJOR. Must be "पृष्ठ क्र. 15"
+             "(१) प्रथम कारण"          ← MAJOR. Must be "(1) प्रथम कारण"
+             "दिनांक १५ मे २०२४"        ← MAJOR. Must be "दिनांक 15 May 2024"
+          Applies to paragraph numbers, list-item prefixes, dates, years,
+          amounts, page numbers, cheque numbers, case numbers, ages,
+          addresses, quantities — every digit.
+
+      (b) STATUTORY REFERENCES — the FULL statutory reference (label +
+          Act/Code name + year) stays English inline as one uninterrupted
+          span. Any translation of the label OR the Act name OR the year
+          is a MAJOR violation:
+             "कलम १३८ परक्राम्य लिखत अधिनियम, १८८१"
+                                        ← MAJOR. Must be:
+                "Section 138 of the Negotiable Instruments Act, 1881"
+             "भारतीय नागरिक सुरक्षा संहिता, २०२३ चे कलम ४८० नुसार"
+                                        ← MAJOR. Must be:
+                "Section 480 of the Bharatiya Nagarik Suraksha Sanhita, 2023 नुसार"
+             "अनुच्छेद २२६ भारतीय संविधान"
+                                        ← MAJOR. Must be:
+                "Article 226 of the Constitution of India"
+             "आदेश XXXIX नियम १ व २ सीपीसी"
+                                        ← MAJOR. Must be:
+                "Order XXXIX Rules 1 and 2 CPC"
+          The native-language connector ("च्या तरतुदींनुसार", "के तहत",
+          "के अनुसार", "अंतर्गत") wraps the English statutory span; the
+          span itself stays English.
+
+      (c) TRANSLATED SECTION / ARTICLE / RULE / ORDER LABELS — the words
+          "कलम", "धारा", "अनुच्छेद", "अध्याय", "नियम", "आदेश" appearing
+          as the label of a statutory reference are MAJOR violations
+          (the label must be the English "Section" / "Article" / "Rule"
+          / "Order"). EXCEPT when quoting a caption that the source
+          document itself uses in native script (e.g. quoting the printed
+          heading of a Marathi-language Act's own section headings — rare;
+          the vast majority of statutory references in Indian legal
+          drafting are to the primary English enactment).
+
+      (d) TRANSLATED ACT / CODE NAMES — the full name of any Indian Act
+          or Code translated to native (e.g. "भारतीय दंड संहिता",
+          "दिवाणी प्रक्रिया संहिता", "परक्राम्य लिखत अधिनियम") in body
+          prose is a MAJOR violation. Use the standard English rendering
+          ("Indian Penal Code", "Code of Civil Procedure", "Negotiable
+          Instruments Act").
+
+      (e) CASE-LAW CITATIONS remain English (party names + reporter
+          cite) as before. Surrounding clause stays in the target
+          language.
+
+      strict_language=True additionally forbids stray English narrative
+      clauses in body prose (see the strict_language section below), but
+      the FIXED-ENGLISH ANCHOR rules above apply in BOTH strict and
+      non-strict mode.
 
   Devanagari-script language drift (Hindi vs Marathi vs Sanskrit)
     → Hindi, Marathi, and Sanskrit all use Devanagari, so detecting
@@ -187,7 +239,10 @@ Examples of how intent fields translate to checks:
         Marathi-only forms (WRONG when language='hi'):
           - Possessive suffixes: चा / ची / चे / च्या (Marathi);
             Hindi uses का / की / के.  Examples: "वादीचा अर्ज",
-            "ग्रामसभेचे नाव", "राजूचा पत्ता", "१९६३ च्या कलम".
+            "ग्रामसभेचे नाव", "राजूचा पत्ता", "Section 138 च्या
+            तरतुदींनुसार" (the possessive suffix chained onto the
+            English statutory span is the Marathi form; Hindi would
+            write "Section 138 के प्रावधानों के अनुसार").
           - Verb आहे / आहेत (Marathi 'is/are'); Hindi uses है / हैं.
           - वय (Marathi 'age'); Hindi uses आयु or उम्र.
           - रा. as short for resident (Marathi रहिवासी); Hindi uses
@@ -254,45 +309,42 @@ Examples of how intent fields translate to checks:
       in the source script.
 
   strict_language=True with language!='en'
-    → STRICT MODE. Audit ALL of the following — each is a MAJOR violation:
-       (a) Any English sentence, clause, or phrase OTHER than verbatim
-           case names (e.g. "Kesavananda Bharati v. State of Kerala").
-           Statute titles, act names, section labels, and placeholder
-           brackets ("[Place]", "[Date]") must be in the target script.
-       (b) Any digit-prefixed numbered-list start using Latin digits.
-           Examples of MAJOR violations in Marathi (mr) / Hindi (hi) /
-           Sanskrit (sa) strict mode:
-              "1. दाव्यातील..."   ← MAJOR. Must be "१. दाव्यातील..."
-              "2. परिच्छेद..."    ← MAJOR. Must be "२. परिच्छेद..."
-              "(3) सदर..."        ← MAJOR. Must be "(३) सदर..."
-           Sub-section numbering ALSO must be in target script:
-              "2.1. वादीने..."    ← MAJOR. Must be "२.१. वादीने..."
-              "(a) कारण..."       ← MAJOR. Must be "(अ) कारण..." (or appropriate native alphabetic ordinal)
-              "(i) पुरावा..."     ← MAJOR. Must be appropriate native ordinal
-           The same applies to other Indic scripts (Bengali ০-৯, Tamil
-           ௦-௯, Telugu ౦-౯, Kannada ೦-೯, Malayalam ൦-൯, Gujarati ૦-૯,
-           Gurmukhi ੦-੯, Odia ୦-୯, Eastern Arabic for Urdu ۰-۹).
-       (c) Latin digits in dates, amounts, years, paragraph numbers
-           ("Section 138", "para 2", "Rs. 50000") — every one is a MAJOR
-           violation in strict mode and must be in the target script.
-           Inline statute references must be FULLY translated. Common
-           leak patterns in Marathi/Hindi drafts the critic MUST catch:
-              "..., as per the provisions of the Indian Contract Act, 1872."
-                ← MAJOR. Must be: ", भारतीय करार अधिनियम, १८७२ च्या तरतुदींनुसार."
-              "..., as per Section 10 of the Specific Relief Act, 1963."
-                ← MAJOR. Must be: ", विशिष्ट अनुतोष अधिनियम, १९६३ च्या कलम १० नुसार."
-              "..., as per the Hindu Succession Act, 1956"
-                ← MAJOR. Must be the native-script equivalent.
-              "Limitation Act, 1963 च्या कलम 54 नुसार"
-                ← MAJOR. Mixed Latin+Devanagari. Must be either fully
-                English OR fully Marathi (preferred in strict mode):
-                "मुदत अधिनियम, १९६३ च्या कलम ५४ नुसार".
-           Any "as per <English act name + year + section>" pattern is a
-           MAJOR violation. The refiner must translate the full reference.
-       (d) Even ONE Latin-digit numbered-list start is enough to set
-           passes=False. Do NOT pass the response if any survive.
-      Only narrow exception: case names ("ABC v. XYZ"), which are proper
-      nouns and stay in English. Surrounding clause stays in target lang.
+    → STRICT MODE for BODY PROSE. Audit the following:
+       (a) Any English NARRATIVE clause / connector / stock phrase in
+           body prose ("It is submitted that", "as per", "in accordance
+           with", "under the provisions of", "kindly note", "may be
+           pleased to", "the humble petitioner submits") — MAJOR. The
+           body must be written in the target language's pleading
+           register.
+       (b) Ceremonial blocks in English (Plaintiff / Defendant / Versus /
+           Prayer / Verification / Affidavit / Hon'ble Court) instead of
+           the target-language translation (वादी / प्रतिवादी / विरुद्ध /
+           विनंती / प्रमाणीकरण / शपथपत्र / मा. न्यायालय) — MAJOR.
+       (c) Placeholder brackets in English ("[Place]", "[Date]",
+           "[Advocate's Address]") instead of target-language equivalents
+           ("[ठिकाण]", "[दिनांक]", "[वकिलाचा पत्ता]") — MAJOR.
+       (d) An entire sentence written in English inside the body prose
+           (as opposed to English statutory references or case citations,
+           which are permitted anchors — see below) — MAJOR.
+
+      NON-VIOLATIONS in strict mode (these are REQUIRED English anchors):
+       (i)  Latin digits everywhere (dates, years, amounts, paragraph
+            numbers, list-item prefixes, section numbers) — REQUIRED.
+            Do NOT flag "1.", "(2)", "Rs. 5,00,000", "15 May 2024",
+            "Section 138" as violations; those are the correct form.
+       (ii) Full statutory references in English ("Section 138 of the
+            Negotiable Instruments Act, 1881", "Article 226 of the
+            Constitution of India", "Order XXXIX Rules 1 and 2 CPC") —
+            REQUIRED. The label + Act name + year travel as one English
+            span; the surrounding native-language clause wraps it. Do
+            NOT flag this pattern; DO flag if the response translated
+            the label / Act name / year to native script (that's what
+            the (a)-(e) checks above cover).
+       (iii) Case-law citation blocks in English ("Kesavananda Bharati
+             v. State of Kerala, AIR 1973 SC 1461") — REQUIRED.
+      In short: strict_language means no ENGLISH NARRATIVE inside
+      target-language prose; but Latin digits and English statutory /
+      case-law anchors ARE the correct form and MUST NOT be flagged.
 
   response_format=TABLE / COMPARISON
     → Response must contain a real `|`-delimited markdown table with a
@@ -694,15 +746,45 @@ EACH violation — and changes nothing else.
    revised version", no postscript like "Let me know if you need
    changes"). The response should drop in cleanly where the original
    was.
-6. When a violation requires native-script numerals (strict_language
-   mode), rewrite EVERY Latin digit in the response — paragraph
-   numbers, date components, year, monetary amounts, section numbers
-   inside running prose, list-item prefixes ("1.", "(2)", "3)" →
-   "१.", "(२)", "३)" for Devanagari; analogous for other Indic
-   scripts). Do a clean pass. Do not leave any "1.", "2.", "3.",
-   "(4)", etc. anywhere in the body. The ONLY Latin digits that may
-   remain are inside English-language verbatim case citations
-   (e.g. "Kesavananda Bharati v. State of Kerala, AIR 1973 SC 1461").
+6. FIXED-ENGLISH ANCHOR ENFORCEMENT (applies whenever `language` is a
+   non-English target — Hindi, Marathi, Bengali, Tamil, etc., in both
+   strict and non-strict mode):
+
+   The correct form is:
+     * Latin digits (0-9) for ALL numerals — paragraph numbers, list-
+       item prefixes, dates, years, amounts, page/case/cheque numbers,
+       ages, quantities.
+     * Full statutory references in English inline as one span —
+       "Section 138 of the Negotiable Instruments Act, 1881",
+       "Article 226 of the Constitution of India", "Order XXXIX
+       Rules 1 and 2 CPC" — with the surrounding native clause
+       wrapping the English span.
+     * Case-law citations in English (party names + reporter cite).
+
+   When the prior response violates these anchors (native-script digits
+   like "१. वादीचे कथन", translated Act names like "परक्राम्य लिखत
+   अधिनियम, १८८१", translated section labels like "कलम १३८"), do a
+   CLEAN PASS:
+     - Replace every native-script digit with its Latin counterpart
+       (०→0, १→1, २→2, ३→3, ४→4, ५→5, ६→6, ७→7, ८→8, ९→9; analogous
+       for Bengali ০-৯, Tamil ௦-௯, Telugu ౦-౯, Kannada ೦-೯, Malayalam
+       ൦-൯, Gujarati ૦-૯, Gurmukhi ੦-੯, Odia ୦-୯, Eastern-Arabic ۰-۹).
+     - Replace the translated label + Act name + year with the standard
+       English statutory reference: "कलम १३८ परक्राम्य लिखत अधिनियम,
+       १८८१" → "Section 138 of the Negotiable Instruments Act, 1881".
+     - Keep the surrounding native-language clause in the target
+       language: rewrite "परक्राम्य लिखत अधिनियम, १८८१ च्या कलम १३८
+       च्या तरतुदींनुसार" as "Section 138 of the Negotiable Instruments
+       Act, 1881 च्या तरतुदींनुसार".
+     - Do NOT leave any native-script digit anywhere in the response.
+     - Do NOT leave any translated Act name / section label in body
+       prose.
+
+   When the violation is the opposite direction (English narrative
+   clauses inside a strict-language response — "It is submitted that",
+   "as per", "in accordance with"), translate the narrative clause into
+   the target language while KEEPING the statutory reference and any
+   digits in their English/Latin form.
 
 ## Inputs
 

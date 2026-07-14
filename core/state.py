@@ -11,6 +11,8 @@ from typing import Any, Literal, Annotated
 from langchain_core.messages import BaseMessage
 from langgraph.graph import MessagesState
 
+from core.source_registry import SourceRegistry, merge_source_registries
+
 
 TaskType = Literal[
     "Drafting", "Judgment", "Legislation", "Constitution",
@@ -167,6 +169,14 @@ class LegalAgentState(MessagesState):
     final_response: str
     source_metadata: Annotated[list[dict[str, Any]], _cap_source_metadata]
     tokens_consumed: Annotated[int, _sum_tokens]
+
+    # Citation grounding — one registry per request, populated by every
+    # retrieval-side agent before it calls its generator. Consumed by
+    # generator prompts, orchestrator merge, and self_refine critic/refiner
+    # to ensure every citation, quoted statute, and PDF URL in the final
+    # answer is traceable to an actual retrieval — never invented from
+    # training memory. See core/source_registry.py.
+    source_registry: Annotated[SourceRegistry, merge_source_registries]
 
 
 def get_query_with_context(state: dict) -> tuple[str, str]:

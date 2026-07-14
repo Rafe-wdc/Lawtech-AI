@@ -618,6 +618,27 @@ violations specific to Indian drafting practice:
     `stance.key_cases` is suspect — flag MAJOR and ask the refiner
     to either replace with a stance case or remove the citation lead-in.
 
+  unretrieved_citation — [PIPELINE-LEVEL — applies to scenario, multi-
+    agent, and single-agent responses; the source-registry version of
+    fabricated_citation.] Flag as MAJOR when the response cites any case
+    name, quoted statutory provision, or PDF URL that is NOT present in
+    the "## Retrieved Sources (allowed-citation whitelist)" block passed
+    to you below. Also flag as MAJOR every bracketed placeholder like
+    "[citation to be verified]", "[verify]", "[TBD]", "[citation
+    needed]", "[to be confirmed]" or similar — even if the surrounding
+    prose is otherwise fine. Also flag citation drift: same party names
+    but different volume / page / court abbreviation / year from the
+    retrieved-source record. If a case appears in the response but no
+    entry in the retrieved-sources block contains those party names,
+    it is a hallucination from training memory. Suggested_fix: "Replace
+    the hallucinated cite of <invented case> with a case from the
+    retrieved-sources block (e.g. <closest match>), or drop the citation
+    and restate the point without an authority." Do NOT flag when the
+    retrieved-sources block is literally empty (marker "(none — ...)"),
+    because in that case the response layer has no whitelist to enforce
+    against — flag only when at least one retrieved source is available
+    AND the response cites something not in it.
+
   canonical_example_substitution — the draft uses canonical Indian-legal
     example names / places / dates from LLM training data as if they were
     the user's real facts. Substitution set to flag: "Priyanka", "Sneha",
@@ -877,6 +898,13 @@ User intent (JSON — this is your ground truth):
 {intent_json}
 ```
 
+## Retrieved Sources (allowed-citation whitelist for the `unretrieved_citation` category)
+The following are the ONLY case names, statutory quotes, and PDF URLs the
+response is permitted to cite. Anything cited in the response that is not
+here is a hallucination — flag under `unretrieved_citation`.
+
+{retrieved_sources_whitelist}
+
 Response to audit:
 {response}
 """
@@ -982,6 +1010,15 @@ User intent (this is the ground truth — do NOT deviate):
 {intent_json}
 ```
 
+## Retrieved Sources (allowed-citation whitelist)
+When fixing `unretrieved_citation` violations, replace the hallucinated
+citation with the CLOSEST-topic case, statute, or URL from this whitelist
+— never restore the invented citation, and never invent a new one.
+If nothing in this whitelist supports the point, state the legal
+principle without any case citation rather than emitting a placeholder.
+
+{retrieved_sources_whitelist}
+
 Violations to fix (each has a suggested_fix the auditor wrote):
 {violations_block}
 
@@ -1071,12 +1108,20 @@ async def _critique(
     intent: UserIntent,
     response: str,
     critic_llm=None,
+    retrieved_sources_whitelist: str = "",
 ) -> Critique:
     """Run a single critique LLM call. Returns a Critique (passes + violations).
 
     On any error: returns a "passes=True, confidence=0" critique so the loop
     treats it as "nothing to do" and stops. We do not want a critic blip to
     break the user-visible request.
+
+    `retrieved_sources_whitelist` is the SourceRegistry-derived allowed-
+    citation pool for the `unretrieved_citation` category. Empty string
+    (the default) means "no whitelist available" — the critic will skip
+    that category for this call (see the category description in
+    CRITIQUE_PROMPT). Populated by the orchestrator when it calls
+    self_refine after multi-agent synthesis.
     """
     try:
         with log_time(log, "Self-refine critique"):
@@ -1092,6 +1137,11 @@ async def _critique(
                     "query":       wrap_untrusted(user_query),
                     "intent_json": intent_json,
                     "response":    wrap_untrusted(response),
+                    "retrieved_sources_whitelist": (
+                        retrieved_sources_whitelist
+                        or "(none — the caller passed no source registry; skip the "
+                           "`unretrieved_citation` category for this call)"
+                    ),
                 },
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
@@ -1122,11 +1172,16 @@ async def _refine(
     response: str,
     critique: Critique,
     refiner_llm=None,
+    retrieved_sources_whitelist: str = "",
 ) -> str:
     """Run a single refinement pass. Returns the revised response.
 
     On any error: returns the original response so the user gets SOMETHING
     rather than nothing.
+
+    `retrieved_sources_whitelist` is threaded through so the refiner can
+    substitute a real retrieved citation for a hallucinated one flagged
+    under `unretrieved_citation`, instead of restoring the invention.
     """
     try:
         with log_time(log, "Self-refine refinement"):
@@ -1145,6 +1200,11 @@ async def _refine(
                     "violations_block": violations_block,
                     "quality_notes":   critique.overall_quality_notes or "(none)",
                     "response":        response,
+                    "retrieved_sources_whitelist": (
+                        retrieved_sources_whitelist
+                        or "(none — restrict yourself to fixing non-citation "
+                           "violations; do not touch existing citations for this call)"
+                    ),
                 },
             )
         _record_tokens("SelfRefine", "refine", result)
@@ -1181,6 +1241,7 @@ async def self_refine(
     critic_llm=None,
     refiner_llm=None,
     source_languages: tuple[str, ...] = (),
+    source_registry: object = None,
 ) -> tuple[str, list[Critique]]:
     """Generate-critique-refine loop over an existing response.
 
@@ -1210,8 +1271,19 @@ async def self_refine(
     """
     has_directives = _intent_has_directives(intent)
     has_lang_mismatch = _source_language_mismatch(intent, source_languages)
-    if not (has_directives or has_lang_mismatch):
+    # Phase 5 (citation-grounding pipeline): also force the loop when a
+    # populated source_registry is supplied. Even with no explicit intent
+    # directives, if the caller retrieved N real sources we want the critic
+    # to verify the response actually cites from that pool rather than
+    # hallucinating. Skip force-run when registry is empty.
+    has_registry = bool(source_registry) and getattr(source_registry, "__len__", lambda: 0)() > 0
+    if not (has_directives or has_lang_mismatch or has_registry):
         return response, []
+
+    # Compute the allowed-citation whitelist ONCE, reuse across iterations.
+    _whitelist = ""
+    if has_registry and hasattr(source_registry, "serialize_for_critic"):
+        _whitelist = source_registry.serialize_for_critic()
     if len(response) < min_response_chars:
         log.info(
             "Self-refine skipped — response below min length",
@@ -1228,7 +1300,10 @@ async def self_refine(
     history: list[Critique] = []
     current = response
     for iteration in range(max_iterations + 1):  # +1 for the final critique
-        critique = await _critique(user_query, critic_intent, current, critic_llm)
+        critique = await _critique(
+            user_query, critic_intent, current, critic_llm,
+            retrieved_sources_whitelist=_whitelist,
+        )
         history.append(critique)
         if critique.passes:
             log.info(
@@ -1257,6 +1332,9 @@ async def self_refine(
             )
             return current, history
         # Refine
-        current = await _refine(user_query, critic_intent, current, critique, refiner_llm)
+        current = await _refine(
+            user_query, critic_intent, current, critique, refiner_llm,
+            retrieved_sources_whitelist=_whitelist,
+        )
 
     return current, history

@@ -784,6 +784,50 @@ violations specific to Indian drafting practice:
        the Prayer's substantive reliefs MUST reference the same
        identified subject-matter, not talk about "the goods" or "the
        property" in the abstract → MAJOR.
+       Facts plead RESCISSION / REPUDIATION of the contract, OR
+       exercise a statutory right of rejection (Section 41 of the
+       Sale of Goods Act, 1930; Section 39 of the Indian Contract
+       Act, 1872) → the Prayer MUST include a DECLARATORY relief
+       ("Pass a decree declaring that the contract dated ___ stands
+       rescinded / that the Plaintiff's rejection of the consignment
+       is valid and binding on the Defendant"). Restitution and
+       damages flow from a rescinded contract; a Prayer that seeks
+       only money without asking the Court to declare the rescission
+       leaves the primary status question unadjudicated → MAJOR.
+       Facts plead a LEGAL NOTICE that demanded reliefs IN THE
+       ALTERNATIVE (typical patterns: "replace the defective goods
+       OR refund the price", "perform the contract OR pay damages",
+       "vacate the premises OR pay mesne profits") → BOTH alternative
+       reliefs MUST appear in the Prayer, either as alternative
+       prayers ("(a) direct the Defendant to replace ... ; (b) in the
+       alternative, refund ...") or as compounded prayers. Silently
+       dropping one alternative to keep only the money claim exposes
+       the Plaintiff to Order II Rule 2 CPC bar in any subsequent
+       suit for the abandoned relief → MAJOR.
+       Facts plead a PRE-SUIT LEGAL NOTICE with a monetary demand
+       that went unpaid → the Prayer MUST include PRE-SUIT interest
+       from the date of the legal notice (or date of breach), not
+       merely pendente lite and future interest from the date of
+       filing. Statutory anchors: Section 34 of the Code of Civil
+       Procedure, 1908 (pre-suit + pendente lite + future); Section
+       61 of the Sale of Goods Act, 1930 (seller's / buyer's right
+       to interest on the price); Section 3 of the Interest Act,
+       1978 (interest on debts and damages). A Prayer that skips
+       the pre-suit head silently truncates the claim → MAJOR.
+       Facts plead BOTH (a) restitution of a sum already paid
+       (advance / consideration / earnest money to be returned upon
+       rescission — Section 65 of the Indian Contract Act, 1872 or
+       Section 62 of the Sale of Goods Act, 1930) AND (b)
+       compensation for loss caused by the breach (damages under
+       Section 73 of the Indian Contract Act, 1872) → the Prayer
+       MUST separate the restitutionary head from the damages head
+       ("(a) direct restitution of Rs. ___ under Section 65 ICA;
+       (b) award damages of Rs. ___ under Section 73 ICA"). Rolling
+       both into a single lump-sum decree ("Pass a decree for Rs.
+       ___ comprising refund of advance + loss of profit + ...") is
+       legally sloppy: the court can grant one head and refuse the
+       other, and the two heads rest on different burdens of proof
+       and different limitation clocks → MAJOR.
     MAJOR. Suggested_fix must be CONCRETE and derived from THIS
     draft's Facts + Legal Grounds — never a generic "improve the
     prayer" instruction. Example: "Rewrite Prayer clause (a) as: 'Pass
@@ -796,7 +840,8 @@ violations specific to Indian drafting practice:
     Add clauses for (i) loss of profit on intended resale, (ii)
     surveyor's fee, (iii) cost of legal notice, before the interest
     and costs prayers. Anchor the interest prayer to Section 34 of
-    the Code of Civil Procedure, 1908."
+    the Code of Civil Procedure, 1908, and claim pre-suit interest
+    from the date of the legal notice."
 
 For each, the suggested_fix should be concrete:
   - "Replace 'Section 38 SRA' with 'Order XXXIX Rules 1 & 2 CPC' in

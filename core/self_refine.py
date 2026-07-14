@@ -254,7 +254,7 @@ Examples of how intent fields translate to checks:
           Suggested_fix: "Remove the backticks (or code fence, or
           <code> tags) surrounding <specific anchor span> in <paragraph
           N> — emit that span as plain running text so it renders in
-          the same proportional font as the surrounding {lang} prose;
+          the same proportional font as the surrounding {{lang}} prose;
           preserve any adjacent bold/italic markdown, only the code
           formatting is being stripped."
 
@@ -494,7 +494,7 @@ violations specific to Indian drafting practice:
        indicates is the wrong authority for the relief sought.
 
   placeholder_marker — surviving `[CITE: ...]` brackets, "(citation
-    needed)", "{section number}", "<insert party>", "TBD", "FILL IN".
+    needed)", "{{section number}}", "<insert party>", "TBD", "FILL IN".
     The drafting prompt forbids these; if they survive, MAJOR.
 
   orphan_citation_tail — sentences ending with "as held in.", "the
@@ -719,6 +719,84 @@ violations specific to Indian drafting practice:
        fit" only, with no specific relief → MAJOR; specific reliefs
        must be enumerated before the residuary catchall.
     MAJOR.
+
+  reliefs_section_duplication — the draft contains TWO adjacent
+    sections that both function as the enumerated reliefs list, e.g.
+    "## Reliefs Sought" (with a-d listing damages, interest, costs,
+    catch-all) IMMEDIATELY FOLLOWED BY "## Prayer" (with a-d listing
+    the same damages, interest, costs, catch-all). Any Indian
+    pleading has ONE reliefs enumeration — the Prayer clause. A
+    separate "Reliefs Sought" section that repeats the same substance
+    is structural redundancy, not two distinct pleading blocks.
+    Signals:
+       Both sections open with the same substantive relief items in
+       the same order.
+       "Reliefs Sought" restates the reliefs in a-d form and "Prayer"
+       restates the same reliefs in a-d form with a "WHEREFORE ..."
+       preamble.
+       A short forwarding stub "Reliefs Sought" ("The Plaintiff claims
+       the reliefs detailed in the prayer clause hereunder") followed
+       by a "Prayer" is ALSO redundant — the stub adds no substance;
+       remove the stub and keep only the Prayer.
+    MAJOR. Suggested_fix: "Merge the two sections into a single
+    canonical `## Prayer` section that opens with 'WHEREFORE ...' and
+    enumerates the reliefs a/b/c/... once. Delete the duplicate
+    `Reliefs Sought` section (or its forwarding stub). Renumber any
+    following section (Verification, List of Documents) so paragraph
+    counts remain consistent."
+
+  prayer_generic_boilerplate — the Prayer clause exists but its
+    enumerated reliefs are MATERIALLY THINNER OR MORE GENERIC than
+    what the pleaded Facts and Legal Grounds justify. The Prayer must
+    reflect THIS matter's specific reliefs — not the reference
+    template's boilerplate. Concrete gap patterns:
+       Facts plead REJECTION of specific goods delivered in defective
+       / damaged condition, or Facts plead an advance already PAID
+       against the contract → Prayer MUST include a specific relief
+       directing the Defendant to take back the rejected goods and
+       refund the price paid (or a proportionate refund), OR to
+       replace the defective goods with conforming goods. A Prayer
+       that asks only for undifferentiated "damages for breach of
+       contract" misses the concrete replace/refund/take-back relief
+       the pleaded facts already justify → MAJOR.
+       Facts + Legal Grounds identify DISTINCT DAMAGES HEADS (cost of
+       goods, loss of profit on intended resale, surveyor / inspection
+       cost, storage / transportation of rejected consignment, cost of
+       legal notice, reputational loss) → the Prayer MUST list those
+       heads separately with quantum placeholders, not collapse them
+       into a single "Rs. [Amount of Damages Claimed]" line → MAJOR.
+       Legal Grounds section builds up specific statutory authority
+       for the reliefs (e.g. Section 73 of the Indian Contract Act,
+       1872; Sections 41 / 59 / 60 of the Sale of Goods Act, 1930;
+       Section 34 of the Code of Civil Procedure, 1908 for interest)
+       → the Prayer MUST anchor each substantive relief to the
+       operative statute cited above ("Pass a decree ... under Section
+       73 of the Indian Contract Act, 1872 read with Section 59 of
+       the Sale of Goods Act, 1930", "pendente lite and future
+       interest under Section 34 of the Code of Civil Procedure,
+       1908"). A Prayer that asks bare "damages" and "interest"
+       without tethering to the statutes the Legal Grounds section
+       cites is generic boilerplate inherited from the reference
+       template → MAJOR.
+       Facts describe SPECIFIC PROPERTY / GOODS with identifying
+       detail (1000 refrigerators of a stated brand, an immovable
+       property with CTS/survey number, a specific consignment) →
+       the Prayer's substantive reliefs MUST reference the same
+       identified subject-matter, not talk about "the goods" or "the
+       property" in the abstract → MAJOR.
+    MAJOR. Suggested_fix must be CONCRETE and derived from THIS
+    draft's Facts + Legal Grounds — never a generic "improve the
+    prayer" instruction. Example: "Rewrite Prayer clause (a) as: 'Pass
+    a decree directing the Defendant to take back the [Number of
+    Damaged Units] rejected refrigerators from the Plaintiff's
+    warehouse at [Plaintiff's Warehouse Address] and refund the sum
+    of Rs. [Amount Paid] paid by way of advance, together with damages
+    of Rs. [Damages Claimed] under Section 73 of the Indian Contract
+    Act, 1872 read with Section 59 of the Sale of Goods Act, 1930.'
+    Add clauses for (i) loss of profit on intended resale, (ii)
+    surveyor's fee, (iii) cost of legal notice, before the interest
+    and costs prayers. Anchor the interest prayer to Section 34 of
+    the Code of Civil Procedure, 1908."
 
 For each, the suggested_fix should be concrete:
   - "Replace 'Section 38 SRA' with 'Order XXXIX Rules 1 & 2 CPC' in

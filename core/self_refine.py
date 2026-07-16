@@ -639,6 +639,47 @@ violations specific to Indian drafting practice:
     against — flag only when at least one retrieved source is available
     AND the response cites something not in it.
 
+    ### URL character-match sub-rule (catches fabricated PDF URLs)
+    For EVERY URL emitted in the response (typically inside
+    `[Judgment PDF](https://...)` markdown links or trailing
+    `## PDF Links` blocks), check character-by-character whether the
+    URL string appears verbatim in one of the `pdf_urls: [...]`
+    entries in the whitelist. If a URL is NOT a verbatim character-
+    for-character match to a whitelist URL, flag as MAJOR — even if
+    the case name in the surrounding sentence IS in the whitelist,
+    even if the URL "looks like" a plausible `api.sci.gov.in` /
+    `indiankanoon.org` / `hcbombay.gov.in` / etc. path. LLMs will
+    fabricate plausibly-shaped URLs (e.g. inventing
+    `api.sci.gov.in/supremecourt/YYYY/MM/DD/judgment_YYYY-MM-DD.pdf`
+    when the real retrieved URL is
+    `api.sci.gov.in/supremecourt/2023/12064/12064_2023_1_1501_56228_Judgement_03-Oct-2024.pdf`).
+    Path patterns, ID numbers, and file names must match exactly.
+    Suggested_fix: "Replace the fabricated URL `<invented>` with
+    the retrieved URL `<real url from whitelist>` for <case name>,
+    or if the case has no PDF in the whitelist, drop the `[Judgment
+    PDF](...)` markdown link and cite the case name only."
+
+    ### Cross-source-type hallucination sub-rule (catches invented HC
+    cases when only SCI was retrieved, etc.)
+    Group the whitelist entries by their court/source type using the
+    party-name and citation format as signal (Supreme Court cases end
+    in `... - <YEAR>` / `... INSC ...` / `... SCC ...` and match the
+    `sci-*` id prefix in the whitelist; High-Court cases carry court
+    abbreviations `Del`, `Bom`, `Mad`, `Kar`, `All`, `Hyd`, `HP`, etc.
+    or ITR/CTR reporter cites). If the whitelist contains ZERO entries
+    of a particular court/source type (e.g. no High-Court records
+    retrieved at all), and the response nonetheless cites a case
+    attributed to that court/type (e.g. "Delhi High Court held in
+    *Sonansh Creations Pvt. Ltd. v. ACIT, (2025) SCC OnLine Del ...*"
+    when no `[hc-*]` or Delhi-HC record is in the whitelist), flag as
+    MAJOR — it is a training-memory hallucination that survived the
+    party-name check because it doesn't collide with any retrieved
+    entry to compare against. Suggested_fix: "Drop the invented
+    <court-type> citation of <case> because no <court-type> records
+    were retrieved for this request; rely on the retrieved <other-
+    court-type> authorities instead, or state the point without a
+    case cite."
+
   canonical_example_substitution — the draft uses canonical Indian-legal
     example names / places / dates from LLM training data as if they were
     the user's real facts. Substitution set to flag: "Priyanka", "Sneha",

@@ -20,6 +20,13 @@ from core.clients import get_gemini_flash, get_gemini_flash_full, get_gemini_pro
 from core.language import localize_prompt
 from core.logger import get_logger, log_time
 from core.progress import progress
+from core.source_registry import (
+    SourceRegistry,
+    source_from_sci,
+    source_from_hc,
+    source_from_legislation,
+    source_from_web,
+)
 from config.prompts import (
     TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT, SYNTHESIS_TABLE_PROMPT,
     USER_INTENT_EXTRACTION_PROMPT,
@@ -1515,6 +1522,48 @@ def _token_overlap_ratio(primary: set[str], supporting: set[str]) -> float:
     return overlap / len(supporting)
 
 
+def _build_source_registry(agent_results: dict[str, AgentResult]) -> SourceRegistry:
+    """Auto-lift every agent's retrieved SourceMetadata into a unified
+    SourceRegistry.
+
+    Called once at the top of synthesis. Downstream consumers (synthesis
+    prompt, self_refine critic/refiner, per-agent primary-picker) read from
+    the returned registry so citations, quoted statutes, and PDF URLs in the
+    final answer are grounded to what was actually retrieved — not
+    fabricated from training memory.
+
+    Adapters live in `core.source_registry`. Records with no id / no title
+    are silently dropped (see `source_from_*` adapters).
+    """
+    registry = SourceRegistry()
+    for agent_name, result in agent_results.items():
+        if not result or not getattr(result, "sources", None):
+            continue
+        for meta in result.sources:
+            st = getattr(meta, "source_type", "")
+            record = None
+            if st == "sci_judgment":
+                record = source_from_sci(meta)
+            elif st in ("judgment", "gst_judgment"):
+                record = source_from_hc(meta)
+            elif st in ("legislation", "newacts", "constitution", "maxim"):
+                record = source_from_legislation(meta)
+            elif st in ("scenario", "scenario_web", "legal_concepts", "document"):
+                record = source_from_web(meta)
+            else:
+                # Unknown source_type — try each adapter in order; the
+                # first that returns non-None wins. Keeps the registry
+                # tolerant of new source types added downstream.
+                for adapter in (source_from_sci, source_from_hc,
+                                source_from_legislation, source_from_web):
+                    record = adapter(meta)
+                    if record:
+                        break
+            if record:
+                registry.add(record)
+    return registry
+
+
 async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     """Phase 2 — Merge results from all domain agents into final response.
 
@@ -1536,8 +1585,18 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # get_full_attachment(collection_id). Synthesis only merges results.
     fc = FileContextData.from_state(state)
 
+    # Phase 2 (source-registry pipeline): auto-lift every retrieved
+    # SourceMetadata into a single SourceRegistry. Downstream prompt
+    # interpolation (SYNTHESIS_PROMPT `{retrieved_sources}` slot) and
+    # self_refine critic/refiner read from this registry so citations,
+    # quoted statutes, and PDF URLs in the final answer are traceable to
+    # what was actually retrieved — never fabricated from training memory.
+    # Merged into state via the merge_source_registries reducer.
+    source_registry = _build_source_registry(agent_results)
+
     log.info("Synthesize phase started",
              agents_received=list(agent_results.keys()),
+             registry_size=len(source_registry),
              has_response_instructions=bool(response_instructions))
 
     progress("orchestrator", f"Merging results from {len(agent_results)} agents...", found=len(agent_results), step="synthesize")
@@ -1903,6 +1962,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "agent_results": merge_input,
                 "response_instructions": response_instructions or
                     "Standard legal response with proper citations and markdown formatting.",
+                # Phase 3 (citation-grounding pipeline): the registry is the
+                # authoritative allowed-citation whitelist for the merge.
+                # SYNTHESIS_PROMPT rules 12/13 forbid citations outside this
+                # pool and mandate inline PDF-URL preservation.
+                "retrieved_sources": source_registry.serialize_for_prompt(),
             }, timeout=180)
 
             merged = response.content
@@ -1915,6 +1979,31 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                      final_len=len(merged),
                      supporting_agents=list(kept_supporting.keys()),
                      total_tokens=total_tokens)
+
+            # Phase 5 (citation-grounding pipeline): audit the merged
+            # response against the source registry. self_refine is a no-op
+            # when the intent has no directives AND the registry is empty,
+            # so this is safe to call unconditionally. When the registry
+            # carries retrievals, the critic checks for hallucinated
+            # citations / bracket placeholders / invented PDF URLs via the
+            # `unretrieved_citation` category, and the refiner rewrites on
+            # violations using the registry as the allowed-citation pool.
+            try:
+                from core.self_refine import self_refine as _self_refine
+                refined, _crit_history = await _self_refine(
+                    merged,
+                    query,
+                    state.get("user_intent"),
+                    source_registry=source_registry,
+                )
+                if refined and refined != merged:
+                    log.info("Merge output refined by self_refine (citation grounding)",
+                             pre_len=len(merged), post_len=len(refined),
+                             iterations=len(_crit_history))
+                    merged = refined
+            except Exception as _refine_err:
+                log.warning("self_refine failed after merge — using unrefined merged output",
+                            error=str(_refine_err).splitlines()[0][:200])
 
             return {
                 "final_response": merged,
@@ -2000,11 +2089,18 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             chain = prompt | llm
 
             from core.streaming import stream_chain_response
-            response = await stream_chain_response(chain, {
+            _chain_input = {
                 "query": query,
                 "agent_results": agent_results_text,
                 "response_instructions": response_instructions or "Standard legal response with proper citations and markdown formatting.",
-            }, timeout=180)  # Multi-agent synthesis needs more time
+            }
+            # Phase 3 (citation-grounding pipeline): SYNTHESIS_PROMPT carries
+            # the {retrieved_sources} slot for rules 12/13 (fidelity + PDF
+            # link preservation). SYNTHESIS_TABLE_PROMPT does not, so only
+            # inject when the general prompt is selected.
+            if not wants_table:
+                _chain_input["retrieved_sources"] = source_registry.serialize_for_prompt()
+            response = await stream_chain_response(chain, _chain_input, timeout=180)  # Multi-agent synthesis needs more time
 
         synthesized = response.text
         from core.token_tracker import record as _record_tokens
@@ -2024,6 +2120,31 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         log.info("Synthesis completed",
                  synthesized_len=len(synthesized),
                  synthesis_tokens=synth_tokens, total_tokens=total_tokens)
+
+        # Phase 5 (citation-grounding pipeline): audit the synthesized
+        # response against the source registry. Skipped when wants_table
+        # (tables shouldn't carry case-law citations to hallucinate) or
+        # when the response was truncated (refiner might chop legitimate
+        # content). Otherwise the critic looks for hallucinated citations,
+        # bracket placeholders, and invented PDF URLs, and the refiner
+        # rewrites on violations using the registry as the whitelist.
+        if not wants_table and len(source_registry) > 0:
+            try:
+                from core.self_refine import self_refine as _self_refine_pkg
+                refined_synth, _crit_hist = await _self_refine_pkg(
+                    synthesized,
+                    query,
+                    state.get("user_intent"),
+                    source_registry=source_registry,
+                )
+                if refined_synth and refined_synth != synthesized:
+                    log.info("Synthesis refined by self_refine (citation grounding)",
+                             pre_len=len(synthesized), post_len=len(refined_synth),
+                             iterations=len(_crit_hist))
+                    synthesized = refined_synth
+            except Exception as _refine_err:
+                log.warning("self_refine failed after synthesis — using unrefined output",
+                            error=str(_refine_err).splitlines()[0][:200])
 
     except Exception as e:
         log.error("LLM synthesis failed, concatenating results", error=str(e))

@@ -127,9 +127,14 @@ Case law — neutral or reporter citation:
 
 HARD RULE on citations: If you do not actually know a citation is real
 and correct, do NOT cite it. NEVER fabricate AIR/SCC numbers, page
-numbers, or holdings. State the proposition and note "[citation to be
-verified by advocate]" rather than inventing one. A hallucinated
-citation is a filing-level defect.
+numbers, or holdings. State the proposition WITHOUT any citation rather
+than inventing one — a bare proposition is preferable to a fabricated
+authority. NEVER emit bracketed placeholders like "[citation to be
+verified]", "[citation to be verified by advocate]", "[TBD]", "[verify]",
+"[citation needed]", or similar. If you cannot cite, do not gesture
+toward a missing citation — just state the point cleanly. A hallucinated
+citation is a filing-level defect; a leaked placeholder is worse
+because it signals to the user that the response is unfinished.
 
 LANGUAGE NOTE: The examples above are written in English because the
 default response language is English. When the response language is a
@@ -396,6 +401,80 @@ Do NOT repeat sections more than once.
 """
 
 
+# --- 11/11: Citation grounding to the retrieved-sources pool ---
+# The pipeline-level anti-hallucination discipline. Introduced 2026-07-15
+# after the client-reported audit showed the SCI ReAct agent and Scenario
+# web-fallback inventing case names + PDF URLs from Gemini's training memory
+# while ignoring the 21 real retrieved judgments in the source pool. The
+# `[citation to be verified by advocate]` placeholder that leaked was the
+# smoking gun — the older INDIAN_LEGAL_CITATION_FORMAT block literally told
+# the model to write that phrase when in doubt.
+#
+# This block appended to every domain-agent system prompt AND to
+# SYNTHESIS_PROMPT via the standard append pattern. Paired with the
+# `unretrieved_citation` category in CRITIQUE_PROMPT (core/self_refine.py)
+# as the post-generation safety net, and the SourceRegistry primitive
+# (core/source_registry.py) that supplies the concrete allowed-citation
+# pool this block references.
+INDIAN_LEGAL_CITATION_GROUNDING = """\
+## CITATION GROUNDING (MANDATORY — anti-hallucination discipline)
+
+You will receive a `## Retrieved Sources` block (or equivalent tool
+responses) listing every case, statute, and web source the pipeline has
+actually retrieved for this request. Every citation, quoted statutory
+text, and PDF URL you emit in your response MUST be traceable to one of
+those retrieved sources. This is the single most load-bearing rule in
+this prompt — the pipeline's downstream critic will flag every violation
+and the refiner will rewrite offending sentences.
+
+### What you MAY cite
+1. Any case whose full party names appear in the retrieved sources —
+   reproduce the party names exactly as retrieved and use the citation
+   string from the source when available.
+2. Any statutory provision retrieved as part of the source pool — quote
+   the exact text as retrieved, do not paraphrase from memory.
+3. Any web source retrieved during web-grounded search — reference by
+   the URL from the retrieved source.
+
+### What you MUST NOT do
+1. NEVER cite a case, statute, or PDF URL that is not in the retrieved
+   sources — no matter how confident you are that it exists or how well
+   it would support your point. Training-memory citations are exactly
+   how hallucinations enter the pipeline.
+2. NEVER emit bracketed placeholders — "[citation to be verified]",
+   "[verify]", "[TBD]", "[citation needed]", "[to be confirmed]",
+   "(citation to follow)", or any similar phrasing. If you cannot cite
+   from the retrieved sources, cite nothing at all.
+3. NEVER invent a PDF URL. Only reproduce URLs that appear verbatim in
+   the retrieved sources.
+4. NEVER drift a real citation into a fabricated one — do not change
+   volume numbers, page numbers, court abbreviations, or years to
+   "correct" a citation from memory.
+
+### When the retrieved sources don't cover your point
+You have three permitted options. Pick whichever fits best:
+(a) Use a different retrieved case that DOES support a related point,
+    and adjust the surrounding sentence accordingly.
+(b) State the legal principle without any case citation — the sentence
+    stands on its own.
+(c) Note honestly: "no retrieved authority directly addresses this
+    specific sub-question" — never with a placeholder for a missing cite.
+
+### PDF link discipline
+When a retrieved source includes a PDF URL (typical for Supreme Court
+judgments retrieved from api.sci.gov.in), embed the URL inline the first
+time you cite the case, as a clickable markdown link:
+
+    *Union of India v. Rajeev Bansal, 2024 INSC 754*
+    ([Judgment PDF](https://api.sci.gov.in/supremecourt/...))
+
+Additionally, when your response cites two or more retrieved judgments
+that have PDF URLs, include a `## PDF Links` block at the end of the
+response listing every unique retrieved PDF URL — one clickable markdown
+link per line, labelled with the case name.
+"""
+
+
 # --- Orchestrator: Task Classification ---
 TASK_CLASSIFICATION_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an expert AI assistant specialized in Indian legal domain analysis and task classification.
 INSTRUCTIONS: Analyze the user query and chat summary (Optional) then perform the following steps sequentially:
@@ -517,6 +596,9 @@ Response Format Instructions: {response_instructions}
 Agent Results:
 {agent_results}
 
+## Retrieved Sources (the authoritative pool — you may cite ONLY from these)
+{retrieved_sources}
+
 Rules:
 1. **FOLLOW the Response Format Instructions above** — they describe what the user expects (draft, table, explanation, advice, language, etc.). Tailor your output format accordingly.
 2. Organize by legal argument, not by agent source.
@@ -533,6 +615,8 @@ Rules:
     - Build the response for that one act only. Do NOT compare across acts unless the user explicitly asked.
 11. **Response budget**: total output must stay under ~30,000 characters.
     If the agent results carry more than that, summarise rather than dumping.
+12. **CITATION FIDELITY (pipeline-level anti-hallucination)**: Every case name, statutory citation, quoted statute text, and PDF URL in your merged response MUST be traceable to an entry in the "## Retrieved Sources" block above. If a supporting agent's content cites a case that is NOT in the retrieved sources, DROP that citation from the merged output — do not carry through hallucinated authorities. NEVER add a citation from your own training memory to "improve completeness." NEVER emit placeholders like "[citation to be verified]" or "[TBD]".
+13. **PDF LINK PRESERVATION**: When the retrieved sources include a PDF URL for a case you cite (typical for `api.sci.gov.in` Supreme Court records), embed that URL inline the first time the case is mentioned as a clickable markdown link — e.g. `*Union of India v. Rajeev Bansal, 2024 INSC 754* ([Judgment PDF](https://api.sci.gov.in/...))`. Additionally, when the merged response cites two or more retrieved judgments that have PDF URLs, include a `## PDF Links` block at the very end of the response listing every unique retrieved PDF URL — one clickable markdown link per line, labelled with the case name.
 
 """ + _TABLE_FORMATTING_RULES
 
@@ -546,6 +630,7 @@ SYNTHESIS_PROMPT += (
     "\n\n" + INDIAN_LEGAL_DUAL_LAW_MANDATE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1220,6 +1305,7 @@ DRAFTING_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1448,6 +1534,7 @@ DRAFTING_SECTION_PAIR_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1559,6 +1646,7 @@ JUDGMENT_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_JUDGMENT_SHAPE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1576,6 +1664,7 @@ LEGISLATION_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1632,6 +1721,7 @@ NEWACTS_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1657,6 +1747,7 @@ CONSTITUTION_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1682,6 +1773,7 @@ MAXIM_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1724,6 +1816,7 @@ LEGAL_CONCEPTS_PROMPT += (
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
     + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1827,6 +1920,7 @@ SCENARIO_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
     + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2046,6 +2140,7 @@ SCI_JUDGMENT_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_JUDGMENT_SHAPE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2238,6 +2333,7 @@ CROSS_EXAMINATION_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2282,6 +2378,7 @@ DEPOSITION_SUMMARY_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2328,6 +2425,7 @@ CONTRACT_ANALYSIS_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2388,6 +2486,7 @@ LEGAL_NOTICE_DRAFT_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2446,6 +2545,7 @@ COMPLAINT_DRAFT_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2496,6 +2596,7 @@ WITNESS_PREP_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2534,6 +2635,7 @@ OPENING_STATEMENT_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -2569,5 +2671,6 @@ CLOSING_ARGUMENT_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 

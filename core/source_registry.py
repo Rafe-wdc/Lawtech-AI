@@ -50,17 +50,31 @@ class RetrievedSource:
     year: str = ""                       # judgment year / act year — helps disambiguate
 
 
+@dataclass
 class SourceRegistry:
     """Container for the request's retrieved sources.
 
     A plain dict-backed registry, keyed by `RetrievedSource.id`. Insertion is
     idempotent: `add()` on an existing id overwrites the older record (useful
     when a later retrieval step enriches an earlier metadata-only entry).
-    """
-    __slots__ = ("_records",)
 
-    def __init__(self, records: dict[str, RetrievedSource] | None = None) -> None:
-        self._records = dict(records) if records else {}
+    Must remain a `@dataclass` (not a `__slots__`-only class) so the LangGraph
+    checkpoint serializer (`_msgpack_default` in
+    langgraph.checkpoint.serde.jsonplus) can round-trip it as
+    EXT_CONSTRUCTOR_KW_ARGS. A non-dataclass Python class without a custom
+    msgpack handler crashes the checkpointer with `Type is not msgpack
+    serializable: <TopType>` — and because ormsgpack reports the *outermost*
+    packed type, the message names "Send" (the wrapping fan-out task), not
+    this class. The failure surfaces mid-stream, drops the answer, and
+    replaces it with the generic web-fallback message.
+    """
+    _records: dict[str, RetrievedSource] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Force a shallow copy so callers passing a dict (or a peer registry's
+        # `_records`) don't share mutation with the new instance.
+        # `merge_source_registries` relies on this to avoid leaking writes.
+        self._records = dict(self._records) if self._records else {}
 
     def add(self, source: RetrievedSource) -> None:
         if not source.id:

@@ -64,7 +64,12 @@ log = get_logger("RetrievalGate")
 _COARSE_SEMANTIC_FLOOR = float(
     os.environ.get("RETRIEVAL_GATE_COARSE_FLOOR", "0.15")
 )
-_RELEVANCE_CHUNK_CHARS = 1200       # Per-chunk text window shown to the judge
+# Per-chunk floor and ceiling for the adaptive judge window.
+# `_RELEVANCE_CHUNK_CHARS` is kept as a name (imported by tests) but is
+# now the FLOOR, not a hard limit. See `_adaptive_chunk_window` below.
+_RELEVANCE_CHUNK_CHARS = 1200
+_RELEVANCE_CHUNK_CHARS_MAX = 6000
+_RELEVANCE_TOTAL_CHARS_BUDGET = 12000
 # Number of top hits the judge sees. Raised from 3 to 10: a multi-section
 # query ("compare BNS 115, 118, 189, 190, 191, 351, 352") produces 7+ hits
 # and the judge was rejecting them because it only saw the first 3
@@ -242,11 +247,36 @@ so the system can fall back to web search rather than ship wrong citations.
 
 # --- Helpers ---
 
+def _adaptive_chunk_window(n_chunks: int) -> int:
+    """Per-chunk char budget scaled to hit count.
+
+    Motivation: a single filtered hit (e.g. Legislation's exact
+    section-number lookup returning one long definitions block) needs
+    a large window so the judge can see the requested sub-clause,
+    which often lives past char 1200. Multi-section retrievals stay
+    at today's 1200-char default so total judge input stays bounded.
+
+    Returns min=1200, max=6000. Total input to the judge is capped at
+    ~12000 chars (n_chunks * per_chunk).
+    """
+    if n_chunks <= 0:
+        return _RELEVANCE_CHUNK_CHARS
+    return min(
+        _RELEVANCE_CHUNK_CHARS_MAX,
+        max(_RELEVANCE_CHUNK_CHARS, _RELEVANCE_TOTAL_CHARS_BUDGET // n_chunks),
+    )
+
+
 def _build_chunks_block(chunks: list[str]) -> tuple[str, int]:
-    """Render top chunks as a numbered block for the judge prompt."""
+    """Render top chunks as a numbered block for the judge prompt.
+
+    Chunk window sizes adaptively — see `_adaptive_chunk_window`.
+    """
+    non_empty = [c for c in chunks[:_RELEVANCE_TOP_N] if c]
+    per_chunk = _adaptive_chunk_window(len(non_empty))
     parts: list[str] = []
-    for i, c in enumerate(chunks[:_RELEVANCE_TOP_N], 1):
-        text = (c or "")[:_RELEVANCE_CHUNK_CHARS].strip()
+    for i, c in enumerate(non_empty, 1):
+        text = c[:per_chunk].strip()
         if text:
             parts.append(f"[Doc {i}]\n{text}")
     return "\n\n".join(parts), len(parts)

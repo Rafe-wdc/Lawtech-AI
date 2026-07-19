@@ -239,12 +239,23 @@ def _search_legislation(
                 {"match_phrase": {"page_content": {"query": header_var, "boost": 8.0}}}
             )
 
+        # Case-tolerant exact filter on section_number.keyword. The parser
+        # lowercases letter suffixes (e.g. "498a", "65b"), while ES stores
+        # them uppercased ("498A", "65B") — a plain `term` filter would
+        # miss. `terms` with both casings covers all observed acts and
+        # works on both ES and OpenSearch (no case_insensitive dependency).
+        # Anchors retrieval to the exact section the parser identified,
+        # so definition-heavy sections (like Section 2 of IR Code 2020,
+        # whose 20-KB definitions block loses BM25 to short cross-
+        # referencing sections) still surface.
+        sn_variants = list({sn, sn.upper(), sn.lower()})
         source_query = {
             "query": {
                 "bool": {
                     "must": [{"term": {"source.keyword": most_common_source}}],
+                    "filter": [{"terms": {"section_number.keyword": sn_variants}}],
                     "should": should_clauses,
-                    "minimum_should_match": 1,
+                    "minimum_should_match": 0,
                 }
             },
             "size": 5,
@@ -263,6 +274,30 @@ def _search_legislation(
 
     source_response = es.search(index=index, body=source_query)
     final_hits = source_response["hits"]["hits"]
+
+    # Safety net: if the exact-section filter returned nothing, retry the
+    # legacy boost-only query. Protects against parser mis-extractions
+    # (e.g. "wages under Industrial Relations Code 2020" → sn="2020"),
+    # sections stored with unusual section_number formatting, and any
+    # other edge case where the identified section number simply isn't
+    # present as a keyword under the picked source.
+    if parsed_info and not final_hits:
+        log.info("Section-filter returned 0 hits, retrying without filter",
+                 source=most_common_source, section=parsed_info["section_number"])
+        source_query_nofilter = {
+            "query": {
+                "bool": {
+                    "must": [{"term": {"source.keyword": most_common_source}}],
+                    "should": should_clauses,
+                    "minimum_should_match": 1,
+                }
+            },
+            "size": 5,
+            "sort": [{"_score": {"order": "desc"}}],
+        }
+        source_response = es.search(index=index, body=source_query_nofilter)
+        final_hits = source_response["hits"]["hits"]
+
     log.debug("Targeted source search done",
               source=most_common_source, hits=len(final_hits))
     return final_hits, most_common_source

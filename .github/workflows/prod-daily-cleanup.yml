@@ -1,0 +1,141 @@
+name: Prod Daily Cleanup (uploads / chroma / tmp / journal)
+
+# Daily scheduled cleanup on the prod box. Reversible in scope:
+# nothing here alters code, DB rows, or systemd state — only stale
+# files on disk. Also exposed as workflow_dispatch for manual runs.
+#
+# Why this exists:
+#   - The /pyapi/chat upload path saves user PDFs to
+#     /root/Lawtech-AI/uploads/{thread_id}/ and never removes them.
+#     On 2026-07-19 we discovered this had grown to 133 GB across
+#     8 147 thread dirs (5 984 older than 7 days). The safe-plan
+#     cleanup that day freed ~110 GB (disk 97 % → 37 %). Without a
+#     scheduled cleanup, the same growth pattern will recur.
+#   - /tmp/tmp*.pdf accumulation from
+#     `tempfile.NamedTemporaryFile(delete=False)` in
+#     core/gateway.py:946 — 774 orphan PDFs (6 GB) on the same day.
+#     The underlying leak in the upload path should also be patched,
+#     but this job prevents disk exhaustion until that ships.
+#
+# Scope of each bucket (mtime-based, chosen to avoid breaking active
+# threads):
+#   - uploads/*/          mtime +7d   — agents already stopped re-reading
+#                                       the local file on follow-up turns
+#                                       (agents/memory.py:293
+#                                       _restore_file_context threads only
+#                                       chromadb_collection IDs, not paths)
+#   - chroma_store/*/     mtime +30d  — LOAD-BEARING for follow-up RAG on
+#                                       any thread with an uploaded PDF; a
+#                                       30-day-cold collection is unlikely
+#                                       to be revisited but the small risk
+#                                       is documented
+#   - /tmp/tmp*.pdf       mtime +1d   — orphan scratch files
+#   - journalctl          200 MB cap  — stops the systemd journal from
+#                                       ballooning past 1-2 GB over months
+#
+# What it does NOT touch (deliberate):
+#   - /var/lib/postgresql — chat_store + langgraph checkpoints
+#   - pip cache           — refills only on deploys (handled elsewhere)
+#   - venv / models       — code / models are managed by deploy-prod.yml
+
+on:
+  schedule:
+    # 03:30 UTC daily == 09:00 IST (ap-south-1). Off-peak for the box.
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+    # Manual re-run: same behavior. Use if the scheduled run fails and
+    # we need to catch up before disk hits the health-probe threshold.
+
+concurrency:
+  # Don't overlap runs. If a run is still going when the next tick fires,
+  # skip the newer one — the older one will catch up on the same buckets.
+  group: prod-daily-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Cleanup stale files on prod
+    runs-on: ubuntu-latest
+    # Same environment as deploy-prod.yml and prod-disk-audit.yml —
+    # required to access SSH_PRIVATE_KEY_PROD / SERVER_HOST_PROD /
+    # SERVER_USER_PROD and to gate on the production environment.
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Run daily cleanup on prod
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u  # do NOT `set -e` — some finds hit permission-denied and that's fine
+
+          echo "=========================================================="
+          echo " Disk BEFORE"
+          echo "=========================================================="
+          df -h /
+          echo
+
+          echo "=========================================================="
+          echo " Dry-run counts (what we're about to delete)"
+          echo "=========================================================="
+          UPLOADS_DIRS=$(sudo find /root/Lawtech-AI/uploads -mindepth 1 -maxdepth 1 -type d -mtime +7 2>/dev/null | wc -l)
+          CHROMA_DIRS=$(sudo find /root/Lawtech-AI/chroma_store -mindepth 1 -maxdepth 1 -type d -mtime +30 2>/dev/null | wc -l)
+          TMP_PDFS=$(sudo find /tmp -maxdepth 1 -type f -name 'tmp*.pdf' -mtime +1 2>/dev/null | wc -l)
+          echo "  uploads/*/    (+7d):  ${UPLOADS_DIRS}"
+          echo "  chroma/*/     (+30d): ${CHROMA_DIRS}"
+          echo "  /tmp/tmp*.pdf (+1d):  ${TMP_PDFS}"
+          echo
+
+          echo "=========================================================="
+          echo " 1. uploads/*/  (mtime +7d)"
+          echo "=========================================================="
+          time sudo find /root/Lawtech-AI/uploads -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
+          REMAINING_UPLOADS=$(sudo find /root/Lawtech-AI/uploads -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+          UPLOADS_SIZE=$(sudo du -sh /root/Lawtech-AI/uploads 2>/dev/null | awk '{print $1}')
+          echo "  remaining dirs: ${REMAINING_UPLOADS}    total size: ${UPLOADS_SIZE}"
+          echo
+
+          echo "=========================================================="
+          echo " 2. chroma_store/*/  (mtime +30d)"
+          echo "=========================================================="
+          time sudo find /root/Lawtech-AI/chroma_store -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null
+          REMAINING_CHROMA=$(sudo find /root/Lawtech-AI/chroma_store -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+          echo "  remaining dirs: ${REMAINING_CHROMA}"
+          echo
+
+          echo "=========================================================="
+          echo " 3. /tmp/tmp*.pdf  (mtime +1d)"
+          echo "=========================================================="
+          time sudo find /tmp -maxdepth 1 -type f -name 'tmp*.pdf' -mtime +1 -delete 2>/dev/null
+          REMAINING_TMP=$(sudo find /tmp -maxdepth 1 -type f -name 'tmp*.pdf' 2>/dev/null | wc -l)
+          echo "  remaining /tmp/tmp*.pdf: ${REMAINING_TMP}"
+          echo
+
+          echo "=========================================================="
+          echo " 4. journalctl --vacuum-size=200M"
+          echo "=========================================================="
+          sudo journalctl --vacuum-size=200M 2>&1 | tail -3
+          echo
+
+          echo "=========================================================="
+          echo " Disk AFTER"
+          echo "=========================================================="
+          df -h /
+          echo
+
+          echo "=========================================================="
+          echo " Health probe (should still be healthy)"
+          echo "=========================================================="
+          curl -sS http://127.0.0.1:5000/pyapi/health | head -c 400
+          echo
+          ENDSSH

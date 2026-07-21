@@ -127,7 +127,7 @@ jobs:
           echo
 
           echo "=========================================================="
-          echo " 8. Quick live probe: does gemini-3.5-flash accept a 1-token"
+          echo " 8. Quick live probe: does gemini-2.5-flash accept a 1-token"
           echo "     hello call? Runs in the same venv as the service."
           echo "=========================================================="
           APP_DIR=""
@@ -138,8 +138,8 @@ jobs:
             sudo -E env PYTHONPATH="$APP_DIR" "$APP_DIR/.venv/bin/python3" - << 'PY'
 import os, traceback
 from core.clients import get_gemini_flash_lite, get_gemini_flash_full
-for name, factory in [("flash_lite (gemini-3.1-flash-lite)", get_gemini_flash_lite),
-                      ("flash_full (gemini-3.5-flash)", get_gemini_flash_full)]:
+for name, factory in [("flash_lite (gemini-2.5-flash-lite)", get_gemini_flash_lite),
+                      ("flash_full (gemini-2.5-flash)", get_gemini_flash_full)]:
     try:
         llm = factory(temperature=0.1, max_output_tokens=64)
         resp = llm.invoke("Reply with exactly one word: hello")

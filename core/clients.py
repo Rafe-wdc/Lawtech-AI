@@ -175,7 +175,7 @@ def get_gemini_flash_lite(temperature: float = 0.3,
     Defaults: 8K tokens cap, no thinking (lite is for fast/cheap, not reasoning).
     """
     return init_chat_model(
-        "google_genai:gemini-3.1-flash-lite",
+        "google_genai:gemini-2.5-flash-lite",
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,
@@ -203,7 +203,7 @@ def get_gemini_flash_full(temperature: float = 0.3,
     should explicitly opt in: `get_gemini_flash_full(temperature=0, thinking_budget=2048)`.
     """
     return init_chat_model(
-        "google_genai:gemini-3.5-flash",
+        "google_genai:gemini-2.5-flash",
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,
@@ -240,7 +240,7 @@ def get_drafting_llm(max_output_tokens: int = 65535,
     for drafts; the drafting prompt is highly structured).
     """
     return init_chat_model(
-        "google_genai:gemini-3.5-flash",
+        "google_genai:gemini-2.5-flash",
         temperature=0.4,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,

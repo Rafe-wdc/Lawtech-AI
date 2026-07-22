@@ -534,34 +534,6 @@ User Query: {query}
 Chat Summary (Optional): {chat_summary}
 """
 
-# --- Orchestrator: Multi-Agent Planning ---
-MULTI_AGENT_PLAN_PROMPT = """You are a legal query planner. Given a user's legal query, determine which specialized agents should handle it.
-
-Available agents and their capabilities:
-- Legislation: Retrieves specific sections/provisions from Indian acts and statutes
-- Judgment: Searches court case laws, citations, and precedents
-- Newacts: Handles BNS, BNSS, BSA, IPC, CrPC, IEA queries
-- Drafting: Creates legal documents from templates
-- Scenario: Complex situational analysis with web search
-- Constitution: Constitutional provisions, fundamental rights
-- Maxim: Legal maxims and doctrines
-
-Rules:
-1. Most queries need only ONE agent.
-2. Use MULTIPLE agents when the query explicitly asks for different types of information.
-   Examples:
-   - "Draft bail application with relevant case laws" → [Drafting, Judgment]
-   - "Section 438 BNSS with SC precedents" → [Newacts, Judgment]
-   - "Explain Article 21 and related case laws" → [Constitution, Judgment]
-3. For scenario/advice queries with specific act references → [Scenario, Legislation/Newacts]
-4. Never use more than 3 agents for a single query.
-5. Return the list of agent names.
-
-Query: {query}
-Primary Task: {task}
-
-Which agents should handle this query? Return as JSON list.
-"""
 
 # Shared formatting rules for ALL prompts that may produce markdown tables.
 # Reuse via f-string interpolation in the individual prompts below. The
@@ -728,7 +700,19 @@ Given the user's query and the recent conversation summary, produce:
 
    include_citations — default TRUE. Set FALSE only if user said "no citations".
    include_examples  — TRUE iff user asked for examples / illustrations.
-   include_case_law  — TRUE iff user asked for case laws / precedents.
+   include_case_law  — TRUE iff the user EXPLICITLY asked for case laws /
+       precedents / judgments / rulings / "cases on" / "leading cases" /
+       "landmark judgments" / "supporting citations". Triggers include the
+       words "case law", "precedent", "judgment", "ruling", "leading case",
+       "landmark case", "cases on this", "case reference", "case-law
+       support", or a named case ("Puttaswamy", "Kesavananda"), in any
+       language / script.
+       FALSE by default. Do NOT set TRUE merely because the query is IN a
+       legal domain that typically has case law (criminal, family, consumer,
+       constitutional, etc.). A user asking "how does bail work" or "when
+       should I hire a lawyer" is asking for an educational explanation,
+       NOT for a case-law appendix — leave this FALSE. TRUE only when the
+       user's own words request cases / precedents.
    arguments_for_party — for drafting / argument-writing tasks: who the user
        is speaking FOR. The downstream Drafting and Scenario agents use this
        to pick the right first-person voice for the body, prayer, verification,
@@ -943,8 +927,14 @@ Given the user's query and the recent conversation summary, produce:
          - act / code names: "IPC", "BNS", "CrPC", "BNSS", "IEA", "BSA",
            "NI Act", "Companies Act", "Hindu Marriage Act", "GST Act",
            "Specific Relief Act", and their full / native equivalents
-         - "applicable law", "relevant statute", "under which law",
-           "statutory provision"
+         - explicit phrases requesting the statute: "applicable law",
+           "relevant statute", "under which law", "statutory provision",
+           "which section applies", "what does the law say"
+       FALSE by default. Do NOT set TRUE merely because the query is IN a
+       legal domain where statutes obviously exist (criminal, family, tax).
+       Educational how-to / when-to questions like "how to deal with a
+       criminal case" or "when should I hire a lawyer" name no section, no
+       act, and no request for the statute text — leave this FALSE. Also
        FALSE for pure factual scenario queries that don't reference any
        specific statute.
 

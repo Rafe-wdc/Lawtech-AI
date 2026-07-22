@@ -48,32 +48,43 @@ class ClarificationRequest(BaseModel):
 
 # --- Prompts ---
 
-_PLAN_PROMPT = """You are a legal query planner. Given a query and its primary task type, determine if MULTIPLE agents should handle it.
+_PLAN_PROMPT = """You are an Indian legal agent planner. Given a query and its already-classified primary task, decide which 1-4 agents should handle it.
 
-Available agents:
-- Legislation: Central/state law sections and provisions
-- Judgment: Court case laws, citations, precedents
-- Newacts: BNS, BNSS, BSA, IPC, CrPC, IEA provisions
-- Drafting: Legal document templates and drafting
-- Scenario: Situational analysis with web search
-- Constitution: Constitutional provisions
-- Maxim: Legal maxims and doctrines
-- Legal_Concepts: General legal explanations
+## Agents
+- Legislation: Central/state acts (except the 6 codes below)
+- Newacts: IPC, BNS, CrPC, BNSS, IEA, BSA (any spelling)
+- Judgment: HC / general court case law
+- SCI_Judgment: Supreme Court cases only
+- GST_Judgment: GST AAR / AAAR rulings
+- Constitution: Articles, fundamental rights, DPSPs
+- Maxim: Latin maxims and doctrines
+- Scenario: Situational analysis grounded in facts
+- Drafting: Standalone legal document generation
+- Legal_Concepts: Educational / procedural explanations
+- Document: Uploaded-file Q&A
 
-Rules:
-1. Most queries need only the PRIMARY agent matching the task type.
-2. Use MULTIPLE agents when the query explicitly asks for different types:
-   - "Draft bail application with relevant case laws" → [Drafting, Judgment]
-   - "Section 438 BNSS with SC precedents" → [Newacts, Judgment]
-   - "Explain Article 21 and related case laws" → [Constitution, Judgment]
-3. For complex scenarios requesting statutes → add Legislation or Newacts alongside Scenario.
-4. Never use more than 3 agents.
-5. "Other" always maps to Scenario.
+## Fan-out rules
+
+### HARD RULES (apply first, override everything else)
+- If task is Non_legal / Document / Legal_Concepts → agents = [task]. No fan-out.
+- Never pair Newacts + Legislation. Newacts covers both old and new codes.
+- Maximum 4 agents.
+
+### Default
+- Single agent matching the primary task.
+
+### Additive rules (only when the user's own words trigger them)
+- Asks for case laws / precedents / citations / rulings verbatim: add BOTH Judgment AND SCI_Judgment. Skip SCI if user scoped to HC only; skip Judgment if scoped to SC only or named a specific SC case.
+- Asks for statutory text alongside another primary: add Legislation (or Newacts if it's one of the 6 codes — never both).
+- Invokes a fundamental right alongside another primary: add Constitution.
+- Invokes a Latin maxim alongside another primary: add Maxim.
+- Drafting + explicit "with case laws / citations": add Judgment (+ SCI_Judgment if SC scope named).
+- "Other" primary task → route to Scenario.
 
 Query: {query}
 Primary Task: {task}
 
-Return the list of agents and brief reasoning."""
+Return the list of agents and one-sentence reasoning."""
 
 
 _CLARIFICATION_PROMPT = """You are a legal AI assistant. The user's query is ambiguous and needs clarification before proceeding.

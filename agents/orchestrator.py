@@ -308,107 +308,95 @@ class AgentPlan(BaseModel):
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
 
-PLAN_PROMPT = """You are a legal query planner. Given a query and its primary task type, determine which agents should handle it.
+CLASSIFY_AND_PLAN_PROMPT = """You are an Indian legal query router. Output:
+- `task`: the ONE primary task type (from the ordered list below)
+- `agents`: 1-4 agents to invoke (see fan-out rules)
+- `reasoning`: one sentence explaining the choice
 
-Available agents:
-- Legislation: Central/state law sections and provisions (all acts EXCEPT the 6 below)
-- Judgment: Court case laws, citations, precedents (general / High Court / unspecified courts)
-- Newacts: ONLY these 6 acts: BNS/IPC, BNSS/CrPC, BSA/IEA
-- Drafting: ONLY when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document (verbs: draft, write, prepare, create, generate, compose, draw up, "give me a [doc]", "I need a [doc]"). NEVER for questions ABOUT documents (format, structure, essential elements, requirements, how to file, when to use, difference between X and Y) — those go to Legal_Concepts / Legislation / Scenario.
-- Scenario: Situational analysis, legal advice, remedies, web search
-- Constitution: Constitutional provisions, fundamental rights, Articles
-- Maxim: Legal maxims and doctrines (Latin phrases like res judicata, audi alteram partem, estoppel)
-- Legal_Concepts: General legal explanations (use only when no specific category applies)
-- SCI_Judgment: Supreme Court of India case search
-- GST_Judgment: GST Appellate Authority for Advance Ruling (AAAR) orders. Use for any query about GST/CGST/SGST/IGST advance rulings, AAR, AAAR, GST classification appeals, GST ITC disputes, GST valuation rulings, or state-level GST appellate orders.
-- Document: Answers questions about user-uploaded documents (PDFs, images, DOCX). Use when user has uploaded files.
+## Task types — evaluate TOP-DOWN; FIRST match wins
 
-Rules:
-1. Most queries need only the PRIMARY agent matching the task type.
-2. Use MULTIPLE agents when the query explicitly or implicitly asks for different types of information:
-   - "Draft bail application with relevant case laws" → [Drafting, Judgment]
-   - "Section 438 BNSS with SC precedents" → [Newacts, SCI_Judgment]
-   - "Arguments on behalf of plaintiff and defendant" → [Scenario, Judgment]
-   - "Explain Article 21 and related case laws" → [Constitution, Judgment]
-3. COMPLEX SCENARIO QUERIES: When a query describes a factual situation AND asks for arguments, defences, legal provisions, citations, or remedies, use MULTIPLE agents:
-   - Scenario (for analysis/arguments/remedies) + Judgment (for case laws) + Legislation/Newacts (for statutory provisions)
-   - Example: "A doctor operated on wrong patient. What are the legal arguments and relevant case laws and statutory provisions?" → [Scenario, Judgment, Legislation]
-   - Example: "My landlord locked me out. Arguments with citations and relevant IPC sections" → [Scenario, Judgment, Newacts]
-4. When a query mentions BOTH a constitutional concept AND a legal maxim/doctrine → [Constitution, Maxim]
-5. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
-6. For drafting requests: ONLY include Drafting when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document. Questions ABOUT documents (format, structure, essential elements, ingredients, requirements, how to file, when to use, difference between X and Y) are NOT drafting requests — route those to Legal_Concepts, Legislation, or Scenario. "What legal options" or "how can I" is NOT drafting.
-7. Never use more than 3 agents.
-8. "Other" always maps to Scenario.
+1. **Non_legal** — greetings ("hi", "hello", "namaste"), casual chat, non-legal
+   topics (weather, sports, math), or bot-identity questions ("who are you",
+   "what can you do").
+2. **Document** — the user attached files AND is asking about their contents
+   (summary, extraction, "what does this say", "who is the plaintiff here").
+3. **Drafting** — explicit production verb (draft / write / prepare / create /
+   generate / compose / draw up / redraft / "give me a" / "I need a") PLUS a
+   filing-ready document noun (plaint, petition, written statement, bail
+   application, affidavit, legal notice, agreement, contract, deed, MOU, will,
+   divorce petition, reply, rejoinder, etc.).
+   NOT Drafting:
+   - Tactical outputs (arguments, cross-examination questions, strategy,
+     defences, briefs of advice) → **Scenario**, even if the user says "draft".
+   - Questions ABOUT documents (format, essential elements, requirements,
+     "how to file", "difference between X and Y", "what is a written
+     statement") → **Legal_Concepts** or **Legislation**.
+4. **Newacts** — the query references any of the 6 codes: IPC, BNS, CrPC,
+   BNSS, IEA, BSA (any spelling / any language / full-name variants like
+   "Indian Penal Code", "Code of Criminal Procedure", "Bharatiya Nyaya
+   Sanhita"). Includes section references inside them ("Section 302 IPC",
+   "Section 438 BNSS", "Section 65B Evidence Act").
+   HARD RULE: NEVER also add Legislation to the agents list. Newacts already
+   covers both old (IPC / CrPC / IEA) and new (BNS / BNSS / BSA) statute text.
+5. **Legislation** — any OTHER Indian central or state act, or a specific
+   section within one: NI Act (Sec 138), Companies Act, Hindu Marriage Act,
+   GST Act, Specific Relief Act, Consumer Protection Act, POCSO, JJ Act,
+   IBC, Motor Vehicles Act, etc.
+6. **Constitution** — an Article of the Constitution ("Article 21",
+   "Article 32"), a fundamental right, a directive principle, or the Preamble.
+7. **SCI_Judgment** — user explicitly names the Supreme Court ("SC",
+   "Hon'ble Supreme Court", "apex court") OR names a famous SC landmark case
+   (Kesavananda Bharati, Puttaswamy, Maneka Gandhi, Vishaka, Navtej, D.K. Basu,
+   Arnesh Kumar, Hussainara Khatoon, etc.).
+8. **GST_Judgment** — GST AAR / AAAR / advance ruling / classification appeal
+   under GST / GST ITC dispute / HSN code ruling / state GST appellate order.
+9. **Judgment** — the user names a specific case OR asks for court decisions
+   / precedents from High Courts or unspecified courts.
+10. **Maxim** — a Latin legal maxim or doctrine (res judicata, audi alteram
+    partem, estoppel, nemo judex, actus reus, mens rea, ubi jus ibi remedium,
+    caveat emptor, etc.).
+11. **Scenario** — the query describes a SPECIFIC FACT PATTERN (the user's
+    situation, a client's situation, or a hypothetical with concrete facts)
+    AND asks for arguments / defences / remedies / options / strategy.
+    REQUIRES facts. If the query is abstract ("how does bail work", "when to
+    hire a lawyer"), it is NOT Scenario — see #12.
+12. **Legal_Concepts** — educational / procedural / definitional query with
+    NO specific act, NO specific section, NO specific case, NO fact pattern.
+    Patterns: "how does X work", "when should I Y", "what is Z", "difference
+    between A and B", "procedure for W", "how to deal with a criminal case",
+    "when to hire a lawyer", "what are my rights when arrested". This is a
+    first-class target — reach for it whenever the query is educational
+    rather than fact- or reference-specific.
+13. **Other** — legal-adjacent but nothing above matched → route to Scenario.
 
-Query: {query}
-Primary Task: {task}
+## Fan-out rules
 
-Return the list of agents and brief reasoning."""
+### HARD RULES (apply first, override everything else)
+- If task is **Non_legal**, **Document**, or **Legal_Concepts** → agents MUST
+  be `[task]` alone. No fan-out under any circumstance.
+- Never pair **Newacts + Legislation** in the same agents list.
+- Maximum 4 agents.
 
+### Default
+- Single agent equal to the primary task.
 
-CLASSIFY_AND_PLAN_PROMPT = """You are an expert AI assistant specialized in Indian legal domain analysis.
+### Additive rules (only when the user's own words trigger them)
+- Asks for case laws / precedents / citations / rulings / supporting
+  judgments (verbatim): add BOTH **Judgment** AND **SCI_Judgment**. Skip
+  SCI_Judgment if the user scoped to "High Court only"; skip Judgment if
+  they scoped to "Supreme Court only" or named a specific SC case.
+- Asks for statutory text alongside another primary: add **Legislation**
+  (or **Newacts** if it's one of the 6 codes — never both).
+- Invokes a fundamental right alongside another primary: add **Constitution**.
+- Invokes a Latin maxim alongside another primary: add **Maxim**.
+- Drafting + explicit "with case laws / citations / precedents" →
+  add **Judgment** (also **SCI_Judgment** if SC scope named).
 
-Perform TWO tasks in one step:
+## Inputs
+User query: {query}
+Chat summary (optional, may be stale): {chat_summary}
 
-## Task 1: Classify the query
-Identify the PRIMARY legal task type. Choose EXACTLY ONE:
-
-- **Newacts** → ONLY for these 6 acts: BNS/IPC, BNSS/CrPC, BSA/IEA (and their old/new equivalents). NOT for any other acts.
-  - This includes ALL variants and full names: "IPC" / "Indian Penal Code" / "Penal Code"; "CrPC" / "Cr.P.C" / "Code of Criminal Procedure" / "Criminal Procedure Code"; "IEA" / "Indian Evidence Act" / "Evidence Act"; "BNS" / "Bharatiya Nyaya Sanhita"; "BNSS" / "Bharatiya Nagarik Suraksha Sanhita"; "BSA" / "Bharatiya Sakshya Adhiniyam".
-  - Examples: "Section 125 of CrPC" → [Newacts]; "Section 125 of Code of Criminal Procedure 1973" → [Newacts]; "Section 302 IPC" → [Newacts]; "Section 65B Indian Evidence Act" → [Newacts]; "Section 438 BNSS" → [Newacts]. NEVER pair these queries with Legislation -- Newacts already covers both the old and new statute text.
-- **Legislation** → ALL other central/state acts and statutes NOT listed under Newacts.
-  - Examples: "Section 138 NI Act" → [Legislation]; "Section 7 Hindu Marriage Act" → [Legislation]; "Section 482 Companies Act" → [Legislation].
-- **Drafting** → User explicitly asks the AI to **CREATE a standalone legal document** that could be filed in court or signed by parties: plaints, petitions, written statements, bail applications, affidavits, legal notices, agreements, contracts, deeds, MOUs, wills, divorce petitions, etc. Trigger only on explicit production verbs: "draft", "write", "prepare", "create", "generate", "compose", "draw up", "redraft", "give me a [document]", "I need a [document]" — **paired with a court-filing-ready document noun**. DO NOT trigger on questions ABOUT documents (format, structure, essential elements, ingredients, requirements, how to file, when to use, difference between X and Y). DO NOT trigger on tactical / strategic outputs like cross-examination questions, arguments, defences, strategies, analyses, opinions, briefs of advice — those go to **Scenario** (situational legal analysis), even when the user uses the words "draft" or "prepare".
-  - DO Drafting: "Draft a plaint for partition", "Prepare a bail application", "Give me a sample MOU", "Write a legal notice for property dispute", "Generate a divorce petition".
-  - DO NOT route to Drafting (route elsewhere):
-    - "Essential elements of a partnership agreement" → Legal_Concepts (theory)
-    - "What is the format of a bail application?" → Legal_Concepts (structural explanation)
-    - "How to file a writ petition under Article 32?" → Scenario (procedure)
-    - "Discuss petition under Article 32" → Constitution (concept)
-    - "Notice under Section 138 NI Act — requirements" → Legislation (statutory rule)
-    - "Section 80 CPC notice requirements" → Legislation
-    - "Plaint requirements under Order VII CPC" → Legislation
-    - "Difference between agreement and contract" → Legal_Concepts
-    - "What is a written statement?" → Legal_Concepts
-    - "Prepare a cross-examination strategy for an NDPS case" → Scenario (tactical output)
-    - "Draft arguments for the accused / for the prosecution" → Scenario (advocacy strategy)
-    - "Give me cross-examination questions for the IO" → Scenario (litigation prep)
-    - "Prepare a brief on bail under Section 37 NDPS" → Scenario (legal analysis)
-    - "What defences are available against Section 498A IPC" → Scenario (situational advice)
-- **Constitution** → Constitutional provisions, fundamental rights/duties, Articles of Constitution.
-- **Scenario** → Situational legal query, real-life legal situation analysis, legal advice.
-- **Judgment** → Case law, court decisions, precedents (general / High Court / unspecified courts).
-- **SCI_Judgment** → Supreme Court of India cases. Use when user explicitly mentions "Supreme Court" or "SC", or names a landmark SC case.
-- **GST_Judgment** → GST Appellate Authority for Advance Ruling (AAAR) orders. Use when the query is about: GST/CGST/SGST/IGST advance rulings, AAR or AAAR orders, GST classification appeals, GST input tax credit (ITC) disputes, GST valuation rulings, HSN classification under GST, or state-level GST appellate decisions.
-- **Maxim** → Legal maxims, Latin phrases, legal doctrines (res judicata, estoppel, etc.).
-- **Legal_Concepts** → General legal explanations that don't fit above categories.
-- **Document** → Questions about uploaded files/documents.
-- **Non_legal** → Non-legal queries: greetings, casual chat, non-legal topics, bot identity questions.
-- **Other** → Legal-adjacent queries that don't fit other categories.
-
-## Task 2: Plan which agents to invoke
-Available agents: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document
-
-Rules:
-1. Most queries need only the PRIMARY agent matching the task type.
-2. Use MULTIPLE agents when the query explicitly asks for different types of information:
-   - "Draft bail application with relevant case laws" → [Drafting, Judgment]
-   - "Section 438 BNSS with SC precedents" → [Newacts, SCI_Judgment]
-   - "Explain Article 21 and related case laws" → [Constitution, Judgment]
-3. COMPLEX SCENARIO QUERIES: When a query describes a factual situation AND asks for arguments, defences, provisions, or citations, use MULTIPLE agents:
-   - Scenario + Judgment + Legislation/Newacts as appropriate
-4. When a query mentions BOTH constitutional concept AND legal maxim → [Constitution, Maxim]
-5. **CASE LAW / CITATIONS**: When the user asks for case laws, citations, precedents, or supporting judgments — even generically ("with case laws", "with supporting citations") — INCLUDE BOTH `Judgment` (High Court / general) AND `SCI_Judgment` (Supreme Court) in the agent list. The HC corpus has regional / recent cases; the SC corpus has the substantive-law landmarks (Jacob Mathew for medical negligence, Kesavananda Bharati for constitutional, etc.). Only use one of them alone when the user EXPLICITLY scopes to "High Court only" or "Supreme Court only" or names a specific HC / SC case.
-6. When a query references a named SC landmark case alongside a constitutional topic → include SCI_Judgment.
-7. For drafting requests: ONLY include Drafting when the user explicitly asks the AI to CREATE / WRITE / PREPARE / DRAFT a legal document. Questions ABOUT documents (format, structure, essential elements, requirements, how to file, difference between X and Y) are NOT drafting — route to Legal_Concepts / Legislation / Scenario.
-8. Never use more than 4 agents.
-9. "Other" task always maps to Scenario agent.
-10. For Non_legal: agents should be ["Non_legal"].
-
-User Query: {query}
-Chat Summary (Optional): {chat_summary}
-
-Return the task type, list of agents, and brief reasoning."""
+Return `task`, `agents`, and one-sentence `reasoning`."""
 
 
 def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str, list[str]]:
@@ -515,6 +503,20 @@ def _detect_multi_intent(intent: UserIntent | None, task: str) -> list[str]:
     keyword-scan safety net.
     """
     if intent is None or intent.confidence < 0.5:
+        return []
+    # Legal_Concepts primary is STRICTLY single-agent (see the HARD RULES
+    # block in CLASSIFY_AND_PLAN_PROMPT). The web-grounded legal_concepts
+    # agent produces a self-contained answer; any fan-out here reintroduces
+    # the concat-of-agent-outputs artifact seen in the 2026-07-23 same-thread
+    # smoke ("How to deal with a criminal case?" → 4-agent plan → duplicate
+    # PDF blocks + self-contradiction in turn 2). If the user genuinely
+    # references a specific act / case / Article / maxim, the top-down
+    # decision procedure in CLASSIFY_AND_PLAN_PROMPT will have already
+    # routed to that more specific task (Newacts / SCI_Judgment / etc.)
+    # before falling through to Legal_Concepts — so reaching here with
+    # task == "Legal_Concepts" means the query is genuinely educational
+    # and no enrichment is warranted.
+    if task == "Legal_Concepts":
         return []
     extra: list[str] = []
     if intent.include_case_law:

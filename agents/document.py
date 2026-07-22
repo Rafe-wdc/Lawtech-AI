@@ -8,7 +8,7 @@ Manages per-user ChromaDB collections for uploaded documents.
 2. Process → extract text, OCR scanned pages, chunk, embed, store
 3. Chat → retrieve from user's collection, generate answer
 
-Uses: Gemini 2.5 Pro (Q&A), Gemini Flash Lite (Vision OCR)
+Uses: Gemini 2.5 Pro (Q&A), Gemini 2.5 Flash (Vision OCR)
 Data Source: ChromaDB (per-user collections in chroma_store/)
 Embedding: all-MiniLM-L6-v2
 """

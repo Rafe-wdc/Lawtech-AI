@@ -61,9 +61,20 @@ VISION_DPI_LOW = 96             # V1 default — fast, acceptable for most cases
 VISION_DPI_HIGH = 200            # used when low-DPI OCR returns very little text
 VISION_DPI = VISION_DPI_LOW      # default; _vision_ocr_pdf may escalate
 
-VISION_BATCH_SIZE = 10          # pages per Gemini Vision call (was 5)
+# Pages per Gemini Vision call. Was 10, dropped to 1 on 2026-07-22 after
+# the WhatsApp Devanagari-scan incident: multi-page batching is the primary
+# trigger of Gemini's degenerate token-repetition loop on handwritten Indic
+# scripts (12,335-char response was 2 real lines + `ज.` repeated ~5,000
+# times). Single-page batches produce coherent output on the same file.
+# Throughput is still handled by VISION_MAX_CONCURRENT parallel calls.
+VISION_BATCH_SIZE = 1
 VISION_MAX_CONCURRENT = 4       # max parallel OCR batch calls
 OCR_CACHE_DIR = os.path.join(CHROMA_STORE_ROOT, ".ocr_cache")
+
+# Bump when the OCR prompt or model changes so pre-existing cache entries
+# (which may contain garbage produced by the old prompt / weaker model) are
+# not served to users. Change to "v3" etc. on any future OCR-quality fix.
+OCR_CACHE_VERSION = "v2"
 
 # ChromaDB chunk size for evidence PDFs. Raised to 15000 in the RAG
 # attachment routing plan (docs/rag_attachment_routing_plan.md, Phase A,
@@ -425,7 +436,30 @@ def _score_text_quality(text: str, sample_chars: int = 20_000) -> dict:
     if not raw_tokens:
         return {"verdict": "empty", "score": 0, "metrics": {}}
 
-    # First, a language-agnostic broken-CMap check (U+FFFD soup, Latin-Extended
+    # Token-repetition-loop check. Gemini Vision on handwritten Indic
+    # scripts occasionally enters a degenerate loop where a single 1-3-char
+    # abbreviation (e.g. Devanagari `ज.`) is emitted thousands of times.
+    # The Latin-script word-statistics below cannot see this; the broken-
+    # CMap check below cannot see it either (the script profile looks
+    # perfectly Devanagari). Real prose never has one token > 15% of
+    # tokens; we flag > 30% as a clear loop signature. Runs *before* the
+    # script check so a loop in ANY script is caught. See the WhatsApp
+    # Scan 2026-07-20 incident.
+    if len(raw_tokens) >= 50:
+        from collections import Counter
+        top_tok, top_n = Counter(raw_tokens).most_common(1)[0]
+        top_ratio = top_n / len(raw_tokens)
+        if top_ratio > 0.30:
+            return {
+                "verdict": "garbled",
+                "score": 100,
+                "metrics": {"reason": "token_loop",
+                            "top_token": top_tok[:20],
+                            "top_ratio": round(top_ratio, 3),
+                            "total_tokens": len(raw_tokens)},
+            }
+
+    # A language-agnostic broken-CMap check (U+FFFD soup, Latin-Extended
     # dump zone, no coherent dominant script). This catches garbled Kannada /
     # Hindi / Tamil / etc. text layers that the Latin word-statistics below
     # can't see. Runs for *every* script, including Latin.
@@ -609,15 +643,26 @@ def _file_hash(file_path: str) -> str:
     return h.hexdigest()
 
 
+def _ocr_cache_path(file_hash: str) -> str:
+    """Cache filename includes OCR_CACHE_VERSION so a prompt/model fix
+    invalidates every previously-cached result at once."""
+    return os.path.join(OCR_CACHE_DIR, f"{file_hash}_{OCR_CACHE_VERSION}.txt")
+
+
 def _load_ocr_cache(file_hash: str) -> str | None:
-    """Return cached OCR text if available, else None."""
-    cache_file = os.path.join(OCR_CACHE_DIR, f"{file_hash}.txt")
+    """Return cached OCR text if available, else None.
+
+    Only reads entries produced by the current OCR_CACHE_VERSION — older
+    entries (potentially garbage from the pre-fix pipeline) are ignored.
+    """
+    cache_file = _ocr_cache_path(file_hash)
     if os.path.exists(cache_file):
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
                 text = f.read()
             if text.strip():
-                log.info("OCR cache hit", hash=file_hash[:12])
+                log.info("OCR cache hit",
+                         hash=file_hash[:12], version=OCR_CACHE_VERSION)
                 return text
         except Exception as e:
             log.warning("OCR cache read failed; will re-OCR",
@@ -626,13 +671,14 @@ def _load_ocr_cache(file_hash: str) -> str | None:
 
 
 def _save_ocr_cache(file_hash: str, text: str) -> None:
-    """Persist OCR text to disk cache."""
+    """Persist OCR text to disk cache under the current version key."""
     try:
         os.makedirs(OCR_CACHE_DIR, exist_ok=True)
-        cache_file = os.path.join(OCR_CACHE_DIR, f"{file_hash}.txt")
+        cache_file = _ocr_cache_path(file_hash)
         with open(cache_file, "w", encoding="utf-8") as f:
             f.write(text)
-        log.info("OCR result cached", hash=file_hash[:12], chars=len(text))
+        log.info("OCR result cached",
+                 hash=file_hash[:12], chars=len(text), version=OCR_CACHE_VERSION)
     except Exception as e:
         log.warning("Failed to cache OCR result", error=str(e))
 
@@ -678,8 +724,73 @@ def _render_pdf_pages(
     return batches
 
 
+# Shared OCR system prompt. Extracted so _ocr_batch (PDF pages) and
+# _vision_ocr_image (single image) stay in sync — one prompt, one place to
+# edit. The anti-repetition + handwriting-hint clauses were added on
+# 2026-07-22 after the WhatsApp Devanagari-scan repetition-loop incident
+# (see project memory + audit notes). Prompt-first defense per the
+# `feedback_no_mechanical_patterns` rule.
+_OCR_PROMPT_BODY = (
+    "You are an OCR engine for legal documents. Transcribe ALL visible text "
+    "from the image(s) EXACTLY as written.\n"
+    "- The document may be in English or any Indian language (Hindi, Kannada, "
+    "Tamil, Telugu, Malayalam, Bengali, Marathi, Gujarati, Punjabi, Odia, "
+    "Assamese, Urdu, etc.) and may be printed OR handwritten. Transcribe "
+    "text in its ORIGINAL script. Do NOT translate. Do NOT transliterate to "
+    "the Latin/Roman alphabet. If the page mixes scripts, keep each part in "
+    "its own script.\n"
+    "- Preserve formatting, paragraph breaks, headings, lists, and the "
+    "natural reading order. For tables, use markdown pipe-tables so columns "
+    "stay readable downstream (date / UTR / amount / bank / etc.).\n"
+    "- Transcribe party names, case numbers, dates, section numbers, court "
+    "names, statutory provisions, amounts, and bank/account/UTR references "
+    "EXACTLY as written.\n"
+    "- If a word or passage is genuinely illegible (blurred, cut off, glare, "
+    "unclear handwriting), write [illegible] in its place and continue with "
+    "the next word. Do NOT guess, fill in, or invent text.\n"
+    "- CRITICAL: Do NOT repeat the same word, character, or abbreviation "
+    "more than a few times in a row. If a section of the image is unreadable "
+    "or you find yourself repeating output, stop and write [illegible] once, "
+    "then move on to the next legible section. Never fill space by echoing "
+    "the same short token over and over.\n"
+    "Output only the transcribed text, nothing else."
+)
+
+
+def _extract_ai_text(resp) -> str:
+    """Best-effort text extraction from a LangChain AIMessage.
+
+    Prefers explicit text-typed content blocks (guards against future
+    thinking-budget changes that would put reasoning into `resp.text`).
+    Falls back to `resp.text` for the common case where content is already
+    a flat string.
+    """
+    content = getattr(resp, "content", None)
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "text":
+                t = b.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+            elif isinstance(b, str):
+                parts.append(b)
+        if parts:
+            return "".join(parts)
+    return (getattr(resp, "text", None) or "") if not isinstance(content, str) else content
+
+
 def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
-    """Send a batch of page images to Gemini for OCR. Returns extracted text."""
+    """Send a batch of page images to Gemini for OCR. Returns extracted text.
+
+    Retries up to 3 times with exponential backoff (1s, 2s) on transient
+    errors (rate limits, connection resets — literally what the 2026-07-22
+    WhatsApp local repro hit on the low-DPI pass). A whole-batch failure
+    that gets swallowed silently at the pass level is the mask that hides
+    the underlying issue from users — retrying inside `_ocr_batch` keeps
+    the outer contract ("returns text, empty on failure") intact but
+    absorbs the common transient class before it bubbles up.
+    """
     content = [
         {
             "role": "user",
@@ -687,22 +798,9 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
                 {
                     "type": "text",
                     "text": (
-                        f"You are an OCR engine for legal documents. Transcribe ALL visible "
-                        f"text from these document images (pages {batch_start + 1} to "
-                        f"{batch_start + len(batch_b64)}), exactly as it appears.\n"
-                        "- The document may be in English OR an Indian language (Hindi, "
-                        "Kannada, Tamil, Telugu, Malayalam, Bengali, Marathi, Gujarati, "
-                        "Punjabi, Odia, Assamese, Urdu, etc.). Transcribe text in its "
-                        "ORIGINAL script. Do NOT translate. Do NOT transliterate to the "
-                        "Latin/Roman alphabet. If the page mixes scripts (e.g. English "
-                        "headers with Kannada body text), keep each part in its own script.\n"
-                        "- Preserve formatting, paragraph breaks, headings, lists, tables, "
-                        "and the natural reading order.\n"
-                        "- Transcribe party names, case numbers, dates, section numbers, "
-                        "court names, statutory provisions, and amounts EXACTLY as written.\n"
-                        "- If a word or passage is genuinely illegible, write [illegible] in "
-                        "its place. Do NOT guess, fill in, or invent text.\n"
-                        "Output only the transcribed text, nothing else."
+                        f"{_OCR_PROMPT_BODY}\n\n"
+                        f"(These are pages {batch_start + 1} to "
+                        f"{batch_start + len(batch_b64)} of a legal document.)"
                     ),
                 },
                 *[
@@ -715,30 +813,52 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
             ],
         }
     ]
-    resp = llm.invoke(content)
-    return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.text.strip()}"
+
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            resp = llm.invoke(content)
+            text = _extract_ai_text(resp).strip()
+            return (
+                f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{text}"
+                if text else ""
+            )
+        except Exception as e:
+            last_exc = e
+            if attempt < 3:
+                backoff = 2 ** (attempt - 1)  # 1s, 2s
+                log.warning("OCR batch attempt failed; retrying",
+                            batch_start=batch_start, attempt=attempt,
+                            backoff_s=backoff, error=str(e)[:200])
+                time.sleep(backoff)
+    log.error("OCR batch failed after retries",
+              batch_start=batch_start, error=str(last_exc)[:200])
+    raise last_exc if last_exc else RuntimeError("OCR batch failed with no exception recorded")
 
 
 def _vision_ocr_image(file_path: str, filename: str = "") -> str:
     """Run Gemini Vision OCR on a single image file.
 
     Hash-cached by file content (mirrors `_vision_ocr_pdf`) so repeat uploads
-    of the same image are zero-cost. Uses the same legal-aware OCR prompt as
-    the PDF path so transcription quality (party names, case numbers, dates,
-    section numbers, Indian-language scripts) is identical across kinds.
+    of the same image are zero-cost. Uses the SAME shared OCR prompt as the
+    PDF path (`_OCR_PROMPT_BODY`) and the SAME Gemini 2.5 Flash model
+    (`get_gemini_flash_full`, not Flash Lite) so transcription quality is
+    identical whether the user uploaded a PDF-of-scans or a raw JPEG.
 
-    Returns empty string on failure — callers fall back to the Gemini URI
-    path for the Document agent (multimodal), but non-multimodal agents
-    (Drafting, Scenario, Legislation) lose grounding for that file. This
-    is logged but doesn't break the request.
+    3-attempt retry with exponential backoff on transient errors (rate
+    limits, connection resets — mirrors _ocr_batch). Cached result must
+    pass the same quality check as the PDF path — degenerate-loop output
+    is NOT cached, so a re-upload of a problem image gets a real re-run.
 
     Bug report 2026-06-19: user attached 3 JPEGs of a real apartment dispute
     + 1 scanned PDF and asked "Prepare a legal notice". Drafting produced an
     employment-dues notice with 40 [placeholders], zero references to the
     real facts. Root cause: images had no OCR branch at all, so inline_text
-    was empty and the agent had no grounding.
+    was empty and the agent had no grounding. This function was added then;
+    2026-07-22 upgraded model + prompt + added retry + quality gate to
+    match the PDF path.
     """
-    from core.clients import get_gemini_flash
+    from core.clients import get_gemini_flash_full
     import base64
 
     img_hash = _file_hash(file_path)
@@ -763,48 +883,50 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
             ".bmp": "image/bmp",
         }.get(ext, "image/jpeg")
 
-        llm = get_gemini_flash(temperature=0.0)
+        llm = get_gemini_flash_full(temperature=0.0)
         content = [{
             "role": "user",
             "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "You are an OCR engine for legal documents. Transcribe ALL "
-                        "visible text from this single document image, exactly as it "
-                        "appears.\n"
-                        "- The document may be in English OR an Indian language "
-                        "(Hindi, Kannada, Tamil, Telugu, Malayalam, Bengali, Marathi, "
-                        "Gujarati, Punjabi, Odia, Assamese, Urdu, etc.). Transcribe "
-                        "text in its ORIGINAL script. Do NOT translate. Do NOT "
-                        "transliterate to the Latin/Roman alphabet. If the image "
-                        "mixes scripts, keep each part in its own script.\n"
-                        "- Preserve formatting, paragraph breaks, headings, lists, "
-                        "tables, and the natural reading order.\n"
-                        "- For tables, render as markdown tables with pipe-delimited "
-                        "rows so downstream agents can read the columns (date / UTR "
-                        "/ amount / bank / etc. for payment proofs, schedules, etc.).\n"
-                        "- Transcribe party names, case numbers, dates, section "
-                        "numbers, court names, statutory provisions, amounts, and "
-                        "bank/account/UTR references EXACTLY as written.\n"
-                        "- If a word or passage is genuinely illegible (blurred, "
-                        "cut off, glare), write [illegible] in its place. Do NOT "
-                        "guess, fill in, or invent text.\n"
-                        "Output only the transcribed text, nothing else."
-                    ),
-                },
+                {"type": "text", "text": _OCR_PROMPT_BODY},
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:{mime_for_data_url};base64,{b64}"},
                 },
             ],
         }]
-        with log_time(log, "Image Vision OCR", file=filename or "image"):
-            resp = llm.invoke(content)
-        text = (resp.text or "").strip()
 
-        if text:
+        last_exc: Exception | None = None
+        text = ""
+        for attempt in range(1, 4):
+            try:
+                with log_time(log, "Image Vision OCR",
+                              file=filename or "image", attempt=attempt):
+                    resp = llm.invoke(content)
+                text = _extract_ai_text(resp).strip()
+                last_exc = None
+                break
+            except Exception as e:
+                last_exc = e
+                if attempt < 3:
+                    backoff = 2 ** (attempt - 1)  # 1s, 2s
+                    log.warning("Image OCR attempt failed; retrying",
+                                file=filename or os.path.basename(file_path),
+                                attempt=attempt, backoff_s=backoff,
+                                error=str(e)[:200])
+                    time.sleep(backoff)
+        if last_exc:
+            raise last_exc
+
+        # Only cache usable output — same discipline as the PDF path.
+        # Bad output (loop, gibberish) returns to the caller but doesn't
+        # poison the cache; a re-upload gets a real re-run.
+        usable, reason = _ocr_result_is_usable(text)
+        if text and usable:
             _save_ocr_cache(img_hash, text)
+        elif text:
+            log.warning("Image OCR produced unusable text — NOT caching",
+                        file=filename or os.path.basename(file_path),
+                        reason=reason, chars=len(text))
         return text
 
     except Exception as e:
@@ -818,25 +940,36 @@ def _ocr_pdf_at_dpi(
     file_path: str, page_count: int, dpi: int,
     emit: Optional[Callable[[dict], None]] = None,
     pass_label: str = "",
-) -> str:
-    """Run Vision OCR over a PDF at a specific DPI. Internal helper for the
-    adaptive-DPI logic in _vision_ocr_pdf — separated so the low- and
-    high-DPI passes share rendering + batching code.
+) -> tuple[str, int, int]:
+    """Run Vision OCR over a PDF at a specific DPI.
+
+    Returns (joined_text, failed_batch_count, total_batches). The caller
+    (currently _vision_ocr_pdf) can then distinguish "empty scan" from
+    "every batch errored" — the older API returned "" identically for
+    both, which masked hard failures behind the adaptive-DPI retry.
+
+    Uses `get_gemini_flash_full` (Gemini 2.5 Flash) — NOT Flash Lite. Lite
+    was the default before 2026-07-22 and was the direct trigger of the
+    Devanagari repetition-loop on handwritten Indic scripts. Flash has
+    demonstrably better multilingual + handwriting OCR at ~2x the cost per
+    call; single-page batching (VISION_BATCH_SIZE = 1) keeps total spend
+    reasonable.
 
     Optional ``emit`` callback streams per-batch progress events for the
     SSE channel — useful for 100+ page scanned PDFs where OCR alone takes
     1-3 minutes and the user would otherwise see dead silence.
     """
-    from core.clients import get_gemini_flash
+    from core.clients import get_gemini_flash_full
 
     with log_time(log, "PDF page rendering", pages=page_count, dpi=dpi):
         batches = _render_pdf_pages(file_path, page_count, dpi=dpi)
 
     total = len(batches)
-    llm = get_gemini_flash(temperature=0.0)
+    llm = get_gemini_flash_full(temperature=0.0)
     log.info("Starting parallel OCR",
              batches=total, pages=page_count, dpi=dpi,
-             batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT)
+             batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT,
+             model="gemini-2.5-flash")
 
     if emit and total:
         emit({
@@ -853,20 +986,37 @@ def _ocr_pdf_at_dpi(
             "pass": pass_label or "single",
         })
 
+    failed_batches = 0
     with log_time(log, "Parallel Vision OCR", batches=total):
         with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
-            futures = [
-                executor.submit(_ocr_batch, llm, batch_images, batch_start)
+            future_batch = {
+                executor.submit(_ocr_batch, llm, batch_images, batch_start):
+                    (batch_start, len(batch_images))
                 for batch_start, batch_images in batches
-            ]
-            results = []
+            }
+            results: list[str] = []
             done = 0
-            for future in futures:
+            for future in future_batch:
+                batch_start, batch_len = future_batch[future]
+                # Timeout scales with batch size: 45s base + 40s per page at
+                # single-page batching (85s cap) is comfortably above the
+                # observed 200-DPI Devanagari p95 (~55s) but tight enough
+                # that a wedged call fails fast.
+                batch_timeout = 45 + 40 * batch_len
                 try:
-                    results.append(future.result(timeout=120))
+                    result = future.result(timeout=batch_timeout)
+                    if result:
+                        results.append(result)
+                    else:
+                        # Batch returned empty (image was blank / all illegible).
+                        # Not a failure — just no text.
+                        pass
                 except Exception as e:
-                    log.warning("OCR batch failed", error=str(e))
-                    results.append("")
+                    failed_batches += 1
+                    log.warning("OCR batch failed after retries",
+                                batch_start=batch_start,
+                                timeout_s=batch_timeout,
+                                error=str(e)[:200])
                 done += 1
                 if emit:
                     pages_done = min(done * VISION_BATCH_SIZE, page_count)
@@ -877,27 +1027,51 @@ def _ocr_pdf_at_dpi(
                             f"OCR batch {done}/{total} done "
                             f"({pages_done} of {page_count} pages)"
                             + (f" [{pass_label}]" if pass_label else "")
+                            + (f", {failed_batches} failed" if failed_batches else "")
                         ),
                         "done": done,
                         "total": total,
                         "pages_done": pages_done,
                         "pages": page_count,
+                        "failed_batches": failed_batches,
                         "dpi": dpi,
                         "pass": pass_label or "single",
                     })
 
-    return "\n\n".join(r for r in results if r)
+    return "\n\n".join(results), failed_batches, total
 
 
-# Adaptive-DPI threshold: if the low-DPI OCR returns fewer than
-# (page_count × LOW_DPI_TEXT_PER_PAGE_FLOOR) chars, we retry at high
-# DPI. The threshold is intentionally conservative — many one-page
-# Indian court orders are dense; we want to retry only on genuinely
-# thin output (truly garbled or scanned-poorly cases). V1 used the
-# same family of heuristic with `text_length > num_pages * 700` to
-# decide whether to OCR at all; we re-use 200 as the "this OCR pass
-# clearly under-read the doc" floor.
+# Minimum chars-per-page floor for the low-DPI pass. Below this the low-DPI
+# OCR clearly under-read the doc (faded scan, tiny handwriting, thin
+# strokes) and we escalate to high DPI regardless of quality verdict.
+# Retained from the pre-fix pipeline as the *lower* of two triggers; the
+# *upper* trigger is a quality-verdict check (see _vision_ocr_pdf) which
+# now catches repetition-loops and CMap-style garble that length-based
+# checks miss entirely.
 LOW_DPI_TEXT_PER_PAGE_FLOOR = 200
+
+
+def _ocr_result_is_usable(text: str) -> tuple[bool, str]:
+    """Judge whether an OCR result is safe to return / cache.
+
+    Runs _score_text_quality (which now includes token-loop detection) and
+    returns (usable, reason). "usable" means the text is likely real
+    content, not the degenerate-loop garbage the 2026-07-22 WhatsApp scan
+    produced. Empty / too-short results are treated as unusable so the
+    high-DPI retry fires — a short page can escalate for free, and a
+    genuinely blank page just costs one extra call.
+    """
+    if not text or not text.strip():
+        return False, "empty"
+    score = _score_text_quality(text, sample_chars=20_000)
+    verdict = score["verdict"]
+    if verdict == "garbled":
+        return False, f"garbled:{score['metrics'].get('reason', 'score')}"
+    if verdict in ("empty", "too_short"):
+        return False, verdict
+    # "clean" and "non_latin" are both acceptable (non_latin = coherent
+    # Indic/CJK script, deferred to language-aware downstream handling).
+    return True, verdict
 
 
 def _vision_ocr_pdf(
@@ -907,26 +1081,23 @@ def _vision_ocr_pdf(
 ) -> str:
     """Run Gemini Vision OCR on PDF pages with parallel batch processing.
 
-    Adaptive DPI (added 2026-06-23):
-      1. First pass at VISION_DPI_LOW (96) — V1 baseline, ~4x faster than 200
-      2. If output is unusably thin (< page_count × LOW_DPI_TEXT_PER_PAGE_FLOOR
-         chars), retry at VISION_DPI_HIGH (200) for better fidelity on faded /
-         handwritten / unusually-formatted legal text
-      3. Cache the best result
+    Adaptive DPI:
+      1. First pass at VISION_DPI_LOW (96) — fast baseline.
+      2. Escalate to VISION_DPI_HIGH (200) when EITHER
+         (a) the low-DPI text is unusably thin (< page_count × 200 chars), OR
+         (b) the low-DPI output fails the quality check
+             (`_ocr_result_is_usable` — catches token-loops and CMap-style
+             garble the length gate cannot see; added 2026-07-22).
+      3. Compare the two passes by quality VERDICT first, then length —
+         a clean short result beats a longer garbled one.
+      4. Only cache when the result is usable (bad results never poison
+         the cache; a re-upload of the same file triggers a real re-run).
 
-    Other features (unchanged):
-    - Hash-based cache: same PDF + DPI not re-OCR'd within cache lifetime
-    - JPEG @ quality 85 — ~2x smaller payloads vs PNG
-    - Batch size 10 — fewer API calls (was 5)
-    - Parallel batch calls — up to 4 concurrent Gemini calls
-    - Legal-aware OCR prompt — better extraction of names, dates, sections
-
-    The optional ``emit`` callback streams SSE progress events so users see
-    real activity during the 1-3 minute synchronous OCR on large scanned
-    PDFs (added 2026-06-28).
+    Uses Gemini 2.5 Flash (not Flash Lite) via `get_gemini_flash_full`.
+    Model + batch size + prompt were all changed on 2026-07-22 after the
+    WhatsApp Devanagari-scan incident where Flash Lite entered a
+    repetition loop on handwritten Hindi.
     """
-    # Check cache first (hash uses file content, not DPI — first hit wins
-    # regardless of which DPI produced it).
     pdf_hash = _file_hash(file_path)
     cached = _load_ocr_cache(pdf_hash)
     if cached:
@@ -958,61 +1129,105 @@ def _vision_ocr_pdf(
                 "dpi": VISION_DPI_LOW,
             })
 
-        text = _ocr_pdf_at_dpi(
+        low_text, low_failed, low_total = _ocr_pdf_at_dpi(
             file_path, page_count, VISION_DPI_LOW,
             emit=emit, pass_label=f"low-DPI {VISION_DPI_LOW}",
         )
+        low_usable, low_reason = _ocr_result_is_usable(low_text)
 
-        # Adaptive escalation: if the low-DPI pass produced very thin text
-        # for a large PDF, retry at high DPI. Cheap heuristic: chars per
-        # page. Single-page PDFs always retry on empty output regardless.
-        thin = (
-            len(text.strip()) < max(LOW_DPI_TEXT_PER_PAGE_FLOOR, page_count * LOW_DPI_TEXT_PER_PAGE_FLOOR)
+        text = low_text
+        chosen_pass = "low-DPI"
+        chosen_reason = low_reason
+
+        # Escalate on either length floor OR quality failure. The length
+        # floor catches faded scans; the quality check catches token-loops
+        # and CMap noise that length alone cannot see.
+        thin_by_length = (
+            len(low_text.strip())
+            < max(LOW_DPI_TEXT_PER_PAGE_FLOOR,
+                  page_count * LOW_DPI_TEXT_PER_PAGE_FLOOR)
         )
-        if thin and VISION_DPI_HIGH > VISION_DPI_LOW:
-            log.info("Low-DPI OCR produced thin output — retrying at high DPI",
+        should_escalate = (
+            (thin_by_length or not low_usable)
+            and VISION_DPI_HIGH > VISION_DPI_LOW
+        )
+        if should_escalate:
+            escalation_reason = (
+                "thin_text" if thin_by_length
+                else f"quality_check_failed:{low_reason}"
+            )
+            log.info("Escalating Vision OCR to high DPI",
                      file=label,
                      pages=page_count,
-                     low_dpi_chars=len(text.strip()),
+                     low_dpi_chars=len(low_text.strip()),
                      low_dpi=VISION_DPI_LOW,
-                     high_dpi=VISION_DPI_HIGH)
+                     high_dpi=VISION_DPI_HIGH,
+                     reason=escalation_reason)
             if emit:
                 emit({
                     "type": "file_processing",
                     "stage": "ocr_dpi_escalation",
                     "message": (
-                        f"{label}: low-DPI OCR returned thin text "
-                        f"({len(text.strip())} chars) — retrying at "
-                        f"{VISION_DPI_HIGH} DPI for better fidelity"
+                        f"{label}: low-DPI OCR unusable "
+                        f"({escalation_reason}, {len(low_text.strip())} chars) — "
+                        f"retrying at {VISION_DPI_HIGH} DPI"
                     ),
                     "file": label,
-                    "low_dpi_chars": len(text.strip()),
+                    "low_dpi_chars": len(low_text.strip()),
                     "low_dpi": VISION_DPI_LOW,
                     "high_dpi": VISION_DPI_HIGH,
+                    "reason": escalation_reason,
                 })
-            high_text = _ocr_pdf_at_dpi(
+            high_text, high_failed, high_total = _ocr_pdf_at_dpi(
                 file_path, page_count, VISION_DPI_HIGH,
                 emit=emit, pass_label=f"high-DPI {VISION_DPI_HIGH}",
             )
-            # Keep whichever pass produced more substantive text.
-            if len(high_text.strip()) > len(text.strip()):
-                text = high_text
+            high_usable, high_reason = _ocr_result_is_usable(high_text)
 
-        # Cache the best result
-        if text.strip():
+            # Prefer the pass that produced USABLE text. If both are usable,
+            # keep whichever is longer (more content extracted). If both are
+            # unusable, still pick the longer non-empty one so the user at
+            # least sees partial output — but we WON'T cache it (below).
+            if high_usable and not low_usable:
+                text, chosen_pass, chosen_reason = high_text, "high-DPI", high_reason
+            elif low_usable and not high_usable:
+                text, chosen_pass, chosen_reason = low_text, "low-DPI", low_reason
+            elif high_usable and low_usable:
+                if len(high_text.strip()) > len(low_text.strip()):
+                    text, chosen_pass, chosen_reason = high_text, "high-DPI", high_reason
+            else:
+                # Both unusable — return the longer one, marked unusable.
+                if len(high_text.strip()) > len(low_text.strip()):
+                    text, chosen_pass, chosen_reason = high_text, "high-DPI", high_reason
+
+        chosen_usable, _ = _ocr_result_is_usable(text)
+        # Cache ONLY when the winning pass is usable. Prevents poisoning the
+        # cache with repetition-loop garbage — a re-upload of the same file
+        # will trigger a real re-OCR (potentially at high DPI) instead of
+        # instantly serving the cached bad text.
+        if text.strip() and chosen_usable:
             _save_ocr_cache(pdf_hash, text)
-            if emit:
-                emit({
-                    "type": "file_processing",
-                    "stage": "ocr_done",
-                    "message": (
-                        f"{label}: OCR complete — extracted "
-                        f"{len(text)} chars from {page_count} pages"
-                    ),
-                    "file": label,
-                    "chars": len(text),
-                    "pages": page_count,
-                })
+        elif text.strip():
+            log.warning("OCR produced unusable text — NOT caching",
+                        file=label, pass_chosen=chosen_pass,
+                        reason=chosen_reason, chars=len(text))
+
+        if emit:
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_done" if chosen_usable else "ocr_low_quality",
+                "message": (
+                    f"{label}: OCR complete — extracted {len(text)} chars "
+                    f"from {page_count} pages "
+                    f"({chosen_pass}, {chosen_reason})"
+                    + (" [low quality: not cached]" if not chosen_usable else "")
+                ),
+                "file": label,
+                "chars": len(text),
+                "pages": page_count,
+                "pass": chosen_pass,
+                "usable": chosen_usable,
+            })
 
         return text
 

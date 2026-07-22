@@ -96,10 +96,10 @@ from .scenario_tools import (
 )
 
 # --- Document Tools ---
+# validate_pdf / extract_text_pymupdf / extract_text_vision were removed on
+# 2026-07-22 — dead code that duplicated (and drifted from) the real OCR
+# pipeline in core/file_processor.py. See document_tools.py header comment.
 from .document_tools import (
-    validate_pdf,
-    extract_text_pymupdf,
-    extract_text_vision,
     compress_pdf,
     delete_pdf_vectorstore,
     get_collection_metadata,
@@ -208,10 +208,7 @@ ALL_TOOLS = [
     find_similar_cases,
     suggest_remedies,
     get_legal_news,
-    # Document (6)
-    validate_pdf,
-    extract_text_pymupdf,
-    extract_text_vision,
+    # Document (3)
     compress_pdf,
     delete_pdf_vectorstore,
     get_collection_metadata,
@@ -338,9 +335,6 @@ AGENT_TOOLS = {
         generate_legal_response,
     ],
     "document": [
-        validate_pdf,
-        extract_text_pymupdf,
-        extract_text_vision,
         compress_pdf,
         search_pdf_collection,
         store_pdf_chunks,

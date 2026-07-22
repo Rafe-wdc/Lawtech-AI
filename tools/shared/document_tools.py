@@ -1,27 +1,32 @@
 """Shared Tools: Document and PDF processing operations.
 
-Reusable @tool functions for PDF validation, text extraction (direct + OCR),
-compression, and ChromaDB collection management.
+Reusable @tool functions for PDF compression and ChromaDB collection
+management.
 
 Used by the Document Agent (#10) for PDF upload/processing/chat workflows.
 
-Uses: PyMuPDF (fitz) for PDF handling, Gemini Flash Lite for Vision OCR,
+Uses: PyMuPDF (fitz) for PDF handling,
       PikePDF/Ghostscript for compression, ChromaDB for storage
+
+Note (2026-07-22): the parallel OCR path here (`extract_text_pymupdf`,
+`extract_text_vision`, `validate_pdf`) was deleted. The single source of
+truth for text extraction and OCR is `core.file_processor`
+(`_extract_pdf_text_per_page`, `_vision_ocr_pdf`, `_vision_ocr_image`).
+Keeping two implementations caused prompt/model drift and was the reason
+the production pipeline silently used Flash Lite while this file used
+Flash — see the audit findings and the WhatsApp Devanagari-scan bug.
 """
 
 from __future__ import annotations
 
-import io
 import os
-import base64
 import shutil
 import subprocess
 import tempfile
 
 from langchain.tools import tool
-from langchain_core.prompts import ChatPromptTemplate
 
-from core.clients import get_gemini_flash_full, get_qa_embeddings, get_chroma_client
+from core.clients import get_chroma_client
 from core.logger import get_logger
 from core.settings import CHROMA_STORE_ROOT
 
@@ -32,10 +37,10 @@ log = get_logger("DocumentTools")
 
 MAX_PDF_SIZE_MB = 50
 MAX_PDF_PAGES = 500
-GEMINI_VISION_BATCH_SIZE = 10
 
-# Allowed base directories for PDF file operations.
-# Files must resolve to one of these paths to prevent path traversal.
+# Allowed base directories for PDF file operations. Files must resolve to
+# one of these paths to prevent path traversal attacks where a crafted
+# filename like '../../etc/passwd' could escape the expected upload dir.
 _ALLOWED_PDF_DIRS: tuple[str, ...] = (
     tempfile.gettempdir(),
     CHROMA_STORE_ROOT,
@@ -44,12 +49,8 @@ _ALLOWED_PDF_DIRS: tuple[str, ...] = (
 
 
 def _is_safe_pdf_path(file_path: str) -> bool:
-    """Return True if file_path resolves to within an allowed directory.
-
-    Prevents path traversal attacks where a crafted filename like
-    '../../etc/passwd' could escape the expected upload directory.
-    Also enforces a .pdf extension requirement.
-    """
+    """Return True if file_path resolves to within an allowed directory
+    and has a .pdf extension."""
     if not file_path.lower().endswith(".pdf"):
         return False
     resolved = os.path.realpath(file_path)
@@ -61,198 +62,6 @@ def _is_safe_pdf_path(file_path: str) -> bool:
 
 
 # --- Tool Functions ---
-
-@tool
-def validate_pdf(file_path: str, max_size_mb: int = 50, max_pages: int = 500) -> dict:
-    """Validate a PDF file for processing eligibility.
-
-    Checks file existence, size limits, page count limits, and
-    whether the PDF is encrypted or corrupted.
-
-    Args:
-        file_path: Absolute path to the PDF file
-        max_size_mb: Maximum allowed file size in MB (default 50)
-        max_pages: Maximum allowed page count (default 500)
-
-    Returns:
-        Dict with keys: valid (bool), reason (str or None), pages (int), size_mb (float)
-    """
-    import fitz
-
-    if not _is_safe_pdf_path(file_path):
-        return {"valid": False, "reason": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'", "pages": 0, "size_mb": 0}
-
-    if not os.path.exists(file_path):
-        return {"valid": False, "reason": "File not found", "pages": 0, "size_mb": 0}
-
-    size_bytes = os.path.getsize(file_path)
-    size_mb = round(size_bytes / (1024 * 1024), 2)
-
-    if size_mb > max_size_mb:
-        return {
-            "valid": False,
-            "reason": f"File size ({size_mb} MB) exceeds limit ({max_size_mb} MB)",
-            "pages": 0,
-            "size_mb": size_mb,
-        }
-
-    try:
-        doc = fitz.open(file_path)
-    except Exception as e:
-        return {"valid": False, "reason": f"Cannot open PDF: {e}", "pages": 0, "size_mb": size_mb}
-
-    if doc.is_encrypted:
-        doc.close()
-        return {"valid": False, "reason": "PDF is encrypted/password-protected", "pages": 0, "size_mb": size_mb}
-
-    pages = doc.page_count
-    doc.close()
-
-    if pages > max_pages:
-        return {
-            "valid": False,
-            "reason": f"Page count ({pages}) exceeds limit ({max_pages})",
-            "pages": pages,
-            "size_mb": size_mb,
-        }
-
-    if pages == 0:
-        return {"valid": False, "reason": "PDF has no pages", "pages": 0, "size_mb": size_mb}
-
-    return {"valid": True, "reason": None, "pages": pages, "size_mb": size_mb}
-
-
-@tool
-def extract_text_pymupdf(file_path: str) -> dict:
-    """Extract text from a PDF using PyMuPDF (fitz) — direct text extraction.
-
-    Fast extraction that works for text-based (non-scanned) PDFs.
-    Returns page-by-page text content.
-
-    Args:
-        file_path: Absolute path to the PDF file
-
-    Returns:
-        Dict with keys: text (str), pages_extracted (int), has_text (bool)
-    """
-    import fitz
-
-    if not _is_safe_pdf_path(file_path):
-        return {"text": "", "pages_extracted": 0, "has_text": False, "error": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'"}
-
-    try:
-        doc = fitz.open(file_path)
-        all_text = []
-        pages_with_text = 0
-
-        for page_num, page in enumerate(doc):
-            text = page.get_text("text")
-            if text and text.strip():
-                all_text.append(f"--- Page {page_num + 1} ---\n{text.strip()}")
-                pages_with_text += 1
-
-        doc.close()
-
-        full_text = "\n\n".join(all_text)
-        return {
-            "text": full_text,
-            "pages_extracted": pages_with_text,
-            "has_text": pages_with_text > 0,
-        }
-
-    except Exception as e:
-        return {"text": "", "pages_extracted": 0, "has_text": False, "error": str(e)}
-
-
-@tool
-def extract_text_vision(file_path: str, start_page: int = 0, end_page: int = -1) -> dict:
-    """Extract text from PDF pages using Gemini Flash Lite Vision OCR.
-
-    Converts PDF pages to images and uses vision model to extract text.
-    Handles scanned PDFs, handwritten content, and blurred text.
-    Processes in batches of 5 pages.
-
-    Args:
-        file_path: Absolute path to the PDF file
-        start_page: First page to process (0-indexed, default 0)
-        end_page: Last page to process (-1 for all pages)
-
-    Returns:
-        Dict with keys: text (str), pages_processed (int)
-    """
-    import fitz
-
-    if not _is_safe_pdf_path(file_path):
-        return {"text": "", "pages_processed": 0, "error": f"Invalid or unsafe file path: '{os.path.basename(file_path)}'"}
-
-    doc = None
-    try:
-        doc = fitz.open(file_path)
-        total_pages = doc.page_count
-
-        if end_page < 0:
-            end_page = total_pages - 1
-        end_page = min(end_page, total_pages - 1)
-
-        results = []
-        batch_images = []
-
-        llm = get_gemini_flash_full(temperature=0.0)
-
-        def process_batch(batch_b64: list[str], batch_start: int) -> str:
-            content = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"Extract all visible text and markdown tables from these scanned legal document images "
-                                f"(Pages {batch_start + 1} to {batch_start + len(batch_b64)}). "
-                                "Pay attention to: party names, case numbers, dates, section numbers, "
-                                "court names, and legal provisions. "
-                                "If anything is missing, blurred or illegible, replace it with most similar text or possible context."
-                            ),
-                        },
-                        *[
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"},
-                            }
-                            for b64_img in batch_b64
-                        ],
-                    ],
-                }
-            ]
-            resp = llm.invoke(content)
-            return f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{resp.text.strip()}"
-
-        for i in range(start_page, end_page + 1):
-            page = doc[i]
-            pix = page.get_pixmap(dpi=200)
-            img_bytes = pix.tobytes("jpeg", jpg_quality=85)
-            b64 = base64.b64encode(img_bytes).decode("utf-8")
-            batch_images.append(b64)
-
-            if len(batch_images) == GEMINI_VISION_BATCH_SIZE:
-                results.append(process_batch(batch_images, i - len(batch_images) + 1))
-                batch_images = []
-
-        if batch_images:
-            results.append(process_batch(batch_images, end_page - len(batch_images) + 1))
-
-        return {
-            "text": "\n\n".join(results),
-            "pages_processed": end_page - start_page + 1,
-        }
-
-    except Exception as e:
-        log.error(f"[Document] Vision extraction failed: {e}")
-        return {"text": "", "pages_processed": 0, "error": str(e)}
-    finally:
-        if doc:
-            doc.close()
-
 
 @tool
 def compress_pdf(file_path: str) -> dict:

@@ -745,6 +745,102 @@ violations specific to Indian drafting practice:
     deed). Legal notices are signed by counsel directly; agreements
     have parties' signatures. The court-filing footer is wrong. MAJOR.
 
+  reply_notice_correspondence_framing — when the draft is a REPLY to a
+    legal notice (identifiable from the response's OWN text: (i) the
+    subject line begins with "Reply to your Legal Notice" / "Reply to
+    your notice dated ___" / "In reply to your legal notice dated ___",
+    or (ii) the opening body paragraph establishes rejoinder to a prior
+    notice — "your legal notice dated ___ served on my client",
+    "hereby reply to the legal notice dated ___ issued by you on behalf
+    of ___"), the sender letterhead, addressee block, and body voice
+    must be internally consistent AND must respect Indian reply-notice
+    conventions. The critic does not see the source PDF — cross-check
+    the letterhead and "To" block against the response's OWN subject
+    line and opening body paragraph, which name the real parties. Three
+    sub-patterns to flag:
+
+    (a) Sender-voice contradiction. The "From the desk of" / letterhead
+        block names the REPLYING PARTY directly (party-as-sender), but
+        the body speaks in an advocate's voice ("Under the instructions
+        and on behalf of my client, Shri [Party Name]...", "my client
+        instructs me to reply", "on the strength of my client's
+        instructions"). A reply notice is EITHER (i) party-authored
+        — letterhead names the party, body opens first-person "I,
+        [Party Name], do hereby reply to the legal notice dated ___
+        served on me by you..." — OR (ii) advocate-authored —
+        letterhead names the replying advocate (name, enrolment number,
+        office address), body opens "Under the instructions of my
+        client, Shri [Party Name]...". Mixing the two (party name in
+        the letterhead AND "my client Shri [same party name]" in the
+        body) is MAJOR. Additional signal: the same party name appears
+        BOTH in the "From the desk of" line AND immediately after "my
+        client" in the opening body paragraph — that is the tell.
+        Suggested_fix: pick ONE artefact. If the reply is intended to
+        be advocate-issued (mirroring the source notice's advocate
+        letterhead), rewrite the letterhead as "[Replying Advocate —
+        Name, Enrolment No., Office Address, Contact]" — preserve as
+        a bracketed placeholder if the replying advocate's identity was
+        NOT supplied by the user or the source — and keep the "on
+        behalf of my client" body voice. If the reply is genuinely
+        party-authored, keep the party's name in the letterhead and
+        rewrite the body opening to first-person "I, [Party Name], do
+        hereby reply to the legal notice dated ___ served on me by
+        you...".
+
+    (b) Missing claimant in the "To" block. The source legal notice
+        was issued BY an advocate ON BEHALF OF a named client (the
+        CLAIMANT — typically identified in the reply's own subject
+        line or opening body paragraph as "your client Shri [Claimant
+        Name] of M/s [Company]"). A reply notice must address BOTH
+        (i) the opposing advocate (for service) AND (ii) the claimant
+        party (whose claims are being denied on the merits). If the
+        "To" block names only the opposing advocate — with no
+        "Advocate for [Claimant Name]" qualifier and no separate
+        "Through his Advocate:" sub-block naming the claimant above —
+        the substantive service chain breaks. Concrete failure
+        pattern:
+           "To, [Opposing Advocate Name], Advocate, Office: [Address]."
+           (no claimant identified anywhere in the To block, even
+           though the response's own subject line names "your client
+           Shri [Claimant Name] of M/s [Company]")
+                                        ← MAJOR.
+        Suggested_fix: rewrite the "To" as EITHER the two-level form —
+           "To,
+            1. [Claimant Name, Designation, M/s Company],
+               [Claimant Address as stated in the response's opening
+                body paragraph or source description].
+            Through his Advocate:
+               [Opposing Advocate Name, Office Address]."
+        OR the compact "Advocate for" form —
+           "To, Shri [Opposing Advocate Name], Advocate for
+            Shri [Claimant Name] ([Designation] of M/s [Company]),
+            Office: [Opposing Advocate Office Address]."
+        Populate the [Claimant ...] and [Address] slots from the
+        claimant identification that the response's own subject/body
+        already surfaces. Never leave the claimant anonymous, never
+        invent a claimant not identifiable from the response itself.
+
+    (c) Recipient identity hallucination in the To block. The "To"
+        block names an opposing-advocate identity or office address
+        that does NOT appear anywhere else in the response (subject
+        line, opening body paragraph, reference to the source notice).
+        Reply notices must be served on the SAME advocate at the SAME
+        office address that issued the source notice; any fresh
+        advocate name or fresh office address that the response's own
+        body does not corroborate is a service defect. Flag MAJOR.
+        Distinct from `canonical_example_substitution` (which covers
+        substantive party/place substitution in the body) — this rule
+        specifically covers the address block of a reply notice.
+        Suggested_fix: "Replace the unsupported opposing-advocate
+        [Name / Address] in the To block with the placeholder
+        `[Opposing Advocate — Name and Office Address]` and leave the
+        population to fact-injection at service time."
+
+    These three sub-flags fire in ADDITION TO (not instead of) the
+    generic `legal_artifact='legal_notice'` intent check, which
+    enforces format-level completeness for any notice. Reply-notice
+    framing is reply-specific and needs its own audit.
+
   missing_jurisdiction_clause — a court-filing draft (plaint, petition,
     suit, writ, complaint) lacks an explicit jurisdiction clause stating
     EITHER territorial jurisdiction (place of cause of action / where
@@ -1040,6 +1136,54 @@ EACH violation — and changes nothing else.
    translate the anchor into the target language while stripping the
    fence; the anchor stays English by policy (Rule 6). Do NOT introduce
    new anchor content — only unwrap what was already there.
+
+8. PLACEHOLDER PRESERVATION. Never substitute concrete values (party
+   names, addresses, dates, monetary amounts, cheque numbers, enrolment
+   numbers, PAN / GSTIN / registration numbers, phone / email, section
+   numbers filled in when the source used `[Section]`) for bracketed
+   `[Placeholder]` fields unless the user query OR the prior response's
+   own factual context (its subject line, its opening body paragraph,
+   its cited source material) already contains that value verbatim.
+   Preserve every `[…]` marker exactly — the bracket syntax, the label
+   inside, the position in the sentence.
+
+   When a violation's suggested_fix directs you to INSERT a placeholder
+   (e.g. "replace the letterhead with `[Replying Advocate — Name,
+   Enrolment No., Office Address]`", "replace 'Rs. 1,50,00,000/-' with
+   `Rs. [Total Contract Value]/-`"), emit that placeholder LITERALLY —
+   do NOT populate it with any name, address, amount, or date pulled
+   from elsewhere in the document to "make the draft look complete."
+   An honestly-bracketed placeholder is the correct form; a plausibly-
+   invented concrete value is a fact hallucination.
+
+   Concrete failure patterns this rule prevents:
+     - Reply-notice letterhead: the prior response has the replying
+       party's name in "From the desk of" (a Sender-voice contradiction
+       flagged by `reply_notice_correspondence_framing (a)`). The
+       correct fix is to replace that letterhead with `[Replying
+       Advocate — Name, Enrolment No., Office Address, Contact]`, NOT
+       to grab a different party's name from the source PDF and drop
+       it in.
+     - Prayer clauses: Facts para reads `Rs. [Total Contract Value]/-`
+       and the critic flags `prayer_relief_mismatch`. The correct fix
+       is to add the missing relief while KEEPING the `[Total Contract
+       Value]` placeholder verbatim in both the Facts and the Prayer,
+       NOT to invent `Rs. 1,50,00,000/-` and back-propagate it.
+     - Party details: cause title reads `[Plaintiff Name], aged
+       [Age] years, resident of [Address]`. The correct fix for any
+       violation touching the cause title is to leave those placeholders
+       intact, NOT to substitute "Anjali Deshmukh, aged 42, resident of
+       Pune" from the LLM's canonical-example bank.
+
+   Cross-checks:
+     - Count bracketed `[...]` markers in the prior response. The
+       refined response must have AT LEAST that many bracketed markers
+       (may have more if a violation's suggested_fix explicitly adds
+       one). Fewer bracketed markers = you substituted a concrete
+       value. Undo it.
+     - If a suggested_fix's example text contains a bracketed
+       placeholder, that placeholder MUST appear verbatim in your
+       refined output.
 
 ## Inputs
 

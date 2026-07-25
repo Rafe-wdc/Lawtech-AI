@@ -305,21 +305,20 @@ class SourceMetadata:
 ```
 Input:  state["original_query"]
 ─────────────────────────────────────────────────────
-Step 1: validate_input()
-        → Check emptiness, length > 5000 chars
-        → Return block if invalid
+Passthrough. Only reject a literally empty query with a friendly
+"please enter a legal question" nudge.
 
-Step 2: detect_injection_regex()
-        → Fast pattern match (15 regex patterns)
-        → Patterns: "ignore previous", "you are now", "DAN", "jailbreak", etc.
-        → Returns: {is_injection: bool, matched_pattern: str}
+Removed 2026-07-25:
+  - validate_input length limits (blocked legitimate long drafts)
+  - detect_injection_regex (14 hardcoded patterns blocked
+    "act as complainant", "act as karta", "act as public prosecutor",
+    and every other Indian-legal role phrase not on a 25-item whitelist)
+  - detect_injection_llm (Gemini Flash sniffer that emitted a second,
+    confusingly similar block message)
 
-Step 3: If regex suspicious → detect_injection_llm()
-        → Model: Gemini Flash Lite, temp=0.0
-        → Structured output: {is_injection: bool, confidence: "low"|"medium"|"high"}
-        → Threshold: block only if confidence = "high"
+Trust Gemini's own safety layer + 2M-token context window.
 ─────────────────────────────────────────────────────
-Output: {is_blocked: bool, block_reason: str | None}
+Output: {is_blocked: bool}   # True only when the query is literally empty
 ```
 
 ### memory

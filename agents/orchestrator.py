@@ -39,94 +39,13 @@ log = get_logger("Orchestrator")
 
 import re
 
-# --- Response Instructions Sanitization ---
-
-_INJECTION_PATTERNS = re.compile(
-    r"(?i)(ignore\s+(all\s+)?(previous|above|prior)\s+(instructions?|rules?|prompts?)"
-    r"|disregard\s+(everything|all|the)\b"
-    r"|you\s+are\s+now\b"
-    r"|system\s*:\s*"
-    r"|new\s+instructions?\s*:"
-    r"|override\s+(all|previous|the)\b"
-    r"|do\s+not\s+follow\b"
-    r"|forget\s+(all|your|previous)\b)",
-)
-
-_MAX_INSTRUCTIONS_LEN = 500
-
-
-# Tax / quasi-judicial appellate triggers — when any of these appears in
-# the user's drafting query, the orchestrator auto-enables cite_appendix
-# (fans Judgment / SCI_Judgment / Legislation alongside Drafting) so the
-# resulting written submission cites real case laws from the corpus,
-# not the section-LLM's parametric memory. Sagar feedback 2026-06-18 —
-# CIT(A) written submissions specifically need "Add valid and correct
-# relevant case laws/citations with Case Number and Case Year" plus
-# AO-citation rebuttal, both of which require corpus retrieval.
-#
-# NB: bracketed forms like "CIT(A)" don't play nicely with \b boundaries
-# (\b doesn't match between `)` and a following non-word char). The
-# patterns below avoid trailing \b for those forms.
-_TAX_APPELLATE_PATTERNS = (
-    re.compile(r"\bCIT\s*\(\s*A(?:ppeals?)?\s*\)", re.IGNORECASE),
-    re.compile(r"\bCIT\s+Appeals?\b", re.IGNORECASE),
-    re.compile(
-        r"\bCommissioner\s+of\s+Income[\s-]*Tax\s*\(\s*Appeals?\s*\)",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\bITAT\b", re.IGNORECASE),
-    re.compile(r"\bIncome[\s-]*Tax\s+Appellate\s+Tribunal\b", re.IGNORECASE),
-    re.compile(r"\bNFAC\b", re.IGNORECASE),
-    re.compile(r"\bNational\s+Faceless\s+Appeal\s+Centre\b", re.IGNORECASE),
-    re.compile(r"\bForm\s*35\b", re.IGNORECASE),
-    re.compile(r"\bSection\s*143\s*\(\s*3\s*\)", re.IGNORECASE),
-    re.compile(r"\bSection\s*144\s*B\b", re.IGNORECASE),
-    re.compile(
-        r"\bSection\s*250\s+(?:of\s+the\s+)?Income[\s-]*Tax\s+Act\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\bGST\s+Appellate\b", re.IGNORECASE),
-    re.compile(r"\bAAAR\b", re.IGNORECASE),
-    re.compile(
-        r"\bAppellate\s+Authority\s+for\s+Advance\s+Ruling\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\bCESTAT\b", re.IGNORECASE),
-    re.compile(r"\bNCLT\b", re.IGNORECASE),
-    re.compile(r"\bNCLAT\b", re.IGNORECASE),
-    re.compile(
-        r"\bNational\s+Company\s+Law\s+(?:Appellate\s+)?Tribunal\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\bSAT\s+(?:Mumbai|Delhi)\b", re.IGNORECASE),
-    re.compile(r"\bSecurities\s+Appellate\s+Tribunal\b", re.IGNORECASE),
-    re.compile(r"\bDRT\b|\bDRAT\b", re.IGNORECASE),
-    re.compile(
-        r"\bDebt(?:s)?\s+Recovery\s+(?:Appellate\s+)?Tribunal\b",
-        re.IGNORECASE,
-    ),
-)
-
-
-def _is_tax_appellate_query(query: str) -> bool:
-    """True iff the query looks like a tax / quasi-judicial appellate
-    written submission. Used to auto-enable cite_appendix for these
-    drafts so case laws come from the corpus retrieval pipeline rather
-    than the section LLM's parametric memory.
-    """
-    if not query:
-        return False
-    return any(p.search(query) for p in _TAX_APPELLATE_PATTERNS)
-
-
-def _sanitize_response_instructions(instructions: str) -> str:
-    """Strip prompt-injection patterns and cap length of LLM-extracted instructions."""
-    if not instructions:
-        return ""
-    cleaned = _INJECTION_PATTERNS.sub("", instructions).strip()
-    if len(cleaned) > _MAX_INSTRUCTIONS_LEN:
-        cleaned = cleaned[:_MAX_INSTRUCTIONS_LEN]
-    return cleaned
+# Prompt-injection sanitizer and the tax-appellate keyword detector were
+# removed on 2026-07-25. The former was dead code (no live callers) that
+# duplicated the guardrail regex; the latter was a hardcoded keyword bank
+# that auto-enabled cite_appendix on CIT(A)/ITAT/GST/NCLT queries and
+# violated the project's no-mechanical-patterns policy. Callers that want
+# the citation appendix should pass `cite_appendix=true` explicitly, or
+# rely on the env-level DRAFTING_CITE_APPENDIX_DEFAULT.
 
 
 # --- Internal cite-marker stripper (BUG-09) ---
@@ -1326,22 +1245,9 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         from core.settings import DRAFTING_CITE_APPENDIX_DEFAULT
         _flag = state.get("cite_appendix")
         cite_appendix_on = _flag if _flag is not None else DRAFTING_CITE_APPENDIX_DEFAULT
-        # Tax / quasi-judicial appellate written submissions (CIT(A) /
-        # ITAT / GST appellate / NCLT / SAT / DRT) inherently require
-        # detailed case-law citations groundwise. The frontend may not
-        # know to send cite_appendix=true for these drafts, so detect
-        # them server-side via keyword triggers and force fan-out to
-        # Judgment / SCI_Judgment / Legislation. Sagar bug feedback
-        # 2026-06-18 — user explicitly wanted "Add valid and correct
-        # relevant case laws/citations with Case Number and Case Year"
-        # plus "All the Citations mentioned in the assessment order by
-        # AO, need to be explained, how the same is not applicable to
-        # the assessee with detailed explanation".
-        _tax_appellate_detected = _is_tax_appellate_query(query)
-        if not cite_appendix_on and _tax_appellate_detected:
-            cite_appendix_on = True
-            log.info("cite_appendix force-enabled — tax appellate query detected",
-                     trigger="tax_appellate_keyword")
+        # The server-side tax-appellate keyword auto-enable was removed
+        # 2026-07-25. Callers must pass cite_appendix=true when they want
+        # citation fanout on CIT(A)/ITAT/GST/NCLT written submissions.
         # Client feedback 2026-06-19: legal notices need NO judgments and
         # office applications (RTI / department / employer / bank / etc.)
         # need NO judgments. These are correspondence, not pleadings. If

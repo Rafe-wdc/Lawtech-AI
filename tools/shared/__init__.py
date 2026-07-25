@@ -59,10 +59,10 @@ from .storage_tools import (
 )
 
 # --- Guardrail Tools ---
+# validate_input / detect_injection_regex / detect_injection_llm were removed
+# 2026-07-25 along with the live-path prompt-injection filter in
+# agents/guardrail.py. Only PII + hallucination utilities remain.
 from .guardrail_tools import (
-    validate_input,
-    detect_injection_regex,
-    detect_injection_llm,
     detect_pii,
     redact_pii,
     flag_hallucination,
@@ -183,10 +183,7 @@ ALL_TOOLS = [
     # Storage (2)
     generate_s3_link,
     load_chat_history_from_api,
-    # Guardrail (6)
-    validate_input,
-    detect_injection_regex,
-    detect_injection_llm,
+    # Guardrail (3) — PII + hallucination utilities only
     detect_pii,
     redact_pii,
     flag_hallucination,
@@ -256,9 +253,6 @@ AGENT_TOOLS = {
         request_clarification,
     ],
     "guardrail": [
-        validate_input,
-        detect_injection_regex,
-        detect_injection_llm,
         detect_pii,
         redact_pii,
         flag_hallucination,

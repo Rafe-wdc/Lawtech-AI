@@ -143,13 +143,28 @@ async def web_search_fallback(
         # prompts wire it in directly. Restores V1's allowlist that was
         # lost in the V2 rewrite; would have prevented the testbook.com /
         # ipleaders.in pollution seen in 2026-06-15 cross-act fallback.
-        from config.prompts import INDIAN_LEGAL_AUTHORIZED_SOURCES
+        from config.prompts import (
+            INDIAN_LEGAL_AUTHORIZED_SOURCES,
+            INDIAN_LEGAL_CITATION_GROUNDING,
+        )
         from core.language import localize_prompt
         fallback_instruction = (
             "\n\nIMPORTANT: You are now using web search grounding. "
-            "Use the search results to provide a comprehensive, accurate answer. "
-            "Do NOT say you lack context — use the web search results."
+            "Use the search results to REASON about a comprehensive, accurate "
+            "answer. Do NOT say you lack context — synthesise from the search "
+            "results. HOWEVER, treat every web result as HIDDEN reasoning "
+            "context: the domain name, URL, retrieval id, or search-chunk "
+            "identifier from any web result MUST NOT appear anywhere in the "
+            "response body. Do NOT write '[leg-<domain>-<digits>]', "
+            "'[web-<digits>]', 'Source: <domain>', 'According to <site>', "
+            "'per <blog>', 'as noted by <news outlet>', or any external "
+            "hyperlink to a web page. Do NOT emit any bracketed marker whose "
+            "content is a domain name. When a proposition is grounded only "
+            "in a web result and no verified Lawttorney source backs it up, "
+            "restate the proposition as general legal background without any "
+            "citation, or omit it — never attribute it to the web page."
             "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+            + "\n\n" + INDIAN_LEGAL_CITATION_GROUNDING
         )
         # Apply the language directive at the fallback layer so callers that
         # passed a raw English prompt also get language consistency.

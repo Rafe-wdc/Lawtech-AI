@@ -618,6 +618,56 @@ violations specific to Indian drafting practice:
     `stance.key_cases` is suspect — flag MAJOR and ask the refiner
     to either replace with a stance case or remove the citation lead-in.
 
+  unverified_web_citation — [PIPELINE-LEVEL — applies to every response
+    that touched web-grounded search, i.e. Scenario, Legal_Concepts, and
+    any domain agent that fell back to the web layer.] Flag as MAJOR
+    whenever the response body surfaces ANY of the following:
+      (i)  A bare web-domain name treated as a citation, source label,
+           or bracketed marker. Concrete patterns:
+             `[leg-vakilsearch.com-44320]`, `[web-812345]`,
+             `[hc-<domain>-<digits>]`, `[leg-<domain>-<digits>]`,
+             "Source: livelaw.in", "According to vakilsearch.com",
+             "per chamberofmayank.com", "as noted by ipleaders.in",
+             a trailing `[<domain>-<id>]` after a sentence, ANY bracket
+             whose content is a domain-shaped string (e.g. `<word>.com`,
+             `<word>.in`, `<word>.co.in`, `<word>.org`).
+      (ii) An external hyperlink to a web page — any `[<label>](https://...)`
+           whose URL is NOT (a) an `api.sci.gov.in/...` Supreme Court PDF
+           URL from the whitelist below, (b) an official High Court PDF
+           URL that appears verbatim in the whitelist, or (c) a Lawttorney
+           S3 bucket link that appears verbatim in the whitelist. Blog
+           posts, news articles, aggregator pages, forum posts, and
+           content-mill URLs are all MAJOR violations regardless of the
+           domain — even if the domain is on the ingestion allowlist
+           (indiankanoon.org, barandbench.com, etc.), the URL itself
+           must not be a visible link.
+     (iii) Any internal retrieval identifier leaked verbatim into the
+           body: `leg-*`, `hc-*`, `sci-*`, `web-*`, `newacts-*`,
+           `const-*`, `maxim-*`, `gst-*` id-shaped tokens appearing as
+           bracketed markers, footnotes, superscripts, or standalone
+           strings. These are internal index handles, never user-visible.
+     (iv) A "Sources" / "References" / "Web References" / "External
+          Sources" appendix that enumerates web pages, domain names, or
+          search-grounding results. The only permitted appendix is
+          `## PDF Links` populated exclusively from VERIFIED entries
+          (api.sci.gov.in PDFs, official High Court PDF URLs, Lawttorney
+          S3 links) present verbatim in the whitelist below.
+    Suggested_fix must be surgical: name the exact offending token /
+    marker / URL and specify the replacement. Examples:
+      - "Strip the trailing `[leg-vakilsearch.com-44320]` marker after
+         paragraph 3 sentence 2; restate the sentence without any
+         attribution."
+      - "Remove the external hyperlink `[livelaw article](https://
+         livelaw.in/...)` in paragraph 5; keep the underlying legal
+         point but attribute it to Section <X> of the <Act> only,
+         without any URL."
+      - "Delete the '## References' section at the end that lists web
+         URLs; leave only the `## PDF Links` block with verified
+         api.sci.gov.in entries (if any)."
+    This category is INDEPENDENT of `unretrieved_citation` — even when
+    the underlying legal proposition is correct, surfacing a web
+    attribution or retrieval id is still a MAJOR violation.
+
   unretrieved_citation — [PIPELINE-LEVEL — applies to scenario, multi-
     agent, and single-agent responses; the source-registry version of
     fabricated_citation.] Flag as MAJOR when the response cites any case

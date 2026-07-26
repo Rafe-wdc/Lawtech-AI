@@ -858,6 +858,46 @@ def _validate_and_enrich_plan(
     return tasks_planned
 
 
+# ---------------------------------------------------------------------------
+# Review-and-Redraft citation-agent strip
+#
+# When the user uploaded a document AND asked to review/redraft it, the
+# Drafting agent is the right place to retrieve supporting precedents — it
+# already runs `_gather_relevant_context` (SC/HC/Legislation/Newacts top
+# hits) against the user's ACTUAL matter. Co-planning SCI_Judgment /
+# Judgment / GST_Judgment as separate agents on a topic-loose "landmark
+# case laws" rewrite fires each of those agents' generation LLMs with a
+# vague query; the LLM returns fully-shaped prose (sometimes a full second
+# drafted application, sometimes 3 unrelated case summaries), and the
+# Draft-Aware append-only synth path appends that prose verbatim under a
+# `### <AGENT> CITATIONS:` header. This is the "highly hallucination"
+# failure mode the client reported.
+#
+# The verb detection mirrors `_REVIEW_REDRAFT_VERBS_RE` in
+# agents/drafting.py — keep both in sync. Long-term the check should move
+# to a typed `UserIntent.document_analysis_mode` field.
+# ---------------------------------------------------------------------------
+_REVIEW_REDRAFT_VERBS_RE = re.compile(
+    r"\b("
+    r"review|redraft|revise|revised|revising|revision|"
+    r"correct|corrected|correcting|"
+    r"fix|fixing|"
+    r"audit|auditing|"
+    r"rectif|"
+    r"amend|amending|amendment|"
+    r"error|errors|mistake|mistakes"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment")
+
+
+def _has_review_redraft_verbs(query: str) -> bool:
+    """True when `query` contains any review/redraft/revise/audit verb."""
+    return bool(query and _REVIEW_REDRAFT_VERBS_RE.search(query))
+
+
 # --- Regenerate helper (Sagar bug #5, 2026-06-16) ---
 
 _REFINE_PROMPT = """You are refining a previous legal AI response. The user
@@ -1298,6 +1338,37 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     tasks_planned = _validate_and_enrich_plan(
         tasks_planned, extracted_intent, log,
     )
+
+    # Review-and-Redraft with upload: strip citation agents.
+    #
+    # When the user uploaded a document AND asked to review/redraft it, the
+    # Drafting agent is authoritative for both the corrected draft AND the
+    # supporting precedents (via `_gather_relevant_context` — SC/HC/Legis/
+    # Newacts top hits retrieved against the user's actual matter). Keeping
+    # SCI_Judgment / Judgment / GST_Judgment co-planned on a topic-loose
+    # "landmark case laws" rewrite fires each of those agents' generation
+    # LLMs with a vague query, and the Draft-Aware append-only synth path
+    # (orchestrator_synthesize_node) then appends their prose verbatim
+    # under `### <AGENT> CITATIONS:` — the exact "highly hallucination"
+    # failure mode the client reported on 2026-07-26 (Section 290 BNSS
+    # plea-bargaining smoke).
+    if (
+        fc and fc.has_content
+        and "Drafting" in tasks_planned
+        and _has_review_redraft_verbs(_original_query)
+    ):
+        _stripped = [
+            a for a in tasks_planned
+            if a not in _CITATION_AGENTS_TO_STRIP_ON_REVIEW
+        ]
+        _removed = [a for a in tasks_planned if a in _CITATION_AGENTS_TO_STRIP_ON_REVIEW]
+        if _removed:
+            log.info(
+                "Review-and-redraft with upload: citation agents stripped "
+                "(Drafting retrieves precedents via _gather_relevant_context)",
+                removed=_removed, kept=_stripped,
+            )
+            tasks_planned = _stripped
 
     # The tax-appellate fan-out guardrail was removed on 2026-07-25 along
     # with the _is_tax_appellate_query keyword detector it depended on.

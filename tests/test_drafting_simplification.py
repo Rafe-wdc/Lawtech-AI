@@ -434,12 +434,14 @@ class TestGenerateSectionwise:
             *, sections_to_write, section_position_start, total_sections,
             query, user_facts, reference_draft, prior_text,
             gathered_context, user_intent, user_language,
+            review_and_redraft_mode=False,
         ):
             calls.append({
                 "sections_to_write": list(sections_to_write),
                 "position_start": section_position_start,
                 "total": total_sections,
                 "prior_len": len(prior_text or ""),
+                "review_and_redraft_mode": review_and_redraft_mode,
             })
             return "\n".join(
                 f"## {s.heading}\nBody of {s.id}." for s in sections_to_write

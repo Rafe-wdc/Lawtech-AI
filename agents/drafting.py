@@ -67,6 +67,83 @@ _AGENT_SEMAPHORE = asyncio.Semaphore(3)
 
 
 # ---------------------------------------------------------------------------
+# Review-and-Redraft short-circuit
+#
+# When the user uploaded a document AND their query has review/redraft/revise
+# verbs, the uploaded document IS the reference draft the user wants preserved.
+# The ES picker rejects this case because it looks for a template that matches
+# the QUERY, not the attachment; the web fallback then returns a generic
+# template unrelated to the actual uploaded doc (observed on smoke: contract-
+# analysis / money-recovery-plaint templates returned for a Section 290 BNSS
+# plea-bargaining application). Both outcomes discard the format the user
+# already showed us — the exact "not specific format" client complaint.
+#
+# Detection is verb-based (surface signal). The typed UserIntent does not yet
+# carry a `document_analysis_mode` field; when it does, this regex should be
+# replaced by an intent-driven check. Both conditions must hold — a fresh
+# draft without a file uses the picker+web path unchanged; an uploaded file
+# WITHOUT review verbs (e.g. "write a rejoinder to this notice") also uses
+# the unchanged path so a proper rejoinder template is fetched.
+# ---------------------------------------------------------------------------
+_REVIEW_REDRAFT_VERBS_RE = re.compile(
+    r"\b("
+    r"review|redraft|revise|revised|revising|revision|"
+    r"correct|corrected|correcting|"
+    r"fix|fixing|"
+    r"audit|auditing|"
+    r"rectif|"          # rectify / rectifying / rectification
+    r"amend|amending|amendment|"
+    r"error|errors|mistake|mistakes"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_review_and_redraft_of_upload(query: str, user_facts: str) -> bool:
+    """True when the user uploaded a document AND asked to review/redraft it.
+
+    Both conditions must hold. Detection is verb-based (see
+    `_REVIEW_REDRAFT_VERBS_RE` above for the trigger set and rationale).
+    A short user_facts blob (<200 chars) is treated as "no meaningful upload"
+    to avoid triggering on placeholder / metadata-only extractions.
+    """
+    if not user_facts or len(user_facts.strip()) < 200:
+        return False
+    if not query:
+        return False
+    return bool(_REVIEW_REDRAFT_VERBS_RE.search(query))
+
+
+# System-prompt-level override prepended to DRAFTING_SYSTEM_PROMPT and
+# DRAFTING_SECTION_PAIR_PROMPT when review_and_redraft_mode=True. Without
+# this, both default system prompts authoritatively frame REFERENCE DRAFT
+# as "from a DIFFERENT matter — MUST NOT appear in your output" (see
+# config/prompts.py DRAFTING_SYSTEM_PROMPT and DRAFTING_SECTION_PAIR_PROMPT
+# rule #1), which causes the section-writer LLM to discard the uploaded
+# document's party names, court, case number, and statutory citations —
+# defaulting to a generic template (observed on smoke: Master Services
+# Agreement / Contract-Analysis Memorandum output for a Section 290 BNSS
+# plea-bargaining application). Prepending the override at the system
+# prompt level flips the framing before the default rules are read.
+_REVIEW_AND_REDRAFT_MODE_OVERRIDE = """## MODE OVERRIDE — REVIEW-AND-REDRAFT OF THE USER'S OWN UPLOADED DOCUMENT
+
+The user uploaded a legal document AND explicitly asked you to REVIEW it for legal errors + REDRAFT the corrected version. This is NOT a fresh drafting task. The uploaded document is the FORMAT ANCHOR, the FACT ANCHOR, and the IDENTITY ANCHOR of your output.
+
+The rules below (in the default drafting system prompt) frame REFERENCE DRAFT as "from a DIFFERENT matter — MUST NOT appear in your output". In THIS mode that framing is INVERTED:
+
+  - The REFERENCE DRAFT and the UPLOADED SOURCE DOCUMENTS are the SAME document — the user's own file.
+  - PRESERVE every party name, court name, case number, forum, statutory citation, Act name, section number, address, date, and monetary amount from that document VERBATIM in your output.
+  - Your job is to CORRECT the substantive legal errors and formatting in that document — nothing more.
+  - Common corrections in scope: wrong statute cited for the relief, wrong Act name / wrong section number, misidentified chapter / part, missing procedural block (verification / prayer / cause title), misstated law, missing landmark-precedent citation.
+  - OUT OF SCOPE: changing the document type. If the user uploaded a plea-bargaining application, produce a corrected plea-bargaining application. If they uploaded a bail application, produce a corrected bail application. If they uploaded a rejoinder, produce a corrected rejoinder. NEVER convert their document to a Master Services Agreement, a Contract-Analysis Memorandum, an MOU, a lease deed, or any other template.
+  - Do NOT replace real values from the uploaded document with `[Placeholder]` / `[Date]` / `[Full Legal Name of Party A]` fields.
+  - Do NOT introduce boilerplate WHEREAS / NOW THEREFORE / IN WITNESS WHEREOF blocks unless the uploaded document itself uses them.
+  - When adding landmark Supreme Court case-law citations, add them inline where they support the legal argument, NOT as a bibliography appendix at the end.
+
+If any rule in the default drafting system prompt below CONTRADICTS this MODE OVERRIDE, this MODE OVERRIDE wins."""
+
+
+# ---------------------------------------------------------------------------
 # Input sanitisation (used by the ES `match` query in `_acquire_reference_draft`)
 # ---------------------------------------------------------------------------
 
@@ -577,6 +654,7 @@ async def _generate_single_pass(
     user_language: str,
     progress_emit,
     gathered_context: dict[str, str] | None = None,
+    review_and_redraft_mode: bool = False,
 ) -> str:
     """Produce the full document in one Gemini 2.5 Pro call.
 
@@ -595,6 +673,15 @@ async def _generate_single_pass(
     from langchain_core.messages import SystemMessage, HumanMessage
 
     system_prompt = localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language, user_intent)
+    if review_and_redraft_mode:
+        # The default system prompt frames REFERENCE DRAFT as "from a
+        # different matter — MUST NOT appear in your output". In
+        # review-and-redraft mode the reference IS the uploaded document,
+        # so that default framing produces a generic template (Master
+        # Services Agreement / Contract-Analysis Memorandum) instead of a
+        # corrected version of the uploaded document. Prepend a MODE
+        # OVERRIDE that flips the framing at the system-prompt level.
+        system_prompt = _REVIEW_AND_REDRAFT_MODE_OVERRIDE + "\n\n---\n\n" + system_prompt
 
     source_docs_block = ""
     if user_facts and user_facts.strip():
@@ -610,15 +697,36 @@ async def _generate_single_pass(
             f"{user_facts.strip()}\n\n"
         )
 
-    reference_block = (
-        "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
-        "IGNORE every name, date, address, amount, party detail, and case-"
-        "specific value in this block. They belong to a different person's "
-        "matter and MUST NOT appear in your output. Use ONLY the reference's "
-        "shape: section ordering, headings, salutations, conventions, "
-        "phrasing patterns, and statutory-citation style.)\n"
-        f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and uploaded source documents alone, following Indian-law conventions for the document type)'}\n\n"
-    )
+    if review_and_redraft_mode:
+        # The reference draft IS the uploaded document. The user is asking
+        # us to REVIEW-AND-REDRAFT their own document — every party name,
+        # court name, case number, statutory citation, and case-specific
+        # detail must be PRESERVED VERBATIM. Only the substantive legal
+        # errors and formatting are to be corrected.
+        reference_block = (
+            "## REFERENCE DRAFT (this is the SAME document the user uploaded — "
+            "the user is performing a REVIEW-AND-REDRAFT of THEIR OWN document. "
+            "PRESERVE every party name, court name, case number, forum, statutory "
+            "citation, address, date, monetary amount, and case-specific detail "
+            "in this block VERBATIM. Correct ONLY the substantive legal errors "
+            "(wrong statute, wrong Act name, missing procedural section, "
+            "misstated law, missing verification / prayer conventions) and the "
+            "formatting. Do NOT rewrite this as a generic template. Do NOT "
+            "replace real values with `[placeholders]`. Do NOT introduce a "
+            "contract-analysis / memorandum / MOU / lease-deed shape unless the "
+            "uploaded document itself is one of those.)\n"
+            f"{reference_draft.strip()}\n\n"
+        )
+    else:
+        reference_block = (
+            "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
+            "IGNORE every name, date, address, amount, party detail, and case-"
+            "specific value in this block. They belong to a different person's "
+            "matter and MUST NOT appear in your output. Use ONLY the reference's "
+            "shape: section ordering, headings, salutations, conventions, "
+            "phrasing patterns, and statutory-citation style.)\n"
+            f"{reference_draft.strip() if reference_draft else '(no reference draft available — produce the document from the user query and uploaded source documents alone, following Indian-law conventions for the document type)'}\n\n"
+        )
 
     # Gathered context — relevant statutes / judgments retrieved by the
     # domain agents' own ES tools. Injected BEFORE the reference / source
@@ -925,6 +1033,7 @@ async def _generate_section_pair(
     gathered_context: dict[str, str] | None,
     user_intent,
     user_language: str,
+    review_and_redraft_mode: bool = False,
 ) -> str:
     """Produce 1 or 2 consecutive sections of the document in one Gemini
     2.5 Pro call. Mirrors the safety / retry pattern of single-pass.
@@ -941,6 +1050,14 @@ async def _generate_section_pair(
     system_prompt = localize_prompt(
         DRAFTING_SECTION_PAIR_PROMPT, user_language, user_intent,
     )
+    if review_and_redraft_mode:
+        # See rationale in _generate_single_pass — the section-pair prompt
+        # carries the same "REFERENCE DRAFT belongs to a DIFFERENT matter"
+        # framing (config/prompts.py DRAFTING_SECTION_PAIR_PROMPT rule #1)
+        # that must be flipped at the system-prompt level for review-and-
+        # redraft mode to actually preserve the uploaded document's
+        # party names, court, case number, etc.
+        system_prompt = _REVIEW_AND_REDRAFT_MODE_OVERRIDE + "\n\n---\n\n" + system_prompt
 
     section_lines: list[str] = []
     for offset, sec in enumerate(sections_to_write):
@@ -981,13 +1098,29 @@ async def _generate_section_pair(
                 + "\n"
             )
 
-    reference_block = (
-        "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
-        "IGNORE every name, date, address, amount, party detail in this block. "
-        "Use ONLY the reference's shape: section ordering, headings, conventions, "
-        "phrasing patterns, and statutory-citation style.)\n"
-        f"{reference_draft.strip() if reference_draft else '(no reference draft available — follow Indian-law conventions for the document type)'}\n\n"
-    )
+    if review_and_redraft_mode:
+        reference_block = (
+            "## REFERENCE DRAFT (this is the SAME document the user uploaded — "
+            "the user is performing a REVIEW-AND-REDRAFT of THEIR OWN document. "
+            "PRESERVE every party name, court name, case number, forum, statutory "
+            "citation, address, date, monetary amount, and case-specific detail "
+            "VERBATIM. Correct ONLY the substantive legal errors (wrong statute, "
+            "wrong Act name, missing procedural section, misstated law, missing "
+            "verification / prayer conventions) and formatting. Do NOT rewrite "
+            "this as a generic template. Do NOT replace real values with "
+            "`[placeholders]`. Do NOT introduce a contract-analysis / "
+            "memorandum / MOU / lease-deed shape unless the uploaded document "
+            "itself is one of those.)\n"
+            f"{reference_draft.strip()}\n\n"
+        )
+    else:
+        reference_block = (
+            "## REFERENCE DRAFT (STRUCTURE-ONLY example from a different matter — "
+            "IGNORE every name, date, address, amount, party detail in this block. "
+            "Use ONLY the reference's shape: section ordering, headings, conventions, "
+            "phrasing patterns, and statutory-citation style.)\n"
+            f"{reference_draft.strip() if reference_draft else '(no reference draft available — follow Indian-law conventions for the document type)'}\n\n"
+        )
 
     if prior_text and prior_text.strip():
         prior_block = (
@@ -1127,6 +1260,7 @@ async def _generate_sectionwise(
     user_language: str,
     progress_emit,
     gathered_context: dict[str, str] | None,
+    review_and_redraft_mode: bool = False,
 ) -> str:
     """Walk the section list in pairs of two (last is solo if odd).
 
@@ -1168,6 +1302,7 @@ async def _generate_sectionwise(
                 gathered_context=gathered_context,
                 user_intent=user_intent,
                 user_language=user_language,
+                review_and_redraft_mode=review_and_redraft_mode,
             )
         except Exception as e:
             log.warning(
@@ -1193,6 +1328,7 @@ async def _generate_draft(
     user_language: str,
     progress_emit,
     gathered_context: dict[str, str] | None = None,
+    review_and_redraft_mode: bool = False,
 ) -> str:
     """Thin dispatcher: judge call decides single-pass vs section-wise.
 
@@ -1222,6 +1358,7 @@ async def _generate_draft(
             user_language=user_language,
             progress_emit=progress_emit,
             gathered_context=gathered_context,
+            review_and_redraft_mode=review_and_redraft_mode,
         )
 
     log.info(
@@ -1243,6 +1380,7 @@ async def _generate_draft(
         user_language=user_language,
         progress_emit=progress_emit,
         gathered_context=gathered_context,
+        review_and_redraft_mode=review_and_redraft_mode,
     )
 
 
@@ -1359,10 +1497,19 @@ async def drafting_node(state: LegalAgentState) -> dict:
     await _AGENT_SEMAPHORE.acquire()
 
     try:
-        # --- 4. In parallel: acquire reference draft AND gather relevant
-        # legal context (statutes + judgments retrieved via the same ES
-        # tools the domain agents use). Both are independent retrievals;
-        # running them concurrently saves ~5s wall time vs sequential.
+        # --- 4. Reference draft acquisition + relevant-context gather.
+        #
+        # Two branches:
+        #
+        #   (a) REVIEW-AND-REDRAFT of an uploaded document: the uploaded
+        #       document IS the reference the user wants preserved. Skip the
+        #       ES picker + web fallback (both discard the format the user
+        #       already showed us — see _is_review_and_redraft_of_upload).
+        #       Only gather relevant legal context (statutes + precedents).
+        #
+        #   (b) Fresh draft (or upload without review verbs): existing
+        #       parallel gather — ES picker → web fallback for reference,
+        #       plus context retrieval.
         #
         # No case-fact extraction step. The raw `user_facts` blob (verbatim
         # extracted text of every uploaded document) flows straight into
@@ -1370,19 +1517,56 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # multi-100K-char PDFs, and the raw source is required for tasks
         # like rejoinder / para-wise reply where the model must walk the
         # source paragraph-by-paragraph.
-        progress("drafting", "Searching templates and relevant law...",
-                 step="reference")
-        (reference_text, reference_source, reference_kind), gathered_ctx = \
-            await asyncio.gather(
-                _acquire_reference_draft(
-                    query,
-                    progress,
-                    user_language=user_language,
-                    intent=intent_obj,
-                    original_query=original_query,
-                ),
-                _gather_relevant_context(query),
+        use_upload_as_ref = _is_review_and_redraft_of_upload(
+            original_query, user_facts
+        )
+        if use_upload_as_ref:
+            # Restore the raw user prompt for downstream generation. The
+            # per-agent rewriter compresses "Review the attached word document
+            # and Find out every legal error from the application and redraft
+            # with removing all legal error and with most relevant and
+            # landmark case laws of supreme court" into a topic-loose
+            # "Redraft legal document to remove all legal errors, incorporating
+            # relevant Supreme Court landmark cases", which the fanout judge
+            # and section-writer LLM cannot anchor to the actual matter
+            # (Section 290 BNSS plea bargaining / MV Act 185 in the smoke).
+            # The result was a generic contract-analysis memorandum even
+            # though the reference draft was correctly set to the uploaded
+            # DOCX. Per feedback_preserve_user_query: never lose information
+            # from the user's prompt anywhere in the pipeline.
+            if query != original_query:
+                log.info(
+                    "Review-and-redraft mode: restoring raw prompt for downstream",
+                    rewritten_len=len(query), raw_len=len(original_query),
+                )
+                query = original_query
+            log.info(
+                "Review-and-redraft mode: uploaded document is the reference",
+                query_len=len(original_query), user_facts_chars=len(user_facts),
             )
+            progress(
+                "drafting",
+                "Using uploaded document as the reference (review-and-redraft mode)",
+                step="reference",
+            )
+            reference_text = user_facts
+            reference_source = "<uploaded:review_and_redraft>"
+            reference_kind = "uploaded"
+            gathered_ctx = await _gather_relevant_context(query)
+        else:
+            progress("drafting", "Searching templates and relevant law...",
+                     step="reference")
+            (reference_text, reference_source, reference_kind), gathered_ctx = \
+                await asyncio.gather(
+                    _acquire_reference_draft(
+                        query,
+                        progress,
+                        user_language=user_language,
+                        intent=intent_obj,
+                        original_query=original_query,
+                    ),
+                    _gather_relevant_context(query),
+                )
         if gathered_ctx:
             progress(
                 "drafting",
@@ -1394,6 +1578,13 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # --- 5. Generation (Gemini 2.5 Pro) with raw source + gathered context.
         # The dispatcher picks single-pass or per-section fan-out based on
         # `_judge_fanout`. Raw `user_facts` is threaded through both paths.
+        #
+        # `use_upload_as_ref` propagates to the generators so the reference
+        # block wording flips to "PRESERVE these values verbatim" instead of
+        # the default "IGNORE these values (they belong to a different
+        # matter)". Without this flip, the section writer receives the
+        # uploaded doc twice (once as reference, once as source) with
+        # contradictory directives and falls back to a generic template.
         draft = await _generate_draft(
             query=query,
             user_facts=user_facts,
@@ -1402,6 +1593,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             user_language=user_language,
             progress_emit=progress,
             gathered_context=gathered_ctx,
+            review_and_redraft_mode=use_upload_as_ref,
         )
 
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
@@ -1409,7 +1601,24 @@ async def drafting_node(state: LegalAgentState) -> dict:
         draft, draft_warnings = validate_draft(draft)
 
         # --- 7. self_refine — the scope critic + audit pass against UserIntent ---
-        if draft and intent_obj is not None:
+        #
+        # Skipped in review-and-redraft mode. The critic is calibrated against
+        # a "fresh draft produced from scratch" — it expects things like a
+        # full landmark-precedent block, standard prayer/verification wording,
+        # or specific procedural blocks the user's uploaded document may
+        # legitimately have omitted. When the user's task is "review my
+        # existing document and correct the legal errors", the critic
+        # reliably fires 3+ violations against the correct section-writer
+        # output, and the refiner then wholesale rewrites the corrected draft
+        # into a generic template (observed on smoke: Master Services
+        # Agreement / Contract-Analysis Memorandum replacing the Section 290
+        # BNSS plea-bargaining redraft that the section writer had produced
+        # correctly — confirmed via SECTION_PAIR_PEEK diagnostic).
+        #
+        # Long-term the critic prompt should gain a review-and-redraft mode
+        # branch that trusts the uploaded document's shape; for now the
+        # cleanest fix is to short-circuit the loop.
+        if draft and intent_obj is not None and not use_upload_as_ref:
             try:
                 progress(
                     "drafting",
@@ -1434,6 +1643,11 @@ async def drafting_node(state: LegalAgentState) -> dict:
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))
+        elif use_upload_as_ref:
+            log.info(
+                "Review-and-redraft mode: self_refine skipped "
+                "(critic reliably rewrites correct redrafts into generic templates)"
+            )
 
         # --- 9. Build AgentResult with source attribution ---
         if reference_kind == "es":
@@ -1445,6 +1659,15 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 file_name=reference_source,
                 agent_name="Drafting",
                 template_type=template_display,
+            )]
+        elif reference_kind == "uploaded":
+            sources = [SourceMetadata(
+                source_type="drafting",
+                title="Reference draft (uploaded document — review-and-redraft mode)",
+                content=[reference_text[:300]] if reference_text else [],
+                file_name=reference_source,
+                agent_name="Drafting",
+                template_type="uploaded",
             )]
         else:
             sources = [SourceMetadata(

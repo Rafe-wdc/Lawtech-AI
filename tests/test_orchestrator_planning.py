@@ -127,6 +127,7 @@ class TestE2EFintechCasePack:
         result = await orch_module.orchestrator_plan_node(state)
         plan = result.get("tasks_planned") or [result.get("task")]
 
+        # Phase 1 invariant: not collapsed to SCI_Judgment alone
         assert plan != ["SCI_Judgment"], (
             f"Bug signature: 12-part fintech prompt collapsed to "
             f"['SCI_Judgment']. Pre-check may have been re-added. Plan: {plan}"
@@ -135,8 +136,32 @@ class TestE2EFintechCasePack:
             f"Multi-task case-pack prompt planned only {len(plan)} agent(s): "
             f"{plan}. Expected >=2 agents."
         )
-        expected_any = {"Drafting", "Newacts", "Legislation", "Legal_Concepts"}
-        assert expected_any & set(plan), (
-            f"Plan {plan} contains none of {expected_any}. LLM planner "
-            f"did not decompose the 12-part prompt correctly."
+
+        # Phase 2 invariant: Drafting agent must be in the plan for a
+        # prompt that names four draftable documents (FIR / seizure /
+        # arrest / charge sheet). If the intent extractor regresses to
+        # task_intent="analyze" for mixed-intent prompts, or the case-
+        # pack strip re-tightens to drop non-Drafting agents, this
+        # assertion catches it.
+        assert "Drafting" in plan, (
+            f"Phase 2 regression: 4-draft prompt did NOT plan Drafting. "
+            f"Plan: {plan}. Root cause likely one of: (a) intent extractor "
+            f"classified task_intent!='draft' for a mixed-intent prompt "
+            f"(check config/prompts.py MIXED-INTENT rule), (b) case-pack "
+            f"strip at orchestrator.py line ~1315 became over-aggressive."
+        )
+
+        # Phase 2 invariant: at least one content agent co-planned with
+        # Drafting (the case-pack asks for statutory + case-law content
+        # alongside the drafts). If ALL content agents get stripped, we
+        # revert to the pre-Phase-2 behavior of drafts-only.
+        content_agents = {"Newacts", "Legislation", "Judgment",
+                          "SCI_Judgment", "Legal_Concepts", "Scenario"}
+        assert content_agents & set(plan), (
+            f"Phase 2 regression: Drafting is planned but ALL content "
+            f"agents ({content_agents}) were stripped. Plan: {plan}. "
+            f"Check the case-pack heuristic at orchestrator.py line ~1315 "
+            f"— when the user's intent shows wants_statute_text / "
+            f"include_case_law / wants_supreme_court etc., co-planned "
+            f"content agents must be kept alongside Drafting."
         )

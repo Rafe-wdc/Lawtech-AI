@@ -1312,9 +1312,38 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                      citation_agents=citation_agents,
                      source="request" if _flag is not None else "env_default")
         else:
-            tasks_planned = [t for t in tasks_planned if t == "Drafting" or t == "Document"][:3]
-            log.info("Drafting citation appendix skipped",
-                     source="request" if _flag is not None else "env_default")
+            # Case-pack heuristic (2026-07-26): the citation-appendix strip
+            # was over-aggressive for prompts that ask for BOTH drafts AND
+            # explanatory content (statute text / case law / SC judgments /
+            # etc.) in the same message. Example: "Identify BNS offences,
+            # discuss IT Act, ... draft FIR + seizure memo + arrest memo +
+            # charge sheet, cite SC judgments." The user wants a full case
+            # pack, not a citation-free draft. If any typed content flag
+            # is set, keep the co-planned content agents — they are the
+            # authoritative source for their content type, not a redundant
+            # citation layer that _gather_relevant_context can substitute.
+            _wants_extra_content = extracted_intent is not None and (
+                extracted_intent.wants_statute_text
+                or extracted_intent.include_case_law
+                or extracted_intent.wants_constitution
+                or extracted_intent.wants_maxim
+                or extracted_intent.wants_supreme_court
+                or extracted_intent.wants_gst_rulings
+                or extracted_intent.wants_scenario_analysis
+            )
+            if _wants_extra_content:
+                tasks_planned = tasks_planned[:4]
+                log.info(
+                    "Drafting + case-pack content agents co-planned "
+                    "(typed intent shows user wants explanatory content "
+                    "alongside the draft)",
+                    source="request" if _flag is not None else "env_default",
+                    agents=tasks_planned,
+                )
+            else:
+                tasks_planned = [t for t in tasks_planned if t == "Drafting" or t == "Document"][:3]
+                log.info("Drafting citation appendix skipped",
+                         source="request" if _flag is not None else "env_default")
     else:
         # Bumped from [:3] to [:4] on 2026-06-30 so multi-intent enrichment
         # can fan out to BOTH SCI_Judgment AND Judgment alongside the

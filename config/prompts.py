@@ -965,20 +965,44 @@ Given the user's query and the recent conversation summary, produce:
        the BEST single match:
 
        "draft"            user wants the AI to PRODUCE a court-filing-ready
-                          legal document (plaint, petition, written statement,
-                          bail application, affidavit, legal notice, agreement,
-                          contract, deed, MOU, will, divorce petition, complaint,
-                          rejoinder, etc.) — paired with an EXPLICIT production
-                          verb: "draft", "write", "prepare", "create",
-                          "generate", "compose", "draw up", "give me a <doc>",
-                          "I need a <doc>", "prepare a <doc>", and ANY native-
-                          language equivalents ("बनवा / तयार कर / लिखो /
-                          draft kar do / banao"). The verb-noun pairing must be
-                          there. "What's in this plaint?" is NOT a draft
-                          request. "Format of an affidavit" is NOT a draft
-                          request. "Cross-examination questions" is NOT a draft
-                          request (those are tactical/analytical — use
-                          "analyze").
+                          legal document OR a police-station document (plaint,
+                          petition, written statement, bail application,
+                          affidavit, legal notice, agreement, contract, deed,
+                          MOU, will, divorce petition, complaint, rejoinder,
+                          FIR, seizure memo, arrest memo, charge sheet,
+                          panchnama, remand application, etc.) — paired with
+                          an EXPLICIT production verb: "draft", "write",
+                          "prepare", "create", "generate", "compose", "draw
+                          up", "give me a <doc>", "I need a <doc>", "prepare
+                          a <doc>", and ANY native-language equivalents
+                          ("बनवा / तयार कर / लिखो / draft kar do / banao").
+                          The verb-noun pairing must be there. "What's in
+                          this plaint?" is NOT a draft request. "Format of
+                          an affidavit" is NOT a draft request. "Cross-
+                          examination questions" is NOT a draft request
+                          (those are tactical/analytical — use "analyze").
+
+                          IMPORTANT — MIXED-INTENT PROMPTS: A prompt can ask
+                          for BOTH explanatory work AND one-or-more explicit
+                          draft requests in the SAME message. Example:
+                          "Identify every applicable offence under BNS.
+                          Discuss the IT Act provisions. Explain investigation
+                          procedure. ... Draft FIR. Draft seizure memo.
+                          Draft arrest memo. Draft charge sheet. Relevant
+                          Supreme Court judgments." — here the user wants
+                          BOTH statutory analysis AND four drafted documents.
+                          Whenever the prompt contains ANY explicit
+                          production-verb + document-noun pair, set
+                          task_intent="draft" — even if the prompt has
+                          multiple explanatory asks (identify / discuss /
+                          explain / describe / analyze) that outnumber the
+                          draft asks. Reason: drafting output needs the
+                          specialist Drafting agent (template picking,
+                          per-section fan-out, self_refine); the explanatory
+                          asks can be co-planned alongside via other agents.
+                          Do NOT downgrade to "analyze" / "explain" just
+                          because explanatory verbs outnumber draft verbs
+                          by count.
        "analyze"          tactical / situational legal analysis: arguments,
                           defences, remedies, recommendations, "what should I
                           do", "what are my options", "what defences are
@@ -1013,7 +1037,12 @@ Given the user's query and the recent conversation summary, produce:
        "other"            default — none of the above clearly applies.
 
        Be CONSERVATIVE: when in doubt between "draft" and "explain", pick
-       "explain". When in doubt between "analyze" and "lookup", pick "lookup".
+       "explain" — EXCEPT when the prompt contains ANY explicit production-
+       verb + document-noun pair anywhere in it (e.g. "draft FIR", "prepare
+       notice", "write charge sheet", "prepare seizure memo"); in that
+       case pick "draft" per the MIXED-INTENT rule above, regardless of the
+       overall balance of explanatory vs drafting asks. When in doubt
+       between "analyze" and "lookup", pick "lookup".
 
    wants_statute_text — TRUE iff the user wants statutory text / a specific
        section / specific act provisions surfaced. Triggers (any language):

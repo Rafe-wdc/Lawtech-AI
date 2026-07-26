@@ -526,14 +526,36 @@ async def document_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        log.error("Agent failed",
-                  collection=unique_string, error=str(e), exc_info=True)
-        result = AgentResult(
-            agent_name="Document",
-            content="",
-            sources=[],
-            tokens_consumed=0,
-            error=str(e),
-        )
+        err_str = str(e).lower()
+        # Gemini 400 INVALID_ARGUMENT when combined docs exceed the model's
+        # 1M-token context. Surface a user-actionable message instead of the
+        # raw SDK error, which is opaque and not fixable by retrying.
+        if "input token count" in err_str and "maximum" in err_str:
+            log.warning("Document input exceeded model context limit",
+                        collection=unique_string, error=str(e)[:200])
+            friendly_msg = (
+                "The uploaded documents are too large to analyze in a "
+                "single response — they exceed the model's context limit. "
+                "Please narrow your question to a specific section (for "
+                "example, \"summarize the arguments on page 4\" or \"what "
+                "does clause 7 say\"), or upload smaller documents so I "
+                "can process them properly."
+            )
+            result = AgentResult(
+                agent_name="Document",
+                content=friendly_msg,
+                sources=[],
+                tokens_consumed=0,
+            )
+        else:
+            log.error("Agent failed",
+                      collection=unique_string, error=str(e), exc_info=True)
+            result = AgentResult(
+                agent_name="Document",
+                content="",
+                sources=[],
+                tokens_consumed=0,
+                error=str(e),
+            )
 
     return {"agent_results": {"Document": result}}

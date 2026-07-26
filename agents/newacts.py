@@ -719,7 +719,10 @@ async def newacts_node(state: LegalAgentState) -> dict:
                         hits = await asyncio.to_thread(_build_and_search)
                 except Exception as es_err:
                     err_msg = str(es_err).lower()
-                    if "embedding" in err_msg or "script" in err_msg or "illegal_argument" in err_msg:
+                    if any(k in err_msg for k in (
+                        "embedding", "script", "illegal_argument",
+                        "compile error", "class_cast",
+                    )):
                         log.warning("Hybrid search failed, falling back to BM25-only",
                                     error=str(es_err))
                         bm25_result = await asyncio.to_thread(

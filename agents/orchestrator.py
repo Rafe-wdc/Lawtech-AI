@@ -1047,25 +1047,23 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         or any(_orig_stripped.startswith(g + " ") and len(_orig_stripped) < 30 for g in _GREETING_EXACT)
     )
 
-    _SCI_STRONG_KEYWORDS = (
-        "supreme court judgment", "supreme court case", "supreme court ruling",
-        "supreme court ruled", "supreme court held", "supreme court order",
-        "sc judgment", "sc case", "sc ruling", "hon'ble sc",
-        "article 136", "supreme court of india", "apex court judgment",
-        "apex court ruling", "supreme court bench",
-    )
     _orig_lower = _original_query.lower()
-    is_sci = any(k in _orig_lower for k in _SCI_STRONG_KEYWORDS)
 
     fc = FileContextData.from_state(state)
 
     # Intent extractor result (Phase 1, telemetry-only). Stays None on the
-    # short-circuit paths (greeting / SCI / skip-normalize) and on extractor
+    # short-circuit paths (greeting / skip-normalize) and on extractor
     # failures. Populated only inside the parallel-gather path below when
     # INTENT_EXTRACTOR_V2 is on.
     extracted_intent: UserIntent | None = None
 
-    # --- Short-circuit: greeting or SCI pre-check resolved ---
+    # The SCI keyword pre-check (removed 2026-07-26) substring-matched
+    # "supreme court judgment" anywhere in the query and hardcoded
+    # tasks_planned=["SCI_Judgment"], collapsing multi-task case-pack prompts
+    # ("draft FIR + charge sheet + cite Supreme Court judgments") to one
+    # agent. Rule 7 of CLASSIFY_AND_PLAN_PROMPT already routes pure SCI
+    # lookups correctly; the ~2s latency saving was not worth the collapse.
+    # --- Short-circuit: greeting resolved ---
     if is_greeting:
         log.info("Greeting detected, short-circuiting classification",
                  original=_original_query[:60])
@@ -1078,13 +1076,6 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             log.info("Non-legal overridden to Document due to file context")
             task = "Document"
             tasks_planned = ["Document"]
-
-    elif is_sci:
-        log.info("SCI pre-check triggered, skipping LLM classification",
-                 query=query[:80])
-        task = "SCI_Judgment"
-        tasks_planned = ["SCI_Judgment"]
-        response_instructions = ""
 
     else:
         # --- Change 3: Skip normalization for English queries ---

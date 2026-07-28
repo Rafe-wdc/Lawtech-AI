@@ -28,6 +28,21 @@ from core.logger import get_logger
 log = get_logger("ChatStore")
 
 
+def _pg_safe_str(value) -> str:
+    """Coerce to string, drop None, strip NUL bytes.
+
+    PostgreSQL text fields reject 0x00 bytes with an explicit error.
+    OCR output on scanned PDFs occasionally contains embedded NULs that
+    make it into `extracted_text` (or, defensively, any other string
+    field). Strip them at the write boundary so a single bad byte in a
+    100-page scan doesn't blow up the `thread_files` insert.
+    """
+    if value is None:
+        return ""
+    s = value if isinstance(value, str) else str(value)
+    return s.replace("\x00", "") if "\x00" in s else s
+
+
 # --- Return type ---
 
 @dataclass
@@ -503,20 +518,20 @@ class _SqliteChatHistoryStore:
                         upload_error  = excluded.upload_error
                 """, (
                     thread_id,
-                    getattr(pf, "file_id", "") or "",
-                    getattr(pf, "original_name", "") or "",
-                    getattr(pf, "file_type", "") or "",
-                    getattr(pf, "mime_type", "") or "",
+                    _pg_safe_str(getattr(pf, "file_id", "")),
+                    _pg_safe_str(getattr(pf, "original_name", "")),
+                    _pg_safe_str(getattr(pf, "file_type", "")),
+                    _pg_safe_str(getattr(pf, "mime_type", "")),
                     getattr(pf, "size_bytes", 0) or 0,
-                    getattr(pf, "local_path", "") or "",
-                    getattr(pf, "extracted_text", "") or "",
-                    getattr(pf, "chromadb_collection", "") or "",
-                    getattr(pf, "gemini_uri", "") or "",
-                    getattr(pf, "gemini_name", "") or "",
-                    getattr(pf, "gemini_expiry", "") or "",
+                    _pg_safe_str(getattr(pf, "local_path", "")),
+                    _pg_safe_str(getattr(pf, "extracted_text", "")),
+                    _pg_safe_str(getattr(pf, "chromadb_collection", "")),
+                    _pg_safe_str(getattr(pf, "gemini_uri", "")),
+                    _pg_safe_str(getattr(pf, "gemini_name", "")),
+                    _pg_safe_str(getattr(pf, "gemini_expiry", "")),
                     int(getattr(pf, "gemini_supported", False) or False),
                     getattr(pf, "page_count", 0) or 0,
-                    getattr(pf, "error", "") or "",
+                    _pg_safe_str(getattr(pf, "error", "")),
                 ))
                 conn.commit()
                 log.debug("Thread file saved",
@@ -1817,20 +1832,20 @@ class _PostgresChatHistoryStore:
                     upload_error  = EXCLUDED.upload_error
             """, (
                 thread_id,
-                getattr(pf, "file_id", "") or "",
-                getattr(pf, "original_name", "") or "",
-                getattr(pf, "file_type", "") or "",
-                getattr(pf, "mime_type", "") or "",
+                _pg_safe_str(getattr(pf, "file_id", "")),
+                _pg_safe_str(getattr(pf, "original_name", "")),
+                _pg_safe_str(getattr(pf, "file_type", "")),
+                _pg_safe_str(getattr(pf, "mime_type", "")),
                 getattr(pf, "size_bytes", 0) or 0,
-                getattr(pf, "local_path", "") or "",
-                getattr(pf, "extracted_text", "") or "",
-                getattr(pf, "chromadb_collection", "") or "",
-                getattr(pf, "gemini_uri", "") or "",
-                getattr(pf, "gemini_name", "") or "",
-                getattr(pf, "gemini_expiry", "") or "",
+                _pg_safe_str(getattr(pf, "local_path", "")),
+                _pg_safe_str(getattr(pf, "extracted_text", "")),
+                _pg_safe_str(getattr(pf, "chromadb_collection", "")),
+                _pg_safe_str(getattr(pf, "gemini_uri", "")),
+                _pg_safe_str(getattr(pf, "gemini_name", "")),
+                _pg_safe_str(getattr(pf, "gemini_expiry", "")),
                 int(getattr(pf, "gemini_supported", False) or False),
                 getattr(pf, "page_count", 0) or 0,
-                getattr(pf, "error", "") or "",
+                _pg_safe_str(getattr(pf, "error", "")),
             ))
             conn.commit()
             log.debug("Thread file saved",

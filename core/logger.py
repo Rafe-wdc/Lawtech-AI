@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 import uuid
 from contextvars import ContextVar
@@ -125,6 +126,22 @@ class StructuredLogger:
     def _log(self, level: int, msg: str, kwargs: dict[str, Any], exc_info=None):
         if not self._logger.isEnabledFor(level):
             return
+        # Honor stdlib logging conventions for `exc_info` before handing
+        # the record to makeRecord, which expects either None or a
+        # (type, value, tb) 3-tuple. Without this coercion, call sites
+        # that pass `exc_info=True` (the idiomatic form used in ~38 places
+        # across the codebase) end up with record.exc_info = True, and
+        # the AgentFormatter later crashes in stdlib's formatException
+        # with `TypeError: 'bool' object is not subscriptable`. That
+        # shadows the ORIGINAL exception the caller was trying to log
+        # (e.g. a Gemini 429), which is significantly worse than the
+        # original error itself. See stdlib Logger._log for the canonical
+        # coercion — we mirror it here.
+        if exc_info:
+            if isinstance(exc_info, BaseException):
+                exc_info = (type(exc_info), exc_info, exc_info.__traceback__)
+            elif not isinstance(exc_info, tuple):
+                exc_info = sys.exc_info()
         record = self._logger.makeRecord(
             self._logger.name,
             level,

@@ -1336,6 +1336,31 @@ async def _generate_draft(
     verbatim through to whichever generation strategy runs. Returns a
     single assembled string regardless of the strategy.
     """
+    # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens (~4M chars
+    # English). When user_facts alone approaches that ceiling, every
+    # downstream generation call — single-pass or per-section-pair — will
+    # 400 INVALID_ARGUMENT with "input token count exceeds maximum". The
+    # sectionwise path swallows those failures per-pair and continues,
+    # producing an empty or badly-holed draft. Short-circuit here with a
+    # user-actionable message instead. Budget: 3.5M chars leaves ~500K
+    # chars headroom for system prompt + reference draft + gathered
+    # context + query.
+    _USER_FACTS_CHAR_BUDGET = 3_500_000
+    if user_facts and len(user_facts) > _USER_FACTS_CHAR_BUDGET:
+        log.warning(
+            "Drafting user_facts exceeds token budget — returning friendly message",
+            facts_chars=len(user_facts),
+            budget=_USER_FACTS_CHAR_BUDGET,
+        )
+        return (
+            "The uploaded documents are too large to draft from in a "
+            "single response — they exceed the model's context limit. "
+            "Please narrow the drafting task to a specific section (for "
+            "example, \"draft a reply to paragraph 3 of the notice\"), "
+            "or upload smaller or fewer documents so I can process them "
+            "properly."
+        )
+
     strategy = await _judge_fanout(
         query=query,
         reference_draft=reference_draft,

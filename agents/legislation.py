@@ -385,7 +385,27 @@ async def legislation_node(state: LegalAgentState) -> dict:
             # --- Standard single-section path (use clean_query) ---
             progress("legislation", "Searching legislation database...", step="search")
             with log_time(log, "ES retrieval"):
-                hits, source_name = await asyncio.to_thread(_search_legislation, clean_query, named_acts)
+                try:
+                    hits, source_name = await asyncio.to_thread(_search_legislation, clean_query, named_acts)
+                except Exception as es_err:
+                    err_msg = str(es_err).lower()
+                    # Query-shape failures ES can throw on long / complex
+                    # queries: `too_many_clauses`, `maxClauseCount`,
+                    # `compile error`, `class_cast_exception`. Any of these
+                    # mean "this query is not answerable by ES as built" —
+                    # let the empty-hits path below trigger topic-search
+                    # and then web fallback instead of failing the whole
+                    # agent with an opaque 400.
+                    if any(k in err_msg for k in (
+                        "maxclausecount", "too_many_clauses",
+                        "compile error", "class_cast",
+                    )):
+                        log.warning("Legislation ES retrieval failed on query shape — "
+                                    "falling through to topic/web fallback",
+                                    error=str(es_err)[:200])
+                        hits, source_name = [], None
+                    else:
+                        raise
 
         # Step 3: Topic fallback if no hits and no section was identified
         if not hits and not multi_parsed:

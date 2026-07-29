@@ -1380,6 +1380,24 @@ user's ask requires) document in a single response.
 10. PLAIN-TEXT OUTPUT WITH MARKDOWN. NO raw HTML. NO `<p>`, `<div>`,
     `<span>`, `<center>` tags. NO `align=` attributes. The frontend
     renders markdown only.
+
+11. HONOUR THE `## USER DIRECTIVES` BLOCK APPENDED BELOW.
+    - When it carries `USER DEPTH: comprehensive coverage ...`, produce a
+      SUBSTANTIVE full-length draft — 15+ numbered grounds where the
+      document type has grounds, 2-4 landmark Supreme Court citations
+      woven inline into grounds, full chronological Facts, character /
+      conduct paragraphs for bail-type drafts, custodial-interrogation
+      submissions for anticipatory bail, a Statutory-Framework section
+      that reproduces relied-upon provisions, and a Prayer with
+      multiple sub-lettered reliefs (main + interim + alternative +
+      costs + omnibus). Target assembled length: 20,000+ characters
+      (8-12 printed pages). A short skeleton draft when the user asked
+      for detail is a Rule-11 violation the critic will catch.
+    - When it carries `USER DEPTH: keep the response under 200 words`,
+      DO NOT expand — produce the shortest defensible draft.
+    - When no depth directive is present, use standard length.
+    - Absence of the USER DIRECTIVES block means no explicit directives
+      — default behaviour applies.
 """
 
 # Append the same Indian-legal discipline blocks the legacy prompt uses, so
@@ -1641,7 +1659,12 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
     - Do NOT add a separator line ("---") or any transition text ("Moving on to...") between them.
     - Each section starts with its own `## ` heading line.
 
-11. OUTPUT ONLY THE SECTION BODIES — no preamble, no postscript, no meta-commentary, no markdown fences. The orchestrator concatenates your output to DOCUMENT SO FAR verbatim.
+11. HONOUR THE `## USER DIRECTIVES` BLOCK APPENDED BELOW.
+    - When it carries `USER DEPTH: comprehensive coverage ...`, produce SUBSTANTIVE section bodies — for a Grounds section, emit as many grounds as this pair's fair share of a 15+ ground total (e.g. if this pair is Grounds + Prayer in an 8-section draft, this pair carries ~15 grounds in the Grounds half); for a Facts section, walk the source paragraph-by-paragraph chronologically; for a Prayer, enumerate multiple sub-lettered reliefs (main + interim + alternative + costs + omnibus); for a bail-type draft add character/conduct paragraphs and custodial-interrogation submissions. Weave 2-4 landmark Supreme Court precedents inline into grounds where doctrinally on point. Each ground is 3-5 sentences of substantive argument, not a one-line assertion. A skeleton section when the user asked for detail is a Rule-11 violation the critic will catch.
+    - When it carries `USER DEPTH: keep the response under 200 words`, keep this pair's output tight — do NOT expand.
+    - When no depth directive is present, use standard length.
+
+12. OUTPUT ONLY THE SECTION BODIES — no preamble, no postscript, no meta-commentary, no markdown fences. The orchestrator concatenates your output to DOCUMENT SO FAR verbatim.
 """
 
 # Append the same Indian-legal discipline blocks DRAFTING_SYSTEM_PROMPT uses,

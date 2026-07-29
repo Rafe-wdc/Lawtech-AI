@@ -1051,6 +1051,63 @@ violations specific to Indian drafting practice:
     the Code of Civil Procedure, 1908, and claim pre-suit interest
     from the date of the legal notice."
 
+  under_detailed_draft — [FIRES ONLY when `intent.response_depth == "detailed"`
+    AND the response is a legal draft (task_intent='draft' or the response is
+    clearly a draft).] The user explicitly asked for a DETAILED draft but the
+    output is skeletal — a competent short draft, not a comprehensive one.
+    Fires when ANY of the following holds on a document type that carries the
+    relevant structural feature:
+       GROUNDS section present but fewer than 15 numbered grounds, OR each
+       ground is a single sentence rather than a 3-5 sentence paragraph of
+       substantive argument. (Applies to writ petitions, plaints, bail /
+       anticipatory bail / regular bail applications, revisions, appeals,
+       counter-affidavits, review petitions.)
+       ZERO landmark Supreme Court precedents woven inline into the grounds
+       on a doc type where doctrinal anchors are expected. Anticipatory
+       bail without Gurbaksh Singh Sibbia / Siddharam Mhetre / Arnesh Kumar;
+       regular bail without Sanjay Chandra / Dataram Singh; writ quashing
+       without Bhajan Lal / R.P. Kapur — the omission is a MAJOR gap when
+       the user asked for detail.
+       FACTS section reduced to a single summary paragraph when the uploaded
+       source has multiple paragraph-level events, dates, complainants,
+       witnesses, recovered articles — the Facts should walk the source
+       chronologically, not compress.
+       Bail-type draft (anticipatory / regular / interim) MISSING character /
+       conduct paragraphs (applicant's roots in society, family ties,
+       occupation, clean record, willingness to cooperate) OR missing
+       custodial-interrogation submissions (why custodial is not required,
+       nothing to recover, cooperation offered, parity with released
+       co-accused). One or the other omission → MAJOR. Both missing →
+       CRITICAL.
+       PRAYER with only a single relief when the Facts + Grounds justify
+       main relief + interim relief + costs + omnibus. Detailed drafts
+       enumerate multiple sub-lettered reliefs.
+       STATUTORY-FRAMEWORK section absent or reduced to a single sentence
+       naming the statute — a detailed draft REPRODUCES the text of each
+       relied-upon provision and applies it to the matter.
+       ASSEMBLED LENGTH — the assembled draft body is under ~12,000
+       characters for a document type that carries multiple substantive
+       sections (writ, plaint, detailed bail, appeal, revision). Short
+       assembled length is a strong SIGNAL of under-detail; combine with
+       one or more of the above to flag under MAJOR (do not flag length
+       alone).
+    Severity: individual omissions are MAJOR; two or more concurrent
+    omissions on the same draft → CRITICAL. Suggested_fix must be
+    CONCRETE and reference the specific missing section / grounds /
+    citations by the doc type. Example: "Expand the Grounds section from
+    9 numbered grounds to 15+. Add a dedicated ground on custodial
+    interrogation not being required (nothing to recover, cooperation
+    offered, disclosure-statement-only case). Add character/conduct
+    paragraphs covering the Applicant's roots in Sirsa, occupation,
+    family ties, clean past record. Weave in Gurbaksh Singh Sibbia v.
+    State of Punjab (1980) 2 SCC 565 (the seminal test for anticipatory
+    bail), Siddharam Satlingappa Mhetre v. State of Maharashtra (2011)
+    1 SCC 694 (life and personal liberty under Article 21), and Arnesh
+    Kumar v. State of Bihar (2014) 8 SCC 273 (safeguards against
+    routine arrest). Add a Prayer sub-clause (b) for interim
+    anticipatory bail during pendency and sub-clause (c) omnibus
+    relief."
+
 For each, the suggested_fix should be concrete:
   - "Replace 'Section 38 SRA' with 'Order XXXIX Rules 1 & 2 CPC' in
      para 4.2 and re-state the three-fold injunction test."

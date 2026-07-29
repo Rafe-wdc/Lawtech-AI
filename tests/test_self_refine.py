@@ -115,6 +115,46 @@ class TestSkipWhenTrivial:
 
 
 # ---------------------------------------------------------------------------
+# CRITIQUE_PROMPT categories — presence pinning
+# ---------------------------------------------------------------------------
+
+class TestCritiqueCategories:
+    """The critic prompt carries a fixed set of category descriptions the
+    LLM uses to classify violations. When a new category is added, pin its
+    key phrases so a future prompt-cleanup PR doesn't silently drop the
+    trigger condition."""
+
+    def test_under_detailed_draft_category_present(self):
+        """Path-2 depth fix (2026-07-29) added `under_detailed_draft`.
+        Only fires when `intent.response_depth == 'detailed'` AND the
+        response is a legal draft."""
+        from core.self_refine import CRITIQUE_PROMPT
+        # Category name is the machine-readable field the LLM emits.
+        assert "under_detailed_draft" in CRITIQUE_PROMPT
+        # Trigger condition — only fires when depth=detailed.
+        assert "response_depth" in CRITIQUE_PROMPT
+        assert "detailed" in CRITIQUE_PROMPT
+        # Concrete asks the tester's anticipatory-bail complaint drove:
+        assert "15 numbered grounds" in CRITIQUE_PROMPT or "15+ numbered" in CRITIQUE_PROMPT
+        assert "Sibbia" in CRITIQUE_PROMPT  # anticipatory bail anchor
+        assert "custodial" in CRITIQUE_PROMPT.lower()
+        assert "character" in CRITIQUE_PROMPT.lower() or "conduct" in CRITIQUE_PROMPT.lower()
+
+    def test_prior_drafting_categories_preserved(self):
+        """Regression: the new category must not have displaced the
+        drafting-specific categories the pipeline already relied on."""
+        from core.self_refine import CRITIQUE_PROMPT
+        for cat in (
+            "forbidden_statute_pair",
+            "orphan_citation_tail",
+            "canonical_example_substitution",
+            "prayer_relief_mismatch",
+            "prayer_generic_boilerplate",
+        ):
+            assert cat in CRITIQUE_PROMPT, f"category {cat!r} missing"
+
+
+# ---------------------------------------------------------------------------
 # _format_violations — refiner prompt rendering
 # ---------------------------------------------------------------------------
 

@@ -100,6 +100,62 @@ class TestEnglishDirective:
 
 
 # ---------------------------------------------------------------------------
+# _format_intent_directives — response_depth expansion (Path-2 depth fix)
+# ---------------------------------------------------------------------------
+
+class TestDepthDirective:
+    """The `depth=detailed` directive was expanded on 2026-07-29 to carry
+    concrete drafting asks (15+ grounds, landmark citations inline,
+    character/conduct paragraphs for bail, custodial-interrogation
+    submissions, statutory framework, multi-clause prayer, 20K+ char
+    target). These tests pin the concrete asks so a future prompt
+    cleanup does not silently regress detailed-draft length."""
+
+    def test_detailed_depth_includes_grounds_ask(self):
+        i = UserIntent(response_depth="detailed", confidence=0.9)
+        out = localize_prompt(BASE, "en", i)
+        assert "USER DEPTH" in out
+        assert "15 numbered grounds" in out or "15+ numbered grounds" in out
+
+    def test_detailed_depth_includes_landmark_citations_ask(self):
+        i = UserIntent(response_depth="detailed", confidence=0.9)
+        out = localize_prompt(BASE, "en", i)
+        # Must ask for landmark citations inline, not as an appendix.
+        assert "LANDMARK CASE-LAW" in out or "landmark" in out.lower()
+        # At least one seminal anticipatory-bail authority named.
+        assert "Gurbaksh Singh Sibbia" in out or "Sibbia" in out
+
+    def test_detailed_depth_includes_bail_character_and_custodial_asks(self):
+        i = UserIntent(response_depth="detailed", confidence=0.9)
+        out = localize_prompt(BASE, "en", i)
+        # Bail-specific asks the tester's anticipatory-bail draft missed.
+        assert "custodial" in out.lower()
+        assert "character" in out.lower() or "conduct" in out.lower()
+
+    def test_detailed_depth_includes_length_target(self):
+        i = UserIntent(response_depth="detailed", confidence=0.9)
+        out = localize_prompt(BASE, "en", i)
+        # Concrete length target so the writer produces substantive output.
+        assert "20,000" in out or "20000" in out
+
+    def test_brief_depth_stays_short(self):
+        """Regression: the brief branch was not expanded — must still be
+        the tight 200-word directive."""
+        i = UserIntent(response_depth="brief", confidence=0.9)
+        out = localize_prompt(BASE, "en", i)
+        assert "under 200 words" in out
+        # Detailed asks must NOT leak into the brief branch.
+        assert "15 numbered grounds" not in out
+        assert "Sibbia" not in out
+
+    def test_standard_depth_emits_no_depth_directive(self):
+        """No response_depth override → the depth block is absent."""
+        i = UserIntent(response_depth="standard", confidence=0.9)
+        out = localize_prompt(BASE, "en", i)
+        assert "USER DEPTH" not in out
+
+
+# ---------------------------------------------------------------------------
 # localize_prompt — non-English target (regression + cross-language)
 # ---------------------------------------------------------------------------
 

@@ -35,6 +35,9 @@ from agents.drafting import (
     _judge_fanout,
     _generate_sectionwise,
     _generate_draft,
+    _chunk_user_facts,
+    _pick_relevant_chunk_indices,
+    _SelectedChunks,
 )
 
 
@@ -684,6 +687,405 @@ class TestGenerateDraftDispatcher:
 
 
 # ---------------------------------------------------------------------------
+# Per-section source-chunk router — unit tests
+# ---------------------------------------------------------------------------
+
+class TestChunkUserFacts:
+    """`_chunk_user_facts` splits raw source into paragraph-like chunks."""
+
+    def test_empty_returns_empty_list(self):
+        assert _chunk_user_facts("") == []
+        assert _chunk_user_facts(None) == []
+
+    def test_single_paragraph_returns_one_chunk(self):
+        text = "This is one paragraph with a single sentence."
+        assert _chunk_user_facts(text) == [text]
+
+    def test_splits_on_blank_lines(self):
+        text = "Para 1 first line.\nPara 1 second line.\n\nPara 2 body.\n\n\nPara 3 body."
+        chunks = _chunk_user_facts(text)
+        assert len(chunks) == 3
+        assert "Para 1 first line." in chunks[0]
+        assert chunks[1] == "Para 2 body."
+        assert chunks[2] == "Para 3 body."
+
+    def test_preserves_internal_newlines(self):
+        text = "Heading\n1. First point\n2. Second point\n\nNext block."
+        chunks = _chunk_user_facts(text)
+        assert len(chunks) == 2
+        # Numbered structure inside the first chunk is preserved
+        assert "1. First point" in chunks[0]
+        assert "2. Second point" in chunks[0]
+
+    def test_drops_whitespace_only_chunks(self):
+        text = "Real content.\n\n   \n\nMore content."
+        chunks = _chunk_user_facts(text)
+        assert chunks == ["Real content.", "More content."]
+
+
+class TestPickRelevantChunkIndices:
+    """`_pick_relevant_chunk_indices` routes via Gemini Flash Lite; empty
+    chunks / router failures / empty picks always yield []."""
+
+    def test_empty_chunks_returns_empty_without_llm_call(self):
+        section = _Section(id="s", heading="H", summary="")
+        result = _run(_pick_relevant_chunk_indices(
+            user_facts_chunks=[], section=section, query="q",
+        ))
+        assert result == []
+
+    def test_router_returns_picked_indices(self):
+        chunks = [f"paragraph {i} content" for i in range(6)]
+        section = _Section(
+            id="facts", heading="Facts", summary="Numbered facts",
+        )
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(return_value={
+            "raw": MagicMock(usage_metadata={"total_tokens": 90}),
+            "parsed": _SelectedChunks(
+                chunk_indices=[0, 2, 4],
+                reasoning="Facts para content lives in even indices.",
+            ),
+        })
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            with patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+                mock_prompt.from_template.return_value.__or__ = MagicMock(
+                    return_value=mock_chain,
+                )
+                result = _run(_pick_relevant_chunk_indices(
+                    user_facts_chunks=chunks, section=section, query="q",
+                ))
+        assert result == [0, 2, 4]
+
+    def test_router_drops_out_of_range_and_non_int_indices(self):
+        """Guard against a router that hallucinates bad indices — we must
+        never index past the chunk list or bubble a TypeError."""
+        chunks = ["a", "b", "c"]
+        section = _Section(id="s", heading="H", summary="")
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(return_value={
+            "raw": MagicMock(usage_metadata={"total_tokens": 40}),
+            "parsed": _SelectedChunks(
+                chunk_indices=[0, 99, -1, 1],
+                reasoning="mixed valid + invalid",
+            ),
+        })
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            with patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+                mock_prompt.from_template.return_value.__or__ = MagicMock(
+                    return_value=mock_chain,
+                )
+                result = _run(_pick_relevant_chunk_indices(
+                    user_facts_chunks=chunks, section=section, query="q",
+                ))
+        # Only 0 and 1 are valid; 99 and -1 dropped.
+        assert result == [0, 1]
+
+    def test_llm_failure_returns_empty(self):
+        """Router exception → caller falls back to raw source. Returning []
+        is the signal for that fallback."""
+        chunks = ["a", "b"]
+        section = _Section(id="s", heading="H", summary="")
+        with patch("langchain.chat_models.init_chat_model",
+                   side_effect=RuntimeError("Gemini blip")):
+            result = _run(_pick_relevant_chunk_indices(
+                user_facts_chunks=chunks, section=section, query="q",
+            ))
+        assert result == []
+
+
+class TestSectionwiseChunkingIntegration:
+    """`_generate_sectionwise` routes per-pair when the flag is ON and the
+    upload is above threshold. Fallbacks preserve current behavior."""
+
+    @staticmethod
+    def _silent_progress(*args, **kwargs):
+        pass
+
+    def test_flag_off_never_calls_router(self):
+        """DRAFTING_PER_SECTION_CHUNKING unset → raw user_facts flows to
+        every pair-call unchanged (CLAUDE.md invariant #6)."""
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+        ]
+        big_facts = "para one.\n\npara two.\n\npara three.\n\npara four." * 5000
+        assert len(big_facts) > 100_000  # above threshold
+
+        seen_user_facts: list[str] = []
+        router_calls: list[bool] = []
+
+        async def _fake_pair(*, user_facts, **kwargs):
+            seen_user_facts.append(user_facts)
+            return "ok"
+
+        async def _fake_router(**kwargs):
+            router_calls.append(True)
+            return [0]
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DRAFTING_PER_SECTION_CHUNKING", None)
+            with patch("agents.drafting._generate_section_pair",
+                       side_effect=_fake_pair), \
+                 patch("agents.drafting._pick_relevant_chunk_indices",
+                       side_effect=_fake_router):
+                _run(_generate_sectionwise(
+                    sections=sections,
+                    query="Draft", user_facts=big_facts,
+                    reference_draft="REF",
+                    user_intent=None, user_language="en",
+                    progress_emit=self._silent_progress,
+                    gathered_context=None,
+                ))
+        assert router_calls == []
+        assert seen_user_facts == [big_facts]
+
+    def test_flag_on_below_threshold_never_calls_router(self):
+        """Flag ON but upload below threshold → passthrough (no router)."""
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+        ]
+        small_facts = "para one.\n\npara two.\n\npara three."
+        assert len(small_facts) < 100_000
+
+        seen_user_facts: list[str] = []
+        router_calls: list[bool] = []
+
+        async def _fake_pair(*, user_facts, **kwargs):
+            seen_user_facts.append(user_facts)
+            return "ok"
+
+        async def _fake_router(**kwargs):
+            router_calls.append(True)
+            return [0]
+
+        with patch.dict(os.environ,
+                        {"DRAFTING_PER_SECTION_CHUNKING": "1"}, clear=False):
+            with patch("agents.drafting._generate_section_pair",
+                       side_effect=_fake_pair), \
+                 patch("agents.drafting._pick_relevant_chunk_indices",
+                       side_effect=_fake_router):
+                _run(_generate_sectionwise(
+                    sections=sections,
+                    query="Draft", user_facts=small_facts,
+                    reference_draft="REF",
+                    user_intent=None, user_language="en",
+                    progress_emit=self._silent_progress,
+                    gathered_context=None,
+                ))
+        assert router_calls == []
+        assert seen_user_facts == [small_facts]
+
+    def test_flag_on_above_threshold_calls_router_and_shrinks_user_facts(self):
+        """Flag ON + above threshold + router picks indices → each pair
+        sees a reduced user_facts blob (union of the two sections' picks)."""
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+        ]
+        # Build a facts blob with 10 distinct chunks, each > 12K chars so
+        # the total is well above the 100K threshold.
+        chunk_bodies = [f"CHUNK_{i}_" + ("x" * 12_000) for i in range(10)]
+        big_facts = "\n\n".join(chunk_bodies)
+        assert len(big_facts) > 100_000
+
+        seen_user_facts: list[str] = []
+
+        async def _fake_pair(*, user_facts, **kwargs):
+            seen_user_facts.append(user_facts)
+            return "ok"
+
+        # First section wants chunks [0, 2]; second wants [2, 5]; union = [0,2,5]
+        async def _fake_router(*, section, **kwargs):
+            if section.id == "a":
+                return [0, 2]
+            return [2, 5]
+
+        with patch.dict(os.environ,
+                        {"DRAFTING_PER_SECTION_CHUNKING": "1"}, clear=False):
+            with patch("agents.drafting._generate_section_pair",
+                       side_effect=_fake_pair), \
+                 patch("agents.drafting._pick_relevant_chunk_indices",
+                       side_effect=_fake_router):
+                _run(_generate_sectionwise(
+                    sections=sections,
+                    query="Draft", user_facts=big_facts,
+                    reference_draft="REF",
+                    user_intent=None, user_language="en",
+                    progress_emit=self._silent_progress,
+                    gathered_context=None,
+                ))
+        assert len(seen_user_facts) == 1
+        pair_facts = seen_user_facts[0]
+        # Union contains CHUNK 0, 2, 5 — nothing else
+        assert "CHUNK_0_" in pair_facts
+        assert "CHUNK_2_" in pair_facts
+        assert "CHUNK_5_" in pair_facts
+        assert "CHUNK_1_" not in pair_facts
+        assert "CHUNK_9_" not in pair_facts
+        # And the reduced blob is smaller than the original
+        assert len(pair_facts) < len(big_facts)
+
+    def test_flag_on_router_empty_selection_falls_back_to_raw(self):
+        """Router returns [] for every section → fallback to raw user_facts
+        so the section-writer never sees LESS than the current pipeline."""
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+        ]
+        big_facts = "\n\n".join(f"chunk_{i}_" + "y" * 12_000 for i in range(10))
+        assert len(big_facts) > 100_000
+
+        seen_user_facts: list[str] = []
+
+        async def _fake_pair(*, user_facts, **kwargs):
+            seen_user_facts.append(user_facts)
+            return "ok"
+
+        async def _fake_router(**kwargs):
+            return []  # No indices picked → fallback
+
+        with patch.dict(os.environ,
+                        {"DRAFTING_PER_SECTION_CHUNKING": "1"}, clear=False):
+            with patch("agents.drafting._generate_section_pair",
+                       side_effect=_fake_pair), \
+                 patch("agents.drafting._pick_relevant_chunk_indices",
+                       side_effect=_fake_router):
+                _run(_generate_sectionwise(
+                    sections=sections,
+                    query="Draft", user_facts=big_facts,
+                    reference_draft="REF",
+                    user_intent=None, user_language="en",
+                    progress_emit=self._silent_progress,
+                    gathered_context=None,
+                ))
+        assert seen_user_facts == [big_facts]
+
+    def test_flag_on_too_few_chunks_skips_routing(self):
+        """Above threshold but <4 chunks (huge single-paragraph blob) →
+        no routing signal, passthrough raw."""
+        sections = [
+            _Section(id="a", heading="A", summary=""),
+            _Section(id="b", heading="B", summary=""),
+        ]
+        # Single huge paragraph — no blank lines → 1 chunk after splitting.
+        big_facts = "z" * 150_000
+        assert len(big_facts) > 100_000
+        assert len(_chunk_user_facts(big_facts)) == 1
+
+        seen_user_facts: list[str] = []
+        router_calls: list[bool] = []
+
+        async def _fake_pair(*, user_facts, **kwargs):
+            seen_user_facts.append(user_facts)
+            return "ok"
+
+        async def _fake_router(**kwargs):
+            router_calls.append(True)
+            return [0]
+
+        with patch.dict(os.environ,
+                        {"DRAFTING_PER_SECTION_CHUNKING": "1"}, clear=False):
+            with patch("agents.drafting._generate_section_pair",
+                       side_effect=_fake_pair), \
+                 patch("agents.drafting._pick_relevant_chunk_indices",
+                       side_effect=_fake_router):
+                _run(_generate_sectionwise(
+                    sections=sections,
+                    query="Draft", user_facts=big_facts,
+                    reference_draft="REF",
+                    user_intent=None, user_language="en",
+                    progress_emit=self._silent_progress,
+                    gathered_context=None,
+                ))
+        assert router_calls == []
+        assert seen_user_facts == [big_facts]
+
+
+class TestPreflightBudget:
+    """Language-aware preflight: Devanagari uploads get a tighter budget
+    because they tokenise ~2.5 chars/token (vs ~4 for Latin)."""
+
+    @staticmethod
+    def _silent_progress(*args, **kwargs):
+        pass
+
+    def test_latin_upload_at_2_5m_chars_proceeds(self):
+        """Latin upload above the Devanagari cap but below the Latin cap
+        must NOT be rejected — the preflight branches on script."""
+        latin_facts = "a" * 2_500_000  # above Devanagari cap (2.4M)
+
+        async def _fake_judge(**kwargs):
+            return _FanoutStrategy(should_fanout=False, reasoning="short")
+
+        async def _fake_single(**kwargs):
+            return "OK"
+
+        async def _fake_section(**kwargs):
+            return "OK"
+
+        with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting._generate_single_pass",
+                   side_effect=_fake_single), \
+             patch("agents.drafting._generate_sectionwise",
+                   side_effect=_fake_section):
+            out = _run(_generate_draft(
+                query="q", user_facts=latin_facts,
+                reference_draft="", user_intent=None,
+                user_language="en",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+        assert out == "OK"
+
+    def test_devanagari_upload_at_2_5m_chars_is_rejected(self):
+        """Devanagari-dominant upload above the 2.4M cap → friendly
+        message, no Gemini call fires."""
+        # 20K chars of Devanagari sample, then padding — sampler reads
+        # first 20K only, so the sample is 100% Devanagari.
+        deva_sample = "अ" * 20_000
+        deva_facts = deva_sample + "z" * 2_490_000
+
+        single_called: list[bool] = []
+        section_called: list[bool] = []
+
+        async def _fake_judge(**kwargs):
+            return _FanoutStrategy(should_fanout=False, reasoning="short")
+
+        async def _fake_single(**kwargs):
+            single_called.append(True)
+            return "OK"
+
+        async def _fake_section(**kwargs):
+            section_called.append(True)
+            return "OK"
+
+        with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting._generate_single_pass",
+                   side_effect=_fake_single), \
+             patch("agents.drafting._generate_sectionwise",
+                   side_effect=_fake_section):
+            out = _run(_generate_draft(
+                query="q", user_facts=deva_facts,
+                reference_draft="", user_intent=None,
+                user_language="hi",
+                progress_emit=self._silent_progress,
+                gathered_context=None,
+            ))
+        # Friendly message returned; no generation calls fired.
+        assert "too large" in out.lower()
+        assert single_called == []
+        assert section_called == []
+
+
+# ---------------------------------------------------------------------------
 # Optional end-to-end smokes — gated behind DRAFTING_SIMPLIFICATION_E2E=1
 # (live Gemini + ES required; ~30s per smoke).
 # ---------------------------------------------------------------------------
@@ -843,4 +1245,128 @@ class TestEndToEndSmokes:
         assert deva > latin, (
             f"expected Devanagari dominant in Marathi draft; "
             f"got {deva} Devanagari vs {latin} Latin"
+        )
+
+    def test_per_section_chunking_router_fires_on_large_upload(self):
+        """Chunking-router live smoke — the only E2E that exercises the
+        per-section chunking path end-to-end.
+
+        Constructs a synthetic 150K-char user_facts blob with clear
+        paragraph structure and a query that triggers sectionwise
+        fan-out. Requires BOTH env flags:
+          DRAFTING_SIMPLIFICATION_E2E=1  — the E2E class gate
+          DRAFTING_PER_SECTION_CHUNKING=1 — turns the router on
+
+        Assertions:
+          - No pipeline error, non-empty output, sectionwise shape
+          - Router path was entered — verified by patching
+            `_pick_relevant_chunk_indices` with a tracking wrapper that
+            still calls through to the real Flash-Lite router. Log
+            capture would be cleaner but loguru's default sink binds
+            sys.stderr at import time, so pytest fixtures (caplog /
+            capsys / capfd) all fail to see the log lines even though
+            they show up in pytest's own captured-stderr dump."""
+        if os.environ.get("DRAFTING_PER_SECTION_CHUNKING") != "1":
+            pytest.skip(
+                "Requires DRAFTING_PER_SECTION_CHUNKING=1 to exercise the router."
+            )
+        from agents.drafting import drafting_node
+        from config.intent import default_intent
+
+        # Synthetic 150K-char user_facts blob with a paragraph structure
+        # the router can see and pick over — 30 numbered paragraphs, each
+        # ~5K chars, with distinct topical labels the router prompt can
+        # match against the drafting sections.
+        topics = [
+            "Cause of action and parties",
+            "Chronology of correspondence",
+            "Statutory framework — Section 138 NI Act",
+            "Dishonour of cheque particulars",
+            "Notice of demand and response",
+            "Cheque no. 001234 dated 15-Mar-2026",
+            "Bank memo — funds insufficient",
+            "Prior transactions between parties",
+            "Guarantee and consideration",
+            "Consequences under Section 141 NI Act",
+            "Statutory notice under Section 138 proviso",
+            "Legal advice sought and received",
+            "Documentary evidence — bank statements",
+            "Witnesses to the transaction",
+            "Attempts at amicable resolution",
+        ] * 2  # 30 paragraphs total
+        para_body_filler = "This paragraph describes the material fact. " * 100
+        fact_paras = [
+            f"Paragraph {i+1}. Topic: {t}.\n{para_body_filler}"
+            for i, t in enumerate(topics)
+        ]
+        user_facts = "\n\n".join(fact_paras)
+        assert len(user_facts) > 100_000, (
+            f"synthetic blob {len(user_facts)} chars — must exceed 100K "
+            f"threshold to exercise the router"
+        )
+
+        # Long-writ query so the fan-out judge picks section-wise (the
+        # router only fires on the section-wise path).
+        query = (
+            "Draft a detailed complaint under Section 138 of the "
+            "Negotiable Instruments Act, 1881, against Mr. Rajesh "
+            "Kumar for dishonouring cheque no. 001234 dated 15-Mar-2026 "
+            "for Rs. 5,00,000 issued to the Complainant Mr. Anil Sharma. "
+            "Include Cause Title, Parties, Facts, Cause of Action, "
+            "Statutory Framework, Prayer, and Verification."
+        )
+        # Inject via file_context.extracted_texts — the uploaded-document
+        # path Drafting agents prefer. The `user_context` (pasted-context)
+        # path is truncated to 30K chars at drafting_node, which would
+        # slice our 150K blob below the 100K router threshold.
+        state: dict = {
+            "query": query, "original_query": query,
+            "agent_queries": {"Drafting": query},
+            "user_context": "",
+            "file_context": {
+                "extracted_texts": [
+                    {"name": "large_case_record.txt", "text": user_facts},
+                ],
+            },
+            "user_language": "en",
+            "user_intent": default_intent(),
+            "chat_history": [], "agent_results": {},
+        }
+
+        # Track router invocations while letting the real Flash-Lite
+        # picker run. Each call records (section heading, count of picked
+        # indices) so we can assert "the router fired at least once" —
+        # this is a direct-observation check that doesn't depend on log
+        # capture (loguru binds sys.stderr at import time so pytest's
+        # caplog / capsys / capfd all fail to capture its output).
+        import agents.drafting as drafting_mod
+        real_router = drafting_mod._pick_relevant_chunk_indices
+        router_invocations: list[tuple[str, int]] = []
+
+        async def _tracking_router(**kwargs):
+            picks = await real_router(**kwargs)
+            router_invocations.append(
+                (kwargs["section"].heading[:40], len(picks)),
+            )
+            return picks
+
+        with patch(
+            "agents.drafting._pick_relevant_chunk_indices",
+            side_effect=_tracking_router,
+        ):
+            out = _run(drafting_node(state))
+
+        result = out["agent_results"]["Drafting"]
+        assert result.error is None, f"unexpected pipeline error: {result.error}"
+        assert len(result.content) > 500, (
+            f"expected substantive draft, got {len(result.content)} chars"
+        )
+        # Router fired for at least one section pair. The sectionwise loop
+        # calls the router once per section per pair, so a fanned-out
+        # 6-section draft would produce ≥6 invocations. On any fewer we
+        # know the guard `chunking_enabled and len(all_chunks) >= 4`
+        # tripped incorrectly.
+        assert len(router_invocations) > 0, (
+            f"expected the router to fire on a {len(user_facts)}-char "
+            f"upload with flag ON; got 0 invocations."
         )

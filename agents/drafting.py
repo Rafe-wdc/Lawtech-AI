@@ -942,6 +942,134 @@ class _FanoutStrategy(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# Per-section source-chunk router (opt-in, off by default).
+#
+# When enabled and the uploaded user_facts blob is large, each section-pair
+# call routes to a subset of paragraph chunks instead of receiving the full
+# raw source. This is a cost + overflow optimisation:
+#
+#   - Before: raw user_facts sent 1× per pair (N pairs × full source)
+#   - After:  each pair sees only chunks the router picked as relevant
+#
+# Preserves CLAUDE.md invariant #6 (raw source flows into every pair) via
+# fallback: when the flag is OFF, the router is never called; when it's ON
+# but the router fails / returns empty / the upload is below threshold, the
+# full raw source is sent unchanged.
+#
+# Enable per-worker via `DRAFTING_PER_SECTION_CHUNKING=1`. Threshold below
+# which chunking is skipped is `_PER_SECTION_CHUNKING_MIN_CHARS`.
+# ---------------------------------------------------------------------------
+
+_PER_SECTION_CHUNKING_MIN_CHARS = 100_000
+
+# Split on 2+ newlines. Legal PDFs / DOCX extractions typically have blank
+# lines between paragraphs; when they don't (single-paragraph huge blob) we
+# return a single chunk and the router-guard bails to passthrough.
+_PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n")
+
+
+def _chunk_user_facts(user_facts: str) -> list[str]:
+    """Split user_facts into paragraph-like chunks preserving order.
+
+    Empty user_facts → empty list. Single-paragraph blob (no blank lines) →
+    one chunk containing the whole text. Chunks preserve internal newlines
+    and original numbering / heading text so `## paragraph 5` in the source
+    still starts with `## paragraph 5` after picking.
+    """
+    if not user_facts:
+        return []
+    return [c.strip() for c in _PARAGRAPH_SPLIT_RE.split(user_facts) if c.strip()]
+
+
+class _SelectedChunks(BaseModel):
+    """Structured output from `_pick_relevant_chunk_indices`."""
+    chunk_indices: list[int] = Field(
+        default_factory=list,
+        description=(
+            "0-indexed integers into the paragraph-chunk catalog. Empty "
+            "list = 'no chunk-level filtering possible for this section' — "
+            "the caller falls back to sending the raw source unchanged."
+        ),
+    )
+    reasoning: str = Field(
+        "", description="One short sentence rationale.",
+    )
+
+
+async def _pick_relevant_chunk_indices(
+    *,
+    user_facts_chunks: list[str],
+    section: "_Section",
+    query: str,
+    preview_chars_per_chunk: int = 300,
+) -> list[int]:
+    """Ask Gemini Flash Lite which chunks the section-writer will need.
+
+    Returns a list of valid indices into `user_facts_chunks` (0-based, in
+    the router's picked order, deduplicated by the caller). On any failure
+    or empty selection, returns [] — the caller then falls back to sending
+    the full raw source unchanged, preserving the current pipeline's
+    "raw source into every pair-call" behaviour.
+    """
+    if not user_facts_chunks:
+        return []
+    try:
+        from langchain.chat_models import init_chat_model
+        from config.prompts import DRAFTING_CHUNK_ROUTER_PROMPT
+
+        preview_lines: list[str] = []
+        for i, chunk in enumerate(user_facts_chunks):
+            preview = chunk[:preview_chars_per_chunk].replace("\n", " ").strip()
+            if len(chunk) > preview_chars_per_chunk:
+                preview += " ..."
+            preview_lines.append(f"[{i}] {preview}")
+        catalog = "\n".join(preview_lines)
+
+        llm = init_chat_model(
+            "google_genai:gemini-2.5-flash-lite",
+            temperature=0.0,
+        ).with_structured_output(_SelectedChunks, include_raw=True)
+
+        prompt = ChatPromptTemplate.from_template(DRAFTING_CHUNK_ROUTER_PROMPT)
+        chain = prompt | llm
+
+        with log_time(log, f"Chunk router (section {section.heading[:40]})"):
+            raw_and_parsed = await asyncio.wait_for(
+                chain.ainvoke({
+                    "query": query[:2000],
+                    "section_heading": section.heading,
+                    "section_summary": section.summary or "(no summary)",
+                    "chunk_catalog": catalog,
+                    "total_chunks": len(user_facts_chunks),
+                }),
+                timeout=20,
+            )
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "chunk_router", raw_and_parsed.get("raw"))
+
+        parsed: _SelectedChunks = raw_and_parsed["parsed"]
+        picked = [
+            i for i in parsed.chunk_indices
+            if isinstance(i, int) and 0 <= i < len(user_facts_chunks)
+        ]
+        log.info(
+            "Chunk router selected",
+            section=section.heading[:40],
+            picked=len(picked),
+            total=len(user_facts_chunks),
+            reasoning=parsed.reasoning[:120],
+        )
+        return picked
+    except Exception as e:
+        log.warning(
+            "Chunk router failed; caller will fall back to raw source",
+            section=section.heading[:40],
+            error=str(e).splitlines()[0][:200],
+        )
+        return []
+
+
 def _reference_excerpt(
     reference_draft: str, head: int = 3000, tail: int = 1000,
 ) -> str:
@@ -1274,6 +1402,30 @@ async def _generate_sectionwise(
     """
     completed: list[str] = []
     total = len(sections)
+
+    # Per-section source-chunk routing (opt-in via env flag).
+    # When ON and user_facts is above threshold, each pair sees only the
+    # paragraph chunks the router picked as relevant to that pair's
+    # sections (union across the pair). Union is taken so a section that
+    # needs paragraphs 3-5 and its pair-mate that needs paragraphs 7-9
+    # still see 3,4,5,7,8,9 in a single call. On router failure / empty
+    # selection, the pair falls back to the raw user_facts unchanged —
+    # this preserves CLAUDE.md invariant #6 whenever the router can't help.
+    chunking_enabled = (
+        os.getenv("DRAFTING_PER_SECTION_CHUNKING", "0") == "1"
+        and user_facts
+        and len(user_facts) > _PER_SECTION_CHUNKING_MIN_CHARS
+    )
+    all_chunks: list[str] = _chunk_user_facts(user_facts) if chunking_enabled else []
+    # A single-chunk (no blank lines) or trivially-few-chunks blob has no
+    # routing signal to extract; skip the router and pass raw source.
+    if chunking_enabled and len(all_chunks) < 4:
+        chunking_enabled = False
+        log.info(
+            "Per-section chunking skipped — too few paragraph chunks to route",
+            chunks=len(all_chunks),
+        )
+
     i = 0
     while i < total:
         pair = sections[i:i + 2]
@@ -1290,13 +1442,43 @@ async def _generate_sectionwise(
 
         prior_text = "\n\n".join(completed)
 
+        pair_user_facts = user_facts
+        if chunking_enabled:
+            per_section_picks = await asyncio.gather(*[
+                _pick_relevant_chunk_indices(
+                    user_facts_chunks=all_chunks,
+                    section=sec,
+                    query=query,
+                )
+                for sec in pair
+            ])
+            union_indices = sorted({idx for picks in per_section_picks for idx in picks})
+            if union_indices:
+                pair_user_facts = "\n\n".join(all_chunks[idx] for idx in union_indices)
+                log.info(
+                    "Per-section chunking applied",
+                    pair_start=position_start,
+                    picked_chunks=len(union_indices),
+                    total_chunks=len(all_chunks),
+                    original_chars=len(user_facts),
+                    reduced_chars=len(pair_user_facts),
+                    reduction_pct=round(
+                        100 * (1 - len(pair_user_facts) / max(len(user_facts), 1)), 1,
+                    ),
+                )
+            else:
+                log.info(
+                    "Per-section chunking: no chunks picked — using raw source",
+                    pair_start=position_start,
+                )
+
         try:
             pair_text = await _generate_section_pair(
                 sections_to_write=pair,
                 section_position_start=position_start,
                 total_sections=total,
                 query=query,
-                user_facts=user_facts,
+                user_facts=pair_user_facts,
                 reference_draft=reference_draft,
                 prior_text=prior_text,
                 gathered_context=gathered_context,
@@ -1336,21 +1518,30 @@ async def _generate_draft(
     verbatim through to whichever generation strategy runs. Returns a
     single assembled string regardless of the strategy.
     """
-    # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens (~4M chars
-    # English). When user_facts alone approaches that ceiling, every
-    # downstream generation call — single-pass or per-section-pair — will
-    # 400 INVALID_ARGUMENT with "input token count exceeds maximum". The
-    # sectionwise path swallows those failures per-pair and continues,
-    # producing an empty or badly-holed draft. Short-circuit here with a
-    # user-actionable message instead. Budget: 3.5M chars leaves ~500K
-    # chars headroom for system prompt + reference draft + gathered
-    # context + query.
-    _USER_FACTS_CHAR_BUDGET = 3_500_000
-    if user_facts and len(user_facts) > _USER_FACTS_CHAR_BUDGET:
+    # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens. English
+    # text tokenises at ~4 chars/token so the raw-char ceiling is ~4M
+    # chars, and 3.5M leaves room for system prompt + reference + context
+    # + query. Devanagari (Hindi / Marathi / Sanskrit) and other non-Latin
+    # Indic scripts tokenise DENSER — roughly 2.5 chars/token — so the
+    # effective ceiling drops to ~2.4M chars for those uploads. When we
+    # exceed the applicable budget, every downstream generation call will
+    # 400 INVALID_ARGUMENT and the sectionwise path silently produces an
+    # empty / badly-holed draft. Short-circuit here with a user-actionable
+    # message instead.
+    _USER_FACTS_BUDGET_LATIN = 3_500_000
+    _USER_FACTS_BUDGET_DEVANAGARI = 2_400_000
+    budget = _USER_FACTS_BUDGET_LATIN
+    if user_facts:
+        sample = user_facts[:20_000]
+        deva = sum(1 for c in sample if "ऀ" <= c <= "ॿ")
+        if deva / max(len(sample), 1) > 0.3:
+            budget = _USER_FACTS_BUDGET_DEVANAGARI
+    if user_facts and len(user_facts) > budget:
         log.warning(
             "Drafting user_facts exceeds token budget — returning friendly message",
             facts_chars=len(user_facts),
-            budget=_USER_FACTS_CHAR_BUDGET,
+            budget=budget,
+            script="devanagari" if budget == _USER_FACTS_BUDGET_DEVANAGARI else "latin",
         )
         return (
             "The uploaded documents are too large to draft from in a "

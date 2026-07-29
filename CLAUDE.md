@@ -252,7 +252,18 @@ judge call that decides single-pass vs per-section. Before touching
    affidavit response — has direct access to the source's paragraph
    structure and numbering.
 
-Tests live in `tests/test_drafting_simplification.py` (15 unit + 2 e2e).
+   **Opt-in per-section routing** (`DRAFTING_PER_SECTION_CHUNKING=1`,
+   off by default): when enabled AND `len(user_facts) > 100_000`, each
+   pair calls a Gemini Flash Lite router (`_pick_relevant_chunk_indices`,
+   prompt `DRAFTING_CHUNK_ROUTER_PROMPT`) that selects the paragraph
+   chunks the pair's sections need. Union of the two sections' picks is
+   passed as `user_facts`. Whenever the router fails, returns empty, or
+   the blob has <4 chunks, the pair falls back to the raw source —
+   preserving the invariant on the fallback path. Language-aware
+   preflight: Devanagari-dominant uploads use a 2.4M-char budget (vs
+   3.5M for Latin) because Indic scripts tokenise ~2.5 chars/token.
+
+Tests live in `tests/test_drafting_simplification.py` (31 unit + 4 e2e).
 Run them via:
 ```bash
 pytest tests/test_drafting_simplification.py -v

@@ -1528,6 +1528,40 @@ REFERENCE DRAFT (sample document — use ONLY for structural shape; ignore its p
 Return the structured object — no preamble, no postscript, no commentary."""
 
 
+# 4b) DRAFTING_CHUNK_ROUTER_PROMPT — runs BEFORE each section-pair call
+# when the per-section chunking optimisation is enabled AND the uploaded
+# source is large. The uploaded source has been pre-split into paragraph
+# chunks and previewed. Given the section brief, pick the chunk indices
+# whose full text the section-pair writer needs.
+#
+# Drives `_pick_relevant_chunk_indices` (Gemini Flash Lite, structured
+# output). Empty selection means "route falls back to raw source" — the
+# writer never sees LESS than the current pipeline.
+DRAFTING_CHUNK_ROUTER_PROMPT = """You are a routing helper for an Indian-law drafting pipeline. The user uploaded one or more source documents whose combined text has been split into paragraph-like chunks. For the specific section named below, pick the chunks the section-writer will need to see.
+
+## Section being drafted
+Heading: {section_heading}
+Brief:   {section_summary}
+
+## User's drafting query
+{query}
+
+## Chunk catalog ({total_chunks} chunks total)
+Each entry is `[index] first ~300 chars`. Full chunk text is available downstream — you only need to pick indices.
+{chunk_catalog}
+
+## How to pick
+
+  - Return the 0-indexed integers of the chunks whose FULL text the section-writer must see to produce this section correctly.
+  - INCLUDE any chunk containing party names, dates, addresses, amounts, statutory references, or paragraph-level assertions the section might quote or respond to.
+  - INCLUDE the surrounding chunks when a section walks the source paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-affidavit response, written statement) — those sections need paragraph structure and numbering from the source.
+  - EXCLUDE chunks that are clearly boilerplate / signatures / covering-letter fluff / unrelated matters.
+  - When uncertain whether a chunk is relevant, INCLUDE it — the cost of a missing fact is much higher than the cost of one extra chunk.
+  - If NOTHING in the catalog is clearly relevant, or if the section needs the whole source (para-wise reply covering all paragraphs), return an EMPTY list — the caller will fall back to sending the raw source in full.
+
+Return the structured object — no preamble, no postscript, no commentary."""
+
+
 # 5) DRAFTING_SECTION_PAIR_PROMPT — the per-section generation prompt. Used
 # only when `_judge_fanout` returns should_fanout=true. Drafts 1 or 2
 # consecutive sections per call, given the reference, case facts, the

@@ -1,0 +1,118 @@
+name: Prod — toggle drafting per-section chunking (manual)
+
+# Rollout helper for the opt-in per-section source-chunk router shipped
+# in commit 8a887f9 (2026-07-29). Sister to prod-enable-intent-extractor.yml.
+# workflow_dispatch ONLY — no auto-trigger.
+#
+# When set to "1", each section-pair call in the Drafting sectionwise
+# path routes to a Flash-Lite picker that selects only the paragraph
+# chunks the pair's sections need — cuts input tokens ~50-70% on
+# large uploads and prevents the silent Devanagari overflow that used
+# to produce empty/holed drafts. When set to "0" (default), raw
+# user_facts flows into every pair-call unchanged (current behavior).
+#
+# Idempotent: replaces an existing DRAFTING_PER_SECTION_CHUNKING line
+# in .env, appends if missing. Restarts via
+# `sudo systemctl restart lawttorney-v2` matching the deploy-prod.yml
+# pattern, then waits for 3 consecutive healthy /pyapi/health responses
+# on port 5001.
+#
+# Uses the prod SSH secrets:
+#   SSH_PRIVATE_KEY_PROD, SERVER_HOST_PROD, SERVER_USER_PROD (ubuntu).
+# Prod APP_DIR is /root/Lawtech-AI (root-owned; needs sudo).
+#
+# Rollback: re-run this workflow with value=0. Instant, no code deploy.
+# Delete this workflow once the flag becomes unconditional (or when
+# the chunking behavior graduates to default-on).
+
+on:
+  workflow_dispatch:
+    inputs:
+      value:
+        description: 'DRAFTING_PER_SECTION_CHUNKING value to set on prod (1 = on, 0 = off)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '0'
+
+jobs:
+  flip:
+    name: Flip flag on prod
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Set flag + systemctl restart + verify health
+        env:
+          FLAG_VALUE: ${{ inputs.value }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+            FLAG_VALUE="$FLAG_VALUE" 'bash -s' << 'ENDSSH'
+          set -e
+          APP_DIR=/root/Lawtech-AI
+          ENV_FILE="$APP_DIR/.env"
+
+          echo "=== Current DRAFTING_PER_SECTION_CHUNKING state ==="
+          sudo grep -E '^DRAFTING_PER_SECTION_CHUNKING=' "$ENV_FILE" || echo "(not set)"
+
+          # Idempotent: replace existing line if present, append otherwise.
+          if sudo grep -qE '^DRAFTING_PER_SECTION_CHUNKING=' "$ENV_FILE"; then
+            sudo sed -i.bak -E "s/^DRAFTING_PER_SECTION_CHUNKING=.*/DRAFTING_PER_SECTION_CHUNKING=${FLAG_VALUE}/" "$ENV_FILE"
+            echo "Replaced existing line"
+          else
+            echo "DRAFTING_PER_SECTION_CHUNKING=${FLAG_VALUE}" | sudo tee -a "$ENV_FILE" >/dev/null
+            echo "Appended new line"
+          fi
+
+          echo "=== After change ==="
+          sudo grep -E '^DRAFTING_PER_SECTION_CHUNKING=' "$ENV_FILE"
+
+          echo "=== Restart v2 via systemd (matches deploy-prod.yml) ==="
+          sudo systemctl restart lawttorney-v2
+
+          echo "=== Wait for v2 health (3 consecutive 200s, max 120s) ==="
+          CONSECUTIVE_OK=0
+          NEEDED=3
+          HEALTHY=0
+          for i in $(seq 1 24); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                     --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                echo "  Stable. Settling 10s for any remaining worker startup..."
+                sleep 10
+                HEALTHY=1
+                break
+              fi
+            else
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/24 (HTTP $STATUS)"
+            fi
+          done
+
+          if [ "$HEALTHY" = "1" ]; then
+            echo "FLAG FLIP OK"
+          else
+            echo "ERROR: no $NEEDED consecutive 200s within 120s. journalctl tail:"
+            sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+            exit 1
+          fi
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

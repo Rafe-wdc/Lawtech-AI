@@ -296,3 +296,61 @@ class TestSelfRefineLoop:
         assert result == "refine2" + "x" * 500
         assert len(history) == 3
         assert history[-1].passes is False
+
+    def test_destructive_refinement_is_rejected(self):
+        """Guard added 2026-07-30 — observed on a Hindi anticipatory-bail
+        draft where the critic flagged 14 violations against a well-formed
+        7,643-char draft and the refiner rewrote it into 3,233 chars
+        (-58%) trying to fix all of them. Refinements that drop the
+        response length below 70% of the input are rejected; the loop
+        stops with the pre-refine draft."""
+        i = UserIntent(response_depth="detailed", confidence=0.9)
+        c_fail = Critique(
+            passes=False, confidence=0.9,
+            violations=[Violation(field="under_detailed_draft",
+                                  issue="too short",
+                                  severity="major",
+                                  suggested_fix="expand")],
+        )
+        # Refiner produces a MUCH shorter output — simulating the observed
+        # destructive rewrite.
+        original = "orig" + "x" * 7000  # 7004 chars
+        catastrophically_short = "x" * 3000  # < 70% of 7004
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(return_value=c_fail)) as mock_c, \
+             patch("core.self_refine._refine",
+                   new=AsyncMock(return_value=catastrophically_short)) as mock_r:
+            result, history = _run(self_refine(
+                original, "draft in detail", i, max_iterations=2,
+            ))
+        # Refiner ran once, but its output was rejected — we kept the
+        # original 7004-char draft.
+        assert result == original
+        assert mock_r.await_count == 1
+        # No re-critique on the rejected output — loop stopped.
+        assert mock_c.await_count == 1
+
+    def test_short_response_can_still_shrink_after_refine(self):
+        """Guard applies ONLY to responses >2K chars — short responses
+        (like a 500-char Q&A) can legitimately shrink after e.g. a table
+        format fix. Regression: don't over-scope the guard."""
+        i = UserIntent(strict_language=True, language="mr",
+                       language_explicit=True, confidence=0.95)
+        c_fail = Critique(
+            passes=False, confidence=0.85,
+            violations=[Violation(field="x", issue="y", severity="major",
+                                  suggested_fix="z")],
+        )
+        c_pass = Critique(passes=True, confidence=0.9)
+        # Original is 700 chars — below the 2K guard threshold. Refiner
+        # shrinks it to 200 chars (>70% drop). Should be ACCEPTED.
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(side_effect=[c_fail, c_pass])), \
+             patch("core.self_refine._refine",
+                   new=AsyncMock(return_value="y" * 200)):
+            result, history = _run(self_refine(
+                "x" * 700, "q", i, max_iterations=2,
+            ))
+        # Refinement was applied even though it shortened the response —
+        # because the input was below the 2K guard threshold.
+        assert result == "y" * 200

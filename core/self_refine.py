@@ -1624,9 +1624,32 @@ async def self_refine(
             )
             return current, history
         # Refine
-        current = await _refine(
+        refined = await _refine(
             user_query, critic_intent, current, critique, refiner_llm,
             retrieved_sources_whitelist=_whitelist,
         )
+        # Destructive-refinement guard: reject a refinement that drops the
+        # response length by more than 30%. Observed 2026-07-30 on a Hindi
+        # anticipatory-bail draft — the critic flagged 14 violations against
+        # a well-formed 7,643-char draft and the refiner rewrote it into
+        # 3,233 chars trying to fix all of them at once. Long drafts should
+        # get LONGER (or roughly stay the same) after refinement — dropping
+        # to under 70% of the input signals a runaway rewrite, not a fix.
+        # Guard applies to responses >2K chars (short responses can
+        # legitimately shrink after e.g. a table format fix).
+        if len(current) > 2000 and len(refined) < len(current) * 0.7:
+            log.warning(
+                "Refinement destructively shortened response; keeping original",
+                original_len=len(current),
+                refined_len=len(refined),
+                drop_pct=round(100 * (1 - len(refined) / max(len(current), 1)), 1),
+                iteration=iteration,
+                violation_count=len(critique.violations),
+            )
+            # Skip the refinement, break the loop — retrying would just
+            # feed the shorter draft back to the critic and produce further
+            # destructive shortening.
+            return current, history
+        current = refined
 
     return current, history

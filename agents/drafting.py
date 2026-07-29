@@ -296,6 +296,96 @@ class _PickerChoice(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# Regional-language → English translation for ES corpus lookup.
+#
+# The `drafting` ES index carries English file names and English template
+# text. When the user's query is in a regional Indian language (Hindi /
+# Marathi / Gujarati / Kannada / Tamil / Telugu / Bengali / Punjabi / Odia /
+# Urdu / Assamese / Sanskrit / Malayalam), the raw ES `match` on the
+# regional-script tokens returns 0 candidates → picker gets an empty list →
+# fallback to web synthesis → thinner reference draft → much shorter final
+# output than the English-equivalent query would produce.
+#
+# The fix is a single Gemini Flash Lite call that translates the user's
+# regional-language query into a compact English drafting request. That
+# translation drives BOTH the ES `match` and the picker's LLM reasoning
+# (file names are English). Output-language stays the user's original
+# choice — the reference draft is a STRUCTURAL anchor only; the
+# section-writer produces body text in the user's target language.
+#
+# Fires only when `user_language != "en"`. Falls back to the original
+# query on any translation failure so English-language traffic and
+# regional-language traffic on translator errors both keep current
+# behaviour.
+# ---------------------------------------------------------------------------
+
+
+async def _translate_query_for_es_match(
+    query: str, user_language: str,
+) -> str:
+    """Translate a regional-language drafting query to English for ES lookup.
+
+    Returns empty string on any failure — caller uses the original query
+    in that case. Language codes match `core.language.SUPPORTED_LANGUAGES`.
+    """
+    if not query or not query.strip():
+        return ""
+    if not user_language or user_language == "en":
+        return ""
+    try:
+        from langchain.chat_models import init_chat_model
+        from core.language import language_name
+
+        llm = init_chat_model(
+            "google_genai:gemini-2.5-flash-lite",
+            temperature=0.0,
+        )
+        source_lang = language_name(user_language)
+        prompt = (
+            f"Translate the following legal-drafting query from {source_lang} "
+            f"to English. Return ONLY the translation — no preamble, no "
+            f"quotes, no explanation. Preserve legal terms of art in their "
+            f"standard English equivalents (e.g. 'वकालतनामा' → 'Vakalatnama', "
+            f"'अभियुक्त' → 'accused', 'आवेदन' → 'application', 'याचिका' → "
+            f"'petition', 'शपथपत्र' → 'affidavit'). Keep the translation "
+            f"concise — one to three lines of English.\n\n"
+            f"Query ({source_lang}):\n{query}"
+        )
+        with log_time(log, "Translate query for ES match"):
+            response = await asyncio.wait_for(
+                asyncio.to_thread(llm.invoke, prompt),
+                timeout=10,
+            )
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Drafting", "translate_query", response)
+
+        text = (getattr(response, "text", "") or getattr(response, "content", "") or "").strip()
+        # Guard against the model echoing the original when it can't
+        # translate — a translated string should have some Latin content.
+        latin_ratio = sum(1 for c in text if c.isascii() and c.isalpha()) / max(len(text), 1)
+        if not text or latin_ratio < 0.3:
+            log.warning(
+                "Translator returned insufficient Latin content; ignoring",
+                user_language=user_language, latin_ratio=round(latin_ratio, 2),
+                text_preview=text[:100],
+            )
+            return ""
+        log.info(
+            "Translated query for ES match",
+            user_language=user_language,
+            original=query[:80], translated=text[:80],
+        )
+        return text
+    except Exception as e:
+        log.warning(
+            "Query translation failed; caller will use original",
+            user_language=user_language,
+            error=str(e).splitlines()[0][:200],
+        )
+        return ""
+
+
 async def _pick_reference_source(
     query: str, file_paths: list[str],
 ) -> str | None:
@@ -389,7 +479,17 @@ async def _acquire_reference_draft(
     es = get_es_client()
     index = ES_INDICES["drafting"]
 
-    sanitized = _sanitize_es_input(query)
+    # Regional-language queries need to be translated to English for the ES
+    # match — the drafting corpus is English-only, and raw regional-script
+    # tokens don't match English template names. Falls back to the original
+    # query on any translation failure. English queries skip translation.
+    search_query = query
+    if user_language and user_language != "en":
+        translated = await _translate_query_for_es_match(query, user_language)
+        if translated:
+            search_query = translated
+
+    sanitized = _sanitize_es_input(search_query)
     bm25_body = {
         "size": 100,
         "query": {"match": {"page_content": sanitized}},
@@ -434,7 +534,11 @@ async def _acquire_reference_draft(
         )
         return web_text, "<web:no-corpus-hit>", "web"
 
-    picked = await _pick_reference_source(query, file_paths)
+    # Use the (possibly translated) English `search_query` for the picker so
+    # the LLM reasons about English file names against English intent —
+    # regional-script tokens against English paths produced picker-rejections
+    # even when a good template existed in the corpus.
+    picked = await _pick_reference_source(search_query, file_paths)
 
     if picked is None:
         log.info("Picker rejected all candidates; synthesizing via web")

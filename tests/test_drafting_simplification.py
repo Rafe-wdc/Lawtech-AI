@@ -38,6 +38,7 @@ from agents.drafting import (
     _chunk_user_facts,
     _pick_relevant_chunk_indices,
     _SelectedChunks,
+    _translate_query_for_es_match,
 )
 
 
@@ -1083,6 +1084,204 @@ class TestPreflightBudget:
         assert "too large" in out.lower()
         assert single_called == []
         assert section_called == []
+
+
+# ---------------------------------------------------------------------------
+# Regional-language → English translation for ES corpus lookup
+# ---------------------------------------------------------------------------
+
+class TestTranslateQueryForEsMatch:
+    """`_translate_query_for_es_match` bridges regional-language queries to
+    the English-only ES `drafting` corpus. Fires only when user_language !=
+    'en'; falls back to empty string on any failure so the caller uses the
+    original query and preserves current behaviour."""
+
+    def test_english_target_returns_empty_without_llm_call(self):
+        """English is a no-op — no translation needed, no LLM call fires."""
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            result = _run(_translate_query_for_es_match(
+                "Draft a Section 138 notice.", "en",
+            ))
+        assert result == ""
+        mock_init.assert_not_called()
+
+    def test_empty_language_returns_empty_without_llm_call(self):
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            result = _run(_translate_query_for_es_match("some text", ""))
+        assert result == ""
+        mock_init.assert_not_called()
+
+    def test_empty_query_returns_empty_without_llm_call(self):
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            result = _run(_translate_query_for_es_match("", "hi"))
+        assert result == ""
+        mock_init.assert_not_called()
+
+    def test_hindi_translates_to_english(self):
+        """Successful translation returns the English text."""
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Application to obtain accused's signature on Vakalatnama."
+        mock_response.content = mock_response.text
+        mock_response.usage_metadata = {"total_tokens": 40}
+        mock_llm.invoke = MagicMock(return_value=mock_response)
+        with patch("langchain.chat_models.init_chat_model", return_value=mock_llm):
+            result = _run(_translate_query_for_es_match(
+                "अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
+                "hi",
+            ))
+        assert "Vakalatnama" in result
+        assert "Application" in result
+
+    def test_llm_failure_returns_empty(self):
+        """Translator errors → empty string → caller uses original query."""
+        with patch("langchain.chat_models.init_chat_model",
+                   side_effect=RuntimeError("Gemini blip")):
+            result = _run(_translate_query_for_es_match(
+                "अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
+                "hi",
+            ))
+        assert result == ""
+
+    def test_devanagari_echo_response_is_rejected(self):
+        """When the LLM echoes back Devanagari (didn't actually translate),
+        the low-Latin-ratio guard rejects it and returns empty."""
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।"
+        mock_response.content = mock_response.text
+        mock_response.usage_metadata = {"total_tokens": 40}
+        mock_llm.invoke = MagicMock(return_value=mock_response)
+        with patch("langchain.chat_models.init_chat_model", return_value=mock_llm):
+            result = _run(_translate_query_for_es_match(
+                "अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
+                "hi",
+            ))
+        assert result == ""
+
+
+class TestAcquireReferenceDraftTranslatesRegionalQuery:
+    """`_acquire_reference_draft` calls the translator when `user_language`
+    is not 'en' and uses the translated query for both the ES `match` body
+    and the picker call."""
+
+    @staticmethod
+    def _silent_progress(*args, **kwargs):
+        pass
+
+    def test_regional_language_translates_query_for_es(self):
+        """user_language='hi' → translator fires; ES match uses English text."""
+        seen_es_body: dict = {}
+        seen_picker_query: list[str] = []
+
+        async def _fake_translate(query, user_language):
+            assert user_language == "hi"
+            return "Application to obtain accused signature on Vakalatnama"
+
+        mock_es = MagicMock()
+        def _fake_search(index, body):
+            seen_es_body["match_text"] = body["query"]["match"]["page_content"]
+            return {"hits": {"hits": [
+                {"_source": {"source": "/tpl/Vakalatnama.csv"}},
+            ]}}
+        mock_es.search = _fake_search
+
+        async def _fake_picker(query, file_paths):
+            seen_picker_query.append(query)
+            return None  # Reject → skip fetch, go to web
+
+        async def _fake_web(query, **kwargs):
+            return "SYNTHESIZED WEB TEXT"
+
+        with patch("agents.drafting.get_es_client", return_value=mock_es), \
+             patch("agents.drafting._translate_query_for_es_match",
+                   side_effect=_fake_translate), \
+             patch("agents.drafting._pick_reference_source",
+                   side_effect=_fake_picker), \
+             patch("agents.drafting._acquire_reference_via_web",
+                   side_effect=_fake_web):
+            _run(_acquire_reference_draft(
+                query="अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
+                progress_emit=self._silent_progress,
+                user_language="hi",
+            ))
+        assert "Vakalatnama" in seen_es_body["match_text"]
+        assert "Application" in seen_es_body["match_text"]
+        assert seen_picker_query == ["Application to obtain accused signature on Vakalatnama"]
+
+    def test_english_language_skips_translator(self):
+        """user_language='en' → translator not invoked; original query
+        flows to ES match + picker unchanged."""
+        seen_es_body: dict = {}
+        seen_picker_query: list[str] = []
+        translator_calls: list[bool] = []
+
+        async def _fake_translate(query, user_language):
+            translator_calls.append(True)
+            return "SHOULD NOT BE CALLED"
+
+        mock_es = MagicMock()
+        def _fake_search(index, body):
+            seen_es_body["match_text"] = body["query"]["match"]["page_content"]
+            return {"hits": {"hits": [
+                {"_source": {"source": "/tpl/Vakalatnama.csv"}},
+            ]}}
+        mock_es.search = _fake_search
+
+        async def _fake_picker(query, file_paths):
+            seen_picker_query.append(query)
+            return None
+
+        async def _fake_web(query, **kwargs):
+            return "SYNTHESIZED WEB TEXT"
+
+        with patch("agents.drafting.get_es_client", return_value=mock_es), \
+             patch("agents.drafting._translate_query_for_es_match",
+                   side_effect=_fake_translate), \
+             patch("agents.drafting._pick_reference_source",
+                   side_effect=_fake_picker), \
+             patch("agents.drafting._acquire_reference_via_web",
+                   side_effect=_fake_web):
+            _run(_acquire_reference_draft(
+                query="Application to obtain signature on Vakalatnama.",
+                progress_emit=self._silent_progress,
+                user_language="en",
+            ))
+        assert translator_calls == []
+        assert "Vakalatnama" in seen_es_body["match_text"]
+        assert seen_picker_query == ["Application to obtain signature on Vakalatnama."]
+
+    def test_translator_failure_falls_back_to_original_query(self):
+        """Translator returns empty → ES match + picker use the original
+        regional-language query (current behaviour — worst case is a
+        web-fallback which is what we had before this fix)."""
+        seen_es_body: dict = {}
+
+        async def _fake_translate(query, user_language):
+            return ""  # Translator failed / rejected — signals fallback
+
+        mock_es = MagicMock()
+        def _fake_search(index, body):
+            seen_es_body["match_text"] = body["query"]["match"]["page_content"]
+            return {"hits": {"hits": []}}
+        mock_es.search = _fake_search
+
+        async def _fake_web(query, **kwargs):
+            return "SYNTHESIZED WEB TEXT"
+
+        with patch("agents.drafting.get_es_client", return_value=mock_es), \
+             patch("agents.drafting._translate_query_for_es_match",
+                   side_effect=_fake_translate), \
+             patch("agents.drafting._acquire_reference_via_web",
+                   side_effect=_fake_web):
+            _run(_acquire_reference_draft(
+                query="अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
+                progress_emit=self._silent_progress,
+                user_language="hi",
+            ))
+        # Match body should contain the original Devanagari text (sanitized).
+        assert "अभियुक्त" in seen_es_body["match_text"] or \
+               "वकालतनामा" in seen_es_body["match_text"]
 
 
 # ---------------------------------------------------------------------------

@@ -1214,6 +1214,32 @@ async def _judge_fanout(
         lang_name = language_name(user_language)
         excerpt = _reference_excerpt(reference_draft)
 
+        # Depth hint — the fan-out judge previously never saw the depth
+        # intent, so "in depth" / "detailed" requests on medium docs
+        # (legal notices, complaints, one-page applications) collapsed
+        # into single-pass and produced thin output even after the
+        # per-section depth-directive shipped. Pass an explicit hint so
+        # the judge can bias toward fan-out on depth=detailed.
+        depth = getattr(user_intent, "response_depth", "standard") if user_intent else "standard"
+        if depth == "detailed":
+            depth_directive = (
+                "The user asked for a DETAILED draft (response_depth = "
+                "'detailed'). Bias toward FAN-OUT even for medium document "
+                "types you would normally single-pass — single-pass cannot "
+                "adequately deliver the depth the user requested."
+            )
+        elif depth == "brief":
+            depth_directive = (
+                "The user asked for a BRIEF draft (response_depth = 'brief'). "
+                "Prefer single-pass unless the reference explicitly demands "
+                "fan-out."
+            )
+        else:
+            depth_directive = (
+                "The user did not express an explicit depth preference. "
+                "Apply the default fan-out rules above."
+            )
+
         llm = init_chat_model(
             "google_genai:gemini-2.5-flash-lite",
             temperature=0.0,
@@ -1228,6 +1254,7 @@ async def _judge_fanout(
                     "query": query[:2000],
                     "reference_excerpt": excerpt,
                     "user_language_name": lang_name,
+                    "depth_directive": depth_directive,
                 }),
                 timeout=15,
             )

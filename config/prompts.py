@@ -1535,6 +1535,16 @@ One short sentence. Examples:
   - "Fan out — 9 sections; writ petition with Part I/II/III + Grounds + Prayer."
   - "Fan out — 11 sections; plaint with Facts, Issues, multiple Grounds, Prayer, Verification, Schedule."
 
+## User depth signal
+
+{depth_directive}
+
+When the depth signal is `detailed`, BIAS TOWARDS FAN-OUT even for document types you would normally single-pass (legal notices, demand letters, complaints, one-page applications) — the user explicitly asked for depth, which single-pass generation cannot deliver adequately. For a `detailed` legal notice, fan out into: (1) addressee + subject block, (2) chronological facts, (3) part-payment / admission, (4) legal-heir liability (when relevant), (5) demand + statutory-basis, (6) compliance-deadline + consequences, (7) signature. Similarly for other document types the user asked for in depth — synthesise the fan-out even if the raw doc type sits in the "single-pass" list above.
+
+When the depth signal is `brief`, stay single-pass unless the reference explicitly demands fan-out.
+
+When the depth signal is `standard`, apply the "When to fan out" / "When to keep single-pass" rules above without depth-driven bias.
+
 ## Inputs
 
 USER QUERY:

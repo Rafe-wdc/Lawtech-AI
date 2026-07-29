@@ -415,6 +415,98 @@ class TestJudgeFanout:
                 ))
         assert captured.get("user_language_name") == "Marathi"
 
+    def test_detailed_depth_passes_bias_fan_out_directive(self):
+        """The judge previously never saw response_depth, so "in depth"
+        legal-notice requests collapsed to single-pass and produced thin
+        output. The judge must now receive an explicit "bias toward
+        fan-out" directive when intent.response_depth == 'detailed'."""
+        from config.intent import UserIntent
+        captured: dict = {}
+
+        async def _capture_invoke(payload):
+            captured.update(payload)
+            return {
+                "raw": MagicMock(usage_metadata={"total_tokens": 100}),
+                "parsed": _FanoutStrategy(should_fanout=True, sections=[
+                    _Section(id="a", heading="A", summary=""),
+                    _Section(id="b", heading="B", summary=""),
+                ], reasoning="detailed"),
+            }
+
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            with patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+                mock_prompt.from_template.return_value.__or__ = MagicMock(return_value=mock_chain)
+                _run(_judge_fanout(
+                    query="Draft a legal notice in depth.",
+                    reference_draft="REF",
+                    user_language="en",
+                    user_intent=UserIntent(response_depth="detailed",
+                                           confidence=0.9),
+                ))
+        directive = captured.get("depth_directive", "")
+        assert "DETAILED" in directive
+        assert "FAN-OUT" in directive.upper()
+
+    def test_brief_depth_passes_prefer_single_pass_directive(self):
+        from config.intent import UserIntent
+        captured: dict = {}
+
+        async def _capture_invoke(payload):
+            captured.update(payload)
+            return {
+                "raw": MagicMock(usage_metadata={"total_tokens": 100}),
+                "parsed": _FanoutStrategy(should_fanout=False, reasoning="brief"),
+            }
+
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            with patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+                mock_prompt.from_template.return_value.__or__ = MagicMock(return_value=mock_chain)
+                _run(_judge_fanout(
+                    query="Draft a brief notice.",
+                    reference_draft="REF", user_language="en",
+                    user_intent=UserIntent(response_depth="brief",
+                                           confidence=0.9),
+                ))
+        directive = captured.get("depth_directive", "")
+        assert "BRIEF" in directive
+        assert "single-pass" in directive.lower()
+
+    def test_none_intent_passes_default_directive(self):
+        """user_intent=None → default depth directive (no bias either way)."""
+        captured: dict = {}
+
+        async def _capture_invoke(payload):
+            captured.update(payload)
+            return {
+                "raw": MagicMock(usage_metadata={"total_tokens": 100}),
+                "parsed": _FanoutStrategy(should_fanout=False, reasoning=""),
+            }
+
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
+        with patch("langchain.chat_models.init_chat_model") as mock_init:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            with patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+                mock_prompt.from_template.return_value.__or__ = MagicMock(return_value=mock_chain)
+                _run(_judge_fanout(
+                    query="Draft a notice.", reference_draft="REF",
+                    user_language="en", user_intent=None,
+                ))
+        directive = captured.get("depth_directive", "")
+        assert "default" in directive.lower() or "no explicit" in directive.lower()
+
 
 class TestGenerateSectionwise:
     """`_generate_sectionwise` walks pairs and threads prior_text through."""

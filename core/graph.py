@@ -14,9 +14,43 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Send
 
 from .state import LegalAgentState
-from .logger import get_logger
+from .logger import get_logger, short_err
+from .metrics import observe_node_duration
 
 log = get_logger("Graph")
+
+
+def _timed_node(name: str, node_fn):
+    """Wrap a node function to record `node_duration_seconds{node=name}`
+    on every execution — success or failure.
+
+    LangGraph calls node functions once per invocation with the shared
+    state. Timing here gives us per-node latency for every graph run
+    without touching each agent file.
+    """
+    import time
+    import inspect
+
+    if inspect.iscoroutinefunction(node_fn):
+        async def _awrap(state):  # type: ignore[misc]
+            start = time.perf_counter()
+            try:
+                return await node_fn(state)
+            finally:
+                observe_node_duration(name, time.perf_counter() - start)
+        _awrap.__name__ = f"timed_{name}"
+        _awrap.__wrapped__ = node_fn  # type: ignore[attr-defined]
+        return _awrap
+
+    def _swrap(state):
+        start = time.perf_counter()
+        try:
+            return node_fn(state)
+        finally:
+            observe_node_duration(name, time.perf_counter() - start)
+    _swrap.__name__ = f"timed_{name}"
+    _swrap.__wrapped__ = node_fn  # type: ignore[attr-defined]
+    return _swrap
 
 # Agent imports
 from agents.guardrail import guardrail_input_node, guardrail_output_node
@@ -166,27 +200,29 @@ def build_graph() -> StateGraph:
 
     # --- Add Nodes ---
 
-    # Infrastructure agents
-    graph.add_node("guardrail_input", guardrail_input_node)
-    graph.add_node("memory", memory_node)
-    graph.add_node("orchestrator_plan", orchestrator_plan_node)
-    graph.add_node("orchestrator_synthesize", orchestrator_synthesize_node)
-    graph.add_node("guardrail_output", guardrail_output_node)
-    graph.add_node("blocked_response", blocked_response_node)
+    # Infrastructure agents — wrapped in _timed_node so
+    # `lawtech_node_duration_seconds{node=<name>}` gets observed on
+    # every run, success or failure.
+    graph.add_node("guardrail_input", _timed_node("guardrail_input", guardrail_input_node))
+    graph.add_node("memory", _timed_node("memory", memory_node))
+    graph.add_node("orchestrator_plan", _timed_node("orchestrator_plan", orchestrator_plan_node))
+    graph.add_node("orchestrator_synthesize", _timed_node("orchestrator_synthesize", orchestrator_synthesize_node))
+    graph.add_node("guardrail_output", _timed_node("guardrail_output", guardrail_output_node))
+    graph.add_node("blocked_response", _timed_node("blocked_response", blocked_response_node))
 
     # Domain agents
-    graph.add_node("legislation", legislation_node)
-    graph.add_node("judgment", judgment_node)
-    graph.add_node("newacts", newacts_node)
-    graph.add_node("drafting", drafting_node)
-    graph.add_node("scenario", scenario_node)
-    graph.add_node("constitution", constitution_node)
-    graph.add_node("maxim", maxim_node)
-    graph.add_node("legal_concepts", legal_concepts_node)
-    graph.add_node("document", document_node)
-    graph.add_node("sci_judgment", sci_judgment_node)
-    graph.add_node("gst_judgment", gst_judgment_node)
-    graph.add_node("non_legal", non_legal_node)
+    graph.add_node("legislation", _timed_node("legislation", legislation_node))
+    graph.add_node("judgment", _timed_node("judgment", judgment_node))
+    graph.add_node("newacts", _timed_node("newacts", newacts_node))
+    graph.add_node("drafting", _timed_node("drafting", drafting_node))
+    graph.add_node("scenario", _timed_node("scenario", scenario_node))
+    graph.add_node("constitution", _timed_node("constitution", constitution_node))
+    graph.add_node("maxim", _timed_node("maxim", maxim_node))
+    graph.add_node("legal_concepts", _timed_node("legal_concepts", legal_concepts_node))
+    graph.add_node("document", _timed_node("document", document_node))
+    graph.add_node("sci_judgment", _timed_node("sci_judgment", sci_judgment_node))
+    graph.add_node("gst_judgment", _timed_node("gst_judgment", gst_judgment_node))
+    graph.add_node("non_legal", _timed_node("non_legal", non_legal_node))
 
     # --- Add Edges ---
 

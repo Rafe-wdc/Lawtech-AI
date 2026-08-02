@@ -21,7 +21,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.state import LegalAgentState, AgentResult, SourceMetadata, IntegrationContextData
 from core.clients import get_genai_client
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
 from config.prompts import SCENARIO_SYSTEM_PROMPT
@@ -233,13 +233,15 @@ async def scenario_node(state: LegalAgentState) -> dict:
             )
 
     except Exception as e:
-        log.error("Agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Scenario", e)
+        log.error("Agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Scenario",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     return {"agent_results": {"Scenario": result}}

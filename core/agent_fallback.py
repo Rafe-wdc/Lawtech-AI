@@ -15,7 +15,7 @@ import asyncio
 
 from core.state import AgentResult, SourceMetadata
 from core.clients import get_gemini_flash, get_genai_client
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.chat_store import chat_store
 from core.metrics import METRICS
 from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
@@ -174,34 +174,60 @@ async def web_search_fallback(
         full_prompt = f"{localized_system}\n\nUser Query: {query}"
         client = get_genai_client()
 
-        # Try scenario_web_grounded model first, fall back to gemini-2.5-pro on 503
+        # Try scenario_web_grounded model first, fall back to gemini-2.5-pro
+        # on 503. Also handle 429 rate limits with capped exponential backoff
+        # (up to 3 retries per model) rather than immediately marking the
+        # request failed — a transient quota trip is often self-clearing.
         _primary = MODELS["scenario_web_grounded"]
         response = None
         for model in [_primary, "gemini-2.5-pro"]:
-            try:
-                with log_time(log, f"{model} + Google Search", agent=agent_name):
-                    response = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            client.models.generate_content,
-                            model=model,
-                            contents=[full_prompt],
-                            config={
-                                "tools": [{"google_search": {}}],
-                                "max_output_tokens": 8000,
-                                "temperature": 0.5,
-                                "top_p": 0.95,
-                            },
-                        ),
-                        timeout=TIMEOUT_WEB_SEARCH_SEC,
+            rate_limit_retries = 0
+            while True:
+                try:
+                    with log_time(log, f"{model} + Google Search", agent=agent_name):
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                client.models.generate_content,
+                                model=model,
+                                contents=[full_prompt],
+                                config={
+                                    "tools": [{"google_search": {}}],
+                                    "max_output_tokens": 8000,
+                                    "temperature": 0.5,
+                                    "top_p": 0.95,
+                                },
+                            ),
+                            timeout=TIMEOUT_WEB_SEARCH_SEC,
+                        )
+                    break  # success
+                except Exception as model_err:
+                    err_text = str(model_err)
+                    is_429 = (
+                        "429" in err_text
+                        or "RESOURCE_EXHAUSTED" in err_text
+                        or "rate limit" in err_text.lower()
                     )
-                break  # success
-            except Exception as model_err:
-                if "503" in str(model_err) and model == _primary:
-                    log.warning("Flash 503, retrying with Pro",
-                                agent=agent_name, error=str(model_err)[:100])
-                    await asyncio.sleep(1)
-                    continue
-                raise
+                    if is_429 and rate_limit_retries < 3:
+                        # 2s, 4s, 8s — capped at 3 retries so we never
+                        # burn more than 14s on a single 429 chain.
+                        wait_s = 2 ** (rate_limit_retries + 1)
+                        rate_limit_retries += 1
+                        log.warning(
+                            "Gemini 429 rate limit — backing off",
+                            model=model, wait_s=wait_s,
+                            attempt=rate_limit_retries,
+                            agent=agent_name,
+                        )
+                        await asyncio.sleep(wait_s)
+                        continue
+                    if "503" in err_text and model == _primary:
+                        log.warning("Flash 503, retrying with Pro",
+                                    agent=agent_name, error=err_text[:100])
+                        await asyncio.sleep(1)
+                        break  # break inner while → advance to next model
+                    raise
+            if response is not None:
+                break  # break outer for-loop on success
 
         if response is None:
             raise RuntimeError("All models failed")
@@ -287,13 +313,13 @@ async def web_search_fallback(
 
     except Exception as e:
         log.error("Web search fallback failed",
-                  agent=agent_name, error=str(e), exc_info=True)
-        # Sanitize: take first line only (no stack trace), strip brand
-        # tokens (so a "google.genai.errors..." SDK message can't leak
-        # the provider to the user), and cap to 200 chars.
+                  agent=agent_name, error=short_err(e), exc_info=True)
+        # Sanitize: short_err prepends the exception type (so an empty
+        # TimeoutError still surfaces as "TimeoutError"), then redact
+        # brand tokens so a "google.genai.errors..." SDK message can't
+        # leak the provider to the user.
         from core.redact import redact_brands
-        raw = str(e).splitlines()[0] if str(e) else "unknown error"
-        sanitized = redact_brands(raw)[:200]
+        sanitized = redact_brands(short_err(e))
         return AgentResult(
             agent_name=agent_name,
             content="I was unable to retrieve information on this topic at the moment. Please try rephrasing your question.",

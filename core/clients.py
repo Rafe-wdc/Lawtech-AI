@@ -135,6 +135,91 @@ def record_es_success() -> None:
         _es_open_until = 0.0
 
 
+# --- Gemini Circuit Breaker ---
+# Mirrors the ES pattern above. Prevents cascading Gemini calls during a
+# regional outage / quota trip. When Gemini returns 5xx or a 429 or hits
+# `ResourceExhausted`, agents that guard critical paths with
+# `is_gemini_available()` can skip the Gemini call and fall back to
+# cached / no-op behaviour. This targets self_refine, the drafting
+# judge/router, and web_search_fallback — the paths where a hung Gemini
+# holds a semaphore slot until gunicorn kills the worker.
+#
+# Two breakers because Flash quota is separately rate-limited from Pro
+# quota — Pro can be down while Flash is fine.
+
+_gemini_flash_failure_count: int = 0
+_gemini_flash_open_until: float = 0.0
+_gemini_pro_failure_count: int = 0
+_gemini_pro_open_until: float = 0.0
+_GEMINI_FAILURE_THRESHOLD: int = 5
+_GEMINI_OPEN_DURATION_SEC: float = 60.0
+_gemini_lock = threading.Lock()
+
+
+def is_gemini_flash_available() -> bool:
+    """Return False if the Gemini Flash circuit is open (fast-fail active)."""
+    with _gemini_lock:
+        return time.time() >= _gemini_flash_open_until
+
+
+def is_gemini_pro_available() -> bool:
+    """Return False if the Gemini Pro circuit is open (fast-fail active)."""
+    with _gemini_lock:
+        return time.time() >= _gemini_pro_open_until
+
+
+def record_gemini_flash_failure() -> None:
+    """Increment Flash failure count; open the circuit after 5 hits."""
+    global _gemini_flash_failure_count, _gemini_flash_open_until
+    with _gemini_lock:
+        _gemini_flash_failure_count += 1
+        if _gemini_flash_failure_count >= _GEMINI_FAILURE_THRESHOLD:
+            _gemini_flash_open_until = time.time() + _GEMINI_OPEN_DURATION_SEC
+            _log.warning(
+                "Gemini Flash circuit OPEN — fast-failing for 60s",
+                failure_count=_gemini_flash_failure_count,
+            )
+
+
+def record_gemini_flash_success() -> None:
+    """Reset Flash breaker after a successful call."""
+    global _gemini_flash_failure_count, _gemini_flash_open_until
+    with _gemini_lock:
+        if _gemini_flash_failure_count > 0:
+            _log.info(
+                "Gemini Flash circuit RESET after successful call",
+                previous_failures=_gemini_flash_failure_count,
+            )
+        _gemini_flash_failure_count = 0
+        _gemini_flash_open_until = 0.0
+
+
+def record_gemini_pro_failure() -> None:
+    """Increment Pro failure count; open the circuit after 5 hits."""
+    global _gemini_pro_failure_count, _gemini_pro_open_until
+    with _gemini_lock:
+        _gemini_pro_failure_count += 1
+        if _gemini_pro_failure_count >= _GEMINI_FAILURE_THRESHOLD:
+            _gemini_pro_open_until = time.time() + _GEMINI_OPEN_DURATION_SEC
+            _log.warning(
+                "Gemini Pro circuit OPEN — fast-failing for 60s",
+                failure_count=_gemini_pro_failure_count,
+            )
+
+
+def record_gemini_pro_success() -> None:
+    """Reset Pro breaker after a successful call."""
+    global _gemini_pro_failure_count, _gemini_pro_open_until
+    with _gemini_lock:
+        if _gemini_pro_failure_count > 0:
+            _log.info(
+                "Gemini Pro circuit RESET after successful call",
+                previous_failures=_gemini_pro_failure_count,
+            )
+        _gemini_pro_failure_count = 0
+        _gemini_pro_open_until = 0.0
+
+
 # --- LLM Clients via init_chat_model (provider-agnostic, LangChain 1.0+) ---
 # Pattern: init_chat_model("provider:model_name", **kwargs)
 # Docs: https://docs.langchain.com/oss/python/langchain/models

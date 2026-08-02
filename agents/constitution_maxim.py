@@ -32,7 +32,7 @@ from core.retrieval_relevance import (
 )
 from core.settings import ES_INDICES
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from config.prompts import (
     CONSTITUTION_SYSTEM_PROMPT,
@@ -90,7 +90,7 @@ def _retrieve_from_es(task: str, query: str) -> list[Document]:
 
     try:
         with log_time(log, "ES retrieval", task=task):
-            result = es.search(index=index, body=body)
+            result = es.search(index=index, body=body, request_timeout=8)
 
         hits = result["hits"]["hits"]
         if not hits:
@@ -296,13 +296,15 @@ async def constitution_node(state: LegalAgentState) -> dict:
         result = await _handle_constitution_or_maxim("Constitution", gen_query, chat_history,
                                                       user_language, state.get("user_intent"))
     except Exception as e:
-        log.error("Constitution agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Constitution", e)
+        log.error("Constitution agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Constitution",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     log.info("Constitution agent completed",
@@ -328,13 +330,15 @@ async def maxim_node(state: LegalAgentState) -> dict:
         result = await _handle_constitution_or_maxim("Maxim", gen_query, chat_history,
                                                       user_language, state.get("user_intent"))
     except Exception as e:
-        log.error("Maxim agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Maxim", e)
+        log.error("Maxim agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Maxim",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     log.info("Maxim agent completed",
@@ -356,13 +360,15 @@ async def legal_concepts_node(state: LegalAgentState) -> dict:
     try:
         result = await _handle_legal_concepts(gen_query, chat_history, user_language, state.get("user_intent"))
     except Exception as e:
-        log.error("Legal Concepts agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Legal_Concepts", e)
+        log.error("Legal Concepts agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Legal_Concepts",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     log.info("Legal Concepts agent completed",

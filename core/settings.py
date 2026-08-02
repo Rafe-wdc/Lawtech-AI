@@ -186,4 +186,6 @@ RATE_LIMIT_ADMIN_PER_MINUTE = int(os.getenv("RATE_LIMIT_ADMIN_PER_MINUTE", "200"
 
 # --- Logging ---
 LOG_DIR = str(_PROJECT_ROOT / "logs")
-LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+# Default INFO to keep prod log volume manageable — dev workstations
+# that want verbose output should set LOG_LEVEL=DEBUG in .env explicitly.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

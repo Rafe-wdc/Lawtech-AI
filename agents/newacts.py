@@ -36,7 +36,7 @@ from core.retrieval_relevance import (
 )
 from core.settings import ES_INDICES, TIMEOUT_METADATA_SEC
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from config.prompts import NEWACTS_SYSTEM_PROMPT
 
@@ -1013,13 +1013,15 @@ async def newacts_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        log.error("Agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Newacts", e)
+        log.error("Agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Newacts",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     return {

@@ -33,6 +33,11 @@ keepalive = int(os.getenv("GUNICORN_KEEPALIVE", "75"))
 # under bursty load (kernel dropped SYNs → client `All connection
 # attempts failed`). Bump to match sysctl somaxconn=4096.
 backlog = int(os.getenv("GUNICORN_BACKLOG", "4096"))
+# Recycle each worker after N requests to bound slow memory growth from
+# PDF processing + Gemini file uploads. Jitter prevents synchronized
+# restart storms when all workers cross the threshold at the same time.
+max_requests = int(os.getenv("GUNICORN_MAX_REQUESTS", "1000"))
+max_requests_jitter = int(os.getenv("GUNICORN_MAX_REQUESTS_JITTER", "100"))
 accesslog = os.getenv("GUNICORN_ACCESSLOG", "-")
 errorlog = os.getenv("GUNICORN_ERRORLOG", "-")
 daemon = os.getenv("GUNICORN_DAEMON", "false").lower() in ("1", "true", "yes", "on")

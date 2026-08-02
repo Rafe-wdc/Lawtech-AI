@@ -120,8 +120,32 @@ async def stream_chain_response(
     except Exception as e:
         if not retry:
             raise
+        err_text = str(e)
+        # Rate-limit-aware retry: on 429 back off exponentially (2s, 4s)
+        # before retrying instead of hitting Gemini again immediately.
+        is_429 = (
+            "429" in err_text
+            or "RESOURCE_EXHAUSTED" in err_text
+            or "rate limit" in err_text.lower()
+        )
+        if is_429:
+            for wait_s in (2, 4):
+                log.warning("Gemini 429 during stream — backing off %ds", wait_s)
+                writer({"type": "token_reset"})
+                await asyncio.sleep(wait_s)
+                try:
+                    return await asyncio.wait_for(
+                        _stream_with_writer(chain, inputs, writer), timeout=t,
+                    )
+                except Exception as retry_err:
+                    err_text = str(retry_err)
+                    if "429" not in err_text and "RESOURCE_EXHAUSTED" not in err_text:
+                        # No longer 429 — fall through to the generic retry below
+                        e = retry_err
+                        break
+                    continue
         log.warning("Streaming failed, resetting and retrying once: %s",
-                    str(e)[:200])
+                    err_text[:200])
         # Tell the frontend to clear its token buffer before retry
         writer({"type": "token_reset"})
         return await asyncio.wait_for(

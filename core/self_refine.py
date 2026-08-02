@@ -53,7 +53,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from config.intent import LegalArtifact, UserIntent, default_intent
 from config.prompts import INJECTION_GUARD_PREAMBLE, wrap_untrusted
 from core.clients import get_gemini_flash_full, get_gemini_pro
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.token_tracker import record as _record_tokens
 
 log = get_logger("SelfRefine")
@@ -1415,6 +1415,20 @@ async def _critique(
     CRITIQUE_PROMPT). Populated by the orchestrator when it calls
     self_refine after multi-agent synthesis.
     """
+    # Circuit breaker: skip the critic entirely when Gemini Flash is
+    # unhealthy. Better to ship an un-audited draft (same as the existing
+    # "critique failed → passes=True" fallback) than to sit for 45s
+    # waiting on a call that we already know is failing.
+    from core.clients import (
+        is_gemini_flash_available, record_gemini_flash_failure,
+        record_gemini_flash_success,
+    )
+    if not is_gemini_flash_available():
+        log.warning("Gemini Flash circuit open — skipping critique",
+                    fast_fail=True)
+        return Critique(passes=True, confidence=0.0,
+                        overall_quality_notes="critique skipped (Flash circuit open)")
+
     try:
         with log_time(log, "Self-refine critique"):
             llm = (critic_llm or get_gemini_flash_full(
@@ -1423,21 +1437,33 @@ async def _critique(
             intent_json = intent.model_dump_json(indent=2)
             prompt = ChatPromptTemplate.from_template(CRITIQUE_PROMPT)
             chain = prompt | llm
-            raw_and_parsed = await asyncio.to_thread(
-                chain.invoke,
-                {
-                    "query":       wrap_untrusted(user_query),
-                    "intent_json": intent_json,
-                    "response":    wrap_untrusted(response),
-                    "retrieved_sources_whitelist": (
-                        retrieved_sources_whitelist
-                        or "(none — the caller passed no source registry; skip the "
-                           "`unretrieved_citation` category for this call)"
-                    ),
-                },
+            # Bound the critic call. Without this, a hung Gemini Flash
+            # blocks the caller's drafting semaphore slot until gunicorn
+            # kills the worker at 300s — cascading failure across every
+            # in-flight request in that worker. `bounded_wait_for`
+            # additionally clamps to the request-scoped deadline so a
+            # 45s critic on a 10s remaining budget fails fast instead of
+            # blowing the outer envelope.
+            from core.deadline import bounded_wait_for
+            raw_and_parsed = await bounded_wait_for(
+                asyncio.to_thread(
+                    chain.invoke,
+                    {
+                        "query":       wrap_untrusted(user_query),
+                        "intent_json": intent_json,
+                        "response":    wrap_untrusted(response),
+                        "retrieved_sources_whitelist": (
+                            retrieved_sources_whitelist
+                            or "(none — the caller passed no source registry; skip the "
+                               "`unretrieved_citation` category for this call)"
+                        ),
+                    },
+                ),
+                local_timeout=45,
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
         result: Critique = raw_and_parsed["parsed"]
+        record_gemini_flash_success()
         log.info(
             "Critique result",
             passes=result.passes,
@@ -1449,9 +1475,10 @@ async def _critique(
         )
         return result
     except Exception as e:
+        record_gemini_flash_failure()
         log.warning(
             "Critique LLM call failed; treating as pass to avoid blocking user",
-            error=str(e).splitlines()[0][:200],
+            error=short_err(e),
             exc_info=True,
         )
         return Critique(passes=True, confidence=0.0,
@@ -1475,6 +1502,17 @@ async def _refine(
     substitute a real retrieved citation for a hallucinated one flagged
     under `unretrieved_citation`, instead of restoring the invention.
     """
+    # Circuit breaker: skip the refiner when Gemini Pro is unhealthy.
+    # Returning the original response is the existing fallback anyway.
+    from core.clients import (
+        is_gemini_pro_available, record_gemini_pro_failure,
+        record_gemini_pro_success,
+    )
+    if not is_gemini_pro_available():
+        log.warning("Gemini Pro circuit open — skipping refinement",
+                    fast_fail=True)
+        return response
+
     try:
         with log_time(log, "Self-refine refinement"):
             llm = refiner_llm or get_gemini_pro(
@@ -1484,22 +1522,29 @@ async def _refine(
             violations_block = _format_violations(critique.violations)
             prompt = ChatPromptTemplate.from_template(REFINE_PROMPT)
             chain = prompt | llm
-            result = await asyncio.to_thread(
-                chain.invoke,
-                {
-                    "query":           wrap_untrusted(user_query),
-                    "intent_json":     intent_json,
-                    "violations_block": violations_block,
-                    "quality_notes":   critique.overall_quality_notes or "(none)",
-                    "response":        response,
-                    "retrieved_sources_whitelist": (
-                        retrieved_sources_whitelist
-                        or "(none — restrict yourself to fixing non-citation "
-                           "violations; do not touch existing citations for this call)"
-                    ),
-                },
+            # Bound the refiner too — same reasoning as the critic above,
+            # with deadline-aware clamping.
+            from core.deadline import bounded_wait_for
+            result = await bounded_wait_for(
+                asyncio.to_thread(
+                    chain.invoke,
+                    {
+                        "query":           wrap_untrusted(user_query),
+                        "intent_json":     intent_json,
+                        "violations_block": violations_block,
+                        "quality_notes":   critique.overall_quality_notes or "(none)",
+                        "response":        response,
+                        "retrieved_sources_whitelist": (
+                            retrieved_sources_whitelist
+                            or "(none — restrict yourself to fixing non-citation "
+                               "violations; do not touch existing citations for this call)"
+                        ),
+                    },
+                ),
+                local_timeout=60,
             )
         _record_tokens("SelfRefine", "refine", result)
+        record_gemini_pro_success()
         text = getattr(result, "content", None)
         if text is None:
             text = str(result)
@@ -1511,9 +1556,10 @@ async def _refine(
         )
         return text
     except Exception as e:
+        record_gemini_pro_failure()
         log.warning(
             "Refinement LLM call failed; returning original response",
-            error=str(e).splitlines()[0][:200],
+            error=short_err(e),
             exc_info=True,
         )
         return response

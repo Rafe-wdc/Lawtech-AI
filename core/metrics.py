@@ -53,8 +53,21 @@ METRICS: dict = {
 
     "agent_errors_total": Counter(
         "lawtech_agent_errors_total",
-        "Agent-level errors (empty result or exception)",
-        ["agent"],
+        "Agent-level errors (empty result or exception). `error_class` "
+        "is the exception type name (e.g. TimeoutError, RuntimeError) "
+        "or a synthetic label like `empty_result`.",
+        ["agent", "error_class"],
+    ),
+
+    "node_duration_seconds": Histogram(
+        "lawtech_node_duration_seconds",
+        "Per-graph-node execution latency in seconds. `node` is the "
+        "LangGraph node name (e.g. `orchestrator_plan`, `drafting`, "
+        "`guardrail_input`). Separate from `agent_latency_seconds` "
+        "because it also covers infrastructure nodes (guardrail, "
+        "memory, orchestrator_plan/synthesize).",
+        ["node"],
+        buckets=_LATENCY_BUCKETS,
     ),
 
     # --- Fallback Layer ---
@@ -155,3 +168,55 @@ METRICS: dict = {
         "Total responses that have been quality scored",
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Convenience helpers (thin wrappers so callers don't type
+# METRICS["agent_errors_total"].labels(...).inc() everywhere).
+# ---------------------------------------------------------------------------
+
+def record_agent_error(agent: str, exc: BaseException | None = None,
+                       error_class: str | None = None) -> None:
+    """Increment `agent_errors_total{agent, error_class}`.
+
+    Pass the exception object OR an explicit `error_class` label. When
+    both are None, defaults to `"unknown"` so the metric is never
+    silently under-counted.
+    """
+    if error_class is None:
+        error_class = type(exc).__name__ if exc is not None else "unknown"
+    try:
+        METRICS["agent_errors_total"].labels(
+            agent=agent, error_class=error_class,
+        ).inc()
+    except Exception:  # pragma: no cover — metric failure must never
+        # bring down the caller. The whole point of the wrapper is that
+        # a broken metrics backend can't cascade into agent failure.
+        pass
+
+
+def observe_node_duration(node: str, seconds: float) -> None:
+    """Observe a single per-node execution latency."""
+    try:
+        METRICS["node_duration_seconds"].labels(node=node).observe(seconds)
+    except Exception:  # pragma: no cover — same rationale as above
+        pass
+
+
+from contextlib import contextmanager as _contextmanager
+import time as _time
+
+
+@_contextmanager
+def time_node(node: str):
+    """Context manager that observes `node_duration_seconds{node}`.
+
+    Usage:
+        with time_node("drafting"):
+            result = await run_drafting(state)
+    """
+    start = _time.perf_counter()
+    try:
+        yield
+    finally:
+        observe_node_duration(node, _time.perf_counter() - start)

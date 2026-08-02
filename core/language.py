@@ -554,6 +554,156 @@ def localize_prompt(
                 "- 'Affidavit' → 'शपथपत्रम्'\n"
                 "- 'Hon'ble Court' → 'माननीय-न्यायालयम्'\n\n"
             )
+        # G-30 (P2 2026-08-02): starter ceremonial vocab for the other
+        # 10 supported Indic languages. Uses widely-attested Sanskrit-
+        # derived legal terminology; individual jurisdictions may prefer
+        # local variants — flag through with the intent's
+        # additional_instructions if a specific bar-council form is
+        # needed. All follow the same fixed-English-anchors rule (digits
+        # + statutory refs stay Latin).
+        elif lang == "bn":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Bengali:\n"
+                "- 'Plaintiff / Petitioner' → 'বাদী / আবেদনকারী'\n"
+                "- 'Defendant / Respondent' → 'বিবাদী / প্রতিবাদী'\n"
+                "- 'Versus' → 'বনাম'\n"
+                "- 'Prayer' → 'প্রার্থনা'\n"
+                "- 'Verification' → 'সত্যায়ন'\n"
+                "- 'Affidavit' → 'হলফনামা'\n"
+                "- 'Hon'ble Court' → 'মাননীয় আদালত'\n"
+                "- 'Most respectfully sheweth' → 'সবিনয়ে নিবেদন এই যে'\n"
+                "- 'is / are' → 'হয় / হইতেছেন'\n"
+                "- 'resident of' → 'নিবাসী'\n"
+                "- 'district' → 'জেলা'\n"
+                "- 'year' → 'সাল' (digit stays Latin: 'সাল 2024')\n\n"
+            )
+        elif lang == "ta":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Tamil:\n"
+                "- 'Plaintiff / Petitioner' → 'வாதி / மனுதாரர்'\n"
+                "- 'Defendant / Respondent' → 'பிரதிவாதி / எதிர்மனுதாரர்'\n"
+                "- 'Versus' → 'எதிர்'\n"
+                "- 'Prayer' → 'வேண்டுகோள்'\n"
+                "- 'Verification' → 'உறுதிமொழி'\n"
+                "- 'Affidavit' → 'உறுதிமொழிப்படிவம்'\n"
+                "- 'Hon'ble Court' → 'மாண்புமிகு நீதிமன்றம்'\n"
+                "- 'Most respectfully sheweth' → 'பணிவுடன் விண்ணப்பம் செய்வதாவது'\n"
+                "- 'resident of' → 'வசிப்பிடம்'\n"
+                "- 'district' → 'மாவட்டம்'\n"
+                "- 'year' → 'ஆண்டு' (digit stays Latin: 'ஆண்டு 2024')\n\n"
+            )
+        elif lang == "te":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Telugu:\n"
+                "- 'Plaintiff / Petitioner' → 'వాది / అర్జీదారు'\n"
+                "- 'Defendant / Respondent' → 'ప్రతివాది / ప్రతివాదిదారు'\n"
+                "- 'Versus' → 'వర్సెస్' (or 'కు వ్యతిరేకంగా')\n"
+                "- 'Prayer' → 'ప్రార్థన'\n"
+                "- 'Verification' → 'ధృవీకరణ'\n"
+                "- 'Affidavit' → 'అఫిడవిట్'\n"
+                "- 'Hon'ble Court' → 'గౌరవనీయ న్యాయస్థానం'\n"
+                "- 'resident of' → 'నివాసి'\n"
+                "- 'district' → 'జిల్లా'\n"
+                "- 'year' → 'సంవత్సరం' (digit stays Latin: 'సంవత్సరం 2024')\n\n"
+            )
+        elif lang == "kn":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Kannada:\n"
+                "- 'Plaintiff / Petitioner' → 'ವಾದಿ / ಅರ್ಜಿದಾರ'\n"
+                "- 'Defendant / Respondent' → 'ಪ್ರತಿವಾದಿ / ಪ್ರತಿವಾದಿಗಳು'\n"
+                "- 'Versus' → 'ವಿರುದ್ಧ'\n"
+                "- 'Prayer' → 'ಪ್ರಾರ್ಥನೆ'\n"
+                "- 'Verification' → 'ದೃಢೀಕರಣ'\n"
+                "- 'Affidavit' → 'ಪ್ರಮಾಣಪತ್ರ'\n"
+                "- 'Hon'ble Court' → 'ಗೌರವಾನ್ವಿತ ನ್ಯಾಯಾಲಯ'\n"
+                "- 'resident of' → 'ನಿವಾಸಿ'\n"
+                "- 'district' → 'ಜಿಲ್ಲೆ'\n"
+                "- 'year' → 'ವರ್ಷ' (digit stays Latin: 'ವರ್ಷ 2024')\n\n"
+            )
+        elif lang == "ml":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Malayalam:\n"
+                "- 'Plaintiff / Petitioner' → 'വാദി / ഹര്‍ജിക്കാരന്‍'\n"
+                "- 'Defendant / Respondent' → 'പ്രതി / എതിര്‍കക്ഷി'\n"
+                "- 'Versus' → 'എതിര്‍'\n"
+                "- 'Prayer' → 'അപേക്ഷ'\n"
+                "- 'Verification' → 'സാക്ഷ്യപ്പെടുത്തല്‍'\n"
+                "- 'Affidavit' → 'സത്യവാങ്മൂലം'\n"
+                "- 'Hon'ble Court' → 'ബഹുമാനപ്പെട്ട കോടതി'\n"
+                "- 'resident of' → 'താമസക്കാരന്‍'\n"
+                "- 'district' → 'ജില്ല'\n"
+                "- 'year' → 'വര്‍ഷം' (digit stays Latin: 'വര്‍ഷം 2024')\n\n"
+            )
+        elif lang == "gu":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Gujarati:\n"
+                "- 'Plaintiff / Petitioner' → 'વાદી / અરજદાર'\n"
+                "- 'Defendant / Respondent' → 'પ્રતિવાદી / બિનઅરજદાર'\n"
+                "- 'Versus' → 'વિરુદ્ધ'\n"
+                "- 'Prayer' → 'વિનંતી'\n"
+                "- 'Verification' → 'ખાતરી'\n"
+                "- 'Affidavit' → 'સોગંદનામું'\n"
+                "- 'Hon'ble Court' → 'મા. અદાલત'\n"
+                "- 'resident of' → 'રહેવાસી'\n"
+                "- 'district' → 'જિલ્લો'\n"
+                "- 'year' → 'વર્ષ' (digit stays Latin: 'વર્ષ 2024')\n\n"
+            )
+        elif lang == "pa":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Punjabi (Gurmukhi):\n"
+                "- 'Plaintiff / Petitioner' → 'ਵਾਦੀ / ਦਰਖ਼ਾਸਤਗੁਜ਼ਾਰ'\n"
+                "- 'Defendant / Respondent' → 'ਪ੍ਰਤੀਵਾਦੀ / ਗੈਰ-ਦਰਖ਼ਾਸਤਗੁਜ਼ਾਰ'\n"
+                "- 'Versus' → 'ਬਨਾਮ'\n"
+                "- 'Prayer' → 'ਪ੍ਰਾਰਥਨਾ'\n"
+                "- 'Verification' → 'ਤਸਦੀਕ'\n"
+                "- 'Affidavit' → 'ਹਲਫ਼ਨਾਮਾ'\n"
+                "- 'Hon'ble Court' → 'ਮਾਣਯੋਗ ਅਦਾਲਤ'\n"
+                "- 'resident of' → 'ਵਾਸੀ'\n"
+                "- 'district' → 'ਜ਼ਿਲ੍ਹਾ'\n"
+                "- 'year' → 'ਸਾਲ' (digit stays Latin: 'ਸਾਲ 2024')\n\n"
+            )
+        elif lang == "ur":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Urdu (Arabic script, RTL):\n"
+                "- 'Plaintiff / Petitioner' → 'مدعی / درخواست گزار'\n"
+                "- 'Defendant / Respondent' → 'مدعا علیہ / جوابدہندہ'\n"
+                "- 'Versus' → 'بمقابلہ'\n"
+                "- 'Prayer' → 'استدعا'\n"
+                "- 'Verification' → 'تصدیق'\n"
+                "- 'Affidavit' → 'حلف نامہ'\n"
+                "- 'Hon'ble Court' → 'معزز عدالت'\n"
+                "- 'resident of' → 'رہائشی'\n"
+                "- 'district' → 'ضلع'\n"
+                "- 'year' → 'سنہ' (digit stays Latin: 'سنہ 2024')\n\n"
+            )
+        elif lang == "or":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Odia:\n"
+                "- 'Plaintiff / Petitioner' → 'ବାଦୀ / ଆବେଦନକାରୀ'\n"
+                "- 'Defendant / Respondent' → 'ପ୍ରତିବାଦୀ / ପ୍ରତିପକ୍ଷ'\n"
+                "- 'Versus' → 'ବନାମ'\n"
+                "- 'Prayer' → 'ପ୍ରାର୍ଥନା'\n"
+                "- 'Verification' → 'ସତ୍ୟାପନ'\n"
+                "- 'Affidavit' → 'ଶପଥନାମା'\n"
+                "- 'Hon'ble Court' → 'ମାନ୍ୟବର ଅଦାଲତ'\n"
+                "- 'resident of' → 'ନିବାସୀ'\n"
+                "- 'district' → 'ଜିଲ୍ଲା'\n"
+                "- 'year' → 'ବର୍ଷ' (digit stays Latin: 'ବର୍ଷ 2024')\n\n"
+            )
+        elif lang == "as":
+            ceremonial_examples = (
+                "Court-document ceremonial blocks must be translated to Assamese:\n"
+                "- 'Plaintiff / Petitioner' → 'বাদী / আবেদনকাৰী'\n"
+                "- 'Defendant / Respondent' → 'বিবাদী / প্ৰতিপক্ষ'\n"
+                "- 'Versus' → 'বনাম'\n"
+                "- 'Prayer' → 'প্ৰাৰ্থনা'\n"
+                "- 'Verification' → 'সত্যাপন'\n"
+                "- 'Affidavit' → 'শপত পত্ৰ'\n"
+                "- 'Hon'ble Court' → 'মাননীয় ন্যায়ালয়'\n"
+                "- 'resident of' → 'নিবাসী'\n"
+                "- 'district' → 'জিলা'\n"
+                "- 'year' → 'বছৰ' (digit stays Latin: 'বছৰ 2024')\n\n"
+            )
         else:
             ceremonial_examples = ""
 

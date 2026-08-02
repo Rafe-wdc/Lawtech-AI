@@ -32,7 +32,7 @@ from core.retrieval_relevance import (
 )
 from core.settings import ES_INDICES
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from config.prompts import LEGISLATION_SYSTEM_PROMPT
 
 from tools.inline.section_parser import parse_section_info, parse_multi_section_info
@@ -46,45 +46,10 @@ from core.progress import progress
 log = get_logger("Legislation")
 
 
-# --- Match Phrase Extraction ---
-
-class QueryMetadata(BaseModel):
-    match_phrase: Optional[str] = Field(None, description="match_phrase clause")
-    sub_part: Optional[str] = Field(None, description="Sub part of act with name")
-
-
-MATCH_PHRASE_PROMPT = """You are a legal document search expert.
-
-Given:
-- An act title,
-- A legal provision context,
-- A user query,
-
-You must:
-- Use the provision type (e.g., Rule, Section) from the context.
-- Use the provision number from the user query.
-- Combine them with the act title to create a normalized match_phrase value.
-- Also output the subpart (e.g., "Rule 1").
-
-Title: "{title}"
-Context: {text}
-User Query: "{query}"
-
-Return JSON only:
-{{"match_phrase": "<context type + user number + title>", "sub_part": "<context type + user number>"}}"""
-
-
-def _extract_match_phrase(query: str, text: str, title: str) -> QueryMetadata:
-    """Use Gemini Flash Lite to extract a match phrase for targeted ES search."""
-    llm = get_gemini_flash(temperature=0.1).with_structured_output(
-        QueryMetadata, include_raw=True,
-    )
-    prompt = ChatPromptTemplate.from_template(MATCH_PHRASE_PROMPT)
-    chain = prompt | llm
-    raw_and_parsed = chain.invoke({'query': query, 'text': text, 'title': title})
-    from core.token_tracker import record as _record_tokens
-    _record_tokens("Legislation", "extract_match_phrase", raw_and_parsed.get("raw"))
-    return raw_and_parsed["parsed"]
+# _extract_match_phrase / QueryMetadata / MATCH_PHRASE_PROMPT were
+# removed 2026-08-02 (P2 dead-code sweep). None of them was called from
+# anywhere — the current pipeline uses UserIntent.named_acts + the
+# _search_legislation → _pick_best_source chain instead.
 
 
 # --- Act-name preference for source ranking ---
@@ -152,7 +117,7 @@ def _search_legislation(
         }
 
         try:
-            response = es.search(index=index, body=es_query)
+            response = es.search(index=index, body=es_query, request_timeout=8)
             current_hits = response["hits"]["hits"]
 
             for hit in current_hits:
@@ -272,7 +237,7 @@ def _search_legislation(
             "size": 5,
         }
 
-    source_response = es.search(index=index, body=source_query)
+    source_response = es.search(index=index, body=source_query, request_timeout=8)
     final_hits = source_response["hits"]["hits"]
 
     # Safety net: if the exact-section filter returned nothing, retry the
@@ -295,7 +260,7 @@ def _search_legislation(
             "size": 5,
             "sort": [{"_score": {"order": "desc"}}],
         }
-        source_response = es.search(index=index, body=source_query_nofilter)
+        source_response = es.search(index=index, body=source_query_nofilter, request_timeout=8)
         final_hits = source_response["hits"]["hits"]
 
     log.debug("Targeted source search done",
@@ -592,13 +557,15 @@ async def legislation_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        log.error("Agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Legislation", e)
+        log.error("Agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Legislation",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     return {"agent_results": {"Legislation": result}}

@@ -1,0 +1,90 @@
+name: Post-deploy smoke (prod)
+
+# Manual smoke against api.lawttorney.com — hits 5 canonical queries
+# (one per major agent path) and fails the workflow on any 5xx.
+#
+# Run this AFTER `deploy-prod.yml` completes to catch prompt/route
+# regressions that a syntax-level test can't see.
+#
+# Required secrets (same as deploy-prod.yml):
+#   PROD_INTEGRATION_URL         (repo var — https://api.lawttorney.com)
+#   PROD_INTEGRATION_API_KEY     (secret — user key)
+#
+# CI-editor note: the sample queries here are stable placeholders —
+# tune them for your actual smoke policy. Every non-200 counts as a
+# regression.
+
+on:
+  workflow_dispatch:
+  # Optional: chain from deploy-prod on success. Enable once smoke
+  # has been characterised — see G-29 in the deep-audit doc.
+  # workflow_run:
+  #   workflows: ["Deploy to Production (main → AWS)"]
+  #   types: [completed]
+  #   branches: [main]
+
+jobs:
+  smoke:
+    name: 5 canonical query smoke
+    runs-on: ubuntu-latest
+    if: vars.PROD_INTEGRATION_URL != ''
+
+    steps:
+      - name: Health check must return 200
+        run: |
+          set -e
+          URL="${{ vars.PROD_INTEGRATION_URL }}/pyapi/health"
+          echo "GET $URL"
+          code=$(curl -s -o /tmp/health.json -w "%{http_code}" --max-time 15 "$URL")
+          echo "HTTP $code"
+          cat /tmp/health.json
+          if [ "$code" != "200" ]; then
+            echo "::error::Health check failed"
+            exit 1
+          fi
+
+      - name: Batch endpoint smoke — 5 canonical queries
+        env:
+          BASE: ${{ vars.PROD_INTEGRATION_URL }}
+          KEY: ${{ secrets.PROD_INTEGRATION_API_KEY }}
+        run: |
+          set -e
+          test -n "$KEY" || { echo "::error::PROD_INTEGRATION_API_KEY not set"; exit 1; }
+
+          # Each entry is "AgentTag|Prompt". Keep prompts short and
+          # stable — this is a smoke, not a load test.
+          declare -a QUERIES=(
+            "Legislation|What does Section 138 of the Negotiable Instruments Act say?"
+            "Judgment|Landmark cases on Article 14 equality"
+            "SCI|Supreme Court judgment on right to privacy"
+            "Newacts|Section 63 of the BSA"
+            "Scenario|My landlord is refusing to return my security deposit. What are my options?"
+          )
+
+          FAIL=0
+          for entry in "${QUERIES[@]}"; do
+            TAG="${entry%%|*}"
+            PROMPT="${entry#*|}"
+            echo ""
+            echo "--- Smoke [$TAG] ---"
+            echo "Prompt: $PROMPT"
+            BODY=$(jq -cn --arg q "$PROMPT" '{prompt_query: $q}')
+            code=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+              --max-time 300 \
+              -X POST "$BASE/pyapi/search" \
+              -H "Content-Type: application/json" \
+              -H "X-API-Key: $KEY" \
+              -d "$BODY")
+            echo "HTTP $code"
+            head -c 300 /tmp/resp.json ; echo
+            if [ "$code" != "200" ]; then
+              echo "::error::[$TAG] smoke failed with HTTP $code"
+              FAIL=1
+            fi
+          done
+
+          if [ "$FAIL" = "1" ]; then
+            echo "::error::One or more smoke queries failed"
+            exit 1
+          fi
+          echo "All 5 smoke queries returned HTTP 200"

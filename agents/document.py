@@ -17,108 +17,30 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 from datetime import date
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
-from core.clients import get_gemini_pro, get_qa_embeddings, get_chroma_client
-from core.settings import CHROMA_STORE_ROOT, TIMEOUT_CHROMADB_SEC
+from core.clients import get_gemini_pro
+from core.settings import TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt, detect_source_languages
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
-from config.intent import LegalArtifact, UserIntent
-from config.prompts import (
-    CROSS_EXAMINATION_PROMPT,
-    DEPOSITION_SUMMARY_PROMPT,
-    CONTRACT_ANALYSIS_PROMPT,
-    LEGAL_NOTICE_DRAFT_PROMPT,
-    COMPLAINT_DRAFT_PROMPT,
-    WITNESS_PREP_PROMPT,
-    OPENING_STATEMENT_PROMPT,
-    CLOSING_ARGUMENT_PROMPT,
-)
-from core.self_refine import self_refine
+from config.intent import UserIntent
+
 log = get_logger("Document")
 
 
-# ---------------------------------------------------------------------------
-# Specialized-artifact dispatch.
-#
-# When `intent.legal_artifact != NONE`, the document agent:
-#   1. Picks the specialized prompt (e.g. CROSS_EXAMINATION_PROMPT) instead
-#      of the generic file-Q&A prompt.
-#   2. Configures Gemini 2.5 Pro with a thinking budget (planning helps for
-#      strategic legal output) and a larger output cap.
-#   3. After generation, runs the dynamic self-refine loop
-#      (core.self_refine.self_refine) which critiques the response against
-#      the typed UserIntent and refines on violations — no hardcoded
-#      thresholds or retry preambles.
-#
-# Adding a new artifact = add an enum + an entry in _SPECIALIZED_PROMPTS.
-# No quality-gate edits needed; the critic derives the rules from the
-# intent fields themselves.
-# ---------------------------------------------------------------------------
-
-# Per-artifact specialized prompt — the picker reads this map. Add a new
-# entry to extend; no other code needs to change.
-_SPECIALIZED_PROMPTS: dict = {
-    LegalArtifact.CROSS_EXAMINATION:   CROSS_EXAMINATION_PROMPT,
-    LegalArtifact.DEPOSITION_SUMMARY:  DEPOSITION_SUMMARY_PROMPT,
-    LegalArtifact.CONTRACT_ANALYSIS:   CONTRACT_ANALYSIS_PROMPT,
-    LegalArtifact.LEGAL_NOTICE_DRAFT:  LEGAL_NOTICE_DRAFT_PROMPT,
-    LegalArtifact.COMPLAINT_DRAFT:     COMPLAINT_DRAFT_PROMPT,
-    LegalArtifact.WITNESS_PREP:        WITNESS_PREP_PROMPT,
-    LegalArtifact.OPENING_STATEMENT:   OPENING_STATEMENT_PROMPT,
-    LegalArtifact.CLOSING_ARGUMENT:    CLOSING_ARGUMENT_PROMPT,
-}
-
-# NOTE: Removed in the self-refine cutover. The mechanical quality gates
-# (`_QUALITY_THRESHOLDS`) and hardcoded per-artifact retry preambles
-# (`_RETRY_PREAMBLE`) used to live here. They have been replaced with a
-# dynamic LLM-driven self-refine loop — see `core.self_refine.self_refine`.
-#
-# The new loop reads the typed `UserIntent` (the same object that picked
-# the specialized prompt below) and derives the quality checks from the
-# intent fields themselves. Adding a new artifact / language / depth
-# directive no longer requires touching a thresholds dict or writing a
-# bespoke retry preamble — the critic figures it out.
-
-
-def _pick_specialized_prompt(intent, generic_prompt: str) -> str:
-    """Return the specialized prompt registered for `intent.legal_artifact`,
-    or the generic prompt when intent is None / artifact is NONE / artifact
-    is not in the registry.
-    """
-    if intent is None:
-        return generic_prompt
-    artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
-    return _SPECIALIZED_PROMPTS.get(artifact, generic_prompt)
-
-
-def _llm_config_for_artifact(intent) -> dict:
-    """Return Gemini Pro kwargs tuned for the requested artifact.
-
-    Generic (artifact=NONE): temperature=0.3, default output budget.
-    Specialized artifacts: temperature=0.4, thinking_budget=4096 (strategic
-    planning helps for structured legal output), 20K max output tokens
-    (long structured outputs).
-    """
-    if intent is None:
-        return {"temperature": 0.3}
-    artifact = getattr(intent, "legal_artifact", LegalArtifact.NONE)
-    if artifact != LegalArtifact.NONE and artifact in _SPECIALIZED_PROMPTS:
-        return {
-            "temperature": 0.4,
-            "max_output_tokens": 20000,
-            "thinking_budget": 4096,
-        }
-    return {"temperature": 0.3}
-
-
-_SAFE_COLLECTION_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
+# Specialized-artifact dispatch, `_pick_specialized_prompt`,
+# `_llm_config_for_artifact`, `_SPECIALIZED_PROMPTS`, and the ChromaDB
+# retrieval helpers (`_get_or_create_collection`, `_collection_has_data`,
+# `_retrieve_from_collections`, `_retrieve_docs`) were removed 2026-08-02
+# (P2 dead-code sweep). Collection-name validation now lives only in
+# `tools.shared.vectordb_tools._validate_collection_name` — the copy that
+# used to shadow it here has been dropped. The current `document_node`
+# uses the extracted text via `get_full_attachment` and a single generic
+# prompt — no artifact dispatch or Chroma retrieval path is wired.
 
 
 def _smart_truncate_message(text: str, head_chars: int, tail_chars: int) -> str:
@@ -166,114 +88,6 @@ def _format_chat_history(chat_history: list) -> str:
             # cited sections, follow-up cues).
             parts.append(f"Assistant: {_smart_truncate_message(content, 1200, 600)}")
     return "\n".join(parts)
-
-
-def _validate_collection_name(unique_string: str) -> None:
-    if not unique_string or not _SAFE_COLLECTION_RE.match(unique_string):
-        raise ValueError(f"Invalid or unsafe collection name: {unique_string!r}")
-
-
-
-
-# --- ChromaDB Collection Management ---
-
-def _get_or_create_collection(unique_string: str) -> Chroma:
-    """Get or create a ChromaDB collection for a user's uploaded documents."""
-    _validate_collection_name(unique_string)
-    embeddings = get_qa_embeddings()
-
-    return Chroma(
-        client=get_chroma_client(),
-        collection_name=unique_string,
-        embedding_function=embeddings,
-    )
-
-
-
-def _collection_has_data(unique_string: str) -> bool:
-    """Check if a ChromaDB collection exists and has documents.
-
-    Used to verify background OCR has completed before attempting retrieval.
-    Returns False if collection is empty or doesn't exist yet.
-    """
-    try:
-        vectordb = _get_or_create_collection(unique_string)
-        count = vectordb._collection.count()
-        return count > 0
-    except Exception:
-        return False
-
-
-def _retrieve_from_collections(
-    collections: list[str], query: str, k_per_collection: int = 15,
-) -> list[Document]:
-    """Retrieve from multiple ChromaDB collections and merge results.
-
-    When only one collection exists, retrieves k=30 from it.
-    When multiple exist, retrieves k_per_collection from each and merges.
-    Skips empty collections (background OCR may not have completed yet).
-    """
-    all_docs: list[Document] = []
-    ready_collections = [c for c in collections if _collection_has_data(c)]
-
-    if not ready_collections:
-        log.warning("No ChromaDB collections have data yet",
-                    total=len(collections))
-        return []
-
-    if len(ready_collections) != len(collections):
-        log.info("Some collections not ready (background OCR pending)",
-                 ready=len(ready_collections), total=len(collections))
-
-    if len(ready_collections) == 1:
-        # Single collection — use full k budget
-        vectordb = _get_or_create_collection(ready_collections[0])
-        with log_time(log, "MMR retrieval", collection=ready_collections[0]):
-            retriever = vectordb.as_retriever(
-                search_type="mmr",
-                search_kwargs={"k": 30, "fetch_k": 50},
-            )
-            all_docs = retriever.invoke(query)
-    else:
-        # Multiple collections — retrieve from each, merge
-        for coll_id in ready_collections:
-            try:
-                vectordb = _get_or_create_collection(coll_id)
-                with log_time(log, "MMR retrieval", collection=coll_id):
-                    retriever = vectordb.as_retriever(
-                        search_type="mmr",
-                        search_kwargs={"k": k_per_collection, "fetch_k": k_per_collection * 2},
-                    )
-                    docs = retriever.invoke(query)
-                    all_docs.extend(docs)
-            except Exception as e:
-                log.warning("Collection retrieval failed",
-                            collection=coll_id, error=str(e))
-        log.info("Multi-collection retrieval",
-                 collections=len(ready_collections), total_docs=len(all_docs))
-
-    return all_docs
-
-
-def _retrieve_docs(
-    unique_string: str, query: str,
-    collections: list[str] | None = None,
-) -> list[Document]:
-    """Retrieve documents from user's ChromaDB collection(s). No LLM call.
-
-    Split out from _retrieve_and_answer so the async caller can run a
-    `check_retrieval_relevance` gate between retrieval and generation —
-    MMR with k=30 always returns 30 chunks regardless of similarity, so
-    off-topic questions about an uploaded PDF would otherwise get 30
-    unrelated chunks pasted into the prompt and produce a confidently-
-    hallucinated answer. The gate lets the agent return a graceful
-    "this PDF doesn't cover your question" response instead.
-    """
-    coll_list = collections or [unique_string]
-    docs = _retrieve_from_collections(coll_list, query)
-    log.debug("Documents retrieved",
-              collection=unique_string, docs_found=len(docs))
-    return docs
 
 
 def _generate_from_docs(
@@ -548,14 +362,16 @@ async def document_node(state: LegalAgentState) -> dict:
                 tokens_consumed=0,
             )
         else:
+            from core.metrics import record_agent_error
+            record_agent_error("Document", e)
             log.error("Agent failed",
-                      collection=unique_string, error=str(e), exc_info=True)
+                      collection=unique_string, error=short_err(e), exc_info=True)
             result = AgentResult(
                 agent_name="Document",
                 content="",
                 sources=[],
                 tokens_consumed=0,
-                error=str(e),
+                error=short_err(e),
             )
 
     return {"agent_results": {"Document": result}}

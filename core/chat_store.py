@@ -1295,6 +1295,64 @@ class _SqliteChatHistoryStore:
         return await asyncio.to_thread(self._get_usage_stats_sync, days)
 
     # ------------------------------------------------------------------
+    # Maintenance: expire threads unused for N days
+    # ------------------------------------------------------------------
+
+    def _expire_old_threads_sync(self, days: int = 30) -> dict:
+        """Delete threads (and their messages) that have not been
+        updated for `days` days. Protects chat_history from unbounded
+        growth on long-running deployments. Returns a summary dict.
+        """
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                # Find candidate thread ids
+                rows = conn.execute(
+                    "SELECT thread_id FROM threads "
+                    "WHERE updated_at < datetime('now', ?)",
+                    (f'-{int(days)} days',),
+                ).fetchall()
+                thread_ids = [r["thread_id"] for r in rows]
+                if not thread_ids:
+                    return {"deleted_threads": 0, "deleted_messages": 0}
+
+                # Delete messages first (FK-friendly). Batch by 500 to
+                # keep SQL parameter count under limits.
+                deleted_messages = 0
+                for i in range(0, len(thread_ids), 500):
+                    batch = thread_ids[i:i + 500]
+                    placeholders = ",".join("?" * len(batch))
+                    cur = conn.execute(
+                        f"DELETE FROM messages WHERE thread_id IN ({placeholders})",
+                        batch,
+                    )
+                    deleted_messages += cur.rowcount or 0
+
+                # Then delete the threads themselves
+                deleted_threads = 0
+                for i in range(0, len(thread_ids), 500):
+                    batch = thread_ids[i:i + 500]
+                    placeholders = ",".join("?" * len(batch))
+                    cur = conn.execute(
+                        f"DELETE FROM threads WHERE thread_id IN ({placeholders})",
+                        batch,
+                    )
+                    deleted_threads += cur.rowcount or 0
+                conn.commit()
+                return {
+                    "deleted_threads": deleted_threads,
+                    "deleted_messages": deleted_messages,
+                    "days": days,
+                }
+            finally:
+                conn.close()
+
+    async def expire_old_threads(self, days: int = 30) -> dict:
+        """Async wrapper for _expire_old_threads_sync."""
+        return await asyncio.to_thread(self._expire_old_threads_sync, days)
+
+    # ------------------------------------------------------------------
     # Quality Log (L4 — LLM-as-judge response scoring)
     # ------------------------------------------------------------------
 
@@ -2450,6 +2508,39 @@ class _PostgresChatHistoryStore:
 
     async def get_usage_stats(self, days: int = 7) -> dict:
         return await asyncio.to_thread(self._get_usage_stats_sync, days)
+
+    # ------------------------------------------------------------------
+    # Maintenance: expire threads unused for N days
+    # ------------------------------------------------------------------
+
+    def _expire_old_threads_sync(self, days: int = 30) -> dict:
+        """Postgres variant of the SQLite maintenance sweep. Deletes
+        threads (+ their messages, cascading) unused for `days` days.
+        """
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            # Postgres interval literal
+            deleted_messages = conn.execute(
+                "DELETE FROM messages WHERE thread_id IN ("
+                "  SELECT thread_id FROM threads "
+                f"  WHERE updated_at < NOW() - INTERVAL '{int(days)} days'"
+                ") RETURNING thread_id",
+            ).fetchall()
+            deleted_threads = conn.execute(
+                "DELETE FROM threads "
+                f"WHERE updated_at < NOW() - INTERVAL '{int(days)} days' "
+                "RETURNING thread_id",
+            ).fetchall()
+            return {
+                "deleted_threads": len(deleted_threads),
+                "deleted_messages": len(deleted_messages),
+                "days": days,
+            }
+
+    async def expire_old_threads(self, days: int = 30) -> dict:
+        return await asyncio.to_thread(self._expire_old_threads_sync, days)
 
     # ------------------------------------------------------------------
     # Quality Log

@@ -46,7 +46,7 @@ from werkzeug.utils import secure_filename
 from .settings import HOST, PORT, RATE_LIMIT_PER_MINUTE, RATE_LIMIT_ADMIN_PER_MINUTE, CHROMA_STORE_ROOT, UPLOADS_ROOT
 from .graph import compile_graph
 from .checkpointer import create_checkpointer
-from .logger import get_logger, set_request_id, log_time
+from .logger import get_logger, set_request_id, log_time, short_err
 from .chat_store import chat_store
 from .metrics import METRICS
 from .quality import score_response as _score_response
@@ -649,7 +649,12 @@ async def search(data: SearchRequest, request: Request):
 
     _graph_error: str | None = None
     try:
-        with log_time(log, "Full graph execution"):
+        # Seed the request-scoped deadline (285s = 300s outer minus 15s
+        # slack for finalisation) so deeply nested `bounded_wait_for`
+        # calls clamp their local timeouts to the remaining budget instead
+        # of blindly using 45s + 60s + ... and blowing the outer envelope.
+        from core.deadline import deadline_scope
+        with log_time(log, "Full graph execution"), deadline_scope(seconds=285):
             final_state = await asyncio.wait_for(
                 agent_graph.ainvoke(initial_state, config=config),
                 timeout=300,  # 5 minute hard timeout
@@ -659,8 +664,8 @@ async def search(data: SearchRequest, request: Request):
         log.error("Agent graph execution timed out after 300s", query=data.prompt_query[:100])
         raise HTTPException(status_code=504, detail="Request timed out. Please try a simpler query.")
     except Exception as e:
-        _graph_error = str(e)[:200]
-        log.error("Agent graph execution failed", exc_info=True, error=str(e))
+        _graph_error = short_err(e)
+        log.error("Agent graph execution failed", exc_info=True, error=short_err(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 
     # Handle blocked queries
@@ -715,15 +720,18 @@ async def search(data: SearchRequest, request: Request):
         error=_graph_error,
     ))
 
-    # --- L4: Quality scoring (10% sample, fire-and-forget) ---
+    # --- L4: Quality scoring — per-agent sample rate handled by
+    # should_score() (retrieval 10%, Drafting 5%). Fire-and-forget.
     _final_response = final_state.get("final_response", "")
-    if _final_response and not final_state.get("is_blocked") and random.random() < 0.10:
-        _fire_and_forget(_score_response(
-            query=data.prompt_query,
-            response=_final_response,
-            agents_used=agents_used,
-            thread_id=thread_id,
-        ))
+    if _final_response and not final_state.get("is_blocked"):
+        from .quality import should_score as _should_score
+        if _should_score(agents_used):
+            _fire_and_forget(_score_response(
+                query=data.prompt_query,
+                response=_final_response,
+                agents_used=agents_used,
+                thread_id=thread_id,
+            ))
 
     # Memory context metadata
     effective_query = final_state.get("query", data.prompt_query)
@@ -995,9 +1003,25 @@ async def chat_with_files(
                         _fp_events.put_nowait(_FP_SENTINEL)
 
                 _fp_task = asyncio.create_task(_run_fp())
+                # Wall-clock envelope on the whole file-processing phase.
+                # Per-file inner timeouts (60–180s each) don't bound the
+                # aggregate; 30 files hitting their ceiling serially can
+                # blow past the outer 300s SSE envelope with no user
+                # signal. 240s here leaves 60s for the graph phase.
+                _FILE_PROC_TOTAL_TIMEOUT = 240.0
+                _fp_start = time.time()
                 try:
                     while True:
-                        evt = await _fp_events.get()
+                        elapsed = time.time() - _fp_start
+                        remaining_budget = _FILE_PROC_TOTAL_TIMEOUT - elapsed
+                        if remaining_budget <= 0:
+                            raise asyncio.TimeoutError(
+                                "File processing exceeded 240s envelope"
+                            )
+                        evt = await asyncio.wait_for(
+                            _fp_events.get(),
+                            timeout=remaining_budget,
+                        )
                         if evt is _FP_SENTINEL:
                             break
                         yield f"data: {json.dumps(evt)}\n\n"
@@ -1009,11 +1033,24 @@ async def chat_with_files(
                     yield f"data: {json.dumps({'type': 'file_processing', 'message': fc.summary, 'files': fc.file_names})}\n\n"
                     log.info("Files processed for chat",
                              summary=fc.summary, thread_id=thread_id[:12],
-                             new_file_count=len(fc.file_names))
+                             new_file_count=len(fc.file_names),
+                             elapsed_s=round(time.time() - _fp_start, 1))
+                except asyncio.TimeoutError:
+                    log.error("File processing exceeded total budget",
+                              budget_s=_FILE_PROC_TOTAL_TIMEOUT,
+                              elapsed_s=round(time.time() - _fp_start, 1),
+                              file_count=len(file_tuples))
+                    yield f"data: {json.dumps({'type': 'file_processing', 'message': 'File processing took too long — proceeding with any files that finished; please retry with fewer/smaller files if the response is thin.', 'files': []})}\n\n"
+                    if not _fp_task.done():
+                        _fp_task.cancel()
+                        try:
+                            await _fp_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
                 except Exception as e:
-                    log.error("File processing failed", error=str(e))
+                    log.error("File processing failed", error=short_err(e))
                     from core.redact import redact_brands
-                    _fp_msg = redact_brands(f"File processing failed: {e}")
+                    _fp_msg = redact_brands(f"File processing failed: {short_err(e)}")
                     yield f"data: {json.dumps({'type': 'file_processing', 'message': _fp_msg, 'files': []})}\n\n"
                     # Make sure the background task is cleaned up.
                     if not _fp_task.done():
@@ -1146,45 +1183,9 @@ async def integration_poll(
 # Delete VectorDB Route
 # ============================================================
 
-@app.delete("/pyapi/delete_vectordb/{unique_string}", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request)
-async def delete_vectordb(unique_string: str, request: Request):
-    """Delete a user's PDF document collection from ChromaDB."""
-    from .clients import get_chroma_client
-    persist_dir = _safe_persist_dir(unique_string)
-
-    # Try server-mode delete first; fall through to legacy disk cleanup.
-    client = get_chroma_client()
-    deleted_from_server = False
-    try:
-        client.delete_collection(name=unique_string)
-        deleted_from_server = True
-    except Exception as e:
-        log.debug("Chroma server has no collection",
-                  unique_string=unique_string, error=str(e))
-
-    dir_existed = os.path.exists(persist_dir)
-    if not deleted_from_server and not dir_existed:
-        raise HTTPException(status_code=404, detail=f"No vectordb found for {unique_string}")
-
-    try:
-        if dir_existed:
-            shutil.rmtree(persist_dir)
-
-        # Also delete chat history
-        chat_file = os.path.join(CHROMA_STORE_ROOT, "chat_histories", f"{unique_string}_chat.json")
-        if os.path.exists(chat_file):
-            os.remove(chat_file)
-
-        log.info("VectorDB deleted", unique_string=unique_string)
-        return {"message": f'VectorDB for "{unique_string}" successfully deleted.'}
-    except Exception as e:
-        log.error("Failed to delete vectordb",
-                  unique_string=unique_string, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
-
-
-# Legacy /pyapi/upload_async + /pyapi/job_status removed — file uploads handled inline by /pyapi/chat
+# Legacy endpoints removed 2026-08-02 (P2 dead-code sweep):
+#   - /pyapi/upload_async + /pyapi/job_status (file uploads handled inline by /pyapi/chat)
+#   - /pyapi/delete_vectordb/{unique_string} (superseded by DELETE /pyapi/thread/{tid}/files)
 
 
 # ============================================================
@@ -1440,67 +1441,11 @@ async def health(request: Request):
     return JSONResponse(content=body, status_code=status_code)
 
 
-# ============================================================
-# Detailed health: real API pings (admin-only, may incur cost)
-# ============================================================
-
-@app.get("/pyapi/health/detailed", dependencies=[Depends(require_admin_key)])
-async def health_detailed():
-    """Deep readiness probe — actually hits OpenAI and Gemini to validate keys.
-
-    The lightweight /pyapi/health endpoint only checks for env-var presence;
-    this one issues real (tiny) calls so revoked or wrong keys surface before
-    the first user request. Admin-only because it costs a few tokens per call.
-    """
-    from datetime import datetime, timezone
-    from langchain.messages import HumanMessage
-    from .clients import get_gpt4o_mini, get_gemini_flash_lite
-
-    checks: dict[str, dict] = {}
-    overall = "healthy"
-
-    # --- OpenAI live ping ---
-    try:
-        t0 = time.time()
-        llm = get_gpt4o_mini()
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(lambda: llm.invoke([HumanMessage(content="ping")])),
-            timeout=15.0,
-        )
-        checks["openai"] = {
-            "status": "ok",
-            "latency_ms": round((time.time() - t0) * 1000),
-            "preview": (getattr(resp, "content", "") or "")[:40],
-        }
-    except Exception as e:
-        checks["openai"] = {"status": "error", "detail": str(e).splitlines()[0][:200]}
-        overall = "unhealthy"
-
-    # --- Gemini live ping ---
-    try:
-        t0 = time.time()
-        llm = get_gemini_flash_lite()
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(lambda: llm.invoke([HumanMessage(content="ping")])),
-            timeout=15.0,
-        )
-        checks["gemini"] = {
-            "status": "ok",
-            "latency_ms": round((time.time() - t0) * 1000),
-            "preview": (getattr(resp, "content", "") or "")[:40],
-        }
-    except Exception as e:
-        checks["gemini"] = {"status": "error", "detail": str(e).splitlines()[0][:200]}
-        overall = "unhealthy"
-
-    body = {
-        "status": overall,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "checks": checks,
-    }
-    status_code = 503 if overall == "unhealthy" else 200
-    from fastapi.responses import JSONResponse
-    return JSONResponse(content=body, status_code=status_code)
+# /pyapi/health/detailed removed 2026-08-02 (P2 dead-code sweep) —
+# had no callers in frontend / tests / workflows, and its two Bug #1
+# tripwires (str(e).splitlines()[0]) were the last residual crash sites
+# in this file. Live-ping health checks now happen inline via a
+# post-deploy smoke workflow instead of a persistent admin endpoint.
 
 
 # ============================================================
@@ -1533,46 +1478,34 @@ async def prometheus_metrics():
     return Response(content=content, media_type=CONTENT_TYPE_LATEST)
 
 
-# ------------------------------------------------------------------
-# Admin: Fallback Log (ES backfill pipeline)
-# ------------------------------------------------------------------
+# Admin endpoints /pyapi/admin/fallback_logs, /pyapi/admin/fallback_stats,
+# /pyapi/admin/quality_stats removed 2026-08-02 (P2 dead-code sweep) —
+# had no callers in frontend / tests / workflows for months. Fallback
+# telemetry now surfaces via the `lawtech_fallback_total{agent, tier}`
+# Prometheus metric; quality stats via `lawtech_quality_*` gauges.
+#
+# `/pyapi/admin/usage_stats` is retained (referenced by tests).
 
-@app.get("/pyapi/admin/fallback_logs", dependencies=[Depends(require_admin_key)])
-async def admin_fallback_logs(
-    agent: Optional[str] = None,
-    backfilled: Optional[int] = None,
-    limit: int = 50,
-    offset: int = 0,
-):
-    """List web-search fallback events for ES backfill review.
 
-    Query params:
-      agent      — filter by agent name (Judgment, SCI_Judgment, Legislation, ...)
-      backfilled — 0 = pending only, 1 = done only, omit = all
-      limit      — max rows (default 50, max 200)
-      offset     — pagination offset
+@app.post("/pyapi/admin/expire-threads", dependencies=[Depends(require_admin_key)])
+async def admin_expire_threads(days: int = 30):
+    """Prune threads (and their messages) unused for `days` days.
+
+    Protects chat_history from unbounded growth on long-running
+    deployments. Idempotent — a same-day retry is a no-op if the first
+    run cleaned everything.
+
+    Args:
+        days: Retention window (default 30, capped [7, 365]).
     """
     try:
-        result = await chat_store.get_fallback_logs(
-            agent=agent,
-            backfilled=backfilled,
-            limit=min(limit, 200),
-            offset=offset,
-        )
+        days = max(7, min(int(days), 365))
+        result = await chat_store.expire_old_threads(days=days)
+        log.info("Threads expired", **result)
         return result
     except Exception as e:
-        log.error("Failed to fetch fallback logs", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to fetch fallback logs")
-
-
-@app.get("/pyapi/admin/fallback_stats", dependencies=[Depends(require_admin_key)])
-async def admin_fallback_stats():
-    """Aggregate stats: totals by agent, date, top repeated queries."""
-    try:
-        return await chat_store.get_fallback_stats()
-    except Exception as e:
-        log.error("Failed to fetch fallback stats", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to fetch fallback stats")
+        log.error("Failed to expire old threads", error=short_err(e))
+        raise HTTPException(status_code=500, detail="Failed to expire old threads")
 
 
 @app.get("/pyapi/admin/usage_stats", dependencies=[Depends(require_admin_key)])
@@ -1580,27 +1513,18 @@ async def admin_usage_stats(days: int = 7):
     """Per-request usage stats: tokens, cost, latency, agent distribution.
 
     Args:
-        days: Number of days to look back (default: 7)
+        days: Number of days to look back (default: 7, capped at 365
+              to avoid unbounded history loads).
     """
     try:
+        # Cap at 365 days — the audit flagged an unbounded `days` param
+        # as a latent DoS risk against chat_store.get_usage_stats which
+        # otherwise loads the entire history into memory.
+        days = max(1, min(days, 365))
         return await chat_store.get_usage_stats(days=days)
     except Exception as e:
-        log.error("Failed to fetch usage stats", error=str(e))
+        log.error("Failed to fetch usage stats", error=short_err(e))
         raise HTTPException(status_code=500, detail="Failed to fetch usage stats")
-
-
-@app.get("/pyapi/admin/quality_stats", dependencies=[Depends(require_admin_key)])
-async def admin_quality_stats(days: int = 7):
-    """L4 quality scores: faithfulness, relevance, completeness per agent.
-
-    Args:
-        days: Number of days to look back (default: 7)
-    """
-    try:
-        return await chat_store.get_quality_stats(days=days)
-    except Exception as e:
-        log.error("Failed to fetch quality stats", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to fetch quality stats")
 
 
 @app.get("/pyapi/threads", dependencies=[Depends(require_user_key)])
@@ -1663,19 +1587,19 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         elif data.thread_id and data.turn_number:
             msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
             if not msg:
-                return _error_response("not_found", "Message not found", 404)
+                return _error_response(404, "not_found", "Message not found")
             md_text = msg["ai_response"]
             title = title or msg.get("user_query", "Lawttorney Export")[:100]
             created_at = msg.get("created_at")
         else:
             return _error_response(
+                400,
                 "validation_error",
                 "Provide either raw_text or thread_id + turn_number",
-                400,
             )
 
         if not md_text or not md_text.strip():
-            return _error_response("validation_error", "No content to export", 400)
+            return _error_response(400, "validation_error", "No content to export")
 
         buf, filename, media_type = export_document(
             title=title,
@@ -1692,8 +1616,8 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         )
 
     except Exception as e:
-        log.error("Export failed", error=str(e), exc_info=True)
-        return _error_response("export_error", f"Export failed: {e}", 500)
+        log.error("Export failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "export_error", f"Export failed: {short_err(e)}")
 
 
 # --- Save Turn Endpoint (for persisting compliance reports, revised drafts) ---
@@ -1714,8 +1638,8 @@ async def save_turn_endpoint(data: SaveTurnRequest, request: Request):
         turn = await chat_store.save_turn(data.thread_id, data.user_query, data.ai_response)
         return JSONResponse({"turn_number": turn})
     except Exception as e:
-        log.error("Save turn failed", error=str(e), exc_info=True)
-        return _error_response("save_error", f"Failed to save: {e}", 500)
+        log.error("Save turn failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "save_error", f"Failed to save: {short_err(e)}")
 
 
 # --- Fix Draft Endpoint ---
@@ -1740,9 +1664,9 @@ async def fix_draft_endpoint(data: FixDraftRequest, request: Request):
 
     try:
         if not data.original_draft.strip():
-            return _error_response("validation_error", "No original draft provided", 400)
+            return _error_response(400, "validation_error", "No original draft provided")
         if not data.compliance_report.strip():
-            return _error_response("validation_error", "No compliance report provided", 400)
+            return _error_response(400, "validation_error", "No compliance report provided")
 
         revised = await fix_draft(data.original_draft, data.compliance_report)
 
@@ -1767,8 +1691,8 @@ async def fix_draft_endpoint(data: FixDraftRequest, request: Request):
         )
 
     except Exception as e:
-        log.error("Fix draft failed", error=str(e), exc_info=True)
-        return _error_response("fix_draft_error", f"Draft revision failed: {e}", 500)
+        log.error("Fix draft failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "fix_draft_error", f"Draft revision failed: {short_err(e)}")
 
 
 # --- Compliance Check Endpoint ---
@@ -1800,11 +1724,11 @@ async def compliance_check_endpoint(data: ComplianceRequest, request: Request):
         if data.thread_id and data.turn_number and not text:
             msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
             if not msg:
-                return _error_response("not_found", "Message not found", 404)
+                return _error_response(404, "not_found", "Message not found")
             text = msg["ai_response"]
 
         if not text.strip():
-            return _error_response("validation_error", "No text to check", 400)
+            return _error_response(400, "validation_error", "No text to check")
 
         report = await check_compliance(text, data.doc_type or "")
 
@@ -1829,8 +1753,8 @@ async def compliance_check_endpoint(data: ComplianceRequest, request: Request):
         )
 
     except Exception as e:
-        log.error("Compliance check failed", error=str(e), exc_info=True)
-        return _error_response("compliance_error", f"Compliance check failed: {e}", 500)
+        log.error("Compliance check failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "compliance_error", f"Compliance check failed: {short_err(e)}")
 
 
 # --- Statute Referencing Endpoint ---
@@ -1860,11 +1784,11 @@ async def add_statute_refs_endpoint(data: StatuteRefRequest, request: Request):
         if data.thread_id and data.turn_number and not text:
             msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
             if not msg:
-                return _error_response("not_found", "Message not found", 404)
+                return _error_response(404, "not_found", "Message not found")
             text = msg["ai_response"]
 
         if not text.strip():
-            return _error_response("validation_error", "No text to enhance", 400)
+            return _error_response(400, "validation_error", "No text to enhance")
 
         enhanced = await add_statute_references(text)
 
@@ -1889,8 +1813,8 @@ async def add_statute_refs_endpoint(data: StatuteRefRequest, request: Request):
         )
 
     except Exception as e:
-        log.error("Statute referencing failed", error=str(e), exc_info=True)
-        return _error_response("statute_ref_error", f"Statute referencing failed: {e}", 500)
+        log.error("Statute referencing failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "statute_ref_error", f"Statute referencing failed: {short_err(e)}")
 
 
 # --- Table of Authorities Endpoint ---
@@ -1924,12 +1848,12 @@ async def generate_toa_endpoint(data: TOARequest, request: Request):
         if data.thread_id and data.turn_number and not response_text:
             msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
             if not msg:
-                return _error_response("not_found", "Message not found", 404)
+                return _error_response(404, "not_found", "Message not found")
             response_text = msg["ai_response"]
             query = query or msg.get("user_query", "")
 
         if not response_text.strip():
-            return _error_response("validation_error", "No content for TOA extraction", 400)
+            return _error_response(400, "validation_error", "No content for TOA extraction")
 
         toa_md = await generate_toa(
             query=query,
@@ -1959,8 +1883,8 @@ async def generate_toa_endpoint(data: TOARequest, request: Request):
         )
 
     except Exception as e:
-        log.error("TOA generation failed", error=str(e), exc_info=True)
-        return _error_response("toa_error", f"TOA generation failed: {e}", 500)
+        log.error("TOA generation failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "toa_error", f"TOA generation failed: {short_err(e)}")
 
 
 # --- Research Memo Endpoint ---
@@ -2000,12 +1924,12 @@ async def generate_research_memo(data: MemoRequest, request: Request):
         if data.thread_id and data.turn_number and not response_text:
             msg = await chat_store.load_single_turn(data.thread_id, data.turn_number)
             if not msg:
-                return _error_response("not_found", "Message not found", 404)
+                return _error_response(404, "not_found", "Message not found")
             response_text = msg["ai_response"]
             query = query or msg.get("user_query", "")
 
         if not response_text.strip():
-            return _error_response("validation_error", "No response content for memo", 400)
+            return _error_response(400, "validation_error", "No response content for memo")
 
         # Generate the memo markdown using LLM
         memo_md = await generate_memo(
@@ -2039,8 +1963,8 @@ async def generate_research_memo(data: MemoRequest, request: Request):
         )
 
     except Exception as e:
-        log.error("Memo generation failed", error=str(e), exc_info=True)
-        return _error_response("memo_error", f"Memo generation failed: {e}", 500)
+        log.error("Memo generation failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "memo_error", f"Memo generation failed: {short_err(e)}")
 
 
 @app.post("/pyapi/feedback", dependencies=[Depends(require_user_key)])

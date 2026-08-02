@@ -23,7 +23,7 @@ from langgraph.prebuilt import create_react_agent
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gemini_flash_full
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
 from tools.shared import AGENT_TOOLS, search_by_topic
@@ -71,18 +71,20 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             )),
         )
 
-        # Invoke the ReAct sub-agent
+        # Invoke the ReAct sub-agent. Bounded because a hung ReAct
+        # trajectory can otherwise consume the whole 180-300s gateway
+        # budget with no local ceiling.
         progress("sci_judgment", "Running multi-step research (ReAct agent)...", step="react")
         with log_time(log, "ReAct agent execution"):
-            result = await agent.ainvoke(
-                {"messages": [("user", query)]}
+            result = await asyncio.wait_for(
+                agent.ainvoke({"messages": [("user", query)]}),
+                timeout=90,
             )
 
         # Extract final AI message content and tools used
         messages = result.get("messages", [])
         answer = ""
         tools_used = []
-        pdf_links = []
         sources = []
 
         for msg in messages:
@@ -166,11 +168,14 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
 
                     # Re-invoke ReAct with the search results as context
                     with log_time(log, "ReAct retry with fallback results"):
-                        retry_result = await agent.ainvoke(
-                            {"messages": [
-                                ("user", query),
-                                ("assistant", f"I searched for cases and found these results:\n\n{fallback_result}\n\nLet me present these findings to the user."),
-                            ]}
+                        retry_result = await asyncio.wait_for(
+                            agent.ainvoke(
+                                {"messages": [
+                                    ("user", query),
+                                    ("assistant", f"I searched for cases and found these results:\n\n{fallback_result}\n\nLet me present these findings to the user."),
+                                ]}
+                            ),
+                            timeout=60,
                         )
                     retry_messages = retry_result.get("messages", [])
                     answer = ""
@@ -183,7 +188,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                     log.info("Fallback search completed",
                              response_len=len(answer))
             except Exception as fb_err:
-                log.error("Fallback search failed", error=str(fb_err))
+                log.error("Fallback search failed", error=short_err(fb_err))
 
         # Sum token usage across the ReAct trajectory's AI messages
         from core.token_tracker import record as _record_tokens
@@ -242,6 +247,45 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         log.info("Sources parsed from tool messages",
                  source_count=len(sources))
 
+        # Web-search last-resort. The SC corpus is broad but not
+        # exhaustive; when the ReAct trajectory returns empty content
+        # and topic-search also produced nothing, fall to Gemini +
+        # Google Search grounding so the user sees a scoped answer with
+        # citations instead of a blank content field (which then trips
+        # the orchestrator's all-empty branch → generic web fallback).
+        if (not answer or not answer.strip()) and not sources:
+            progress("sci_judgment",
+                     "No corpus results — falling back to web search...",
+                     step="fallback", substep=True)
+            try:
+                from core.agent_fallback import web_search_fallback
+                fb = await web_search_fallback(
+                    query,
+                    "SCI_Judgment",
+                    localize_prompt(
+                        SCI_JUDGMENT_SYSTEM_PROMPT,
+                        user_language,
+                        state.get("user_intent"),
+                    ),
+                    user_language=user_language,
+                    intent=state.get("user_intent"),
+                )
+                if fb.content:
+                    log.info("SCI web fallback produced answer",
+                             answer_len=len(fb.content),
+                             fb_sources=len(fb.sources or []))
+                    result = AgentResult(
+                        agent_name="SCI_Judgment",
+                        content=fb.content,
+                        sources=fb.sources or [],
+                        tokens_consumed=(tokens or 0) + (fb.tokens_consumed or 0),
+                        fallback_used=True,
+                    )
+                    return {"agent_results": {"SCI_Judgment": result}}
+            except Exception as web_err:
+                log.warning("SCI web fallback failed",
+                            error=short_err(web_err))
+
         result = AgentResult(
             agent_name="SCI_Judgment",
             content=answer,
@@ -250,13 +294,15 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        log.error("Agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("SCI_Judgment", e)
+        log.error("Agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="SCI_Judgment",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     return {"agent_results": {"SCI_Judgment": result}}

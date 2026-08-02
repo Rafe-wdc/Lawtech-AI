@@ -22,7 +22,7 @@ from langgraph.prebuilt import create_react_agent
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import get_gemini_flash_full
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from config.prompts import GST_JUDGMENT_SYSTEM_PROMPT
 from tools.shared import AGENT_TOOLS, gst_search_by_topic
@@ -115,7 +115,12 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
 
         progress("gst_judgment", "Running multi-step research (ReAct agent)...", step="react")
         with log_time(log, "ReAct agent execution"):
-            result = await agent.ainvoke({"messages": [("user", query)]})
+            # Bound the ReAct trajectory — a hung tool loop can otherwise
+            # consume the whole 180-300s gateway budget with no local cap.
+            result = await asyncio.wait_for(
+                agent.ainvoke({"messages": [("user", query)]}),
+                timeout=90,
+            )
 
         messages = result.get("messages", [])
         answer = ""
@@ -171,11 +176,14 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
                     log.info("Fallback sources parsed", source_count=len(sources))
 
                     with log_time(log, "ReAct retry with fallback results"):
-                        retry_result = await agent.ainvoke(
-                            {"messages": [
-                                ("user", query),
-                                ("assistant", f"I searched for GST AAAR orders and found these results:\n\n{fallback_result}\n\nLet me present these findings to the user."),
-                            ]}
+                        retry_result = await asyncio.wait_for(
+                            agent.ainvoke(
+                                {"messages": [
+                                    ("user", query),
+                                    ("assistant", f"I searched for GST AAAR orders and found these results:\n\n{fallback_result}\n\nLet me present these findings to the user."),
+                                ]}
+                            ),
+                            timeout=60,
                         )
                     retry_messages = retry_result.get("messages", [])
                     answer = ""
@@ -187,7 +195,7 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
                         answer = f"Here are relevant GST AAAR orders:\n\n{fallback_result}"
                     log.info("Fallback search completed", response_len=len(answer))
             except Exception as fb_err:
-                log.error("Fallback search failed", error=str(fb_err))
+                log.error("Fallback search failed", error=short_err(fb_err))
 
         from core.token_tracker import record as _record_tokens
         tokens = 0
@@ -216,6 +224,44 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
         progress("gst_judgment", "Generating response...", step="generate")
         log.info("Sources parsed from tool messages", source_count=len(sources))
 
+        # Web-search last-resort — the GST AAAR corpus is only ~533
+        # orders, so ReAct + topic-search misses are common. Fall to
+        # Gemini + Google Search grounding when nothing landed, so the
+        # orchestrator's all-empty branch doesn't fire the generic web
+        # essay that ignores the GST-specific system prompt.
+        if (not answer or not answer.strip()) and not sources:
+            progress("gst_judgment",
+                     "No corpus results — falling back to web search...",
+                     step="fallback", substep=True)
+            try:
+                from core.agent_fallback import web_search_fallback
+                fb = await web_search_fallback(
+                    query,
+                    "GST_Judgment",
+                    localize_prompt(
+                        GST_JUDGMENT_SYSTEM_PROMPT,
+                        user_language,
+                        state.get("user_intent"),
+                    ),
+                    user_language=user_language,
+                    intent=state.get("user_intent"),
+                )
+                if fb.content:
+                    log.info("GST web fallback produced answer",
+                             answer_len=len(fb.content),
+                             fb_sources=len(fb.sources or []))
+                    result = AgentResult(
+                        agent_name="GST_Judgment",
+                        content=fb.content,
+                        sources=fb.sources or [],
+                        tokens_consumed=(tokens or 0) + (fb.tokens_consumed or 0),
+                        fallback_used=True,
+                    )
+                    return {"agent_results": {"GST_Judgment": result}}
+            except Exception as web_err:
+                log.warning("GST web fallback failed",
+                            error=short_err(web_err))
+
         result = AgentResult(
             agent_name="GST_Judgment",
             content=answer,
@@ -224,13 +270,15 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        log.error("Agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("GST_Judgment", e)
+        log.error("Agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="GST_Judgment",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     return {"agent_results": {"GST_Judgment": result}}

@@ -105,15 +105,38 @@ def _sum_tokens(existing: int, new: int) -> int:
     return existing + new
 
 
+# Cap on the `messages` list. MessagesState uses add_messages as its
+# built-in reducer, which appends unbounded — multi-turn threads that
+# never checkpoint-out will grow the list forever, bloating both the
+# in-request state and every serialised checkpoint. Cap after the
+# add_messages semantics so we always keep the freshest N.
+_MESSAGES_CAP = 40   # ~20 turns of user+AI exchanges
+
+def _capped_add_messages(existing, new):
+    """Compose add_messages semantics with a hard cap on total messages."""
+    # Lazy import — langgraph is imported at graph.py time, avoiding
+    # a circular hit at state.py import.
+    from langgraph.graph.message import add_messages
+    merged = add_messages(existing, new)
+    if isinstance(merged, list) and len(merged) > _MESSAGES_CAP:
+        return merged[-_MESSAGES_CAP:]
+    return merged
+
+
 class LegalAgentState(MessagesState):
     """Full shared state for the legal multi-agent graph.
 
-    MessagesState provides: messages (with add_messages reducer)
+    MessagesState provides: messages (with add_messages reducer).
+    We override the reducer with `_capped_add_messages` so long threads
+    don't accumulate unbounded checkpointer bloat.
 
     Each agent returns a partial dict with only the fields it updates.
     Fields with Annotated reducers (agent_results, tokens_consumed)
     are merged/accumulated instead of overwritten.
     """
+    # Override the base MessagesState reducer with a capped variant.
+    messages: Annotated[list[BaseMessage], _capped_add_messages]
+
     # Query lifecycle
     original_query: str
     query: str

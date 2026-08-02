@@ -23,11 +23,42 @@ from core.logger import get_logger
 
 log = get_logger("QualityScorer")
 
-# Agents worth scoring (skip Non_legal greetings, Drafting, Document)
+# Agents worth scoring (skip Non_legal greetings, Document — no signal
+# in a Q&A over an uploaded PDF that we can meaningfully compare
+# faithfulness against without also parsing the source doc).
 _SCOREABLE_AGENTS = {
     "Legislation", "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts",
     "Constitution", "Maxim", "Legal_Concepts", "Scenario",
+    "Drafting",  # Added 2026-08-02 (P2 G-31). Sampled at 5% (see
+                 # should_score below) — half the rate of retrieval
+                 # agents because per-scored request costs ~$0.005
+                 # against Drafting's long response.
 }
+
+# Per-agent sample rate — retrieval agents at 10%, Drafting at 5% to
+# amortise the cost of scoring a long draft.
+_SAMPLE_RATE_DEFAULT = 0.10
+_SAMPLE_RATE_DRAFTING = 0.05
+
+
+def should_score(agents_used: list[str]) -> bool:
+    """Coin-flip that respects per-agent sample rates.
+
+    Central so the two callsites (gateway batch, chat_runner stream)
+    both apply the same policy — callers previously hardcoded 0.10 and
+    would drift over time.
+    """
+    if not agents_used or not any(a in _SCOREABLE_AGENTS for a in agents_used):
+        return False
+    # If Drafting is the ONLY scoreable agent, use the lower rate.
+    # If Drafting is present alongside retrieval agents, keep the
+    # default rate (the retrieval work is worth scoring anyway).
+    non_drafting = [
+        a for a in agents_used
+        if a in _SCOREABLE_AGENTS and a != "Drafting"
+    ]
+    rate = _SAMPLE_RATE_DEFAULT if non_drafting else _SAMPLE_RATE_DRAFTING
+    return random.random() < rate
 
 _SCORE_PROMPT = """\
 You are a strict legal AI evaluator. Score the following AI response on 3 dimensions.

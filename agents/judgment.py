@@ -32,14 +32,10 @@ from core.retrieval_relevance import (
     check_retrieval_relevance, head_tail_apology_detected,
 )
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
-from core.settings import TIMEOUT_ES_PARALLEL_SEC, TIMEOUT_METADATA_SEC
+from core.logger import get_logger, log_time, short_err
+from core.settings import TIMEOUT_ES_PARALLEL_SEC
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
-from tools.shared.judgment_search import (
-    smart_judgment_search,
-    detect_citation,
-    detect_case_type,
-)
+from tools.shared.judgment_search import smart_judgment_search
 from tools.shared.storage_tools import generate_s3_link
 from tools.shared.llm_tools import CaseMetadata
 from core.progress import progress
@@ -412,7 +408,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # Resolve preliminary ES result
         try:
             prelim_result = es_task.result() if es_task in done else {"hits": [], "strategy_used": "none", "strategies_tried": []}
-        except Exception:
+        except Exception as es_err:
+            log.warning("Preliminary ES search failed; will retry via refined search",
+                        error=short_err(es_err))
             prelim_result = {"hits": [], "strategy_used": "none", "strategies_tried": []}
 
         # If preliminary search found hits, use them directly
@@ -624,13 +622,15 @@ async def judgment_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        log.error("Agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Judgment", e)
+        log.error("Agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Judgment",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     return {"agent_results": {"Judgment": result}}

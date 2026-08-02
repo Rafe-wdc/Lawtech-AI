@@ -89,6 +89,24 @@ def _strip_html_from_response(text: str) -> str:
     return out
 
 
+# Defense-in-depth: scrub tag-shaped fragments from every token chunk
+# BEFORE it reaches the client. The final strip above already fires on
+# the terminal `response` event, but token events flow to the browser
+# in real time — if an agent emits a full `<script>...</script>` inside
+# a single chunk, the frontend markdown renderer sees it before the
+# terminal strip runs. Multi-token spanning attacks (e.g. `<scri` +
+# `pt>`) still fall to the terminal strip; single-token attacks stop
+# here. Cheap (compiled regex), preserves legit `<= 5` etc.
+def _strip_html_from_token(text: str) -> str:
+    if not text or "<" not in text:
+        return text
+    scrubbed, n = _FINAL_TAG_RE.subn("", text)
+    if n:
+        log.warning("Token-level HTML strip",
+                    tags_removed=n, preview=text[:120])
+    return scrubbed
+
+
 # ---------------------------------------------------------------------------
 # Integration URL handling (extracted from gateway.py)
 # ---------------------------------------------------------------------------
@@ -122,14 +140,45 @@ async def _handle_integrations(
             "message": f"{provider.title()} link detected. Checking connection...",
         }), None)
 
-    _, statuses, contents = await process_integration_urls(
-        query, integration_token, client,
-    )
+    # Bound the integration status + content extraction call. A stalled
+    # FSD JWT check would otherwise hang the entire SSE stream until the
+    # outer 300s envelope fires (with no informative event in between).
+    # On timeout we emit an integration_error and continue without
+    # integration context — the graph proceeds normally.
+    from core.settings import INTEGRATION_POLL_TIMEOUT_SEC
+    try:
+        _, statuses, contents = await asyncio.wait_for(
+            process_integration_urls(query, integration_token, client),
+            timeout=INTEGRATION_POLL_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        log.warning(
+            "Integration status/content fetch timed out",
+            timeout_s=INTEGRATION_POLL_TIMEOUT_SEC,
+            providers=providers_needed,
+        )
+        for provider in providers_needed:
+            yield (_sse({
+                "type": "integration_error",
+                "provider": provider,
+                "message": (
+                    f"{provider.title()} connection is unreachable right "
+                    "now — continuing without linked content."
+                ),
+            }), None)
+        yield ("", None)
+        return
 
     # For each disconnected provider, emit an auth_url event
     for provider in providers_needed:
         if not statuses.get(provider, False):
-            auth_url = await client.get_auth_url(provider, integration_token)
+            try:
+                auth_url = await asyncio.wait_for(
+                    client.get_auth_url(provider, integration_token),
+                    timeout=10,
+                )
+            except asyncio.TimeoutError:
+                auth_url = None
             if auth_url:
                 yield (_sse({
                     "type": "integration_auth",
@@ -235,11 +284,21 @@ async def run_chat_pipeline(
                 "by_agent": {},
                 "calls": [],
             }
+            # Align the cached `done` event with the non-cached emission
+            # (see the terminal `done` yield below). Frontend consumers
+            # rely on `conversation_turn`, `query_rewritten`,
+            # `effective_query` being present on EVERY done event;
+            # omitting them on cache hits broke consumers that treat the
+            # payload as invariant. Cache hits use turn=0, query not
+            # rewritten (no memory step ran), effective_query=None.
             yield _sse({
                 "type": "done",
                 "agents_used": cached.agents_used,
                 "token_usage": cached_token_usage,
                 "thread_id": i.thread_id,
+                "conversation_turn": 0,
+                "query_rewritten": False,
+                "effective_query": None,
                 "source_metadata": cached.source_metadata,  # kept for backward compat
                 "cached": True,
             })
@@ -288,6 +347,15 @@ async def run_chat_pipeline(
     query_rewritten = False
 
     try:
+        # Seed the request-scoped deadline (285s = 300s outer envelope
+        # minus 15s slack for final `response`/`sources`/`done` events).
+        # Deeply nested `bounded_wait_for` calls clamp their local
+        # timeouts to what's left, so a slow judge doesn't blow the
+        # budget for the refiner. Contextvar propagates to every child
+        # asyncio task spawned during the graph run; when this SSE
+        # generator ends the contextvar's scope ends with it.
+        from core.deadline import set_deadline_seconds
+        set_deadline_seconds(285)
         async with async_timeout_cm(300):
             async for event in i.agent_graph.astream(
                 initial_state,
@@ -301,7 +369,10 @@ async def run_chat_pipeline(
                     if isinstance(chunk, dict):
                         kind = chunk.get("type")
                         if kind == "token":
-                            yield _sse({"type": "token", "content": chunk["content"]})
+                            yield _sse({
+                                "type": "token",
+                                "content": _strip_html_from_token(chunk["content"]),
+                            })
                         elif kind == "token_reset":
                             yield _sse({"type": "token_reset"})
                         elif kind == "drafting_progress":
@@ -434,15 +505,17 @@ async def run_chat_pipeline(
         is_blocked=False,
     ))
 
-    # Quality scoring (10% sample, fire-and-forget)
-    if i.enable_quality_scoring and final_response and random.random() < 0.10:
-        from core.quality import score_response
-        _fire_and_forget(score_response(
-            query=i.query,
-            response=final_response,
-            agents_used=agents_used,
-            thread_id=i.thread_id,
-        ))
+    # Quality scoring — per-agent sample rate handled by should_score()
+    # (retrieval agents 10%, Drafting 5%). Fire-and-forget.
+    if i.enable_quality_scoring and final_response:
+        from core.quality import score_response, should_score
+        if should_score(agents_used):
+            _fire_and_forget(score_response(
+                query=i.query,
+                response=final_response,
+                agents_used=agents_used,
+                thread_id=i.thread_id,
+            ))
 
     # Save chat history
     conversation_turn = 0

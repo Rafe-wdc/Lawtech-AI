@@ -1,0 +1,142 @@
+name: Rollback prod to a specific SHA
+
+# Manual rollback: check out `target_sha` and re-run the deploy-prod
+# steps (tar → scp → ssh → systemd restart → health poll). Faster than
+# `git revert && push && wait for deploy-prod`, and keeps prod at a
+# known-good code state while root-cause work happens on main.
+#
+# Same secrets/vars as deploy-prod.yml. The `production` environment
+# gate applies here too so a human must approve the rollback.
+#
+# Usage:
+#   gh workflow run prod-rollback.yml \
+#     -f target_sha=<full-40-char-SHA-from-main-history>
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Full commit SHA on main to roll back to (40-char hex)"
+        required: true
+        type: string
+
+jobs:
+  rollback:
+    name: Rollback to ${{ inputs.target_sha }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Validate SHA input
+        run: |
+          if [[ ! "${{ inputs.target_sha }}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::target_sha must be a full 40-character git SHA"
+            exit 1
+          fi
+
+      - name: Checkout target SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_sha }}
+
+      - name: Sanity-check the SHA is on main history
+        run: |
+          # Fetch main and confirm the target SHA is an ancestor.
+          # Prevents accidental rollback to a topic branch's stray commit.
+          git fetch --no-tags --depth=200 origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${{ inputs.target_sha }}" origin/main; then
+            echo "::error::${{ inputs.target_sha }} is not an ancestor of origin/main"
+            exit 1
+          fi
+          echo "SHA verified on main history:"
+          git log -1 --oneline "${{ inputs.target_sha }}"
+
+      - name: Package application (same excludes as deploy-prod)
+        run: |
+          tar --exclude='.git' \
+              --exclude='venv' \
+              --exclude='.venv' \
+              --exclude='data' \
+              --exclude='logs' \
+              --exclude='models' \
+              --exclude='chroma_store' \
+              --exclude='uploads' \
+              --exclude='*.pyc' \
+              --exclude='__pycache__' \
+              --exclude='.env' \
+              --exclude='mainserver' \
+              -czf /tmp/lawtech_rollback.tar.gz .
+          echo "Rollback package size: $(du -sh /tmp/lawtech_rollback.tar.gz | cut -f1)"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Upload rollback package
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            /tmp/lawtech_rollback.tar.gz \
+            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}:/tmp/lawtech_rollback.tar.gz"
+
+      - name: Extract + restart + verify health
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+            'bash -s' << 'ENDSSH'
+          set -e
+          APP_DIR=/root/Lawtech-AI
+
+          echo "=== Extract rollback code (preserves .env, models/, chroma_store/, data/) ==="
+          sudo tar -xzf /tmp/lawtech_rollback.tar.gz -C $APP_DIR
+          sudo rm /tmp/lawtech_rollback.tar.gz
+
+          echo "=== Strip CRLF from shipped scripts ==="
+          sudo find $APP_DIR/deploy -type f \( -name "*.sh" -o -name "*.conf" -o -name "*.service" \) \
+            -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+          sudo sed -i 's/\r$//' $APP_DIR/gunicorn.conf.py 2>/dev/null || true
+
+          echo "=== Reinstall dependencies for the rollback SHA ==="
+          sudo $APP_DIR/venv/bin/pip install --quiet -r $APP_DIR/requirements.txt
+
+          echo "=== Restart v2 via systemd ==="
+          sudo systemctl restart lawttorney-v2
+
+          echo "=== Wait for v2 health (3 consecutive 200s, max 120s) ==="
+          CONSECUTIVE_OK=0
+          NEEDED=3
+          HEALTHY=0
+          for i in $(seq 1 24); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                     --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              echo "  Healthy (200), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                sleep 10
+                HEALTHY=1
+                break
+              fi
+            else
+              CONSECUTIVE_OK=0
+              echo "  Waiting... attempt $i/24 (HTTP $STATUS)"
+            fi
+          done
+
+          if [ "$HEALTHY" = "1" ]; then
+            echo "ROLLBACK OK"
+          else
+            echo "ERROR: no $NEEDED consecutive 200s within 120s. journalctl tail:"
+            sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+            exit 1
+          fi
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

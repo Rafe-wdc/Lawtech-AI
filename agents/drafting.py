@@ -54,7 +54,7 @@ from core.clients import (
 )
 from core.settings import ES_INDICES
 from core.language import localize_prompt, detect_source_languages
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.self_refine import self_refine
 
@@ -381,7 +381,7 @@ async def _translate_query_for_es_match(
         log.warning(
             "Query translation failed; caller will use original",
             user_language=user_language,
-            error=str(e).splitlines()[0][:200],
+            error=short_err(e),
         )
         return ""
 
@@ -449,7 +449,7 @@ async def _pick_reference_source(
     except Exception as e:
         log.warning(
             "Reference picker failed; treating as no reference",
-            error=str(e).splitlines()[0][:200],
+            error=short_err(e),
         )
         return None
 
@@ -502,7 +502,7 @@ async def _acquire_reference_draft(
         hits = response["hits"]["hits"]
     except Exception as e:
         log.warning("ES candidate search failed; going to web",
-                    error=str(e).splitlines()[0][:200])
+                    error=short_err(e))
         hits = []
 
     # Distinct file paths preserving order (best-scoring first)
@@ -566,7 +566,7 @@ async def _acquire_reference_draft(
         fetch_hits = fetch_resp["hits"]["hits"]
     except Exception as e:
         log.warning("ES fetch for picked template failed; going to web",
-                    picked=picked, error=str(e).splitlines()[0][:200])
+                    picked=picked, error=short_err(e))
         fetch_hits = []
 
     if not fetch_hits:
@@ -629,7 +629,7 @@ async def _acquire_reference_via_web(
     except Exception as e:
         log.warning(
             "Web fallback synthesis failed; returning empty reference",
-            error=str(e).splitlines()[0][:200],
+            error=short_err(e),
         )
         return ""
 
@@ -1138,8 +1138,20 @@ async def _pick_relevant_chunk_indices(
         prompt = ChatPromptTemplate.from_template(DRAFTING_CHUNK_ROUTER_PROMPT)
         chain = prompt | llm
 
+        # Circuit breaker: if Gemini Flash is unhealthy, skip the router
+        # and let the caller fall back to raw user_facts (existing safe path).
+        from core.clients import (
+            is_gemini_flash_available, record_gemini_flash_failure,
+            record_gemini_flash_success,
+        )
+        if not is_gemini_flash_available():
+            log.warning("Gemini Flash circuit open — skipping chunk router",
+                        section=section.heading[:40], fast_fail=True)
+            return []
+
         with log_time(log, f"Chunk router (section {section.heading[:40]})"):
-            raw_and_parsed = await asyncio.wait_for(
+            from core.deadline import bounded_wait_for
+            raw_and_parsed = await bounded_wait_for(
                 chain.ainvoke({
                     "query": query[:2000],
                     "section_heading": section.heading,
@@ -1147,7 +1159,7 @@ async def _pick_relevant_chunk_indices(
                     "chunk_catalog": catalog,
                     "total_chunks": len(user_facts_chunks),
                 }),
-                timeout=20,
+                local_timeout=20,
             )
         from core.token_tracker import record as _record_tokens
         _record_tokens("Drafting", "chunk_router", raw_and_parsed.get("raw"))
@@ -1157,6 +1169,7 @@ async def _pick_relevant_chunk_indices(
             i for i in parsed.chunk_indices
             if isinstance(i, int) and 0 <= i < len(user_facts_chunks)
         ]
+        record_gemini_flash_success()
         log.info(
             "Chunk router selected",
             section=section.heading[:40],
@@ -1166,10 +1179,11 @@ async def _pick_relevant_chunk_indices(
         )
         return picked
     except Exception as e:
+        record_gemini_flash_failure()
         log.warning(
             "Chunk router failed; caller will fall back to raw source",
             section=section.heading[:40],
-            error=str(e).splitlines()[0][:200],
+            error=short_err(e),
         )
         return []
 
@@ -1197,11 +1211,78 @@ def _reference_excerpt(
     )
 
 
+def _summarise_prior_ai_turn(chat_history) -> str:
+    """Build the `chat_history_hint` block for the fan-out judge.
+
+    Looks at the last AIMessage in `chat_history` (if any). When present,
+    returns a compact summary the judge can read to decide whether the
+    current user query is a polish/redraft follow-up on that response.
+    Empty/None history → returns the "no prior turn" phrasing so the
+    prompt template's `{chat_history_hint}` slot always has a value.
+    """
+    if not chat_history:
+        return (
+            "There is no prior AI turn in this thread — the user is "
+            "starting a fresh drafting request. Apply the fan-out rules "
+            "above without follow-up bias."
+        )
+    # Find the most recent AIMessage.content
+    try:
+        from langchain.messages import AIMessage
+    except Exception:  # pragma: no cover — dep drift
+        AIMessage = None  # type: ignore[assignment]
+
+    prior_ai_text = ""
+    for msg in reversed(chat_history):
+        # Duck-type: some callers pass BaseMessage subclasses, some pass
+        # dicts, some pass the raw AIMessage from langchain.messages.
+        text = None
+        if AIMessage is not None and isinstance(msg, AIMessage):
+            text = getattr(msg, "content", "") or ""
+        elif isinstance(msg, dict):
+            role = msg.get("role") or msg.get("type") or ""
+            if role in ("ai", "assistant"):
+                text = msg.get("content") or ""
+        else:
+            role = getattr(msg, "type", "") or getattr(msg, "role", "")
+            if role in ("ai", "assistant"):
+                text = getattr(msg, "content", "") or ""
+        if text:
+            prior_ai_text = text
+            break
+
+    if not prior_ai_text:
+        return (
+            "There is no prior AI turn in this thread — the user is "
+            "starting a fresh drafting request. Apply the fan-out rules "
+            "above without follow-up bias."
+        )
+    # Head + tail so the judge sees the shape (opening block +
+    # signature/prayer block) without paying for the full body.
+    head_n, tail_n = 800, 400
+    if len(prior_ai_text) <= head_n + tail_n:
+        excerpt = prior_ai_text
+    else:
+        excerpt = (
+            f"{prior_ai_text[:head_n]}\n"
+            f"[...{len(prior_ai_text) - head_n - tail_n} chars elided...]\n"
+            f"{prior_ai_text[-tail_n:]}"
+        )
+    return (
+        "The PRIOR AI TURN in this thread (excerpt shown below) has "
+        "already produced a document. If the current user query is a "
+        "polish / translate / shorten / lengthen / redraft directive on "
+        "this document, STAY SINGLE-PASS.\n\n"
+        "PRIOR AI TURN EXCERPT:\n" + excerpt
+    )
+
+
 async def _judge_fanout(
     query: str,
     reference_draft: str,
     user_language: str,
     user_intent,
+    chat_history=None,
 ) -> _FanoutStrategy:
     """Decide single-pass vs section-by-section. Always falls back to
     single-pass on any error so traffic never breaks.
@@ -1248,20 +1329,39 @@ async def _judge_fanout(
         prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)
         chain = prompt | llm
 
+        # Circuit breaker: if Gemini Flash is unhealthy, skip the judge
+        # and default to single-pass (existing fallback anyway).
+        from core.clients import (
+            is_gemini_flash_available, record_gemini_flash_failure,
+            record_gemini_flash_success,
+        )
+        if not is_gemini_flash_available():
+            log.warning("Gemini Flash circuit open — defaulting to single-pass",
+                        fast_fail=True)
+            return _FanoutStrategy(
+                should_fanout=False,
+                reasoning="Flash circuit open; defaulted to single-pass",
+            )
+
+        chat_history_hint = _summarise_prior_ai_turn(chat_history)
+
         with log_time(log, "Fan-out judge"):
-            raw_and_parsed = await asyncio.wait_for(
+            from core.deadline import bounded_wait_for
+            raw_and_parsed = await bounded_wait_for(
                 chain.ainvoke({
                     "query": query[:2000],
                     "reference_excerpt": excerpt,
                     "user_language_name": lang_name,
                     "depth_directive": depth_directive,
+                    "chat_history_hint": chat_history_hint,
                 }),
-                timeout=15,
+                local_timeout=15,
             )
         from core.token_tracker import record as _record_tokens
         _record_tokens("Drafting", "fanout_judge", raw_and_parsed.get("raw"))
 
         parsed = raw_and_parsed["parsed"]
+        record_gemini_flash_success()
         log.info(
             "Fan-out judge decided",
             should_fanout=parsed.should_fanout,
@@ -1270,9 +1370,10 @@ async def _judge_fanout(
         )
         return parsed
     except Exception as e:
+        record_gemini_flash_failure()
         log.warning(
             "Fan-out judge failed; defaulting to single-pass",
-            error=str(e).splitlines()[0][:200],
+            error=short_err(e),
         )
         return _FanoutStrategy(
             should_fanout=False,
@@ -1532,6 +1633,7 @@ async def _generate_sectionwise(
     of a hard failure.
     """
     completed: list[str] = []
+    failed_pairs: list[dict] = []   # {position_start, headings, reason}
     total = len(sections)
 
     # Per-section source-chunk routing (opt-in via env flag).
@@ -1575,14 +1677,32 @@ async def _generate_sectionwise(
 
         pair_user_facts = user_facts
         if chunking_enabled:
-            per_section_picks = await asyncio.gather(*[
-                _pick_relevant_chunk_indices(
-                    user_facts_chunks=all_chunks,
-                    section=sec,
-                    query=query,
-                )
-                for sec in pair
-            ])
+            # return_exceptions=True keeps one section's router crash from
+            # killing the entire sectionwise loop — the guard downstream
+            # already falls back to raw user_facts on empty picks, so an
+            # exception from one section is equivalent to it picking [].
+            per_section_picks_raw = await asyncio.gather(
+                *[
+                    _pick_relevant_chunk_indices(
+                        user_facts_chunks=all_chunks,
+                        section=sec,
+                        query=query,
+                    )
+                    for sec in pair
+                ],
+                return_exceptions=True,
+            )
+            per_section_picks = []
+            for sec, picks in zip(pair, per_section_picks_raw):
+                if isinstance(picks, BaseException):
+                    log.warning(
+                        "Chunk router raised for section; using raw source for this section",
+                        section=sec.heading[:40],
+                        error=short_err(picks),
+                    )
+                    per_section_picks.append([])
+                else:
+                    per_section_picks.append(picks)
             union_indices = sorted({idx for picks in per_section_picks for idx in picks})
             if union_indices:
                 pair_user_facts = "\n\n".join(all_chunks[idx] for idx in union_indices)
@@ -1603,34 +1723,133 @@ async def _generate_sectionwise(
                     pair_start=position_start,
                 )
 
-        try:
-            pair_text = await _generate_section_pair(
-                sections_to_write=pair,
-                section_position_start=position_start,
-                total_sections=total,
-                query=query,
-                user_facts=pair_user_facts,
-                reference_draft=reference_draft,
-                prior_text=prior_text,
-                gathered_context=gathered_context,
-                user_intent=user_intent,
-                user_language=user_language,
-                review_and_redraft_mode=review_and_redraft_mode,
-            )
-        except Exception as e:
-            log.warning(
-                "Section pair generation failed; continuing to next pair",
-                position_start=position_start,
-                error=str(e).splitlines()[0][:200],
-            )
-            pair_text = ""
+        # One retry per pair (Buglist Phase 2). The first attempt uses
+        # the Gemini SDK's default timeout; the retry uses the SAME
+        # timeout but is bounded by the request deadline via
+        # `core.deadline` — so a pair that costs 90s on attempt 1 and
+        # has only 40s of budget left will NOT re-fire and burn another
+        # 90s. Retry fires on either exception or empty content.
+        pair_text = ""
+        _pair_err: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                pair_text = await _generate_section_pair(
+                    sections_to_write=pair,
+                    section_position_start=position_start,
+                    total_sections=total,
+                    query=query,
+                    user_facts=pair_user_facts,
+                    reference_draft=reference_draft,
+                    prior_text=prior_text,
+                    gathered_context=gathered_context,
+                    user_intent=user_intent,
+                    user_language=user_language,
+                    review_and_redraft_mode=review_and_redraft_mode,
+                )
+                _pair_err = None
+                if pair_text.strip():
+                    break
+                # Empty content on attempt 1 → retry once.
+                if attempt == 1:
+                    log.info(
+                        "Section pair returned empty content; retrying once",
+                        position_start=position_start,
+                    )
+                    await asyncio.sleep(1)
+                    continue
+                break
+            except Exception as e:
+                _pair_err = e
+                if attempt == 1:
+                    # Deadline check: don't retry if we've already
+                    # blown the request budget. The retry itself would
+                    # just fail again after another N seconds.
+                    from core.deadline import remaining as _remaining
+                    rem = _remaining()
+                    if rem is not None and rem <= 15:
+                        log.warning(
+                            "Section pair failed; skipping retry (budget exhausted)",
+                            position_start=position_start,
+                            error=short_err(e),
+                            remaining_s=round(rem, 1),
+                        )
+                        break
+                    log.warning(
+                        "Section pair failed; retrying once",
+                        position_start=position_start,
+                        error=short_err(e),
+                    )
+                    await asyncio.sleep(1)
+                    continue
+                # Attempt 2 failed too.
+                log.warning(
+                    "Section pair failed on retry; giving up",
+                    position_start=position_start,
+                    error=short_err(e),
+                )
+                pair_text = ""
+                break
 
         if pair_text.strip():
             completed.append(pair_text.strip())
+        else:
+            # Both attempts produced empty content OR both raised.
+            failed_pairs.append({
+                "position_start": position_start,
+                "headings": [s.heading for s in pair],
+                "reason": short_err(_pair_err) if _pair_err else "empty_content",
+            })
 
         i += 2
 
-    return "\n\n".join(completed)
+    draft = "\n\n".join(completed)
+
+    # G-24: emit draft_incomplete SSE + prepend a banner when any pair
+    # failed. The frontend already listens for draft_incomplete (see
+    # chat_runner.py handler); the banner is belt-and-suspenders so
+    # users who paste the raw markdown see the note too.
+    if failed_pairs:
+        failed_headings: list[str] = []
+        failed_sections_meta: list[dict] = []
+        for fp in failed_pairs:
+            for idx, heading in enumerate(fp["headings"]):
+                section_position = fp["position_start"] + idx
+                failed_headings.append(heading)
+                failed_sections_meta.append({
+                    "position": section_position,
+                    "heading": heading,
+                    "reason": fp["reason"],
+                })
+        try:
+            from langgraph.config import get_stream_writer as _gsw
+            _sw = _gsw()
+            _sw({
+                "type": "draft_incomplete",
+                "failed_sections": failed_sections_meta,
+                "total_sections": total,
+                "completed_sections": total - len(failed_sections_meta),
+            })
+        except (RuntimeError, ImportError):
+            # Not in streaming context (batch endpoint) — SSE event not applicable.
+            pass
+
+        _banner_names = ", ".join(f"'{h}'" for h in failed_headings[:4])
+        if len(failed_headings) > 4:
+            _banner_names += f", and {len(failed_headings) - 4} more"
+        banner = (
+            "> ⚠ **Draft incomplete** — "
+            f"{len(failed_sections_meta)} of {total} section(s) "
+            f"could not be generated ({_banner_names}). "
+            "Please re-send your prompt to retry.\n\n"
+        )
+        draft = banner + draft
+        log.warning(
+            "Sectionwise draft incomplete",
+            failed=len(failed_sections_meta), total=total,
+            failed_positions=[fp["position_start"] for fp in failed_pairs],
+        )
+
+    return draft
 
 
 async def _generate_draft(
@@ -1642,6 +1861,7 @@ async def _generate_draft(
     progress_emit,
     gathered_context: dict[str, str] | None = None,
     review_and_redraft_mode: bool = False,
+    chat_history=None,
 ) -> str:
     """Thin dispatcher: judge call decides single-pass vs section-wise.
 
@@ -1652,27 +1872,45 @@ async def _generate_draft(
     # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens. English
     # text tokenises at ~4 chars/token so the raw-char ceiling is ~4M
     # chars, and 3.5M leaves room for system prompt + reference + context
-    # + query. Devanagari (Hindi / Marathi / Sanskrit) and other non-Latin
-    # Indic scripts tokenise DENSER — roughly 2.5 chars/token — so the
-    # effective ceiling drops to ~2.4M chars for those uploads. When we
-    # exceed the applicable budget, every downstream generation call will
-    # 400 INVALID_ARGUMENT and the sectionwise path silently produces an
-    # empty / badly-holed draft. Short-circuit here with a user-actionable
-    # message instead.
+    # + query. Every dense Indic script (Devanagari, Bengali, Tamil,
+    # Telugu, Kannada, Malayalam, Gujarati, Gurmukhi, Odia) tokenises at
+    # ~2.5 chars/token, so the effective ceiling drops to ~2.4M chars
+    # for those uploads. Earlier we only detected Devanagari; a 3M-char
+    # Kannada PDF would sail through the guard and 400 at generation
+    # time. When we exceed the applicable budget, short-circuit here
+    # with a user-actionable message instead.
     _USER_FACTS_BUDGET_LATIN = 3_500_000
-    _USER_FACTS_BUDGET_DEVANAGARI = 2_400_000
+    _USER_FACTS_BUDGET_INDIC = 2_400_000
+    # Unicode ranges for the dense Indic scripts we protect against.
+    # (script name, start-char, end-char)  — inclusive at both ends.
+    _INDIC_RANGES = (
+        ("devanagari", "ऀ", "ॿ"),  # Hindi, Marathi, Sanskrit
+        ("bengali",    "ঀ", "৿"),  # Bengali, Assamese
+        ("gurmukhi",   "਀", "੿"),  # Punjabi
+        ("gujarati",   "઀", "૿"),
+        ("oriya",      "଀", "୿"),
+        ("tamil",      "஀", "௿"),
+        ("telugu",     "ఀ", "౿"),
+        ("kannada",    "ಀ", "೿"),
+        ("malayalam",  "ഀ", "ൿ"),
+    )
     budget = _USER_FACTS_BUDGET_LATIN
+    detected_script = "latin"
     if user_facts:
         sample = user_facts[:20_000]
-        deva = sum(1 for c in sample if "ऀ" <= c <= "ॿ")
-        if deva / max(len(sample), 1) > 0.3:
-            budget = _USER_FACTS_BUDGET_DEVANAGARI
+        sample_len = max(len(sample), 1)
+        for name, lo, hi in _INDIC_RANGES:
+            count = sum(1 for c in sample if lo <= c <= hi)
+            if count / sample_len > 0.3:
+                budget = _USER_FACTS_BUDGET_INDIC
+                detected_script = name
+                break
     if user_facts and len(user_facts) > budget:
         log.warning(
             "Drafting user_facts exceeds token budget — returning friendly message",
             facts_chars=len(user_facts),
             budget=budget,
-            script="devanagari" if budget == _USER_FACTS_BUDGET_DEVANAGARI else "latin",
+            script=detected_script,
         )
         return (
             "The uploaded documents are too large to draft from in a "
@@ -1688,7 +1926,20 @@ async def _generate_draft(
         reference_draft=reference_draft,
         user_language=user_language,
         user_intent=user_intent,
+        chat_history=chat_history,
     )
+
+    # Hard code-level cap: prompt says "at most 15" but the LLM sometimes
+    # emits more, and 15 sequential Pro calls × ~25s ≈ 375s — over the
+    # 300s gunicorn timeout. Bug #9 in the prod inventory. Trim to 12
+    # deterministically so a mis-behaving judge can't blow the envelope.
+    _FANOUT_HARD_CAP = 12
+    if strategy.sections and len(strategy.sections) > _FANOUT_HARD_CAP:
+        log.warning(
+            "Fan-out judge emitted more sections than the hard cap — trimming",
+            emitted=len(strategy.sections), cap=_FANOUT_HARD_CAP,
+        )
+        strategy.sections = strategy.sections[:_FANOUT_HARD_CAP]
 
     if not strategy.should_fanout or not strategy.sections:
         log.info(
@@ -1755,6 +2006,10 @@ async def drafting_node(state: LegalAgentState) -> dict:
     intent_obj = state.get("user_intent")
     integration_ctx = IntegrationContextData.from_state(state)
     fc = FileContextData.from_state(state)
+    # Last few chat turns feed the fan-out judge so it can detect
+    # polish/redraft follow-ups and stay single-pass (Bug #9 fix).
+    _chat_history = state.get("chat_history") or []
+    _judge_chat_history = _chat_history[-4:] if _chat_history else []
 
     # --- 2. Build user_facts blob from attachments / pasted context / integrations ---
     #
@@ -1812,10 +2067,49 @@ async def drafting_node(state: LegalAgentState) -> dict:
             facts_source = "mixed" if facts_source == "extracted" else "chroma"
 
     if user_context:
-        fact_blocks.append(f"[Pasted context]\n{user_context[:30000]}")
+        # No truncation: CLAUDE.md drafting invariant #3 + feedback_preserve_user_query
+        # require the user's pasted context to flow verbatim into generation. The
+        # earlier `[:30000]` slice silently dropped material past 30 KB — a common
+        # failure mode on multi-affidavit uploads. Aggregate budget is enforced
+        # later by the preflight in _generate_draft.
+        fact_blocks.append(f"[Pasted context]\n{user_context}")
     if integration_ctx and integration_ctx.has_content:
         fact_blocks.append(integration_ctx.as_prompt_prefix().rstrip())
     user_facts = "\n\n".join(fact_blocks)
+
+    # G-27: pre-drafting injection classifier. Off by default; enable
+    # with INJECTION_CHECK_ENABLED=1 in prod once the false-positive
+    # rate has been characterised. When ENABLED and the classifier
+    # returns high-confidence injection, refuse to draft — return a
+    # scoped error message rather than shipping an attacker-influenced
+    # document.
+    from core.injection_check import _enabled as _injection_enabled
+    if _injection_enabled():
+        from core.injection_check import check_injection, sample_chat_history
+        chat_sample = sample_chat_history(_chat_history)
+        verdict = await check_injection(chat_sample, user_facts)
+        if verdict.is_injection and verdict.confidence >= 0.7:
+            log.warning(
+                "Injection classifier blocked drafting",
+                confidence=round(verdict.confidence, 2),
+                reason=verdict.reason,
+            )
+            result = AgentResult(
+                agent_name="Drafting",
+                content=(
+                    "I'm unable to draft this document because the "
+                    "provided source or chat history contains "
+                    "instructions that appear to attempt to override "
+                    "my guidelines. If this is a false positive, "
+                    "please rephrase your request or remove any "
+                    "instruction-shaped text from the uploaded "
+                    "source before retrying."
+                ),
+                sources=[],
+                tokens_consumed=0,
+                error=f"injection_blocked: {verdict.reason}",
+            )
+            return {"agent_results": {"Drafting": result}}
 
     log.info(
         "Agent started",
@@ -1836,12 +2130,50 @@ async def drafting_node(state: LegalAgentState) -> dict:
         _dwriter = _get_writer()
     except (RuntimeError, ImportError):
         _dwriter = None
-    if _AGENT_SEMAPHORE.locked():
+    # Try to acquire without blocking. If we succeed instantly, we
+    # never had to queue and no queue_status event is emitted. If not,
+    # emit the "queued" event AND start a periodic heartbeat so the
+    # frontend knows the request is still alive while waiting.
+    # `.locked()` alone is racy — two simultaneous arrivals when one
+    # slot is free both see `not locked()`, one blocks silently. The
+    # semaphore's own `_value` check via `try/wait_for(0)` is precise.
+    _AGENT_QUEUE_HEARTBEAT_S = 15
+    try:
+        await asyncio.wait_for(_AGENT_SEMAPHORE.acquire(), timeout=0.05)
+    except asyncio.TimeoutError:
         log.warning("Concurrency limit reached, queuing Drafting request")
         if _dwriter:
             _dwriter({"type": "queue_status", "status": "queued",
                       "message": "Drafting agent is busy, queuing your request..."})
-    await _AGENT_SEMAPHORE.acquire()
+
+        async def _emit_queue_heartbeat():
+            waited = 0
+            while True:
+                await asyncio.sleep(_AGENT_QUEUE_HEARTBEAT_S)
+                waited += _AGENT_QUEUE_HEARTBEAT_S
+                if _dwriter:
+                    try:
+                        _dwriter({
+                            "type": "queue_status",
+                            "status": "waiting",
+                            "waited_seconds": waited,
+                            "message": f"Still queued — waited {waited}s so far...",
+                        })
+                    except Exception:
+                        return
+
+        _heartbeat_task = asyncio.create_task(_emit_queue_heartbeat())
+        try:
+            await _AGENT_SEMAPHORE.acquire()
+        finally:
+            _heartbeat_task.cancel()
+            try:
+                await _heartbeat_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if _dwriter:
+            _dwriter({"type": "queue_status", "status": "acquired",
+                      "message": "Drafting slot available — starting now."})
 
     try:
         # --- 4. Reference draft acquisition + relevant-context gather.
@@ -1941,6 +2273,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             progress_emit=progress,
             gathered_context=gathered_ctx,
             review_and_redraft_mode=use_upload_as_ref,
+            chat_history=_judge_chat_history,
         )
 
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
@@ -2047,13 +2380,15 @@ async def drafting_node(state: LegalAgentState) -> dict:
         state_update = {"agent_results": {"Drafting": result}}
 
     except Exception as e:
-        log.error("Agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Drafting", e)
+        log.error("Agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Drafting",
             content="",
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
         state_update = {"agent_results": {"Drafting": result}}
     finally:

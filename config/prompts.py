@@ -1545,13 +1545,9 @@ When the depth signal is `brief`, stay single-pass unless the reference explicit
 
 When the depth signal is `standard`, apply the "When to fan out" / "When to keep single-pass" rules above without depth-driven bias.
 
-## Follow-up detection (critical — read carefully)
+## Follow-up detection
 
 {chat_history_hint}
-
-When the user's query looks like a POLISH / REDRAFT / TRANSLATE / SHORTEN / LENGTHEN request on the AI's PRIOR turn (typical phrasings: "polish this", "in Marathi", "make this more formal", "shorten to one page", "elaborate on the grounds", "add a prayer clause", "translate to English"), and there is a prior AI turn available above, STAY SINGLE-PASS regardless of the depth signal or reference structure. Reason: the whole document already exists in the prior AI turn; the section-wise loop would re-generate every section from scratch and blow the 5-minute request budget. Single-pass with the prior turn as source is the correct path.
-
-When in doubt about whether it's a follow-up, prefer single-pass — a mis-fanned-out follow-up costs the user 4 minutes and returns an error banner; a mis-single-passed fresh draft is still a complete draft.
 
 ## Inputs
 

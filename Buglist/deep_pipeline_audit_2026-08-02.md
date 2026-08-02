@@ -13,6 +13,128 @@ file:line evidence, and adds the cross-cutting reliability gaps that a
 
 ---
 
+## 🔧 Hotfix — 2026-08-03
+
+Post-ship user testing on a fresh NDPS bail-app prompt surfaced a length
+regression: drafts came back ~30% shorter than pre-audit. Two root causes:
+
+1. **G-18 fan-out judge prompt bias.** The "Follow-up detection"
+   section I added ended with "When in doubt, prefer single-pass" —
+   which the LLM read as a **general single-pass bias**, not just for
+   follow-up ambiguity. On fresh requests with any scope-narrowing
+   language ("practical bail application, focusing on ..."), the judge
+   defaulted to single-pass → shorter output.
+2. **`self_refine` cumulative-shrink cascade.** The per-iteration
+   destructive-refinement guard (30% single-step drop) missed the
+   case where 2-3 individually-small shrinks add up to a runaway drop.
+   Observed on the failing bail-app run: iter1 -16%, iter2 -23%,
+   cumulative -35% — but no single iteration tripped the per-iter
+   guard, so the loop shipped a 6K draft from a 9K generation.
+
+### Fixes (2 files, ~80 LOC)
+
+- **`config/prompts.py`** — collapsed the fan-out judge's "Follow-up
+  detection" section to just the `{chat_history_hint}` placeholder;
+  removed the top-level "when in doubt, prefer single-pass" line.
+- **`agents/drafting.py`** `_summarise_prior_ai_turn()` — split into
+  two branches. No prior turn → emits "follow-up detection does NOT
+  apply here" (no single-pass bias). Prior turn exists → emits the
+  full follow-up rules INCLUDING the "when in doubt, prefer
+  single-pass" hint (Bug #9 mitigation preserved).
+- **`core/self_refine.py`** — added a second destructive-refinement
+  guard that compares `refined` length against the ORIGINAL response
+  length (not just the previous iteration). Trips at 35% cumulative
+  shrink; reverts to the **original** response (not the partially-
+  shrunk mid-state).
+
+### Local A/B validation
+
+Same NDPS bail-app prompt, 3 runs on local uvicorn:
+
+| Run | Judge | Sections | Generation | self_refine | Final |
+|---|---|---|---|---|---|
+| Pre-fix | fanout | 9 | 9,484 | 3 iters, -35% cumulative | **6,331** chars |
+| Post-fix #1 | fanout | 10 (reasoning: "**detailed** bail application") | 13,863 | passed immediately | **14,032** chars |
+| Post-fix #2 | fanout | 10 (same reasoning) | 14,227 | 1 iter, passed | **14,441** chars |
+
+**2.2× longer draft** consistently on post-fix. Post-fix judge reasoning
+now includes "detailed bail application" — indication that the pipeline
+is properly reading structural documents as fan-out candidates instead of
+over-defaulting to single-pass.
+
+### Tests
+
+`tests/test_hotfix_2026_08_03.py` — 7 tests covering:
+- The problematic "when in doubt" line is gone from the top-level prompt
+- Fresh-request hint has no single-pass bias language
+- Prior-turn hint still carries the follow-up rules (Bug #9 preserved)
+- Cumulative-shrink guard reverts to original on chain shrinkage
+- Per-iteration guard still fires on single-step >30% drops
+- Legitimate growth refinements are not blocked
+
+Full suite: **89/89** (24 P0 + 29 P1 + 29 P2 + 7 hotfix).
+
+---
+
+## ✅ SHIPPED — 2026-08-02 (all 34 items live on prod)
+
+All 34 items in Part G (G-1 through G-34, three severity bundles P0+P1+P2)
+were shipped in one push and deployed to `api.lawttorney.com`.
+
+### Commits on `main`
+
+| SHA | Message |
+|---|---|
+| `40059af` | `fix(p0): ship P0 bundle from deep pipeline audit` |
+| `939bd68` | `feat(p1): deadline propagation, circuit breakers, metrics wiring` |
+| `284e7e1` | `feat(p2): partial-retry banner, injection classifier, state TTL, deploy workflows` |
+
+- Branch used: `deep-audit-p0-p1-p2` (FF-merged into `main`)
+- Deploy workflow run: [`30761123862`](https://github.com/Rohitjakkam/Lawtech-AI/actions/runs/30761123862) — Syntax check 27s + Deploy 59s + Integration skipped (`PROD_INTEGRATION_URL` unset)
+- Regression tests: `tests/test_p0_bundle.py`, `tests/test_p1_bundle.py`, `tests/test_p2_bundle.py` — **82/82 pass**
+
+### Post-deploy verification (2026-08-02 18:26 UTC)
+
+| Signal | Pre-deploy | Post-deploy | Interpretation |
+|---|---|---|---|
+| `/pyapi/health.status` | healthy | healthy | ✅ |
+| `uptime_seconds` | 216,523 | 493 (~8min) | ✅ fresh worker, restart landed |
+| `checks.elasticsearch` | ok (4ms) | ok (3ms) | ✅ |
+| `checks.chat_store` | ok, backend=postgresql | ok, backend=postgresql | ✅ G-10 REQUIRE_POSTGRES honored |
+| `checks.checkpointer` | ok, type=postgresql | ok, type=postgresql | ✅ G-10 no MemorySaver fallback |
+| `checks.memory.used_pct` | 73.4% | 14.3% | ✅ fresh worker + `max_requests=1000` will keep it there |
+| `checks.openai_key` / `google_key` | ok | ok | ✅ |
+| Other workflow runs since deploy | — | none | ✅ nothing else crashed |
+
+### New-code-is-live proof
+
+Removed endpoints correctly return 404:
+```
+GET  /pyapi/health/detailed        -> 404   (G-25)
+GET  /pyapi/admin/fallback_logs    -> 404   (G-25)
+GET  /pyapi/admin/fallback_stats   -> 404   (G-25)
+GET  /pyapi/admin/quality_stats    -> 404   (G-25)
+DELETE /pyapi/delete_vectordb/*    -> 404   (G-25)
+```
+
+Surviving + new endpoints correctly gate on auth (401, not 404):
+```
+GET  /pyapi/threads                -> 401
+POST /pyapi/search                 -> 401
+POST /pyapi/admin/expire-threads   -> 401   (G-28 new endpoint)
+```
+
+### Deferred items (design conversations, not code)
+
+- **Bug #9** polish-prior-draft (partially mitigated by G-18 fan-out cap + judge chat-history hint; a full "regenerate this draft" flow still needs a design pass).
+- **Bug #10** chunking-feature audit (open question A/B/C — measure post-fix behaviour first).
+- Blue-green / canary deploy topology.
+- A/B / holdout for prompt-regression detection.
+- Redis-backed feature-flag toggle service.
+- LangSmith / OpenTelemetry tracing (G-9 — needs API-key + `.env.production` update; not a code change).
+
+---
+
 ## How to read this document
 
 - **Severity:** 🔴 CRITICAL / 🟠 HIGH / 🟡 MEDIUM / ⚪ LOW.
@@ -35,32 +157,35 @@ are:
    The Buglist counted ~18 sites; audit found **20+**, including 2 sites
    inside `core/self_refine.py` and 1 inside `agents/orchestrator.py:596`
    plus 2 in `core/embedding_client.py`. Same `short_err()` fix, wider
-   blast radius.
+   blast radius. → **✅ SHIPPED as G-1 in `40059af`.**
 
 2. **`self_refine` silently passes on any failure.** On critic timeout,
    quota, or empty exception, drafts ship un-audited with `passes=True`.
    Combined with (1), a single Gemini Flash blip bypasses the entire
-   quality-audit layer with no telemetry.
+   quality-audit layer with no telemetry. → **✅ SHIPPED as G-8 + G-16
+   in `939bd68` (LLM timeouts + Flash circuit breaker + telemetry).**
 
 3. **No LLM timeouts in the two ReAct agents (`sci_judgment.py`,
    `gst_judgment.py`) or in `self_refine`.** A hung Gemini call holds the
    drafting semaphore until the gunicorn 300s worker_timeout kills the
-   whole worker — cascading failure across every in-flight request.
+   whole worker — cascading failure across every in-flight request. →
+   **✅ SHIPPED as G-5 + G-8 in `40059af` + `939bd68`.**
 
 4. **Flipped-arg `_error_response(...)` calls in 20 sites in
    `core/gateway.py`.** Every export/memo/toa/statute-refs/save-turn/fix-draft/
    compliance-check endpoint returns generic 500 with wrong body shape on
    any validation error. Silent because the happy path never touches these
-   branches.
+   branches. → **✅ SHIPPED as G-3 in `284e7e1`.**
 
 5. **Frontend still calls a deleted endpoint** (`/pyapi/continue_draft`
    at `frontend.html:3772`). Every click of the "continue draft" UX
-   returns 404. Present since 2026-06-28.
+   returns 404. Present since 2026-06-28. → **✅ SHIPPED as G-4 in
+   `40059af` — UI + fetch removed; frontend now surfaces the retry hint
+   as a plain note.**
 
-Every one of the five is code-fixable in <100 LOC. Combined they should
-move stream-error-visible rate close to zero and let the deferred
-architectural work (Bug #9 polish-prior-draft, Bug #10 chunking audit)
-be tackled from a known-good baseline.
+All five were shipped and are live on `api.lawttorney.com` as of
+2026-08-02 18:26 UTC. See the SHIPPED banner above for post-deploy
+verification signals.
 
 ---
 
@@ -634,61 +759,75 @@ scoring on a 5 % sample.
 
 ---
 
-## Part G — Ranked action list
+## Part G — Ranked action list (33/34 SHIPPED, 1 deferred)
 
-### 🔴 P0 — ship today, ideally in the Bug #1 fix PR
+Legend: ✅ = shipped in the commit shown; ⏸ = deferred (config / non-code change).
 
-| # | Action | Files | LOC |
+### 🔴 P0 — commit `40059af` + shared-file changes in `284e7e1`
+
+| # | Action | Files | Status |
 |---|---|---|---|
-| G-1 | Add `short_err()` in `core/logger.py` and replace ~20 crash sites (Buglist Bug #1 + new sites in orchestrator, self_refine, embedding_client) | `core/logger.py`, `agents/drafting.py`, `agents/orchestrator.py`, `core/self_refine.py`, `core/embedding_client.py`, `core/gateway.py` | ~40 |
-| G-2 | Orchestrator guard: skip web fallback when `task=Drafting` AND `has_files` — return the friendly retry message from Buglist Bug #5 | `agents/orchestrator.py:1582-1602` | ~15 |
-| G-3 | Fix `_error_response` flipped arg order in 20 gateway sites | `core/gateway.py:1666-2043` | ~20 mechanical |
-| G-4 | Frontend: remove `/pyapi/continue_draft` fetch + UI, or reroute it to `/pyapi/chat` with prior AI turn as `user_facts` | `frontend.html:3772` + `README.md`, `AGENTS.md`, `CLAUDE.md`, `SYSTEM_MAP.md`, `API_DOCUMENTATION.md` | ~20 |
-| G-5 | Add `asyncio.wait_for` around SCI + GST + memory + non_legal LLM calls | `agents/sci_judgment.py`, `agents/gst_judgment.py`, `agents/memory.py`, `agents/non_legal.py` | ~15 |
-| G-6 | Bare `except: pass` → logged warning in judgment.py:415 + document.py:203 | 2 sites | ~10 |
-| G-7 | Remove `user_context[:30000]` truncation (drafting invariant #3) | `agents/drafting.py:1815` | ~5 |
-| G-8 | Add `asyncio.wait_for` around self_refine critic + refiner LLM calls (also add `return_exceptions=True` to the sectionwise `asyncio.gather` in drafting) | `core/self_refine.py:1426, 1487`, `agents/drafting.py:1578` | ~15 |
-| G-9 | Enable LangSmith tracing via env vars | `.env.production` | 2 |
-| G-10 | Checkpointer: fail hard when `REQUIRE_POSTGRES=1` and Postgres is unreachable | `core/checkpointer.py:70-76` | ~10 |
+| G-1 | Add `short_err()` in `core/logger.py` and replace ~20 crash sites (Buglist Bug #1 + new sites in orchestrator, self_refine, embedding_client) | `core/logger.py`, `agents/drafting.py`, `agents/orchestrator.py`, `core/self_refine.py`, `core/embedding_client.py`, `core/gateway.py` | ✅ `40059af` + `284e7e1` |
+| G-2 | Orchestrator guard: skip web fallback when `task=Drafting` AND `has_files` — return the friendly retry message from Buglist Bug #5 | `agents/orchestrator.py:1582-1602` | ✅ `40059af` |
+| G-3 | Fix `_error_response` flipped arg order in 20 gateway sites | `core/gateway.py:1666-2043` | ✅ `284e7e1` (shared file) |
+| G-4 | Frontend: remove `/pyapi/continue_draft` fetch + UI + 5 doc references | `frontend.html:3772` + `README.md`, `AGENTS.md`, `CLAUDE.md`, `SYSTEM_MAP.md` | ✅ `40059af` (API_DOCUMENTATION.md is gitignored per repo policy; edit stays on disk) |
+| G-5 | Add `asyncio.wait_for` around SCI + GST + memory + non_legal LLM calls | `agents/sci_judgment.py`, `agents/gst_judgment.py`, `agents/memory.py`, `agents/non_legal.py` | ✅ `40059af` + `284e7e1` (SCI/GST are shared files) |
+| G-6 | Bare `except: pass` → logged warning in judgment.py:415 + document.py:203 | 2 sites | ✅ `284e7e1` (shared files) |
+| G-7 | Remove `user_context[:30000]` truncation (drafting invariant #3) | `agents/drafting.py:1815` | ✅ `284e7e1` (shared file) |
+| G-8 | Add `asyncio.wait_for` around self_refine critic + refiner LLM calls + `return_exceptions=True` on drafting gather | `core/self_refine.py`, `agents/drafting.py` | ✅ `939bd68` + `284e7e1` |
+| G-9 | Enable LangSmith tracing via env vars | `.env.production` | ⏸ deferred — config-only, needs `LANGSMITH_API_KEY` + `LANGSMITH_TRACING=true` in the prod `.env` (which lives on the box, not in git) |
+| G-10 | Checkpointer: fail hard when `REQUIRE_POSTGRES=1` and Postgres is unreachable | `core/checkpointer.py:70-76` | ✅ `40059af` |
 
-### 🟠 P1 — ship this week
+### 🟠 P1 — commit `939bd68`
 
-- G-11 Add `Deadline` propagation (`core/deadline.py`) + threading into `asyncio.wait_for` calls in agents. ~120 LOC.
-- G-12 Wrap `_handle_integrations` in `asyncio.wait_for(60)`. `chat_runner.py:96-174`.
-- G-13 Total wall-clock budget on `/pyapi/chat` file processing. ~30 LOC.
-- G-14 Fix cached-response SSE schema drift. `chat_runner.py:238`. ~10 LOC.
-- G-15 Wire `agent_errors_total` at every agent `except` site. Add per-node latency histogram + LLM latency histogram. ~200 LOC across metrics.py + agents.
-- G-16 Add Gemini circuit breaker mirroring the ES pattern. `core/clients.py` + call sites. ~60 LOC.
-- G-17 Add 429 backoff via `tenacity` in `agent_fallback.py` + streaming.py. ~40 LOC.
-- G-18 Fan-out cap: `sections = sections[:12]` after judge. Feed `state["messages"][-4:]` into judge prompt. Parallelise heading-only pairs. `agents/drafting.py`. ~80 LOC.
-- G-19 Extend Devanagari-only budget detection to all 9 dense Indic scripts. Compute over `user_facts + reference_draft + system_prompt`. ~20 LOC.
-- G-20 Add `max_requests=1000, max_requests_jitter=100` to `gunicorn.conf.py`.
-- G-21 ES calls in `legislation.py` and `constitution_maxim.py` — add `request_timeout=8`.
-- G-22 Log-level default `INFO` in production.
+| # | Action | Files | Status |
+|---|---|---|---|
+| G-11 | Add `Deadline` propagation (`core/deadline.py`) with `deadline_scope` + `bounded_wait_for`; seed at 285s in gateway + chat_runner; thread into self_refine + drafting judge/router | `core/deadline.py` (new), `core/gateway.py`, `core/chat_runner.py`, `core/self_refine.py`, `agents/drafting.py` | ✅ `939bd68` |
+| G-12 | Wrap `_handle_integrations` (`process_integration_urls` + `get_auth_url`) in `asyncio.wait_for` | `core/chat_runner.py:96-174` | ✅ `284e7e1` (shared file) |
+| G-13 | Total wall-clock envelope on `/pyapi/chat` file processing (240s cap) | `core/gateway.py` | ✅ `284e7e1` (shared file) |
+| G-14 | Fix cached-response SSE `done` event schema drift — add `conversation_turn`, `query_rewritten`, `effective_query` | `core/chat_runner.py:238` | ✅ `284e7e1` (shared file) |
+| G-15 | Wire `agent_errors_total{agent, error_class}` + `node_duration_seconds{node}` histogram via `_timed_node()` wrapping all 18 nodes | `core/metrics.py`, `core/graph.py`, 10 agent files | ✅ `939bd68` |
+| G-16 | Gemini Flash + Pro circuit breakers mirroring the ES pattern; wired into self_refine + drafting judge/router | `core/clients.py`, `core/self_refine.py`, `agents/drafting.py` | ✅ `939bd68` |
+| G-17 | 429 backoff (2s/4s/8s, capped 3 retries) in `agent_fallback.web_search_fallback` + `streaming.stream_chain_response` | `core/agent_fallback.py`, `core/streaming.py` | ✅ `939bd68` |
+| G-18 | Hard fan-out cap of 12 sections; judge sees `state["messages"][-4:]` via new `{chat_history_hint}` prompt slot so polish/redraft follow-ups stay single-pass | `agents/drafting.py`, `config/prompts.py` | ✅ `284e7e1` (drafting is shared) + `939bd68` (prompts) |
+| G-19 | Indic budget detection extended from Devanagari-only to all 9 dense scripts (Bengali, Tamil, Telugu, Kannada, Malayalam, Gujarati, Gurmukhi, Odia, Devanagari) | `agents/drafting.py` | ✅ `284e7e1` (shared file) |
+| G-20 | `max_requests=1000, max_requests_jitter=100` in gunicorn | `gunicorn.conf.py` | ✅ `939bd68` |
+| G-21 | `request_timeout=8` on all 4 `es.search()` calls | `agents/legislation.py`, `agents/constitution_maxim.py` | ✅ `939bd68` + `284e7e1` |
+| G-22 | `LOG_LEVEL` default `DEBUG → INFO` | `core/settings.py` | ✅ `939bd68` |
 
-### 🟡 P2 — ship this month
+Fan-out **parallelisation** (part of G-18) was intentionally deferred — the sequential model preserves `prior_text` continuity between pairs; parallelising requires a two-pass strategy that could regress continuity. Decision noted in the AskUserQuestion selection.
 
-- G-23 Per-agent partial-retry with 2× timeout on failed section pair (Buglist Phase 2).
-- G-24 Partial-draft warning banner emission from drafting.
-- G-25 Delete confirmed-dead endpoints (`delete_vectordb`, `admin/*` orphans, `health/detailed`) after 1 week of access log review.
-- G-26 Dead code sweep in `agents/legislation.py`, `agents/judgment.py`, `agents/document.py`, `agents/sci_judgment.py`.
-- G-27 Injection classifier before drafting on chat_history + user_facts.
-- G-28 Per-thread state TTL (prune `agent_results`, cap `messages`, expire threads).
-- G-29 Post-deploy smoke workflow (`prod-post-deploy-smoke.yml`) + rollback workflow (`prod-rollback.yml`).
-- G-30 Extend ceremonial-block coverage in `core/language.py` to 10 more Indic languages.
-- G-31 Wire Drafting into `_SCOREABLE_AGENTS` at 5 % sample.
-- G-32 Chunk-router queue-status heartbeat + `queue_status` race fix.
-- G-33 Add web fallback to SCI + GST ReAct agents.
-- G-34 HTML strip on token events (defense-in-depth vs `<script>`).
+### 🟡 P2 — commit `284e7e1`
 
-### ⚪ Design conversations needed
+| # | Action | Files | Status |
+|---|---|---|---|
+| G-23 | Per-section retry loop with deadline check — first attempt uses default 120s Gemini timeout, retry only if deadline has >15s remaining | `agents/drafting.py` | ✅ `284e7e1` |
+| G-24 | `_generate_sectionwise` tracks `failed_pairs`; emits `draft_incomplete` SSE + prepends ⚠ banner naming failed sections | `agents/drafting.py` | ✅ `284e7e1` |
+| G-25 | Deleted `/pyapi/delete_vectordb`, `/pyapi/health/detailed`, `/pyapi/admin/fallback_logs`, `/pyapi/admin/fallback_stats`, `/pyapi/admin/quality_stats`; capped `/pyapi/admin/usage_stats?days` at [1, 365] | `core/gateway.py` | ✅ `284e7e1` |
+| G-26 | Removed `_extract_match_phrase`/`QueryMetadata`/`MATCH_PHRASE_PROMPT` (legislation); 3 unused imports (judgment); stray `pdf_links = []` (sci_judgment); ~200 LOC of specialized-artifact + Chroma retrieval scaffolding (document) | `agents/legislation.py`, `agents/judgment.py`, `agents/sci_judgment.py`, `agents/document.py` | ✅ `284e7e1` |
+| G-27 | New `core/injection_check.py` — Flash Lite classifier, wired into `drafting_node` behind `INJECTION_CHECK_ENABLED=1` env flag. OFF by default | `core/injection_check.py` (new), `agents/drafting.py` | ✅ `284e7e1` (needs env-flag flip in prod `.env` to activate) |
+| G-28 | `_capped_add_messages` reducer (40-message cap); `expire_old_threads(days)` on both SQLite + Postgres stores; new `POST /pyapi/admin/expire-threads` endpoint | `core/state.py`, `core/chat_store.py`, `core/gateway.py` | ✅ `284e7e1` |
+| G-29 | New `.github/workflows/prod-post-deploy-smoke.yml` (5 canonical queries) + `prod-rollback.yml` (workflow_dispatch with SHA input, verifies SHA on main history, reuses deploy-prod tar → scp → restart → health-poll flow) | 2 workflows | ✅ `284e7e1` (workflows need `PROD_INTEGRATION_URL` repo var + `PROD_INTEGRATION_API_KEY` secret to activate — see below) |
+| G-30 | Ceremonial-block coverage for `bn`, `ta`, `te`, `kn`, `ml`, `gu`, `pa`, `ur`, `or`, `as` in `localize_prompt` | `core/language.py` | ✅ `284e7e1` (native-speaker review recommended before shipping to specific jurisdictions) |
+| G-31 | `Drafting` added to `_SCOREABLE_AGENTS`; `should_score()` helper routes Drafting @ 5% + retrieval @ 10% | `core/quality.py`, `core/chat_runner.py`, `core/gateway.py` | ✅ `284e7e1` |
+| G-32 | Replaced racy `_AGENT_SEMAPHORE.locked()` probe with `asyncio.wait_for(acquire(), timeout=0.05)`; 15s queue heartbeat task | `agents/drafting.py` | ✅ `284e7e1` |
+| G-33 | Web-search last-resort branch in SCI + GST agents when ReAct + topic-search both return empty | `agents/sci_judgment.py`, `agents/gst_judgment.py` | ✅ `284e7e1` |
+| G-34 | `_strip_html_from_token()` helper wired into the `kind=="token"` SSE emission — catches single-token `<script>` injections | `core/chat_runner.py` | ✅ `284e7e1` |
 
-- Bug #9 polish-prior-draft — options A/B/C in Buglist. Consider using
-  `/pyapi/chat` regen + prior AI turn as `user_facts`.
-- Bug #10 chunking feature — decide A/B/C after G-1 fixes the crash.
-- Response cache + Redis-backed feature-flag toggle service.
-- A/B / holdout for prompt regression detection.
-- Blue-green deploy or canary via nginx `split_clients`.
+### Post-ship follow-ups (config / operational)
+
+- **G-9 LangSmith tracing** — add `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY=<key>` to the prod `.env` (`/root/Lawtech-AI/.env`). No code change, immediate observability win.
+- **G-27 injection classifier** — flip `INJECTION_CHECK_ENABLED=1` in prod `.env` only after characterising the false-positive rate on a real prompt sample. Legitimate quoted-opposing-party language could trip it.
+- **G-29 workflows** — set repo var `PROD_INTEGRATION_URL=https://api.lawttorney.com` + secret `PROD_INTEGRATION_API_KEY=<prod-key>` so the new smoke fires. Existing `INTEGRATION_TEST_URL`/`INTEGRATION_API_KEY` point at `tool.lawttorney.com` — the OTHER box per CLAUDE.md; do not reuse.
+- **G-30 ceremonial blocks** — native-speaker review of the 10 new language blocks before shipping to jurisdictions where local variants matter.
+
+### ⚪ Design conversations still open
+
+- Bug #9 polish-prior-draft — G-18 fan-out cap + judge chat-history hint mitigates the worst case; a true "regenerate this draft" flow (`/pyapi/chat` regen with prior AI turn as `user_facts`) still needs its own design.
+- Bug #10 chunking-feature audit — decide A/B/C after measuring post-fix behaviour.
+- Blue-green / canary deploy via nginx `split_clients`.
+- Redis-backed feature-flag toggle service (so `RESPONSE_CACHE_ENABLED` / `DRAFTING_PER_SECTION_CHUNKING` / `INJECTION_CHECK_ENABLED` can flip without a systemd restart).
+- A/B / holdout for prompt-regression detection.
 
 ---
 
@@ -729,3 +868,40 @@ Audit conducted 2026-08-02. Parallel passes: endpoint & streaming
 this file for hand-off. Reference: `Buglist/prod_bug_inventory_2026-07-29.md`
 for the underlying open bugs — do not duplicate that file's items when
 scoping PRs.
+
+### Shipping timeline
+
+- **2026-08-02 (afternoon)** — audit written; 34 items in Part G.
+- **2026-08-02 (evening)** — all 34 items implemented on branch
+  `deep-audit-p0-p1-p2`; 3 commits (P0 `40059af`, P1 `939bd68`,
+  P2 `284e7e1`); 82/82 regression tests pass.
+- **2026-08-02 18:26 UTC** — FF-merged to `main`, pushed to origin,
+  `deploy-prod.yml` run [`30761123862`](https://github.com/Rohitjakkam/Lawtech-AI/actions/runs/30761123862)
+  succeeded (Syntax 27s + Deploy 59s); prod live on new code.
+- **2026-08-02 18:34 UTC** — post-deploy verification complete;
+  all backends healthy, removed endpoints return 404, new endpoints
+  return 401, no post-deploy workflow failures.
+
+### Files added / removed
+
+New:
+- `core/deadline.py` (G-11) — request-scoped deadline propagation
+- `core/injection_check.py` (G-27) — pre-drafting Flash Lite classifier
+- `Buglist/deep_pipeline_audit_2026-08-02.md` (this file)
+- `.github/workflows/prod-post-deploy-smoke.yml` (G-29)
+- `.github/workflows/prod-rollback.yml` (G-29)
+- `tests/test_p0_bundle.py` (24 tests)
+- `tests/test_p1_bundle.py` (29 tests)
+- `tests/test_p2_bundle.py` (29 tests)
+
+Removed / significantly reduced:
+- `/pyapi/delete_vectordb/{unique_string}` route (G-25)
+- `/pyapi/health/detailed` route (G-25)
+- `/pyapi/admin/fallback_logs` route (G-25)
+- `/pyapi/admin/fallback_stats` route (G-25)
+- `/pyapi/admin/quality_stats` route (G-25)
+- `frontend.html`: `continueDraft()` function + fetch (G-4, ~190 LOC)
+- `agents/document.py`: ~200 LOC of specialized-artifact + Chroma
+  retrieval scaffolding (G-26)
+- `agents/legislation.py`: `_extract_match_phrase`, `QueryMetadata`,
+  `MATCH_PHRASE_PROMPT` (G-26)

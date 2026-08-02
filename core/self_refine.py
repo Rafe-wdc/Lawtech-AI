@@ -1637,6 +1637,7 @@ async def self_refine(
 
     history: list[Critique] = []
     current = response
+    original_response_len = len(response)  # for cumulative-shrink guard
     for iteration in range(max_iterations + 1):  # +1 for the final critique
         critique = await _critique(
             user_query, critic_intent, current, critic_llm,
@@ -1674,12 +1675,13 @@ async def self_refine(
             user_query, critic_intent, current, critique, refiner_llm,
             retrieved_sources_whitelist=_whitelist,
         )
-        # Destructive-refinement guard: reject a refinement that drops the
-        # response length by more than 30%. Observed 2026-07-30 on a Hindi
-        # anticipatory-bail draft — the critic flagged 14 violations against
-        # a well-formed 7,643-char draft and the refiner rewrote it into
-        # 3,233 chars trying to fix all of them at once. Long drafts should
-        # get LONGER (or roughly stay the same) after refinement — dropping
+        # Destructive-refinement guard #1 (PER-ITERATION): reject a
+        # refinement that drops the response length by more than 30%
+        # in a single step. Observed 2026-07-30 on a Hindi anticipatory-
+        # bail draft — critic flagged 14 violations against a well-formed
+        # 7,643-char draft and the refiner rewrote it into 3,233 chars
+        # trying to fix all of them at once. Long drafts should get
+        # LONGER (or roughly stay the same) after refinement — dropping
         # to under 70% of the input signals a runaway rewrite, not a fix.
         # Guard applies to responses >2K chars (short responses can
         # legitimately shrink after e.g. a table format fix).
@@ -1696,6 +1698,24 @@ async def self_refine(
             # feed the shorter draft back to the critic and produce further
             # destructive shortening.
             return current, history
+        # Destructive-refinement guard #2 (CUMULATIVE): the per-iteration
+        # guard misses the "three small shrinks that add up" case
+        # observed 2026-08-02 on a bail-app draft — iter1 shrunk 9484→
+        # 7954 (-16%), iter2 shrunk 7954→6141 (-23%), cumulative -35%.
+        # Each step under the per-iter threshold but the aggregate is
+        # user-visible damage. Revert to the ORIGINAL response (not the
+        # partially-shrunk `current`) because both mid-states were also
+        # unwanted shrinks.
+        if (original_response_len > 2000
+                and len(refined) < original_response_len * 0.65):
+            log.warning(
+                "Refinement cumulative-shrink exceeded budget; reverting to original",
+                original_response_len=original_response_len,
+                refined_len=len(refined),
+                drop_pct=round(100 * (1 - len(refined) / max(original_response_len, 1)), 1),
+                iteration=iteration,
+            )
+            return response, history
         current = refined
 
     return current, history

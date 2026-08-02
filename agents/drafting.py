@@ -1220,13 +1220,21 @@ def _summarise_prior_ai_turn(chat_history) -> str:
     Empty/None history → returns the "no prior turn" phrasing so the
     prompt template's `{chat_history_hint}` slot always has a value.
     """
+    # No prior AI turn → follow-up detection is INAPPLICABLE. Emit a
+    # neutral instruction so the section header ("Follow-up detection")
+    # doesn't accidentally prime the judge toward single-pass. Crucially,
+    # this branch must NOT contain a "prefer single-pass when in doubt"
+    # hint — that biased the judge to single-pass fresh drafts too
+    # (observed on a bail-app prompt post-G-18 ship).
+    _no_prior_turn_hint = (
+        "This is a fresh drafting request — no prior AI turn exists "
+        "in this thread. Follow-up detection does NOT apply here. "
+        "Apply the fan-out rules from the earlier sections above as if "
+        "this section were absent."
+    )
     if not chat_history:
-        return (
-            "There is no prior AI turn in this thread — the user is "
-            "starting a fresh drafting request. Apply the fan-out rules "
-            "above without follow-up bias."
-        )
-    # Find the most recent AIMessage.content
+        return _no_prior_turn_hint
+
     try:
         from langchain.messages import AIMessage
     except Exception:  # pragma: no cover — dep drift
@@ -1252,11 +1260,8 @@ def _summarise_prior_ai_turn(chat_history) -> str:
             break
 
     if not prior_ai_text:
-        return (
-            "There is no prior AI turn in this thread — the user is "
-            "starting a fresh drafting request. Apply the fan-out rules "
-            "above without follow-up bias."
-        )
+        return _no_prior_turn_hint
+
     # Head + tail so the judge sees the shape (opening block +
     # signature/prayer block) without paying for the full body.
     head_n, tail_n = 800, 400
@@ -1268,11 +1273,26 @@ def _summarise_prior_ai_turn(chat_history) -> str:
             f"[...{len(prior_ai_text) - head_n - tail_n} chars elided...]\n"
             f"{prior_ai_text[-tail_n:]}"
         )
+    # Prior-turn branch: emit the full follow-up rules HERE. The
+    # "prefer single-pass when in doubt" hint fires only when a prior
+    # turn actually exists — never on fresh drafts.
     return (
         "The PRIOR AI TURN in this thread (excerpt shown below) has "
-        "already produced a document. If the current user query is a "
-        "polish / translate / shorten / lengthen / redraft directive on "
-        "this document, STAY SINGLE-PASS.\n\n"
+        "already produced a document.\n\n"
+        "When the current user query looks like a POLISH / REDRAFT / "
+        "TRANSLATE / SHORTEN / LENGTHEN request on that prior turn "
+        "(typical phrasings: 'polish this', 'in Marathi', 'make this "
+        "more formal', 'shorten to one page', 'elaborate on the "
+        "grounds', 'add a prayer clause', 'translate to English'), "
+        "STAY SINGLE-PASS regardless of the depth signal or reference "
+        "structure. The whole document already exists in the prior "
+        "turn; re-fanning-out from scratch would blow the 5-minute "
+        "request budget.\n\n"
+        "When in doubt about whether the current query is a follow-up "
+        "on the prior turn (vs a fresh unrelated drafting task), "
+        "prefer single-pass — a mis-fanned-out follow-up costs the "
+        "user 4 minutes and returns an error banner; a mis-single-"
+        "passed follow-up is still a complete document.\n\n"
         "PRIOR AI TURN EXCERPT:\n" + excerpt
     )
 

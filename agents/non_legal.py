@@ -10,12 +10,14 @@ Uses Gemini Flash to generate a warm, contextual response — never a hardcoded 
 
 from __future__ import annotations
 
+import asyncio
+
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.state import LegalAgentState, AgentResult
 from core.clients import get_gemini_flash_full
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 
 log = get_logger("NonLegal")
@@ -62,7 +64,10 @@ async def non_legal_node(state: LegalAgentState) -> dict:
         chain = prompt | llm
 
         with log_time(log, "Non-legal response generation"):
-            response = await chain.ainvoke({"query": query})
+            response = await asyncio.wait_for(
+                chain.ainvoke({"query": query}),
+                timeout=20,
+            )
 
         content = response.text if hasattr(response, "text") else str(response)
         from core.token_tracker import record as _record_tokens
@@ -78,7 +83,9 @@ async def non_legal_node(state: LegalAgentState) -> dict:
         )
 
     except Exception as e:
-        log.error("Non-legal agent failed", error=str(e), exc_info=True)
+        from core.metrics import record_agent_error
+        record_agent_error("Non_legal", e)
+        log.error("Non-legal agent failed", error=short_err(e), exc_info=True)
         result = AgentResult(
             agent_name="Non_legal",
             content=(
@@ -88,7 +95,7 @@ async def non_legal_node(state: LegalAgentState) -> dict:
             ),
             sources=[],
             tokens_consumed=0,
-            error=str(e),
+            error=short_err(e),
         )
 
     return {"agent_results": {"Non_legal": result}}

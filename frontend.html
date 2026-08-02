@@ -2045,7 +2045,7 @@ async function sendChatWithFiles(query, threadId) {
         } else if (evt.type === 'draft_incomplete') {
           const note = document.createElement('div');
           note.className = 'draft-incomplete-note';
-          note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${parseInt(evt.completed_sections)||0}/${parseInt(evt.total_sections)||0} sections completed. ${parseInt(evt.failed_sections)||0} section(s) failed. <button class="btn btn-secondary btn-sm" onclick="continueDraft(this)">Retry failed sections</button>`;
+          note.innerHTML = `<strong>\u26A0\uFE0F Draft incomplete:</strong> ${parseInt(evt.completed_sections)||0}/${parseInt(evt.total_sections)||0} sections completed. ${parseInt(evt.failed_sections)||0} section(s) failed. Please re-send your prompt to retry.`;
           msgDiv.appendChild(note);
         } else if (evt.type === 'done') {
           lastTokens = (evt.token_usage && evt.token_usage.total_tokens) || 0;
@@ -2653,7 +2653,9 @@ async function sendChatStream(query, threadId) {
     msgDiv.appendChild(actionsDiv);
   }
 
-  // Show Continue button for incomplete drafts
+  // Show a plain note for incomplete drafts. The retry-in-place
+  // /pyapi/continue_draft endpoint was removed 2026-06-28; users can
+  // re-send their prompt to regenerate the missing sections.
   if (hasDraftIncomplete && draftIncompleteInfo) {
     const contDiv = document.createElement('div');
     contDiv.className = 'continue-draft-section';
@@ -2665,11 +2667,8 @@ async function sendChatStream(query, threadId) {
         draftIncompleteInfo.failed_sections.length + ' of ' +
         draftIncompleteInfo.total_sections + ' section(s) could not be generated: ' +
         escapeHtml(failedNames) +
-      '</div>' +
-      '<button class="continue-draft-btn" onclick="continueDraft(this)">' +
-        '<span class="spinner-sm"></span>' +
-        'Continue Draft' +
-      '</button>';
+        '. Please re-send your prompt to retry.' +
+      '</div>';
     msgDiv.appendChild(contDiv);
   }
 
@@ -3746,199 +3745,6 @@ async function submitFeedbackComment(input) {
     addLog('info', 'Feedback comment sent for turn ' + turn);
   } catch (e) {
     addLog('error', 'Feedback comment failed: ' + e.message);
-  }
-}
-
-// ============================================================
-// Continue Draft (retry failed sections)
-// ============================================================
-async function continueDraft(btn) {
-  if (!currentThreadId) {
-    addLog('error', 'No active thread for continue draft');
-    return;
-  }
-
-  // Disable button and show loading state
-  btn.classList.add('loading');
-  btn.disabled = true;
-  var origText = btn.innerHTML;
-
-  // Hide the continue section
-  var section = btn.closest('.continue-draft-section');
-
-  addLog('info', 'Continuing incomplete draft...');
-
-  try {
-    var resp = await fetch(getBase() + '/pyapi/continue_draft', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ globalThreadId: currentThreadId }),
-    });
-
-    if (!resp.ok) {
-      var errData = await resp.json().catch(function() { return {}; });
-      throw new Error(errData.detail || 'Continue draft request failed');
-    }
-
-    // Hide the continue section entirely
-    if (section) section.style.display = 'none';
-
-    // Create a new streaming message div
-    var msgDiv = document.createElement('div');
-    msgDiv.className = 'msg ai';
-    msgDiv.innerHTML =
-      '<div class="agents-badge" id="contAgents"><span class="agent-tag">Drafting</span></div>' +
-      '<div id="contStatus" class="stream-status"><span class="streaming-dot"></span> Retrying incomplete sections...</div>' +
-      '<div id="contSteps" class="stream-steps"></div>' +
-      '<div id="contContent" style="display:none;"></div>';
-    document.getElementById('chatMessages').appendChild(msgDiv);
-    scrollChat();
-
-    // Read SSE stream
-    var reader = resp.body.getReader();
-    var decoder = new TextDecoder();
-    var buffer = '';
-    var content = '';
-    var tokenBuffer = '';
-    var renderTimer = null;
-    var isTokenStreaming = false;
-    var hasDraftIncomplete = false;
-    var draftIncompleteInfo = null;
-    var totalTokens = 0;
-    var sourcesData = [];
-
-    while (true) {
-      var result = await reader.read();
-      if (result.done) break;
-
-      buffer += decoder.decode(result.value, { stream: true });
-      var lines = buffer.split('\n');
-      buffer = lines.pop();
-
-      for (var li = 0; li < lines.length; li++) {
-        var line = lines[li];
-        if (!line.startsWith('data: ')) continue;
-        try {
-          var event = JSON.parse(line.slice(6));
-
-          if (event.type === 'drafting_progress') {
-            var statusEl = document.getElementById('contStatus');
-            if (statusEl) {
-              statusEl.innerHTML = '<span class="streaming-dot"></span> Retrying: ' + escapeHtml(event.title) +
-                ' (' + event.section + '/' + event.total + ')';
-            }
-            addLog('info', 'Continue drafting section ' + event.section + '/' + event.total + ': ' + event.title);
-
-          } else if (event.type === 'draft_incomplete') {
-            hasDraftIncomplete = true;
-            draftIncompleteInfo = event;
-            addLog('warning', 'Continue: still ' + event.failed_sections.length + ' section(s) failed');
-
-          } else if (event.type === 'token') {
-            if (!isTokenStreaming) {
-              isTokenStreaming = true;
-              var sEl = document.getElementById('contStatus');
-              if (sEl) sEl.style.display = 'none';
-              var cEl = document.getElementById('contContent');
-              if (cEl) { cEl.style.display = 'block'; cEl.classList.add('streaming-cursor'); }
-            }
-            tokenBuffer += event.content;
-            if (!renderTimer) {
-              renderTimer = setTimeout(function() {
-                var el = document.getElementById('contContent');
-                if (el) el.innerHTML = renderMarkdown(tokenBuffer);
-                scrollChat();
-                renderTimer = null;
-              }, 80);
-            }
-
-          } else if (event.type === 'token_reset') {
-            tokenBuffer = '';
-            if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
-            var rEl = document.getElementById('contContent');
-            if (rEl) rEl.innerHTML = '';
-
-          } else if (event.type === 'response') {
-            content = event.content;
-            msgDiv.dataset.markdown = content || '';
-            isTokenStreaming = false;
-            if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
-            var sEl2 = document.getElementById('contStatus');
-            if (sEl2) sEl2.style.display = 'none';
-            var cEl2 = document.getElementById('contContent');
-            if (cEl2) {
-              cEl2.classList.remove('streaming-cursor');
-              cEl2.style.display = 'block';
-              cEl2.innerHTML = renderMarkdown(content);
-            }
-            scrollChat();
-
-          } else if (event.type === 'sources') {
-            sourcesData = event.data || [];
-
-          } else if (event.type === 'done') {
-            totalTokens = (event.token_usage && event.token_usage.total_tokens) || 0;
-            var convTurn = event.conversation_turn || 0;
-            if (convTurn > 0) persistThread(currentThreadId, convTurn);
-            addLog('success', 'Continue draft complete | ' + totalTokens + ' tokens');
-          }
-        } catch (e) { /* ignore parse errors */ }
-      }
-    }
-
-    // Remove temp IDs
-    ['contAgents', 'contStatus', 'contSteps', 'contContent'].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.removeAttribute('id');
-    });
-
-    // Add citations
-    if (sourcesData.length > 0) {
-      var citDiv = document.createElement('div');
-      citDiv.innerHTML = renderCitations(sourcesData);
-      msgDiv.appendChild(citDiv);
-    }
-
-    // Add tokens and actions
-    if (totalTokens > 0) {
-      var tokDiv = document.createElement('div');
-      tokDiv.className = 'tokens';
-      tokDiv.textContent = totalTokens + ' tokens | ' + sourcesData.length + ' sources';
-      msgDiv.appendChild(tokDiv);
-    }
-    if (content) {
-      msgDiv.dataset.turn = currentTurnCount || '0';
-      var actDiv = document.createElement('div');
-      actDiv.innerHTML = renderResponseActions(currentTurnCount);
-      msgDiv.appendChild(actDiv);
-    }
-
-    // If still incomplete after retry, show Continue button again
-    if (hasDraftIncomplete && draftIncompleteInfo) {
-      var contDiv = document.createElement('div');
-      contDiv.className = 'continue-draft-section';
-      var failedNames = (draftIncompleteInfo.failed_sections || [])
-        .map(function(s) { return s.title; }).join(', ');
-      contDiv.innerHTML =
-        '<div class="continue-draft-info">' +
-          '<strong>Draft still incomplete</strong> — ' +
-          draftIncompleteInfo.failed_sections.length + ' section(s) still failed: ' +
-          escapeHtml(failedNames) +
-        '</div>' +
-        '<button class="continue-draft-btn" onclick="continueDraft(this)">' +
-          '<span class="spinner-sm"></span>' +
-          'Retry Again' +
-        '</button>';
-      msgDiv.appendChild(contDiv);
-    }
-
-    scrollChat();
-
-  } catch (e) {
-    addLog('error', 'Continue draft failed: ' + e.message);
-    btn.classList.remove('loading');
-    btn.disabled = false;
-    btn.innerHTML = origText;
   }
 }
 

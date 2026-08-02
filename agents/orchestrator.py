@@ -18,7 +18,7 @@ from langchain_core.output_parsers import StrOutputParser
 from core.state import LegalAgentState, AgentResult, FileContextData
 from core.clients import get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm
 from core.language import localize_prompt
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.source_registry import (
     SourceRegistry,
@@ -593,7 +593,7 @@ def _extract_user_intent(
         # consumers to fall back to the legacy heuristics. Never raise — the
         # extractor is a soft enhancement layer, not a hard dependency.
         log.warning("Intent extraction failed; falling back to default_intent()",
-                    error=str(e).splitlines()[0][:200], exc_info=True)
+                    error=short_err(e), exc_info=True)
         return query, default_intent()
 
 
@@ -1580,6 +1580,37 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         log.debug("Some agents returned empty results", empty_agents=empty)
 
     if not valid_results:
+        # Drafting + uploaded files: DO NOT fire the generic web-search
+        # last resort. Web search knows nothing about the user's PDFs and
+        # would produce a generic essay that ignores their case documents,
+        # while looking legitimate. Return a specific temporary-failure
+        # message instead so the user knows to retry.
+        # See Buglist/prod_bug_inventory_2026-07-29.md Bug #5.
+        planned = state.get("tasks_planned") or []
+        task = state.get("task")
+        is_drafting_request = (
+            task == "Drafting" or "Drafting" in planned
+        )
+        if is_drafting_request and fc and fc.has_content:
+            file_hint = (
+                f" (attached: {', '.join(fc.file_names[:3])})"
+                if fc.file_names else ""
+            )
+            log.warning(
+                "All agents empty on Drafting-with-files — suppressing web fallback",
+                planned=planned, file_count=len(fc.file_names),
+            )
+            return {
+                "final_response": (
+                    "I couldn't complete this draft right now — the AI "
+                    "backend is experiencing high load. Please try again "
+                    f"in about 30 seconds. Your uploaded documents{file_hint} "
+                    "are still attached to this thread."
+                ),
+                "source_metadata": [],
+                "tokens_consumed": 0,
+            }
+
         log.warning("All agents empty — invoking web search last resort")
         from core.agent_fallback import web_search_fallback
         fallback = await web_search_fallback(
@@ -1954,7 +1985,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                     merged = refined
             except Exception as _refine_err:
                 log.warning("self_refine failed after merge — using unrefined merged output",
-                            error=str(_refine_err).splitlines()[0][:200])
+                            error=short_err(_refine_err))
 
             return {
                 "final_response": merged,
@@ -2095,7 +2126,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                     synthesized = refined_synth
             except Exception as _refine_err:
                 log.warning("self_refine failed after synthesis — using unrefined output",
-                            error=str(_refine_err).splitlines()[0][:200])
+                            error=short_err(_refine_err))
 
     except Exception as e:
         log.error("LLM synthesis failed, concatenating results", error=str(e))

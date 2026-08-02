@@ -65,7 +65,6 @@ All endpoints prefixed with `/pyapi`.
 | POST | `/mainqa` | PDF upload + Q&A (sync) | JSON |
 | POST | `/upload_async` | Background PDF upload | JSON (job_id) |
 | GET | `/job_status/{job_id}` | Poll async upload status | JSON |
-| POST | `/continue_draft` | Resume incomplete draft | SSE events |
 | DELETE | `/delete_vectordb/{unique_string}` | Delete PDF collection | JSON |
 | GET | `/threads` | Session list for sidebar | JSON |
 | GET | `/threads/{thread_id}/messages` | Restore session history | JSON |
@@ -876,14 +875,11 @@ If any section fails (timeout / error):
                 "completed_sections": 6,
                 "total_sections": 8,
                 "failed_sections": 2}
-  → Partial draft saved to draft_continuations table:
-      {thread_id, failed_section_indices, outline, partial_draft}
+  → Client shows a "Draft incomplete — please re-send" note.
 
-POST /continue_draft:
-  → Load draft_continuations for thread_id
-  → Re-run only failed sections (Semaphore(3) again)
-  → Merge with existing partial draft
-  → Emit new SSE tokens
+The /continue_draft resume endpoint was removed on 2026-06-28
+(see docs/drafting_simplification_plan.md). Users retry by
+re-submitting the prompt via /pyapi/chat.
 ```
 
 ---

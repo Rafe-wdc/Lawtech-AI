@@ -51,6 +51,31 @@ def get_request_id() -> str:
     return _request_id.get()
 
 
+# --- Short error helper ---
+
+def short_err(e: BaseException) -> str:
+    """Format an exception for a single log field.
+
+    Always prepends the type name so `TimeoutError()` (empty `str(e)`)
+    still shows as `TimeoutError` instead of a blank `error=`. Splits on
+    newlines and keeps only the first line, capped at 200 chars, to keep
+    log lines tidy.
+
+    Replaces the `str(e).splitlines()[0][:200]` pattern which crashes with
+    IndexError when `str(e) == ""` — a real prod failure documented in
+    Buglist/prod_bug_inventory_2026-07-29.md (Bug #1).
+    """
+    if e is None:  # defensive; callers should always pass an exception
+        return "unknown"
+    name = type(e).__name__
+    msg = str(e)
+    if not msg:
+        return name
+    first_line = msg.splitlines()[0]
+    body = first_line[:200]
+    return f"{name}: {body}" if body else name
+
+
 # --- Custom Formatter ---
 
 class AgentFormatter(logging.Formatter):

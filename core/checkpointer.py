@@ -22,12 +22,19 @@ Schema note:
 
 from __future__ import annotations
 
+import os
+
 from langgraph.checkpoint.memory import MemorySaver
 
 from .settings import POSTGRES_URL
-from .logger import get_logger
+from .logger import get_logger, short_err
 
 log = get_logger("Checkpointer")
+
+
+_REQUIRE_POSTGRES = os.getenv("REQUIRE_POSTGRES", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
 
 
 async def create_checkpointer():
@@ -37,10 +44,25 @@ async def create_checkpointer():
         (AsyncPostgresSaver, AsyncConnectionPool) if POSTGRES_URL is set.
         (MemorySaver, None) otherwise (dev mode).
 
+    Hard-fails at import time when `REQUIRE_POSTGRES=1` and either
+    POSTGRES_URL is unset OR the Postgres connection cannot be
+    established. Silent MemorySaver fallback in prod = silent data loss
+    across worker restarts, which had been masking real infra issues.
+    Mirrors the chat_store.py contract.
+
     The pool must be closed at app shutdown:
         if pool: await pool.close()
     """
     if not POSTGRES_URL:
+        if _REQUIRE_POSTGRES:
+            # Match chat_store.py behaviour: fail fast so the server
+            # never accepts traffic with an unsafe backend.
+            raise RuntimeError(
+                "REQUIRE_POSTGRES=true but POSTGRES_URL is unset. "
+                "Set POSTGRES_URL=postgresql://user:pass@host:port/dbname "
+                "in .env, or remove REQUIRE_POSTGRES to allow the "
+                "MemorySaver fallback (dev only)."
+            )
         log.warning(
             "POSTGRES_URL not set — using in-memory MemorySaver. "
             "Conversation state will be lost on server restart. "
@@ -68,9 +90,20 @@ async def create_checkpointer():
         return saver, pool
 
     except Exception as e:
+        if _REQUIRE_POSTGRES:
+            log.error(
+                "PostgreSQL checkpointer init failed AND REQUIRE_POSTGRES=1 — refusing to start",
+                error=short_err(e),
+                url=POSTGRES_URL[:30] + "...",
+            )
+            raise RuntimeError(
+                f"REQUIRE_POSTGRES=true but checkpointer init failed: "
+                f"{short_err(e)}. Refusing to fall back to MemorySaver "
+                "(would silently drop conversation state)."
+            ) from e
         log.error(
             "Failed to connect to PostgreSQL — falling back to MemorySaver",
-            error=str(e),
+            error=short_err(e),
             url=POSTGRES_URL[:30] + "...",
         )
         return MemorySaver(), None

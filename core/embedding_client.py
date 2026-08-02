@@ -22,7 +22,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from langchain_core.embeddings import Embeddings
 
-from core.logger import get_logger
+from core.logger import get_logger, short_err
 
 log = get_logger("EmbeddingClient")
 
@@ -140,7 +140,7 @@ class RemoteEmbeddings(Embeddings):
                 # to the caller (which often logs into user-facing pipelines).
                 log.error("Embedding service call failed",
                           batch_size=len(batch), base_url=self.base_url,
-                          error=str(e).splitlines()[0][:200])
+                          error=short_err(e))
                 raise
         return all_vectors
 
@@ -171,7 +171,7 @@ class RemoteEmbeddings(Embeddings):
             except httpx.HTTPError as e:
                 log.error("Async embedding call failed",
                           batch_size=len(batch), base_url=self.base_url,
-                          error=str(e).splitlines()[0][:200])
+                          error=short_err(e))
                 raise
         return all_vectors
 

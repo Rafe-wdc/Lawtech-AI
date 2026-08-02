@@ -22,7 +22,7 @@ from core.state import LegalAgentState, FileContextData
 from core.clients import get_gemini_flash
 from core.chat_store import chat_store
 from core.language import detect_language
-from core.logger import get_logger, log_time
+from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from tools.inline.abbreviation import expand_abbreviations
 
@@ -224,7 +224,7 @@ def _rewrite_query(
         return rewritten
 
     except Exception as e:
-        log.error("Rewrite failed, using original query", error=str(e))
+        log.error("Rewrite failed, using original query", error=short_err(e))
         return query
 
 
@@ -446,7 +446,17 @@ async def memory_node(state: LegalAgentState) -> dict:
                          chromadb=len(restored_file_context.get("chromadb_collections", [])))
 
             progress("memory", "Rewriting follow-up query...", step="rewrite")
-            query = await asyncio.to_thread(_rewrite_query, query, chat_history)
+            # Bound the rewrite call: without a local ceiling, a slow
+            # Gemini Flash blocks the memory step for the entire outer
+            # timeout budget. On timeout, keep the original query.
+            try:
+                query = await asyncio.wait_for(
+                    asyncio.to_thread(_rewrite_query, query, chat_history),
+                    timeout=15,
+                )
+            except asyncio.TimeoutError:
+                log.warning("Rewrite timed out; using original query",
+                            timeout_s=15, query=query[:80])
             if query != expand_abbreviations(original_query):
                 progress("memory", f"Expanded: {query[:60]}", substep=True, detail=query[:80], step="rewrite")
 

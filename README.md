@@ -148,7 +148,6 @@ All routes are prefixed with `/pyapi`:
 | POST | `/pyapi/search` | Batch legal Q&A |
 | POST | `/pyapi/search/stream` | Streaming Q&A (Server-Sent Events) |
 | POST | `/pyapi/chat` | Unified chat (SSE + inline file uploads, up to 30 files / 1 GB each) |
-| POST | `/pyapi/continue_draft` | Continue an incomplete draft |
 | DELETE | `/pyapi/delete_vectordb/{unique_string}` | Delete a PDF collection |
 | POST | `/pyapi/feedback` | Submit user feedback |
 | GET | `/pyapi/health` | Health check |

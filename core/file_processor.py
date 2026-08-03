@@ -814,10 +814,18 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
         }
     ]
 
+    from core.token_tracker import record as _record_tokens
+
     last_exc: Exception | None = None
     for attempt in range(1, 4):
         try:
             resp = llm.invoke(content)
+            _record_tokens(
+                "FileProcessor",
+                f"ocr_pdf_pages_{batch_start + 1}_{batch_start + len(batch_b64)}",
+                resp,
+                model="gemini-2.5-flash",
+            )
             text = _extract_ai_text(resp).strip()
             return (
                 f"--- Pages {batch_start + 1}-{batch_start + len(batch_b64)} ---\n{text}"
@@ -895,6 +903,8 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
             ],
         }]
 
+        from core.token_tracker import record as _record_tokens
+
         last_exc: Exception | None = None
         text = ""
         for attempt in range(1, 4):
@@ -902,6 +912,12 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
                 with log_time(log, "Image Vision OCR",
                               file=filename or "image", attempt=attempt):
                     resp = llm.invoke(content)
+                _record_tokens(
+                    "FileProcessor",
+                    f"ocr_image_{filename or os.path.basename(file_path)}",
+                    resp,
+                    model="gemini-2.5-flash",
+                )
                 text = _extract_ai_text(resp).strip()
                 last_exc = None
                 break
@@ -987,10 +1003,18 @@ def _ocr_pdf_at_dpi(
         })
 
     failed_batches = 0
+    # ThreadPoolExecutor threads do NOT inherit ContextVars by default —
+    # the request-scoped token tracker set by /pyapi/chat would be invisible
+    # inside `_ocr_batch`, so OCR usage would silently drop out of the
+    # `token_usage.by_agent["FileProcessor"]` roll-up. Capture the current
+    # context once and dispatch each submit through `ctx.run(...)` so every
+    # worker thread sees the same tracker.
+    import contextvars as _ctxvars
+    _ocr_ctx = _ctxvars.copy_context()
     with log_time(log, "Parallel Vision OCR", batches=total):
         with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
             future_batch = {
-                executor.submit(_ocr_batch, llm, batch_images, batch_start):
+                executor.submit(_ocr_ctx.run, _ocr_batch, llm, batch_images, batch_start):
                     (batch_start, len(batch_images))
                 for batch_start, batch_images in batches
             }

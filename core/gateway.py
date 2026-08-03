@@ -971,6 +971,12 @@ async def chat_with_files(
         # Process files before invoking the pipeline (they need to be staged
         # into ChromaDB + Gemini Files API, which is /chat-specific).
         file_context_dict = None
+        # Start the per-request token tracker BEFORE process_files runs so
+        # the Vision OCR calls inside file_processor.py accumulate under a
+        # "FileProcessor" bucket. chat_runner.run_chat_pipeline reuses this
+        # tracker via get_tracker() instead of overwriting it.
+        from core.token_tracker import start_request as _start_token_tracking
+        _start_token_tracking()
         try:
             # First, emit thread_id and file_processing events directly.
             yield f"data: {json.dumps({'type': 'thread_id', 'data': thread_id})}\n\n"

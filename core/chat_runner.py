@@ -333,8 +333,15 @@ async def run_chat_pipeline(
     # spawned children, since asyncio propagates contextvars) will
     # accumulate into this instance. Read out at the end and surface
     # in the `done` SSE event.
-    from core.token_tracker import start_request as _start_token_tracking
-    token_tracker = _start_token_tracking()
+    # /pyapi/chat starts the tracker before process_files runs so Vision
+    # OCR tokens land in the same tracker; reuse it when present instead
+    # of overwriting (which would drop the FileProcessor calls already
+    # recorded during file processing).
+    from core.token_tracker import (
+        get_tracker as _get_token_tracker,
+        start_request as _start_token_tracking,
+    )
+    token_tracker = _get_token_tracker() or _start_token_tracking()
 
     step_count = 0
     final_response = ""

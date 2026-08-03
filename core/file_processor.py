@@ -1006,16 +1006,22 @@ def _ocr_pdf_at_dpi(
     # ThreadPoolExecutor threads do NOT inherit ContextVars by default —
     # the request-scoped token tracker set by /pyapi/chat would be invisible
     # inside `_ocr_batch`, so OCR usage would silently drop out of the
-    # `token_usage.by_agent["FileProcessor"]` roll-up. Capture the current
-    # context once and dispatch each submit through `ctx.run(...)` so every
-    # worker thread sees the same tracker.
+    # `token_usage.by_agent["FileProcessor"]` roll-up.
+    #
+    # `Context.run` cannot be entered concurrently by multiple threads
+    # (it raises "cannot enter context: <Context> is already entered"),
+    # so we must give EACH submit its OWN copy of the caller context —
+    # not share a single copy across all workers. The TokenUsage object
+    # referenced by the ContextVar is shared and its record() is
+    # threading.Lock-guarded, so concurrent accumulation is still safe.
     import contextvars as _ctxvars
-    _ocr_ctx = _ctxvars.copy_context()
     with log_time(log, "Parallel Vision OCR", batches=total):
         with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
             future_batch = {
-                executor.submit(_ocr_ctx.run, _ocr_batch, llm, batch_images, batch_start):
-                    (batch_start, len(batch_images))
+                executor.submit(
+                    _ctxvars.copy_context().run,
+                    _ocr_batch, llm, batch_images, batch_start,
+                ): (batch_start, len(batch_images))
                 for batch_start, batch_images in batches
             }
             results: list[str] = []

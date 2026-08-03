@@ -174,38 +174,95 @@ def test_chat_runner_starts_tracker_when_absent():
 
 
 def test_ocr_batch_records_across_thread_pool_executor():
-    """Regression test for the ContextVar-propagation bug caught by the
-    2026-08-03 local smoke: `_vision_ocr_pdf` dispatches batches via a
-    `ThreadPoolExecutor`, which does NOT inherit ContextVars unless the
-    caller wraps each submit with `contextvars.copy_context().run(...)`.
+    """Regression test for two related ContextVar bugs in `_ocr_pdf_at_dpi`:
 
+    Bug 1 (2026-08-03 local smoke): `_vision_ocr_pdf` dispatches batches
+    via a `ThreadPoolExecutor`, which does NOT inherit ContextVars unless
+    the caller wraps each submit with `contextvars.copy_context().run(...)`.
     Without that wrap, `_ocr_batch` sees an empty tracker inside the
-    worker thread and the OCR tokens silently drop out of the
-    `by_agent["FileProcessor"]` roll-up. This test simulates the
-    dispatch pattern used in `_vision_ocr_pdf` to lock the fix in.
+    worker thread and the OCR tokens silently drop out.
+
+    Bug 2 (2026-08-03 prod journal, 9 requests hit): a SHARED
+    `Context` object cannot be entered by multiple threads concurrently
+    — Python raises "cannot enter context: <Context> is already entered".
+    The fix is to give each submit its OWN `copy_context()`, not share
+    one across all workers.
+
+    This test uses a blocking `_BarrierLLM` that forces worker threads
+    to hold the context concurrently. With a shared Context, the second
+    thread to enter would raise; per-submit Contexts run cleanly.
     """
     import contextvars
+    import threading
     from concurrent.futures import ThreadPoolExecutor
 
     from core import token_tracker
     from core.file_processor import _ocr_batch
 
     tracker = token_tracker.start_request()
-    llm = _FakeLLM()
 
-    ctx = contextvars.copy_context()
-    with ThreadPoolExecutor(max_workers=2) as ex:
+    # LLM that blocks until N callers all arrive → guarantees the worker
+    # threads are inside `ctx.run(_ocr_batch, ...)` simultaneously.
+    barrier = threading.Barrier(3, timeout=5)
+
+    class _BarrierLLM:
+        def invoke(self, content):
+            barrier.wait()  # holds all 3 threads inside the context
+            return _FakeAIMessage()
+
+    llm = _BarrierLLM()
+    with ThreadPoolExecutor(max_workers=3) as ex:
         futures = [
-            ex.submit(ctx.run, _ocr_batch, llm, ["dGVzdA=="], start)
+            ex.submit(
+                contextvars.copy_context().run,
+                _ocr_batch, llm, ["dGVzdA=="], start,
+            )
             for start in (0, 1, 2)
         ]
         for f in futures:
-            f.result(timeout=5)
+            f.result(timeout=10)
 
     fp = tracker.by_agent.get("FileProcessor")
     assert fp is not None, "FileProcessor bucket missing — ContextVar did not propagate"
     assert fp["calls"] == 3, f"expected 3 OCR calls, got {fp['calls']}"
     assert fp["total"] == 3 * 1240
+
+
+def test_shared_context_across_threads_raises_regression_guard():
+    """Direct guard against re-introducing the shared-Context bug.
+
+    Documents the underlying Python behaviour we designed around:
+    calling `ctx.run(...)` from a second thread while the first still
+    holds it raises RuntimeError. The fix must call `copy_context()`
+    PER submit, not once at the caller level.
+
+    If someone refactors `_ocr_pdf_at_dpi` back to a single shared
+    context, this test doesn't fail directly — but the paired
+    `test_ocr_batch_records_across_thread_pool_executor` above will,
+    because its BarrierLLM forces concurrent entry.
+    """
+    import contextvars
+    import threading
+
+    ctx = contextvars.copy_context()
+    barrier = threading.Barrier(2, timeout=3)
+    errors: list[Exception] = []
+
+    def worker():
+        try:
+            ctx.run(barrier.wait)
+        except RuntimeError as e:
+            errors.append(e)
+
+    t1 = threading.Thread(target=worker)
+    t2 = threading.Thread(target=worker)
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    assert any("already entered" in str(e) for e in errors), (
+        "Expected shared Context to raise 'already entered' when two "
+        "threads run it concurrently. Python's Context semantics may "
+        "have changed — revisit the copy_context()-per-submit rationale."
+    )
 
 
 def test_gemini_flash_price_covers_ocr_cost():

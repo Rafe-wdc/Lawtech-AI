@@ -52,7 +52,6 @@ MODELS = {
     "newacts_metadata": "gpt-4o",
     "draft_selector": "gpt-4o-mini",
     "legislation_match": "gpt-4o-mini",
-    "scenario": "gemini-2.5-pro",
     "scenario_web_grounded": "gemini-2.5-flash",
     "legal_concepts": "gemini-2.5-flash-lite",
     "query_rewrite": "gemini-2.5-flash-lite",

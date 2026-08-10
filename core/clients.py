@@ -299,12 +299,15 @@ def get_gemini_flash_full(temperature: float = 0.3,
 
 @lru_cache(maxsize=8)
 def get_gemini_pro(temperature: float = 0.5,
-                   max_output_tokens: int = 65535,
-                   thinking_budget: int = 8192):
+                   max_output_tokens: int = 16000,
+                   thinking_budget: int = 2048):
     """Gemini 2.5 Pro — strongest. For scenario analysis, PDF chat, complex reasoning.
 
-    Defaults: max output ceiling, generous thinking budget — analytical work
-    benefits from reasoning.
+    Defaults tightened 2026-08-10: previous 65535/8192 defaults meant any caller
+    that forgot to override was billing up to 8192 thinking tokens ($0.08 output-
+    priced) plus a 65K output ceiling per call. The typical Pro workload doesn't
+    approach these bounds; drafting/refiner callsites already override. The new
+    16K/2048 defaults are a safe ceiling for anything that inherits.
     """
     return init_chat_model(
         "google_genai:gemini-2.5-pro",

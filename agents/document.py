@@ -22,7 +22,7 @@ from datetime import date
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
-from core.clients import get_gemini_pro
+from core.clients import get_gemini_pro, get_gemini_flash_full
 from core.settings import TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt, detect_source_languages
 from core.logger import get_logger, log_time, short_err
@@ -120,8 +120,34 @@ def _generate_from_docs(
     # enough — chunks from one PDF are uniform in language.
     source_langs = detect_source_languages(docs_text)
 
-    with log_time(log, "LLM generation"):
-        llm = get_gemini_pro(temperature=0.3)
+    # Route by document size: small docs go to Flash (~4x cheaper per token,
+    # quality delta minimal for short-context Q&A); large docs stay on Pro
+    # for the deeper reasoning it brings to complex/dense legal text.
+    # 60_000 chars ≈ ~15K input tokens ≈ ~30 pages of typical legal PDF.
+    # Tune based on observed quality; log both signals to inform tuning.
+    _FLASH_ROUTING_THRESHOLD_CHARS = 60_000
+    use_flash = len(docs_text) < _FLASH_ROUTING_THRESHOLD_CHARS
+    picked_model = "gemini-2.5-flash" if use_flash else "gemini-2.5-pro"
+    log.info(
+        "PDF chat model routing",
+        docs_chars=len(docs_text),
+        threshold=_FLASH_ROUTING_THRESHOLD_CHARS,
+        model=picked_model,
+    )
+
+    with log_time(log, f"LLM generation ({picked_model})"):
+        if use_flash:
+            llm = get_gemini_flash_full(
+                temperature=0.3,
+                max_output_tokens=8000,
+                thinking_budget=0,  # small-doc Q&A doesn't need thinking trace
+            )
+        else:
+            llm = get_gemini_pro(
+                temperature=0.3,
+                max_output_tokens=8000,
+                thinking_budget=1024,
+            )
         system_prompt = localize_prompt(
             "You are Lawttorney, a legal AI assistant. Answer questions about "
             "the uploaded document(s) using only the provided context. Be "
@@ -151,7 +177,7 @@ def _generate_from_docs(
         response = chain.invoke(invoke_args)
 
     from core.token_tracker import record as _record_tokens
-    tokens = _record_tokens("Document", "qa_chromadb", response)
+    tokens = _record_tokens("Document", "qa_chromadb", response, model=picked_model)
 
     return response.text, tokens
 

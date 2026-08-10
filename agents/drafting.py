@@ -890,7 +890,7 @@ async def _generate_single_pass(
     # cross-reference each emitted entity back to the CASE FACTS block.
     llm = get_gemini_pro(
         temperature=0.0,
-        max_output_tokens=65535,
+        max_output_tokens=24000,
         thinking_budget=4096,
     )
 
@@ -1541,7 +1541,7 @@ async def _generate_section_pair(
 
     llm = get_gemini_pro(
         temperature=0.0,
-        max_output_tokens=32768,
+        max_output_tokens=12000,
         thinking_budget=2048,
     )
 

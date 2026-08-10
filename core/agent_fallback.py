@@ -12,6 +12,7 @@ Pattern borrowed from scenario_node() in agents/scenario.py.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from core.state import AgentResult, SourceMetadata
 from core.clients import get_gemini_flash, get_genai_client
@@ -19,8 +20,33 @@ from core.logger import get_logger, log_time, short_err
 from core.chat_store import chat_store
 from core.metrics import METRICS
 from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
+from core.token_tracker import record as _record_tokens
 
 log = get_logger("AgentFallback")
+
+
+def _record_genai_tokens(agent: str, step: str, response, model: str) -> None:
+    """Adapter: feed raw google-genai response usage into token_tracker.
+
+    token_tracker.record() expects a LangChain-style AIMessage whose
+    `.usage_metadata` is a dict. Raw google-genai responses expose
+    `.usage_metadata` as a Pydantic object with `prompt_token_count` /
+    `candidates_token_count` / `total_token_count` attributes. This adapter
+    normalises the shape so per-request cost attribution captures the
+    priciest calls (Google Search grounding + Pro escalation) that were
+    previously invisible to the tracker.
+    """
+    um = getattr(response, "usage_metadata", None)
+    if um is None:
+        return
+    shim = SimpleNamespace(
+        usage_metadata={
+            "input_tokens":  getattr(um, "prompt_token_count", 0) or 0,
+            "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
+            "total_tokens":  getattr(um, "total_token_count", 0) or 0,
+        },
+    )
+    _record_tokens(agent, step, shim, model=model)
 
 
 # --- Domain-Specific Rewrite Prompts ---
@@ -118,7 +144,11 @@ async def web_search_fallback(
     Same pattern as scenario_node() — uses the native genai.Client
     (NOT LangChain) because LangChain doesn't support the google_search tool.
 
-    Retries once with gemini-2.5-pro if Flash returns 503.
+    Retries the same model on transient errors (429 rate-limit, 503
+    unavailability) with 2s / 4s / 8s exponential backoff, capped at 3
+    attempts. No Pro escalation — Pro and Flash share the same Google
+    backend, so escalating for a transient 503 was 4x cost for zero
+    reliability gain (removed 2026-08-10).
 
     Language consistency:
         Some call sites pass an already-localized `system_prompt`, but
@@ -174,63 +204,65 @@ async def web_search_fallback(
         full_prompt = f"{localized_system}\n\nUser Query: {query}"
         client = get_genai_client()
 
-        # Try scenario_web_grounded model first, fall back to gemini-2.5-pro
-        # on 503. Also handle 429 rate limits with capped exponential backoff
-        # (up to 3 retries per model) rather than immediately marking the
-        # request failed — a transient quota trip is often self-clearing.
+        # Call scenario_web_grounded (Flash) with capped exponential backoff
+        # on transient errors (429 rate-limit, 503 unavailability). 2s / 4s / 8s
+        # for up to 3 retries — never more than 14s cumulative wait per call.
+        #
+        # 2026-08-10: dropped the Flash→Pro escalation on 503. Pro and Flash
+        # are served from the same Google backend, so escalating to Pro for a
+        # transient 503 was paying ~4x per token for zero reliability gain.
+        # If Flash is truly down for >14s, so is Pro — the escalation was cost
+        # theatre. Retry-same-model on 503 matches the pattern already proven
+        # for 429.
         _primary = MODELS["scenario_web_grounded"]
         response = None
-        for model in [_primary, "gemini-2.5-pro"]:
-            rate_limit_retries = 0
-            while True:
-                try:
-                    with log_time(log, f"{model} + Google Search", agent=agent_name):
-                        response = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                client.models.generate_content,
-                                model=model,
-                                contents=[full_prompt],
-                                config={
-                                    "tools": [{"google_search": {}}],
-                                    "max_output_tokens": 8000,
-                                    "temperature": 0.5,
-                                    "top_p": 0.95,
-                                },
-                            ),
-                            timeout=TIMEOUT_WEB_SEARCH_SEC,
-                        )
-                    break  # success
-                except Exception as model_err:
-                    err_text = str(model_err)
-                    is_429 = (
-                        "429" in err_text
-                        or "RESOURCE_EXHAUSTED" in err_text
-                        or "rate limit" in err_text.lower()
+        transient_retries = 0
+        while True:
+            try:
+                with log_time(log, f"{_primary} + Google Search", agent=agent_name):
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            client.models.generate_content,
+                            model=_primary,
+                            contents=[full_prompt],
+                            config={
+                                "tools": [{"google_search": {}}],
+                                "max_output_tokens": 8000,
+                                "temperature": 0.5,
+                                "top_p": 0.95,
+                            },
+                        ),
+                        timeout=TIMEOUT_WEB_SEARCH_SEC,
                     )
-                    if is_429 and rate_limit_retries < 3:
-                        # 2s, 4s, 8s — capped at 3 retries so we never
-                        # burn more than 14s on a single 429 chain.
-                        wait_s = 2 ** (rate_limit_retries + 1)
-                        rate_limit_retries += 1
-                        log.warning(
-                            "Gemini 429 rate limit — backing off",
-                            model=model, wait_s=wait_s,
-                            attempt=rate_limit_retries,
-                            agent=agent_name,
-                        )
-                        await asyncio.sleep(wait_s)
-                        continue
-                    if "503" in err_text and model == _primary:
-                        log.warning("Flash 503, retrying with Pro",
-                                    agent=agent_name, error=err_text[:100])
-                        await asyncio.sleep(1)
-                        break  # break inner while → advance to next model
-                    raise
-            if response is not None:
-                break  # break outer for-loop on success
+                break  # success
+            except Exception as model_err:
+                err_text = str(model_err)
+                is_429 = (
+                    "429" in err_text
+                    or "RESOURCE_EXHAUSTED" in err_text
+                    or "rate limit" in err_text.lower()
+                )
+                is_503 = (
+                    "503" in err_text
+                    or "UNAVAILABLE" in err_text
+                    or "overloaded" in err_text.lower()
+                )
+                if (is_429 or is_503) and transient_retries < 3:
+                    wait_s = 2 ** (transient_retries + 1)  # 2s, 4s, 8s
+                    transient_retries += 1
+                    log.warning(
+                        "Gemini transient error — backing off",
+                        model=_primary, wait_s=wait_s,
+                        attempt=transient_retries,
+                        error_class=("429" if is_429 else "503"),
+                        agent=agent_name,
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
+                raise
 
         if response is None:
-            raise RuntimeError("All models failed")
+            raise RuntimeError("Web fallback failed after transient-error retries")
 
         if not response.candidates or not response.candidates[0].content.parts:
             log.warning("Gemini web fallback returned empty candidates/parts",
@@ -239,6 +271,11 @@ async def web_search_fallback(
         else:
             content = getattr(response.candidates[0].content.parts[0], "text", None) or "I was unable to retrieve information on this topic at the moment. Please try rephrasing your question."
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
+        # Feed the raw genai response into the per-request TokenUsage tracker
+        # so this call shows up in by_agent / by_model / cost_usd summaries.
+        # Closes the observability gap where web-grounded fallback tokens
+        # (often the priciest calls in the pipeline) were invisible.
+        _record_genai_tokens(agent_name, "web_grounded", response, _primary)
 
         # Stream the fallback content as tokens to the frontend
         try:
@@ -348,14 +385,17 @@ async def get_web_context(query: str, agent_name: str) -> str:
             "historical context, exceptions, and how it is used in Indian courts."
         )
 
+        # Same policy as web_search_fallback: Flash only, 2/4/8s exponential
+        # backoff on 429/503, no Pro escalation. (2026-08-10)
         _primary = MODELS["scenario_web_grounded"]
         response = None
-        for model in [_primary, "gemini-2.5-pro"]:
+        transient_retries = 0
+        while True:
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
                         client.models.generate_content,
-                        model=model,
+                        model=_primary,
                         contents=[enrich_prompt],
                         config={
                             "tools": [{"google_search": {}}],
@@ -367,10 +407,28 @@ async def get_web_context(query: str, agent_name: str) -> str:
                 )
                 break
             except Exception as model_err:
-                if "503" in str(model_err) and model == _primary:
-                    log.debug("Flash 503 during enrichment, retrying with Pro",
-                              agent=agent_name)
-                    await asyncio.sleep(1)
+                err_text = str(model_err)
+                is_429 = (
+                    "429" in err_text
+                    or "RESOURCE_EXHAUSTED" in err_text
+                    or "rate limit" in err_text.lower()
+                )
+                is_503 = (
+                    "503" in err_text
+                    or "UNAVAILABLE" in err_text
+                    or "overloaded" in err_text.lower()
+                )
+                if (is_429 or is_503) and transient_retries < 3:
+                    wait_s = 2 ** (transient_retries + 1)  # 2s, 4s, 8s
+                    transient_retries += 1
+                    log.debug(
+                        "Gemini transient error during enrichment — backing off",
+                        model=_primary, wait_s=wait_s,
+                        attempt=transient_retries,
+                        error_class=("429" if is_429 else "503"),
+                        agent=agent_name,
+                    )
+                    await asyncio.sleep(wait_s)
                     continue
                 raise
 
@@ -383,6 +441,8 @@ async def get_web_context(query: str, agent_name: str) -> str:
             text = ""
         else:
             text = response.candidates[0].content.parts[0].text or ""
+        # Record tokens for cost attribution.
+        _record_genai_tokens(agent_name, "web_enrich", response, _primary)
         log.debug("Web context enrichment completed",
                   agent=agent_name, context_len=len(text))
         return text

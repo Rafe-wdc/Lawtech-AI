@@ -164,6 +164,20 @@ class LegalAgentState(MessagesState):
     chat_history: list[BaseMessage]
     summary_text: str
 
+    # Previous-turn typed state (Level 1 of the follow-up simplification —
+    # docs/followup_pipeline_simplification_plan.md). Populated by memory_node
+    # from ChatHistoryResult; consumers (intent extractor, rewriter, classifier,
+    # drafting fast-path) read these to inherit the LAST turn's decisions
+    # instead of re-deriving them from chat-history text. All default to
+    # empty/None on fresh threads and on rows that predate the migration.
+    previous_intent: Any        # config.intent.UserIntent | None (typed as Any
+                                # to avoid an import cycle, matching user_intent above)
+    previous_task: str          # e.g. "Drafting"; "" when no prior turn
+    previous_artifact_kind: str # "draft" when the prior turn produced a
+                                # modifiable draft artefact; "" otherwise
+    previous_artifact_content: str  # the prior turn's ai_response (raw
+                                    # content of the modifiable artefact)
+
     # Agent results — uses custom merge so parallel agents don't overwrite each other
     agent_results: Annotated[dict[str, AgentResult], _merge_agent_results]
 

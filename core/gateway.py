@@ -738,12 +738,46 @@ async def search(data: SearchRequest, request: Request):
     query_rewritten = effective_query != data.prompt_query
     conversation_turn = 0
 
-    # Save chat history to SQLite (non-blocking, don't fail the response)
+    # Save chat history to SQLite (non-blocking, don't fail the response).
+    # Also persists per-turn typed state (user_intent, task, tasks_planned,
+    # primary_artifact_kind) so Turn N+1 can inherit instead of re-derive
+    # — see docs/followup_pipeline_simplification_plan.md Level 1.
     final_response = final_state.get("final_response", "")
     if not final_state.get("is_blocked") and final_response:
+        _turn_intent_obj = final_state.get("user_intent")
+        _turn_intent_json = ""
+        if _turn_intent_obj is not None:
+            try:
+                _turn_intent_json = _turn_intent_obj.model_dump_json()
+            except Exception as e:
+                log.warning("Failed to serialise user_intent; storing empty",
+                            error=str(e)[:200])
+        _turn_task = final_state.get("task") or ""
+        _turn_tasks_planned = final_state.get("tasks_planned") or []
+        # Drafting-produced artefact detection: mirrors the streaming path
+        # in chat_runner.py so both endpoints tag the turn identically.
+        _drafting_result = (
+            final_state.get("agent_results", {}).get("Drafting")
+        )
+        _turn_artifact_kind = ""
+        if _drafting_result is not None:
+            _content = getattr(_drafting_result, "content", "") or (
+                _drafting_result.get("content", "")
+                if isinstance(_drafting_result, dict) else ""
+            )
+            _error = getattr(_drafting_result, "error", None) or (
+                _drafting_result.get("error")
+                if isinstance(_drafting_result, dict) else None
+            )
+            if _content and not _error:
+                _turn_artifact_kind = "draft"
         try:
             conversation_turn = await chat_store.save_turn(
-                thread_id, effective_query, final_response
+                thread_id, effective_query, final_response,
+                user_intent_json=_turn_intent_json,
+                task=_turn_task,
+                tasks_planned_json=json.dumps(_turn_tasks_planned),
+                primary_artifact_kind=_turn_artifact_kind,
             )
             log.debug("Chat history saved",
                       thread_id=thread_id[:12], turn=conversation_turn)

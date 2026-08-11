@@ -47,11 +47,29 @@ def _pg_safe_str(value) -> str:
 
 @dataclass
 class ChatHistoryResult:
-    """What the memory agent needs from the store."""
+    """What the memory agent needs from the store.
+
+    The four `previous_*` fields carry per-turn typed state from the LAST
+    saved turn — see docs/followup_pipeline_simplification_plan.md Level 1.
+    They enable Turn N+1 consumers (intent extractor, rewriter, classifier,
+    drafting fast-path) to inherit the prior turn's decisions instead of
+    re-deriving them from chat-history text. Empty defaults on fresh
+    threads and on rows that predate the migration.
+    """
     chat_history: list[BaseMessage] = field(default_factory=list)
     summary_text: str = ""
     total_turns: int = 0
     raw_turns: list[dict] = field(default_factory=list)
+
+    # Previous-turn typed state (Level 1 of the follow-up simplification).
+    # `previous_intent_json` is the JSON-serialised UserIntent — the consumer
+    # (memory_node) deserialises it into a UserIntent object before writing
+    # to state, so the store stays ignorant of the intent module.
+    previous_intent_json: str = ""
+    previous_task: str = ""
+    previous_tasks_planned: list[str] = field(default_factory=list)
+    previous_artifact_kind: str = ""
+    previous_artifact_content: str = ""
 
 
 # --- Rolling summary prompt ---
@@ -263,6 +281,23 @@ class _SqliteChatHistoryStore:
                     conn.commit()
                     log.info("Migrated thread_files: added ocr_status column")
 
+            # Migration: per-turn typed state for follow-up simplification (Level 1
+            # of docs/followup_pipeline_simplification_plan.md). Enables Turn N
+            # to inherit the previous turn's typed intent / task / artefact kind
+            # instead of re-deriving them from chat history text.
+            msg_cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
+            _new_message_cols = (
+                ("user_intent_json",      "TEXT NOT NULL DEFAULT ''"),
+                ("task",                  "TEXT NOT NULL DEFAULT ''"),
+                ("tasks_planned_json",    "TEXT NOT NULL DEFAULT '[]'"),
+                ("primary_artifact_kind", "TEXT NOT NULL DEFAULT ''"),
+            )
+            for col_name, col_ddl in _new_message_cols:
+                if col_name not in msg_cols:
+                    conn.execute(f"ALTER TABLE messages ADD COLUMN {col_name} {col_ddl}")
+                    conn.commit()
+                    log.info("Migrated messages: added column", column=col_name)
+
             self._initialized = True
             log.info("Schema initialized", db_path=self._db_path)
         finally:
@@ -277,7 +312,13 @@ class _SqliteChatHistoryStore:
         thread_id: str,
         max_recent_turns: int = 5,
     ) -> ChatHistoryResult:
-        """Load chat history for a thread from SQLite."""
+        """Load chat history for a thread from SQLite.
+
+        Also populates the four `previous_*` fields from the LATEST turn
+        (see docs/followup_pipeline_simplification_plan.md). Pulled from
+        the most-recent row in `messages` so consumers can inherit typed
+        state — separate from `chat_history` which returns multiple turns.
+        """
         self._ensure_schema()
         conn = self._get_connection()
         try:
@@ -289,16 +330,23 @@ class _SqliteChatHistoryStore:
             if not thread_row:
                 return ChatHistoryResult()
 
-            # Get recent messages (newest first, then reverse)
+            # Get recent messages (newest first, then reverse). Also pull
+            # the four typed-state columns so we can populate previous_*
+            # from the latest row without a second query.
             rows = conn.execute("""
-                SELECT user_query, ai_response, turn_number
+                SELECT user_query, ai_response, turn_number,
+                       user_intent_json, task, tasks_planned_json,
+                       primary_artifact_kind
                 FROM messages
                 WHERE thread_id = ?
                 ORDER BY turn_number DESC
                 LIMIT ?
             """, (thread_id, max_recent_turns)).fetchall()
 
-            rows = list(reversed(rows))  # oldest first
+            # `rows` is newest-first here — capture the latest row for
+            # previous_* state BEFORE reversing.
+            latest_row = rows[0] if rows else None
+            rows = list(reversed(rows))  # oldest first for chat_history
 
             chat_history: list[BaseMessage] = []
             raw_turns = []
@@ -311,11 +359,42 @@ class _SqliteChatHistoryStore:
                     "turn_number": row["turn_number"],
                 })
 
+            # Previous-turn typed state — defaults to empty on rows that
+            # predate the migration (SQLite's ALTER filled them with the
+            # column DEFAULTs, so the getters below return "" / "[]").
+            prev_intent_json = ""
+            prev_task = ""
+            prev_tasks_planned: list[str] = []
+            prev_artifact_kind = ""
+            prev_artifact_content = ""
+            if latest_row is not None:
+                prev_intent_json = latest_row["user_intent_json"] or ""
+                prev_task = latest_row["task"] or ""
+                # tasks_planned_json defaults to "[]" so json.loads is safe
+                _tp_raw = latest_row["tasks_planned_json"] or "[]"
+                try:
+                    _parsed = json.loads(_tp_raw)
+                    if isinstance(_parsed, list):
+                        prev_tasks_planned = [str(t) for t in _parsed]
+                except (ValueError, TypeError):
+                    log.warning(
+                        "Corrupt tasks_planned_json in messages row; ignoring",
+                        thread_id=thread_id[:12],
+                        raw_preview=_tp_raw[:80],
+                    )
+                prev_artifact_kind = latest_row["primary_artifact_kind"] or ""
+                prev_artifact_content = latest_row["ai_response"] or ""
+
             return ChatHistoryResult(
                 chat_history=chat_history,
                 summary_text=thread_row["summary_text"],
                 total_turns=thread_row["total_turns"],
                 raw_turns=raw_turns,
+                previous_intent_json=prev_intent_json,
+                previous_task=prev_task,
+                previous_tasks_planned=prev_tasks_planned,
+                previous_artifact_kind=prev_artifact_kind,
+                previous_artifact_content=prev_artifact_content,
             )
         finally:
             conn.close()
@@ -339,8 +418,19 @@ class _SqliteChatHistoryStore:
         thread_id: str,
         user_query: str,
         ai_response: str,
+        *,
+        user_intent_json: str = "",
+        task: str = "",
+        tasks_planned_json: str = "[]",
+        primary_artifact_kind: str = "",
     ) -> int:
-        """Save a Q&A turn. Returns the new turn_number."""
+        """Save a Q&A turn. Returns the new turn_number.
+
+        The four keyword-only fields carry per-turn typed state consumed on
+        the NEXT turn — see docs/followup_pipeline_simplification_plan.md
+        Level 1. Callers without state (e.g. the compliance-report REST
+        endpoint) omit them and the defaults are stored.
+        """
         self._ensure_schema()
 
         # Step 1: Save turn inside write lock
@@ -363,9 +453,16 @@ class _SqliteChatHistoryStore:
 
                 # Insert message
                 conn.execute("""
-                    INSERT INTO messages (thread_id, turn_number, user_query, ai_response)
-                    VALUES (?, ?, ?, ?)
-                """, (thread_id, new_turn, user_query, ai_response))
+                    INSERT INTO messages (
+                        thread_id, turn_number, user_query, ai_response,
+                        user_intent_json, task, tasks_planned_json,
+                        primary_artifact_kind
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    thread_id, new_turn, user_query, ai_response,
+                    user_intent_json, task, tasks_planned_json,
+                    primary_artifact_kind,
+                ))
 
                 # Update thread metadata
                 conn.execute("""
@@ -405,10 +502,24 @@ class _SqliteChatHistoryStore:
         thread_id: str,
         user_query: str,
         ai_response: str,
+        *,
+        user_intent_json: str = "",
+        task: str = "",
+        tasks_planned_json: str = "[]",
+        primary_artifact_kind: str = "",
     ) -> int:
-        """Async wrapper — runs SQLite write in thread pool."""
+        """Async wrapper — runs SQLite write in thread pool.
+
+        Keyword-only fields carry per-turn typed state — see
+        `_save_turn_sync` for the contract and
+        docs/followup_pipeline_simplification_plan.md for the rationale.
+        """
         return await asyncio.to_thread(
-            self._save_turn_sync, thread_id, user_query, ai_response
+            self._save_turn_sync, thread_id, user_query, ai_response,
+            user_intent_json=user_intent_json,
+            task=task,
+            tasks_planned_json=tasks_planned_json,
+            primary_artifact_kind=primary_artifact_kind,
         )
 
     # ------------------------------------------------------------------
@@ -1678,6 +1789,24 @@ class _PostgresChatHistoryStore:
             except Exception:
                 conn.rollback()  # column already exists
 
+            # Migration: per-turn typed state (Level 1 of
+            # docs/followup_pipeline_simplification_plan.md). Each column
+            # is attempted independently so a partial prior migration doesn't
+            # block the rest.
+            for col_name, col_ddl in (
+                ("user_intent_json",      "TEXT NOT NULL DEFAULT ''"),
+                ("task",                  "TEXT NOT NULL DEFAULT ''"),
+                ("tasks_planned_json",    "TEXT NOT NULL DEFAULT '[]'"),
+                ("primary_artifact_kind", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE messages ADD COLUMN {col_name} {col_ddl}")
+                    conn.commit()
+                    log.info("PG migration: added column to messages",
+                             column=col_name)
+                except Exception:
+                    conn.rollback()  # column already exists
+
             self._schema_ok = True
             log.info("PostgreSQL chat-store schema ensured")
 
@@ -1690,6 +1819,9 @@ class _PostgresChatHistoryStore:
         thread_id: str,
         max_recent_turns: int = 5,
     ) -> "ChatHistoryResult":
+        """Load chat history + per-turn typed state (Level 1). Mirrors the
+        SQLite implementation — see the sibling for the field contract.
+        """
         self._ensure_schema()
         from psycopg.rows import dict_row
         with self._get_pool().connection() as conn:
@@ -1703,13 +1835,16 @@ class _PostgresChatHistoryStore:
                 return ChatHistoryResult()
 
             rows = conn.execute("""
-                SELECT user_query, ai_response, turn_number
+                SELECT user_query, ai_response, turn_number,
+                       user_intent_json, task, tasks_planned_json,
+                       primary_artifact_kind
                 FROM messages
                 WHERE thread_id = %s
                 ORDER BY turn_number DESC
                 LIMIT %s
             """, (thread_id, max_recent_turns)).fetchall()
 
+        latest_row = rows[0] if rows else None
         rows = list(reversed(rows))
         chat_history: list[BaseMessage] = []
         raw_turns = []
@@ -1722,11 +1857,37 @@ class _PostgresChatHistoryStore:
                 "turn_number": row["turn_number"],
             })
 
+        prev_intent_json = ""
+        prev_task = ""
+        prev_tasks_planned: list[str] = []
+        prev_artifact_kind = ""
+        prev_artifact_content = ""
+        if latest_row is not None:
+            prev_intent_json = latest_row.get("user_intent_json") or ""
+            prev_task = latest_row.get("task") or ""
+            _tp_raw = latest_row.get("tasks_planned_json") or "[]"
+            try:
+                _parsed = json.loads(_tp_raw)
+                if isinstance(_parsed, list):
+                    prev_tasks_planned = [str(t) for t in _parsed]
+            except (ValueError, TypeError):
+                log.warning(
+                    "Corrupt tasks_planned_json in messages row; ignoring",
+                    thread_id=thread_id[:12], raw_preview=_tp_raw[:80],
+                )
+            prev_artifact_kind = latest_row.get("primary_artifact_kind") or ""
+            prev_artifact_content = latest_row.get("ai_response") or ""
+
         return ChatHistoryResult(
             chat_history=chat_history,
             summary_text=thread_row["summary_text"],
             total_turns=thread_row["total_turns"],
             raw_turns=raw_turns,
+            previous_intent_json=prev_intent_json,
+            previous_task=prev_task,
+            previous_tasks_planned=prev_tasks_planned,
+            previous_artifact_kind=prev_artifact_kind,
+            previous_artifact_content=prev_artifact_content,
         )
 
     async def load_history(
@@ -1747,8 +1908,17 @@ class _PostgresChatHistoryStore:
         thread_id: str,
         user_query: str,
         ai_response: str,
+        *,
+        user_intent_json: str = "",
+        task: str = "",
+        tasks_planned_json: str = "[]",
+        primary_artifact_kind: str = "",
     ) -> int:
-        """Save a Q&A turn atomically. Returns the new turn_number."""
+        """Save a Q&A turn atomically. Returns the new turn_number.
+
+        Keyword-only fields carry per-turn typed state — see
+        `_SqliteChatHistoryStore._save_turn_sync` for the contract.
+        """
         self._ensure_schema()
         from psycopg.rows import dict_row
         with self._get_pool().connection() as conn:
@@ -1765,9 +1935,16 @@ class _PostgresChatHistoryStore:
             new_turn = row["total_turns"]
 
             conn.execute("""
-                INSERT INTO messages (thread_id, turn_number, user_query, ai_response)
-                VALUES (%s, %s, %s, %s)
-            """, (thread_id, new_turn, user_query, ai_response))
+                INSERT INTO messages (
+                    thread_id, turn_number, user_query, ai_response,
+                    user_intent_json, task, tasks_planned_json,
+                    primary_artifact_kind
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                thread_id, new_turn, user_query, ai_response,
+                user_intent_json, task, tasks_planned_json,
+                primary_artifact_kind,
+            ))
             conn.commit()
             log.debug("Turn saved", thread_id=thread_id[:12], turn=new_turn)
 
@@ -1785,9 +1962,18 @@ class _PostgresChatHistoryStore:
         thread_id: str,
         user_query: str,
         ai_response: str,
+        *,
+        user_intent_json: str = "",
+        task: str = "",
+        tasks_planned_json: str = "[]",
+        primary_artifact_kind: str = "",
     ) -> int:
         return await asyncio.to_thread(
-            self._save_turn_sync, thread_id, user_query, ai_response
+            self._save_turn_sync, thread_id, user_query, ai_response,
+            user_intent_json=user_intent_json,
+            task=task,
+            tasks_planned_json=tasks_planned_json,
+            primary_artifact_kind=primary_artifact_kind,
         )
 
     # ------------------------------------------------------------------

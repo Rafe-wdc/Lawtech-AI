@@ -353,6 +353,14 @@ async def run_chat_pipeline(
     effective_query = i.query
     query_rewritten = False
 
+    # Per-turn typed state captured for Level 1 of the follow-up simplification
+    # (see docs/followup_pipeline_simplification_plan.md). Persisted alongside
+    # user_query/ai_response so Turn N+1 can inherit the previous turn's
+    # decisions instead of re-deriving them from chat-history text.
+    turn_user_intent = None            # UserIntent | None from orchestrator plan
+    turn_task = ""                     # primary task from orchestrator plan
+    turn_primary_artifact_kind = ""    # "draft" when Drafting produced content
+
     try:
         # Seed the request-scoped deadline (285s = 300s outer envelope
         # minus 15s slack for final `response`/`sources`/`done` events).
@@ -452,10 +460,35 @@ async def run_chat_pipeline(
                         agents_used = update["tasks_planned"]
                         yield _sse({"type": "agents_planned", "agents": agents_used})
 
+                    # Capture the primary task + typed intent from the
+                    # orchestrator plan node so we can persist them on this
+                    # turn (see docs/followup_pipeline_simplification_plan.md).
+                    # `task` is the LLM-picked primary; `user_intent` is the
+                    # typed extractor output. Both may appear in the same
+                    # update or in separate updates depending on the graph
+                    # flush schedule; both branches are last-write-wins which
+                    # matches the graph's own reducer behaviour.
+                    if "task" in update and update["task"]:
+                        turn_task = update["task"]
+                    if "user_intent" in update and update["user_intent"] is not None:
+                        turn_user_intent = update["user_intent"]
+
                     if "agent_results" in update:
                         for name, r in update["agent_results"].items():
                             if hasattr(r, "tokens_consumed"):
                                 total_tokens += r.tokens_consumed or 0
+                            # Mark the turn as producing a modifiable draft
+                            # artefact whenever Drafting returned content
+                            # without an error. Level 2 uses this signal to
+                            # route follow-up directives ("in Marathi", "add
+                            # a prayer clause") through a fast-path modifier
+                            # instead of re-running the full drafting pipeline.
+                            if (
+                                name == "Drafting"
+                                and getattr(r, "content", "")
+                                and not getattr(r, "error", None)
+                            ):
+                                turn_primary_artifact_kind = "draft"
 
                     if "source_metadata" in update and update["source_metadata"]:
                         all_source_metadata = update["source_metadata"]
@@ -524,12 +557,29 @@ async def run_chat_pipeline(
                 thread_id=i.thread_id,
             ))
 
-    # Save chat history
+    # Save chat history + per-turn typed state (Level 1 of the follow-up
+    # simplification: docs/followup_pipeline_simplification_plan.md).
     conversation_turn = 0
     if final_response:
+        # Serialise UserIntent to JSON if we captured one. UserIntent is a
+        # Pydantic BaseModel so model_dump_json() is available; a bare LLM-
+        # failure fallback (default_intent) still serialises cleanly.
+        _intent_json = ""
+        if turn_user_intent is not None:
+            try:
+                _intent_json = turn_user_intent.model_dump_json()
+            except Exception as e:
+                # Non-fatal — turn still persists, next turn just won't
+                # have the typed intent to inherit.
+                log.warning("Failed to serialise user_intent; storing empty",
+                            error=str(e)[:200])
         try:
             conversation_turn = await chat_store.save_turn(
                 i.thread_id, effective_query, final_response,
+                user_intent_json=_intent_json,
+                task=turn_task,
+                tasks_planned_json=json.dumps(tasks_planned_stream or []),
+                primary_artifact_kind=turn_primary_artifact_kind,
             )
         except Exception as e:
             log.error("Failed to save chat history",

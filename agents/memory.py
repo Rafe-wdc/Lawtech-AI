@@ -20,7 +20,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from core.state import LegalAgentState, FileContextData
 from core.clients import get_gemini_flash
-from core.chat_store import chat_store
+from core.chat_store import chat_store, ChatHistoryResult
 from core.language import detect_language
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
@@ -31,10 +31,17 @@ log = get_logger("Memory")
 
 # --- Chat History Loading ---
 
-async def _load_chat_history(thread_id: str) -> tuple[list, str]:
-    """Load chat history from SQLite.
+async def _load_chat_history(thread_id: str) -> ChatHistoryResult:
+    """Load chat history + per-turn typed state from the chat store.
 
-    Returns: (chat_history as HumanMessage/AIMessage list, summary_text str)
+    Returns the full ChatHistoryResult so callers can pull both the
+    text-shaped fields (chat_history, summary_text) AND the Level 1
+    per-turn typed state (previous_intent_json, previous_task, etc.
+    — see docs/followup_pipeline_simplification_plan.md).
+
+    On a fresh thread returns a ChatHistoryResult with the two-message
+    placeholder chat_history — the rewriter and downstream consumers
+    already tolerate this shape.
     """
     with log_time(log, "SQLite history load", thread_id=thread_id):
         result = await chat_store.load_history(thread_id, max_recent_turns=5)
@@ -44,14 +51,19 @@ async def _load_chat_history(thread_id: str) -> tuple[list, str]:
                  thread_id=thread_id[:12],
                  turns=result.total_turns,
                  messages=len(result.chat_history),
-                 has_summary=bool(result.summary_text))
-        return result.chat_history, result.summary_text
+                 has_summary=bool(result.summary_text),
+                 has_prev_intent=bool(result.previous_intent_json),
+                 prev_task=result.previous_task or "(none)",
+                 prev_artifact_kind=result.previous_artifact_kind or "(none)")
+        return result
 
     log.debug("No history found", thread_id=thread_id[:12])
-    return [
-        HumanMessage(content="Previous summary:"),
-        AIMessage(content="Fresh chat started."),
-    ], ""
+    return ChatHistoryResult(
+        chat_history=[
+            HumanMessage(content="Previous summary:"),
+            AIMessage(content="Fresh chat started."),
+        ],
+    )
 
 
 # --- Query Rewriting ---
@@ -408,11 +420,41 @@ async def memory_node(state: LegalAgentState) -> dict:
     chat_history = []
     summary_text = ""
     restored_file_context: dict | None = None
+    # Level 1 typed state carried from the previous turn — see
+    # docs/followup_pipeline_simplification_plan.md. Empty defaults so
+    # first-turn requests behave identically to today.
+    prev_intent_obj = None
+    prev_task = ""
+    prev_artifact_kind = ""
+    prev_artifact_content = ""
 
     if thread_id:
         progress("memory", "Loading conversation history...", step="history")
         log.debug("Loading chat history", thread_id=thread_id[:12])
-        chat_history, summary_text = await _load_chat_history(thread_id)
+        history_result = await _load_chat_history(thread_id)
+        chat_history = history_result.chat_history
+        summary_text = history_result.summary_text
+        # Deserialise the previous turn's typed state. UserIntent is a Pydantic
+        # BaseModel — the import happens lazily to avoid the state.py
+        # import-cycle risk noted in core/state.py's LegalAgentState comments.
+        if history_result.previous_intent_json:
+            try:
+                from config.intent import UserIntent
+                prev_intent_obj = UserIntent.model_validate_json(
+                    history_result.previous_intent_json,
+                )
+            except Exception as e:
+                # Corrupt / schema-drifted intent in storage — degrade
+                # gracefully. Consumers treat None as "no prior intent"
+                # and fall through to today's behaviour.
+                log.warning(
+                    "Failed to deserialise previous_intent_json; treating as absent",
+                    thread_id=thread_id[:12], error=short_err(e),
+                    raw_preview=history_result.previous_intent_json[:120],
+                )
+        prev_task = history_result.previous_task
+        prev_artifact_kind = history_result.previous_artifact_kind
+        prev_artifact_content = history_result.previous_artifact_content
         # Compute REAL turn count: `_load_chat_history` returns a 2-message
         # placeholder ("Previous summary:" + "Fresh chat started.") for new
         # threads with no real history, and naive `len // 2` would mis-count
@@ -471,6 +513,13 @@ async def memory_node(state: LegalAgentState) -> dict:
         "chat_history": chat_history,
         "summary_text": summary_text,
         "user_language": user_language,
+        # Level 1: previous-turn typed state. Consumers (intent extractor,
+        # rewriter, classifier, drafting fast-path) read these as optional
+        # inputs — None / "" means "no prior turn to inherit from."
+        "previous_intent": prev_intent_obj,
+        "previous_task": prev_task,
+        "previous_artifact_kind": prev_artifact_kind,
+        "previous_artifact_content": prev_artifact_content,
     }
     # CRITICAL: Only set file_context if we're RESTORING from history.
     # If new files were uploaded this turn (fc.has_content), do NOT touch

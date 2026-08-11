@@ -140,8 +140,18 @@ Rewritten Standalone Query:"""
 def _rewrite_query(
     query: str,
     chat_history: list[Union[HumanMessage, AIMessage]],
+    previous_task: str = "",
+    previous_artifact_kind: str = "",
 ) -> str:
-    """Rewrite a follow-up query into a standalone query using conversation context."""
+    """Rewrite a follow-up query into a standalone query using conversation context.
+
+    `previous_task` and `previous_artifact_kind` (PR 3b of the follow-up
+    simplification, docs/followup_pipeline_simplification_plan.md) let the
+    rewriter SKIP itself when Turn N is a short directive on a prior drafting
+    turn — the drafting fast-path (Level 2) needs the raw "in Marathi"
+    directive intact, and the rewriter would otherwise expand it into a
+    300+ char query that the fast-path detector then rejects.
+    """
     try:
         # Skip if no history at all
         if not chat_history:
@@ -156,6 +166,26 @@ def _rewrite_query(
         ):
             log.debug("Skipping rewrite — fresh chat placeholder")
             return query
+
+        # PR 3b: preserve short directive follow-ups on prior drafts.
+        # When the previous turn was Drafting and produced a modifiable
+        # artefact, AND the current query is a short directive (< 200
+        # chars, matching the same verb regex the drafting fast-path uses),
+        # keep the raw query so the fast-path sees "in Marathi" intact.
+        # Falls through to the normal rewriter when either condition fails.
+        if (
+            previous_task == "Drafting"
+            and previous_artifact_kind == "draft"
+            and query
+            and len(query) < 200
+        ):
+            from agents.drafting import _DIRECTIVE_VERBS_RE
+            if _DIRECTIVE_VERBS_RE.search(query):
+                log.info(
+                    "Skipping rewrite — short directive on prior drafting turn",
+                    query_preview=query[:80],
+                )
+                return query
 
         # Skip when the query is already long enough to be standalone.
         # The REWRITE_PROMPT is tuned for SHORT follow-ups ("find related
@@ -491,9 +521,15 @@ async def memory_node(state: LegalAgentState) -> dict:
             # Bound the rewrite call: without a local ceiling, a slow
             # Gemini Flash blocks the memory step for the entire outer
             # timeout budget. On timeout, keep the original query.
+            # Pass previous_task + previous_artifact_kind so the rewriter
+            # can SKIP itself on short directive follow-ups after Drafting
+            # — see PR 3b in _rewrite_query.
             try:
                 query = await asyncio.wait_for(
-                    asyncio.to_thread(_rewrite_query, query, chat_history),
+                    asyncio.to_thread(
+                        _rewrite_query, query, chat_history,
+                        prev_task, prev_artifact_kind,
+                    ),
                     timeout=15,
                 )
             except asyncio.TimeoutError:

@@ -1,9 +1,24 @@
 # Follow-up Pipeline Simplification Plan
 
-**Status:** Design doc — awaiting approval before any code is written.
+**Status:** Level 1 + Level 2 + PR 3 shipped locally 2026-08-12 (behind
+`DRAFTING_FOLLOWUP_FAST_PATH=1` for Level 2). Prod deploy pending user go-ahead.
 **Author:** Claude (drafted 2026-08-12)
 **Related docs:** `docs/drafting_simplification_plan.md`, `docs/intent_layer_implementation_plan.md`, `docs/dynamic_orchestrator_plan.md`
 **Related memory:** `project_language_switch_followup_plan.md`, `feedback_preserve_user_query`
+
+## Implementation status (as of 2026-08-12)
+
+| Piece | Status | Commit | Notes |
+|---|---|---|---|
+| Level 1 PR 1 (write path) | ✅ Shipped | 389d139 | 4 new columns on messages; save_turn extended; graph updates captured in chat_runner + gateway |
+| Level 1 PR 2 (read path) | ✅ Shipped | 389d139 | ChatHistoryResult extended; memory_node deserialises previous_intent, populates state.previous_* |
+| Level 1 local smoke | ✅ Verified | — | 41 MB / 3,472-row real DB migrated cleanly; Turn-2 read confirmed via memory node logs |
+| Level 2 (drafting fast-path) | ✅ Shipped | (pending commit) | Behind `DRAFTING_FOLLOWUP_FAST_PATH=1`; 51 unit tests green |
+| PR 3a (extractor inheritance) | ✅ Shipped | (pending commit) | USER_INTENT_EXTRACTION_PROMPT gained `previous_intent_hint` block + inheritance rule |
+| PR 3b (rewriter skip) | ✅ Shipped | (pending commit) | _rewrite_query skips short directive on prior Drafting turn; 9 unit tests green |
+| PR 3c (classifier task preserve) | ✅ Shipped | (pending commit) | orchestrator_plan_node reconciler forces Drafting back onto plan for short directives after prior Drafting turn |
+
+Test totals across the plan: **71 unit tests green** as of local run.
 
 ---
 

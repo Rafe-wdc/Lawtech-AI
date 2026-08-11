@@ -144,6 +144,122 @@ If any rule in the default drafting system prompt below CONTRADICTS this MODE OV
 
 
 # ---------------------------------------------------------------------------
+# Follow-up modification fast-path (Level 2 of the follow-up simplification —
+# docs/followup_pipeline_simplification_plan.md).
+#
+# When Turn N is a SHORT DIRECTIVE follow-up on a PRIOR DRAFTING TURN, skip
+# the ~9-call reference-picker + context-gather + fan-out judge + sectionwise
+# generator + self-refine pipeline and route to a single Gemini Pro call that
+# modifies the prior draft in place. Latency drops ~90s → ~8s; the modified
+# document preserves every party name, date, statute reference from Turn 1
+# instead of rebuilding from a fresh ES template.
+#
+# Detection is verb-based (surface signal) plus a length ceiling. Gated on
+# `previous_artifact_kind == "draft"` and a non-trivial `previous_artifact_content`
+# so it can NEVER fire on Turn 1 or on threads whose previous turn was not
+# drafting. Behind `DRAFTING_FOLLOWUP_FAST_PATH=1` env flag — off by default
+# during initial rollout so the first prod week only validates the WRITE side
+# of Level 1.
+# ---------------------------------------------------------------------------
+
+# Directive verbs that indicate "modify the prior draft" intent. Deliberately
+# lenient — a false positive costs ~8s on the fast path (vs ~90s on the slow
+# path); a false negative degrades to the slow path (no regression vs today).
+_DIRECTIVE_VERBS_RE = re.compile(
+    r"\b("
+    # Language switches (English + native-script triggers)
+    r"in\s+(marathi|hindi|english|tamil|telugu|kannada|malayalam|bengali|"
+    r"punjabi|gujarati|urdu|odia|assamese|sanskrit)|"
+    r"translate\s+to|translate\s+into|"
+    r"in\s+english\s+please|in\s+hindi\s+please|"
+    r"मराठीत|हिंदी\s*में|मराठी\s*मध्ये|मराठीमधे|"
+    r"marathi\s+madhe|hindi\s+mein|"
+    # Length adjustments
+    r"shorten|make\s+it\s+shorter|make\s+shorter|"
+    r"expand|elaborate|make\s+it\s+longer|make\s+longer|"
+    r"more\s+concise|less\s+verbose|"
+    r"summari[sz]e\s+it|condense|trim(?:\s+it)?|"
+    # Content additions
+    r"add\s+(?:a|an|the|another)?\s*(prayer|verification|clause|paragraph|"
+    r"section|ground|footer|salutation|cause\s+title)|"
+    r"insert\s+(?:a|an)\s*(prayer|clause|paragraph|section|ground)|"
+    r"include\s+(?:a|an|the)\s*(prayer|verification|clause|paragraph|"
+    r"ground|citation|reference)|"
+    # Format changes
+    r"as\s+a\s+table|in\s+a\s+table|as\s+bullet\s+points|"
+    r"in\s+bullet\s+points|as\s+a\s+numbered\s+list|"
+    r"reformat|format\s+as|change\s+the\s+format|"
+    # Polish
+    r"polish|refine|improve|clean\s+up|make\s+(?:it|this)\s+(?:more\s+)?formal|"
+    r"tighten|proofread|"
+    # Party / court / forum changes
+    r"change\s+the\s+(court|forum|respondent|petitioner|complainant|accused|"
+    r"defendant|plaintiff|address|date|amount)|"
+    r"correct\s+the\s+(court|forum|party|address|date|amount|section|statute)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Query and prior-draft length gates. Chosen so that:
+#   - a very long Turn 2 (> 300 chars) is treated as a fresh drafting task,
+#     not a directive-follow-up, and takes the full pipeline;
+#   - a very short "prior draft" (< 500 chars) is treated as "no meaningful
+#     document to modify" — likely an error banner, refusal, or placeholder.
+_FOLLOWUP_DIRECTIVE_MAX_QUERY_CHARS = 300
+_FOLLOWUP_DIRECTIVE_MIN_PRIOR_CHARS = 500
+
+# Marker the sectionwise generator prepends when at least one section pair
+# fails. When the prior draft carries this banner the fast-path refuses to
+# fire — modifying a known-degraded document would propagate the degradation
+# through the whole follow-up chain.
+_DRAFT_INCOMPLETE_BANNER_MARKER = "**Draft incomplete**"
+
+
+def _fast_path_enabled() -> bool:
+    """Env-flag gate. Off by default; ops flips DRAFTING_FOLLOWUP_FAST_PATH=1
+    once Level 1's write path has been validated on real prod data.
+    """
+    return os.getenv("DRAFTING_FOLLOWUP_FAST_PATH", "0") == "1"
+
+
+def _is_drafting_followup_directive(
+    query: str,
+    previous_artifact_kind: str,
+    previous_artifact_content: str,
+    new_upload_this_turn: bool,
+) -> bool:
+    """True when this turn should take the drafting fast-path.
+
+    Every rejection is intentional — see docstring block above for the
+    per-condition rationale.
+    """
+    # Rejection 1: no prior draft to modify — fast path cannot apply.
+    if previous_artifact_kind != "draft":
+        return False
+    # Rejection 2: prior draft is trivially short (error banner, refusal,
+    # placeholder). Modifying it would produce garbage.
+    if not previous_artifact_content or len(previous_artifact_content) < _FOLLOWUP_DIRECTIVE_MIN_PRIOR_CHARS:
+        return False
+    # Rejection 3: prior draft is known-degraded (sectionwise banner). Fast
+    # path would propagate the degradation.
+    if _DRAFT_INCOMPLETE_BANNER_MARKER in previous_artifact_content[:400]:
+        return False
+    # Rejection 4: empty query.
+    if not query or not query.strip():
+        return False
+    # Rejection 5: query is too long — treat as a fresh drafting task.
+    if len(query) > _FOLLOWUP_DIRECTIVE_MAX_QUERY_CHARS:
+        return False
+    # Rejection 6: user uploaded a new document THIS turn — likely asking
+    # for a different draft based on the new file, not a modification of
+    # the prior one.
+    if new_upload_this_turn:
+        return False
+    # Accept condition: query matches a directive verb.
+    return bool(_DIRECTIVE_VERBS_RE.search(query))
+
+
+# ---------------------------------------------------------------------------
 # Input sanitisation (used by the ES `match` query in `_acquire_reference_draft`)
 # ---------------------------------------------------------------------------
 
@@ -1872,6 +1988,100 @@ async def _generate_sectionwise(
     return draft
 
 
+# ---------------------------------------------------------------------------
+# Fast-path generator — Level 2 of the follow-up simplification.
+#
+# One Gemini 2.5 Pro call, no ES lookup, no fan-out judge, no self-refine.
+# The prior draft flows verbatim into the prompt as the FORMAT / FACT / IDENTITY
+# anchor; the user's directive tells the model what to change. Everything else
+# is preserved. See config/prompts.DRAFTING_MODIFICATION_PROMPT for the rules.
+# ---------------------------------------------------------------------------
+
+async def _generate_draft_modification(
+    *,
+    user_directive: str,
+    prior_draft: str,
+    user_intent,
+    user_language: str,
+    user_facts: str,
+    progress_emit,
+) -> str:
+    """One-shot 'modify the prior draft per this directive' Pro call.
+
+    Falls back to empty string on any failure — the caller (drafting_node)
+    detects an empty result and routes through the full pipeline instead,
+    so the fast-path is always a strict improvement over today.
+    """
+    from config.prompts import DRAFTING_MODIFICATION_PROMPT
+    from core.language import _format_intent_directives, localize_prompt
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    intent_directives_block = (
+        _format_intent_directives(user_intent) if user_intent is not None else ""
+    ) or "(no explicit user directives — apply the directive as literally as stated)"
+
+    new_source_block = (
+        user_facts.strip() if user_facts and user_facts.strip()
+        else "(no new files uploaded this turn — modify the EXISTING DRAFT alone)"
+    )
+
+    # Order matters: format() FIRST (fills our known placeholders on the raw
+    # template), localize_prompt() SECOND (appends language + intent directive
+    # blocks that may contain literal { characters we don't want format() to
+    # see). Swapping the order can throw KeyError on the localized text.
+    system_prompt = DRAFTING_MODIFICATION_PROMPT.format(
+        existing_draft=prior_draft,
+        user_directive=user_directive.strip(),
+        intent_directives_block=intent_directives_block,
+        new_source_documents=new_source_block,
+    )
+    system_prompt = localize_prompt(system_prompt, user_language, user_intent)
+
+    llm = get_gemini_pro(
+        temperature=0.0,
+        max_output_tokens=24000,
+        thinking_budget=4096,
+    )
+
+    progress_emit(
+        "drafting",
+        "Modifying your prior draft...",
+        step="modify",
+    )
+
+    try:
+        with log_time(log, "Draft modification (fast path)"):
+            response = await asyncio.to_thread(
+                llm.invoke,
+                [SystemMessage(content=system_prompt),
+                 HumanMessage(content="Produce the complete modified draft now.")],
+            )
+    except Exception as e:
+        log.error("Draft modification LLM call failed",
+                  error=short_err(e), exc_info=True)
+        return ""
+
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Drafting", "modify_draft", response)
+
+    text = getattr(response, "text", "") or ""
+
+    if not text:
+        meta = getattr(response, "response_metadata", None) or {}
+        reason = str(meta.get("finish_reason") or "").upper()
+        log.warning(
+            "Draft modification produced empty content",
+            finish_reason=reason or "unknown",
+        )
+        return ""
+
+    log.info(
+        "Draft modification succeeded",
+        prior_len=len(prior_draft), modified_len=len(text),
+    )
+    return text
+
+
 async def _generate_draft(
     query: str,
     user_facts: str,
@@ -2196,6 +2406,80 @@ async def drafting_node(state: LegalAgentState) -> dict:
                       "message": "Drafting slot available — starting now."})
 
     try:
+        # --- 3.5 FAST PATH: drafting follow-up directive on a prior draft ---
+        #
+        # Level 2 of docs/followup_pipeline_simplification_plan.md. When Turn N
+        # is a SHORT directive follow-up on a PRIOR drafting turn, skip the
+        # entire ~9-call reference/context/judge/section/refine pipeline and
+        # run ONE Gemini Pro call that modifies the prior draft in place.
+        # Reads previous_artifact_kind + previous_artifact_content populated
+        # by memory_node from Level 1's SQLite storage.
+        #
+        # Guarded on DRAFTING_FOLLOWUP_FAST_PATH=1 (off during initial rollout).
+        # Uses `original_query` — the raw user directive — so per-agent
+        # rewriting or memory rewriter expansion can't hide "in Marathi" from
+        # detection. On empty fast-path output falls through to the existing
+        # pipeline unchanged.
+        _prev_kind = state.get("previous_artifact_kind", "") or ""
+        _prev_content = state.get("previous_artifact_content", "") or ""
+        _new_upload_this_turn = bool(fc and fc.has_content)
+        if (
+            _fast_path_enabled()
+            and _is_drafting_followup_directive(
+                original_query, _prev_kind, _prev_content, _new_upload_this_turn,
+            )
+        ):
+            log.info(
+                "Fast path: drafting follow-up directive detected",
+                directive_preview=original_query[:80],
+                prior_len=len(_prev_content),
+            )
+            fast_draft = await _generate_draft_modification(
+                user_directive=original_query,
+                prior_draft=_prev_content,
+                user_intent=intent_obj,
+                user_language=user_language,
+                user_facts=user_facts,
+                progress_emit=progress,
+            )
+            if fast_draft.strip():
+                # Cleanup pass — same validator the slow path uses so mojibake
+                # / stray HTML / [CITE:] placeholders never reach the user.
+                # self_refine is deliberately SKIPPED — the prior draft
+                # already passed self_refine on its own turn; re-running it
+                # here reliably triggers destructive-shrink guards (see
+                # core/self_refine.py:1709) or wholesale rewrites.
+                fast_draft, fast_warnings = validate_draft(fast_draft)
+                log.info(
+                    "Fast path succeeded — bypassing full pipeline",
+                    modified_len=len(fast_draft),
+                )
+                _fast_result = AgentResult(
+                    agent_name="Drafting",
+                    content=fast_draft,
+                    sources=[SourceMetadata(
+                        source_type="drafting",
+                        title="Modified from your previous draft",
+                        content=[_prev_content[:300]],
+                        file_name="<prior_turn:modification>",
+                        agent_name="Drafting",
+                        template_type="prior_turn_modification",
+                    )],
+                    tokens_consumed=0,
+                    meta=(
+                        {"draft_warnings": fast_warnings,
+                         "reference_kind": "prior_turn"}
+                        if fast_warnings
+                        else {"reference_kind": "prior_turn"}
+                    ),
+                )
+                return {"agent_results": {"Drafting": _fast_result}}
+            else:
+                log.warning(
+                    "Fast path returned empty content; falling through to full pipeline"
+                )
+                # Fall through to the existing pipeline — no regression.
+
         # --- 4. Reference draft acquisition + relevant-context gather.
         #
         # Two branches:

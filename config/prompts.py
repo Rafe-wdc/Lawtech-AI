@@ -1099,6 +1099,26 @@ Given the user's query and the recent conversation summary, produce:
 Conversation summary (untrusted, may be empty):
 {chat_summary}
 
+Previous turn's typed intent (may be empty on a fresh thread — a compact
+serialisation of the LAST turn's UserIntent, from
+docs/followup_pipeline_simplification_plan.md Level 1):
+{previous_intent_hint}
+
+Inheritance rule (only applies when the previous-turn intent block is populated):
+When the CURRENT query is short (under 30 words) AND does NOT itself name a
+new format / language / depth directive, inherit the previous turn's
+`response_format`, `language`, `strict_language`, `response_depth`, and
+`legal_artifact` values instead of defaulting them. This is the
+"user is refining the prior task" pattern — "in Marathi" on a prior
+Drafting turn should inherit `legal_artifact` from that turn, not default
+to "unspecified".
+
+When the current query DOES name a directive (e.g. "in Marathi" for language,
+"as a table" for format, "briefly" for depth), OVERRIDE only that specific
+field — do NOT reset the other inherited fields.
+
+Never inherit any field the previous-turn intent block does not carry.
+
 User query (untrusted):
 {query}
 """
@@ -1691,6 +1711,80 @@ DRAFTING_SECTION_PAIR_PROMPT += (
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
+
+
+# --- Drafting Pipeline: Follow-up modification fast-path (Level 2) ---
+# One-shot prompt that modifies an EXISTING draft in place per a user
+# directive ("in Marathi", "add a prayer clause", "shorten to one page").
+# Ships behind DRAFTING_FOLLOWUP_FAST_PATH=1. Replaces the ~9-call
+# reference-picker → context-gather → judge → sectionwise → self-refine
+# pipeline with a single Gemini Pro call. See
+# docs/followup_pipeline_simplification_plan.md Level 2.
+DRAFTING_MODIFICATION_PROMPT = """You are modifying an EXISTING Indian-law legal draft. The user already has a full draft (below) and has issued a SHORT DIRECTIVE asking you to apply a specific change to it. Your job is to return the COMPLETE modified draft.
+
+You are NOT drafting from scratch. You are NOT producing a diff. You are NOT returning only the changed section. Return the WHOLE document, modified.
+
+## Inputs you are given
+1. EXISTING DRAFT — the user's current draft. This is the FORMAT anchor, the FACT anchor, and the IDENTITY anchor of your output.
+2. USER DIRECTIVE — the user's short instruction telling you WHAT to change.
+3. USER INTENT DIRECTIVES — typed directives (language, depth, format, additional instructions). Honour every one.
+4. NEW UPLOADED SOURCES — RAW extracted text of any files the user attached on THIS turn (may be empty). Only use these when the directive explicitly references material in them.
+
+## Rules
+
+1. PRESERVE the EXISTING DRAFT's IDENTITY exactly.
+   - Every party name, court name, case number, forum, statutory citation, address, date, and monetary amount from the EXISTING DRAFT stays VERBATIM — UNLESS the directive explicitly changes them.
+   - Do NOT replace real values with `[placeholders]`.
+   - Do NOT introduce canonical training-set names (Sneha / Priyanka / Bhausaheb / Sakore / Anjali Deshmukh / Nashik / Sangamner / Ahmednagar / 29 May 2022 / 1 June 2020) — using any of those when the draft names real parties is a CRITICAL error.
+
+2. PRESERVE the document TYPE.
+   - If the existing draft is a bail application, return a modified bail application.
+   - If it's a legal notice, return a modified legal notice.
+   - If it's a rejoinder, return a modified rejoinder.
+   - NEVER convert to a different document type (Master Services Agreement, Contract-Analysis Memorandum, MOU, lease deed) unless the directive explicitly asks for that conversion.
+
+3. APPLY THE DIRECTIVE FULLY across the entire document.
+   - **Language switch** ("in Marathi", "translate to Hindi", "in English"): translate every non-anchor sentence into the target language. Numerals, statute names (BNS / BNSS / BSA / IPC / CrPC / IEA), case citations, section numbers, party names, and court names stay in English as fixed anchors (per Indian-legal English-anchor convention). Never romanise them into Devanagari or another script.
+   - **Length change** ("shorten", "make it more concise", "expand", "elaborate on grounds"): adjust prose density evenly. Do NOT delete entire structural sections (Cause Title, Facts, Grounds, Prayer, Verification) unless the directive explicitly names them.
+   - **Add content** ("add a prayer for interim injunction", "add a paragraph on limitation", "add a verification clause"): insert at the appropriate structural location. Continue paragraph numbering from the existing draft — do NOT restart numbering. Preserve the surrounding party labels and tone.
+   - **Format change** ("as a table", "in bullet points", "reformat the prayer"): reformat only the section the directive names; do NOT rewrite prose in unrelated sections.
+   - **Polish** ("polish", "refine", "make it more formal", "clean up the grounds"): improve prose quality without changing substance — no new facts, no new citations, no new grounds.
+   - **Party or court change** ("change the court to Sessions", "change the respondent to Mr. X"): update the named entity everywhere it appears in the draft. Preserve all other content unchanged.
+
+4. STRUCTURAL CONTINUITY.
+   - Paragraph numbering: continues from the existing draft; if you add paragraphs, insert them into the sequence, then renumber only the paragraphs AFTER the insertion point.
+   - Section ordering: keep the existing order.
+   - Cause title, verification, signature block: never removed unless the directive explicitly asks.
+
+5. If a value the directive references is NOT present in the EXISTING DRAFT or the NEW UPLOADED SOURCES, use a clearly-bracketed placeholder (e.g. `[Advocate's Address]`, `[Bank Reference Number]`) — never invent it.
+
+6. Output ONLY the complete modified document. No preamble ("Here is the modified draft:"). No postscript ("This has been updated per your request."). No meta-commentary. No diff notation. No `~~strikethrough~~` marking what changed. Just the final document.
+
+## USER INTENT DIRECTIVES
+{intent_directives_block}
+
+## EXISTING DRAFT
+{existing_draft}
+
+## USER DIRECTIVE
+{user_directive}
+
+## NEW UPLOADED SOURCES
+{new_source_documents}
+
+Produce the complete modified draft now.
+"""
+
+# Append shared Indian-legal discipline blocks so the modifier inherits
+# the same jurisdiction / citation / language / format / behavioural
+# rules the primary drafting prompts do.
+DRAFTING_MODIFICATION_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
+    + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
 )
 
 

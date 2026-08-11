@@ -546,14 +546,16 @@ class QueryAnalysisV2(BaseModel):
 
 
 def _extract_user_intent(
-    query: str, chat_summary: str = ""
+    query: str, chat_summary: str = "",
+    previous_intent: UserIntent | None = None,
 ) -> tuple[str, UserIntent]:
     """Extract structured user intent from query + chat history in one LLM call.
 
-    This is the Phase 1 replacement for `_analyze_and_normalize_query`. During
-    Phase 1 both functions run in parallel so we can compare via telemetry;
-    Phase 2 will cut over the downstream consumers (synthesis template picker,
-    pass-through guard) to read `intent.response_format` instead of the regex.
+    `previous_intent` — the LAST turn's UserIntent (Level 1 of the follow-up
+    simplification, docs/followup_pipeline_simplification_plan.md). When
+    populated, the extractor is prompted to INHERIT format / language /
+    depth / legal_artifact from it unless Turn N explicitly overrides them.
+    Fixes the "Turn 2 short directive gets reclassified from scratch" bug.
 
     Returns:
         (normalized_query, UserIntent). On any failure returns
@@ -569,11 +571,32 @@ def _extract_user_intent(
             )
             prompt = ChatPromptTemplate.from_template(USER_INTENT_EXTRACTION_PROMPT)
             chain = prompt | llm
+            # Build the previous-intent hint. Compact and human-readable so
+            # the LLM can reason about which fields to inherit. Empty string
+            # when the previous turn had no meaningful directives.
+            prev_hint = "(no previous turn — this is a fresh conversation)"
+            if previous_intent is not None:
+                _fmt = getattr(getattr(previous_intent, "response_format", None), "value",
+                               str(getattr(previous_intent, "response_format", "")))
+                _artifact = getattr(getattr(previous_intent, "legal_artifact", None), "value",
+                                    str(getattr(previous_intent, "legal_artifact", "")))
+                prev_hint = (
+                    f"- response_format: {_fmt or 'unspecified'}\n"
+                    f"- format_explicit: {getattr(previous_intent, 'format_explicit', False)}\n"
+                    f"- language: {getattr(previous_intent, 'language', 'en')}\n"
+                    f"- language_explicit: {getattr(previous_intent, 'language_explicit', False)}\n"
+                    f"- strict_language: {getattr(previous_intent, 'strict_language', False)}\n"
+                    f"- response_depth: {getattr(previous_intent, 'response_depth', 'standard')}\n"
+                    f"- legal_artifact: {_artifact or 'unspecified'}"
+                )
             raw_and_parsed = chain.invoke({
                 # Both inputs flow into an LLM call, so they MUST be wrapped
-                # with the injection-guard delimiters from Round 4.
-                "query":        wrap_untrusted(query),
-                "chat_summary": wrap_untrusted(chat_summary or ""),
+                # with the injection-guard delimiters from Round 4. The
+                # previous-intent hint is server-generated from typed state,
+                # not user input, so it doesn't need wrapping.
+                "query":                wrap_untrusted(query),
+                "chat_summary":         wrap_untrusted(chat_summary or ""),
+                "previous_intent_hint": prev_hint,
             })
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "extract_user_intent",
@@ -1132,8 +1155,17 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # user-facing directives (language / format / depth) that
         # aren't legal anchors. Reading directives from the raw input
         # keeps `intent.language_explicit` correct on follow-up turns.
+        # Level 1 previous-intent inheritance (see
+        # docs/followup_pipeline_simplification_plan.md). When the memory
+        # node loaded a previous turn's typed intent from SQLite, pass it
+        # in so short Turn-N directives ("in Marathi") inherit the prior
+        # legal_artifact / task shape instead of reclassifying from scratch.
+        _previous_intent = state.get("previous_intent")
         intent_coro = asyncio.wait_for(
-            asyncio.to_thread(_extract_user_intent, _original_query, summary or ""),
+            asyncio.to_thread(
+                _extract_user_intent, _original_query, summary or "",
+                _previous_intent,
+            ),
             timeout=10,
         )
         classify_coro = asyncio.wait_for(
@@ -1191,6 +1223,42 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             # NOTE: Drafting false-positive strip lives downstream — after
             # _detect_multi_intent runs — so both the LLM-added and
             # safety-net-added Drafting cases are caught in one spot.
+
+        # PR 3c: preserve prior task on short directive follow-ups after
+        # Drafting (docs/followup_pipeline_simplification_plan.md Level 1).
+        # When Turn N is a short directive ("in Marathi", "add a prayer
+        # clause") on a prior Drafting turn, the classifier — seeing 12
+        # chars of raw user query — sometimes reclassifies to Legal_Concepts
+        # or Non_legal, dropping Drafting from the plan. That causes the
+        # drafting fast-path to never fire and the follow-up to produce
+        # a chatty answer instead of a modified draft. Force Drafting back
+        # into the plan when the specific "short-directive-on-prior-draft"
+        # pattern holds AND the classifier didn't already include Drafting.
+        _prev_task_state = state.get("previous_task", "") or ""
+        _prev_kind_state = state.get("previous_artifact_kind", "") or ""
+        if (
+            _prev_task_state == "Drafting"
+            and _prev_kind_state == "draft"
+            and _original_query
+            and len(_original_query) < 200
+            and "Drafting" not in tasks_planned
+        ):
+            from agents.drafting import _DIRECTIVE_VERBS_RE as _DRAFTING_DIRECTIVE_RE
+            if _DRAFTING_DIRECTIVE_RE.search(_original_query):
+                log.info(
+                    "Preserving Drafting task on short directive follow-up",
+                    prior_task=_prev_task_state,
+                    classifier_task=task,
+                    classifier_tasks_planned=tasks_planned,
+                    directive_preview=_original_query[:80],
+                )
+                # Prefer Drafting as the primary; keep any other classifier
+                # picks around in tasks_planned so multi-intent behaviour
+                # (e.g. "shorten and also find cases on X") isn't lost.
+                task = "Drafting"
+                if "Drafting" not in tasks_planned:
+                    tasks_planned = ["Drafting"] + [t for t in tasks_planned
+                                                    if t != "Drafting"]
 
         # Handle non-legal with file context
         if task == "Non_legal" and fc and fc.has_content:

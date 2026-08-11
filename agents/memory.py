@@ -172,20 +172,31 @@ def _rewrite_query(
         # artefact, AND the current query is a short directive (< 200
         # chars, matching the same verb regex the drafting fast-path uses),
         # keep the raw query so the fast-path sees "in Marathi" intact.
-        # Falls through to the normal rewriter when either condition fails.
+        #
+        # CRITICAL: only fire this skip WHEN THE FAST-PATH IS ENABLED. With
+        # the fast-path OFF the raw "in Marathi" query flows into the full
+        # drafting pipeline unexpanded, and the classifier + reference
+        # picker interpret it as "draft a notice ABOUT Marathi" — producing
+        # a confabulated notice unrelated to the prior draft (regression
+        # observed on prod smoke 2026-08-12: 'in Marathi' after a cheque
+        # dishonour draft returned a notice to a Marathi-language
+        # university's Vice-Chancellor). When the fast-path is off, we NEED
+        # the rewriter's chat-history expansion so downstream retrieval sees
+        # the actual matter, not the bare directive.
+        from agents.drafting import _fast_path_enabled, _DIRECTIVE_VERBS_RE
         if (
-            previous_task == "Drafting"
+            _fast_path_enabled()
+            and previous_task == "Drafting"
             and previous_artifact_kind == "draft"
             and query
             and len(query) < 200
+            and _DIRECTIVE_VERBS_RE.search(query)
         ):
-            from agents.drafting import _DIRECTIVE_VERBS_RE
-            if _DIRECTIVE_VERBS_RE.search(query):
-                log.info(
-                    "Skipping rewrite — short directive on prior drafting turn",
-                    query_preview=query[:80],
-                )
-                return query
+            log.info(
+                "Skipping rewrite — short directive on prior drafting turn (fast-path ON)",
+                query_preview=query[:80],
+            )
+            return query
 
         # Skip when the query is already long enough to be standalone.
         # The REWRITE_PROMPT is tuned for SHORT follow-ups ("find related

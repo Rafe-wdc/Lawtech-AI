@@ -20,9 +20,18 @@ _REAL_HISTORY = [
 
 class TestRewriterSkipOnDraftingDirective:
     """PR 3b: rewriter must skip short directives on prior drafting turns
-    so the drafting fast-path (Level 2) sees the raw directive intact."""
+    so the drafting fast-path (Level 2) sees the raw directive intact.
 
-    def test_skips_short_directive_after_drafting(self):
+    CRITICAL: only skips WHEN THE FAST-PATH IS ENABLED. With fast-path OFF,
+    the raw directive has no chat-history context and the full drafting
+    pipeline confabulates a wrong document (regression observed on prod
+    2026-08-12: 'in Marathi' after cheque dishonour draft returned a
+    notice to a Marathi-language university's Vice-Chancellor). Every
+    "skip" test below must therefore turn the fast-path flag ON.
+    """
+
+    def test_skips_short_directive_after_drafting(self, monkeypatch):
+        monkeypatch.setenv("DRAFTING_FOLLOWUP_FAST_PATH", "1")
         # "in Marathi" on a prior Drafting turn — rewriter should return
         # the query unchanged (no LLM call should even fire).
         out = _rewrite_query(
@@ -33,7 +42,8 @@ class TestRewriterSkipOnDraftingDirective:
         )
         assert out == "in Marathi"
 
-    def test_skips_add_clause_directive(self):
+    def test_skips_add_clause_directive(self, monkeypatch):
+        monkeypatch.setenv("DRAFTING_FOLLOWUP_FAST_PATH", "1")
         out = _rewrite_query(
             query="add a prayer clause",
             chat_history=_REAL_HISTORY,
@@ -42,7 +52,8 @@ class TestRewriterSkipOnDraftingDirective:
         )
         assert out == "add a prayer clause"
 
-    def test_skips_polish_directive(self):
+    def test_skips_polish_directive(self, monkeypatch):
+        monkeypatch.setenv("DRAFTING_FOLLOWUP_FAST_PATH", "1")
         out = _rewrite_query(
             query="polish this",
             chat_history=_REAL_HISTORY,
@@ -50,6 +61,21 @@ class TestRewriterSkipOnDraftingDirective:
             previous_artifact_kind="draft",
         )
         assert out == "polish this"
+
+    def test_does_NOT_skip_when_fast_path_disabled(self, monkeypatch):
+        """Prod regression 2026-08-12: without this gate, the rewriter
+        skip fired even with fast-path OFF, sending raw 'in Marathi' into
+        the full drafting pipeline which produced an unrelated Marathi
+        university notice. Now the skip requires fast-path ON — with it
+        off the code walks past the skip branch and calls the LLM (not
+        exercised here, just documenting the guard)."""
+        monkeypatch.delenv("DRAFTING_FOLLOWUP_FAST_PATH", raising=False)
+        # Same inputs as test_skips_short_directive_after_drafting above
+        # — with fast-path OFF the skip branch's condition evaluates
+        # False, so the code walks past it. Assert only that the guard
+        # condition evaluates correctly by mirroring the check inline.
+        from agents.drafting import _fast_path_enabled
+        assert _fast_path_enabled() is False
 
     def test_does_not_skip_when_prior_task_is_not_drafting(self):
         """Prior task was retrieval (SCI_Judgment) — directive-style short

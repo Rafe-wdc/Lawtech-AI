@@ -1440,8 +1440,14 @@ async def _critique(
 
     try:
         with log_time(log, "Self-refine critique"):
+            # 4096 was too small: a critique carrying several violations, each
+            # with a quote and a suggested fix, runs past it and the JSON is
+            # truncated mid-string. The parse then fails, and before the
+            # unparseable-output fix that failure was reported as a pass.
+            # Observed 2026-08-13: raw_chars=4397 on a 5-violation critique,
+            # cut off inside the first violation's `issue` field.
             llm = (critic_llm or get_gemini_flash_full(
-                temperature=0.0, max_output_tokens=4096, thinking_budget=0,
+                temperature=0.0, max_output_tokens=16384, thinking_budget=0,
             )).with_structured_output(Critique, include_raw=True)
             intent_json = intent.model_dump_json(indent=2)
             prompt = ChatPromptTemplate.from_template(CRITIQUE_PROMPT)

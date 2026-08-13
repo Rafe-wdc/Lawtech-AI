@@ -6,9 +6,10 @@ Tests: Export, Memo, TOA, Statute Refs, Compliance, Fix Draft, Sanitization.
 import json
 import requests
 import time
+import os
 
 API = "http://localhost:5000/pyapi"
-KEY = "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+KEY = os.environ.get("LAWTECH_TEST_API_KEY", "")
 HEADERS = {"Content-Type": "application/json", "X-API-Key": KEY}
 
 results = []

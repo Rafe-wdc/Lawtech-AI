@@ -145,18 +145,22 @@ DRAFTING_CITE_APPENDIX_DEFAULT = os.getenv(
 # safely. See docs/intent_layer_implementation_plan.md.
 
 # --- Response Cache ---
-# Off by default. The cache stored the FIRST response to a given query and
-# replayed it on subsequent identical queries. Because the Judgment agent's
-# relevance gate is non-deterministic, the cached entry could be either the
-# "ES hits returned (S3 PDFs)" branch OR the "ES hits rejected, web fallback
-# fired (Google grounding links)" branch -- whichever ran first got pinned
-# for 1 hour. Two users running the same query then saw drastically
-# different source sets. Leaving the cache off is safer until the underlying
-# retrieval is more deterministic. Set RESPONSE_CACHE_ENABLED=true to opt
-# back in (useful for synthetic benchmarks where determinism matters more
-# than freshness).
+# ON by default as of 2026-08-13, after the fixes that made caching safe:
+#   1. Cache key includes preferred_language + cite_appendix so two users
+#      with the same query but different response-shaping headers no longer
+#      collide (core/response_cache.py::_make_key).
+#   2. Cache-hit path persists the turn to chat_store so multi-turn context
+#      is preserved (core/chat_runner.py + core/gateway.py cache-hit blocks).
+#   3. Cache-set skips guardrail-blocked responses.
+#   4. Cache-set skips ANY response where a domain agent fell back to
+#      web-grounded search (Tier 3). This closes the historic Judgment
+#      non-determinism hole: the cached entry can no longer be the
+#      "ES-hits" branch on one run and the "web-fallback" branch on
+#      another — only clean ES-hits responses reach the cache.
+#   5. Cache-hit path emits chat_store.log_request for observability.
+# Set RESPONSE_CACHE_ENABLED=false to opt out (e.g. debugging).
 RESPONSE_CACHE_ENABLED = os.getenv(
-    "RESPONSE_CACHE_ENABLED", "false",
+    "RESPONSE_CACHE_ENABLED", "true",
 ).strip().lower() in ("1", "true", "yes", "on")
 
 # --- Redis ---

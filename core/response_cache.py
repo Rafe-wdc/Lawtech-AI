@@ -56,19 +56,42 @@ class ResponseCache:
                  enabled=self._enabled, ttl_s=ttl, max_entries=max_entries)
 
     @staticmethod
-    def _make_key(query: str, file_fingerprint: str = "") -> str:
-        """Normalize query + file identity and create cache key.
+    def _make_key(
+        query: str,
+        file_fingerprint: str = "",
+        *,
+        language: str = "",
+        cite_appendix: bool | None = None,
+    ) -> str:
+        """Normalize query + file identity + response variants → cache key.
 
-        file_fingerprint should be a string like "doc.pdf:1024,img.jpg:5000"
-        (filename:size pairs). Same query + same files = same key.
-        Different files = different key, even if query is identical.
+        file_fingerprint: "doc.pdf:1024,img.jpg:5000" (filename:size pairs).
+        language: the request's preferred_language header (ISO 639-1).
+            Two users with the same query but different language headers
+            must NOT collide — headers steer localize_prompt, which produces
+            a wholly different response body.
+        cite_appendix: the Drafting `cite_appendix` flag. Same query with
+            appendix=True/False produces materially different drafts and
+            must not collide.
         """
         normalized = query.lower().strip()
         if file_fingerprint:
-            normalized += "\x00" + file_fingerprint
+            normalized += "\x00f=" + file_fingerprint
+        lang = (language or "").strip().lower()
+        if lang:
+            normalized += "\x00l=" + lang
+        if cite_appendix is not None:
+            normalized += "\x00a=" + ("1" if cite_appendix else "0")
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
-    def get(self, query: str, file_fingerprint: str = "") -> CacheEntry | None:
+    def get(
+        self,
+        query: str,
+        file_fingerprint: str = "",
+        *,
+        language: str = "",
+        cite_appendix: bool | None = None,
+    ) -> CacheEntry | None:
         """Look up a cached response. Returns None on miss, expiry, or when
         the cache is globally disabled via RESPONSE_CACHE_ENABLED.
 
@@ -79,7 +102,10 @@ class ResponseCache:
         """
         if not self._enabled:
             return None
-        key = self._make_key(query, file_fingerprint)
+        key = self._make_key(
+            query, file_fingerprint,
+            language=language, cite_appendix=cite_appendix,
+        )
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -101,11 +127,22 @@ class ResponseCache:
                             c.pop("model", None)
             return entry
 
-    def set(self, query: str, entry: CacheEntry, file_fingerprint: str = "") -> None:
+    def set(
+        self,
+        query: str,
+        entry: CacheEntry,
+        file_fingerprint: str = "",
+        *,
+        language: str = "",
+        cite_appendix: bool | None = None,
+    ) -> None:
         """Store a response in the cache. No-op when the cache is disabled."""
         if not self._enabled:
             return
-        key = self._make_key(query, file_fingerprint)
+        key = self._make_key(
+            query, file_fingerprint,
+            language=language, cite_appendix=cite_appendix,
+        )
         with self._lock:
             # Evict expired entries if at capacity
             if len(self._store) >= self._max_entries:

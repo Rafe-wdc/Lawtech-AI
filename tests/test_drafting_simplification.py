@@ -605,7 +605,19 @@ class TestGenerateSectionwise:
 
     def test_empty_pair_output_does_not_append(self):
         """A section pair that returns empty text (e.g. Gemini blocked twice)
-        is skipped — the final assembly does not contain an empty entry."""
+        contributes no body text to the final assembly.
+
+        When ALL pairs fail like this, the sectionwise path returns the
+        `**Draft incomplete**` banner listing the failed section names
+        (see `_DRAFT_INCOMPLETE_BANNER_MARKER` at agents/drafting.py:215).
+        The banner is load-bearing UX — the follow-up fast-path uses it
+        to refuse modifying a known-degraded draft — so this test locks
+        in both invariants:
+          (a) NO section body content appears (nothing was silently appended)
+          (b) The banner + failed section names DO appear (user is informed)
+        """
+        from agents.drafting import _DRAFT_INCOMPLETE_BANNER_MARKER
+
         sections = [
             _Section(id="a", heading="A", summary=""),
             _Section(id="b", heading="B", summary=""),
@@ -624,7 +636,12 @@ class TestGenerateSectionwise:
                 progress_emit=self._silent_progress,
                 gathered_context=None,
             ))
-        assert out == ""
+        # Banner is present, naming both failed sections.
+        assert _DRAFT_INCOMPLETE_BANNER_MARKER in out
+        assert "'A'" in out and "'B'" in out
+        # No silent partial content leaked into the output.
+        assert "Body of A" not in out
+        assert "Body of B" not in out
 
     def test_progress_event_per_section(self):
         """One progress event per section (not per pair) — frontend needs

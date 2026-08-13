@@ -150,13 +150,19 @@ class TestUserIntentSchema:
 
     def test_legal_artifact_enum_values(self):
         """Phase B adds 7 more artifact types. Adding more is a deliberate
-        schema bump — this test pins the surface so we notice."""
+        schema bump — this test pins the surface so we notice.
+
+        `office_application` (letter-format applications to non-court
+        authorities — RTI, govt dept, employer, bank, regulator) was added
+        after Phase B; keep it in the pinned set.
+        """
         assert {a.value for a in LegalArtifact} == {
             "none",
             "cross_examination",
             "deposition_summary",
             "contract_analysis",
             "legal_notice",
+            "office_application",
             "complaint_draft",
             "witness_prep",
             "opening_statement",

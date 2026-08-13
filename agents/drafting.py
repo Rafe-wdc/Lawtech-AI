@@ -51,6 +51,15 @@ from core.state import (
 )
 from core.clients import (
     get_es_client, get_gemini_pro,
+    # Circuit-breaker helpers referenced from `try/except` blocks in
+    # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
+    # at module scope so the `except:` handler can still call
+    # `record_gemini_flash_failure` when the preceding `init_chat_model(...)`
+    # call raises BEFORE any function-scope import would have executed. See
+    # tests/test_drafting_simplification.py::TestJudgeFanout::
+    # test_llm_failure_defaults_to_single_pass.
+    is_gemini_flash_available, record_gemini_flash_failure,
+    record_gemini_flash_success,
 )
 from core.settings import ES_INDICES
 from core.language import localize_prompt, detect_source_languages
@@ -1256,10 +1265,6 @@ async def _pick_relevant_chunk_indices(
 
         # Circuit breaker: if Gemini Flash is unhealthy, skip the router
         # and let the caller fall back to raw user_facts (existing safe path).
-        from core.clients import (
-            is_gemini_flash_available, record_gemini_flash_failure,
-            record_gemini_flash_success,
-        )
         if not is_gemini_flash_available():
             log.warning("Gemini Flash circuit open — skipping chunk router",
                         section=section.heading[:40], fast_fail=True)
@@ -1467,10 +1472,6 @@ async def _judge_fanout(
 
         # Circuit breaker: if Gemini Flash is unhealthy, skip the judge
         # and default to single-pass (existing fallback anyway).
-        from core.clients import (
-            is_gemini_flash_available, record_gemini_flash_failure,
-            record_gemini_flash_success,
-        )
         if not is_gemini_flash_available():
             log.warning("Gemini Flash circuit open — defaulting to single-pass",
                         fast_fail=True)

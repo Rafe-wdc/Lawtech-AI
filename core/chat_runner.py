@@ -246,8 +246,13 @@ async def run_chat_pipeline(
 
     # --- Cache check (first turn only) -------------------------------------
     if i.enable_cache and i.is_first_turn:
-        cached = response_cache.get(i.query)
+        cached = response_cache.get(
+            i.query,
+            language=(i.preferred_language or ""),
+            cite_appendix=i.cite_appendix,
+        )
         if cached:
+            _hit_start = time.perf_counter()
             yield _sse({"type": "status", "message": "Returning cached response..."})
             yield _sse({"type": "response", "content": cached.response})
 
@@ -269,6 +274,42 @@ async def run_chat_pipeline(
                 log.warning("Cached followup suggestions failed",
                             endpoint=i.endpoint_name, error=str(e))
 
+            # Persist this turn to chat history even on a cache hit — otherwise
+            # Turn 2 loads empty context from Postgres and the assistant
+            # silently "forgets" Turn 1. Typed state (user_intent, task,
+            # tasks_planned) is empty because the orchestrator did not run;
+            # tasks_planned_json carries agents_used from the cached entry so
+            # the follow-up router still sees what produced the answer.
+            cached_turn = 0
+            try:
+                cached_turn = await chat_store.save_turn(
+                    i.thread_id, i.query, cached.response,
+                    user_intent_json="",
+                    task="",
+                    tasks_planned_json=json.dumps(cached.agents_used or []),
+                    primary_artifact_kind="",
+                )
+            except Exception as e:
+                log.error("Failed to save cached turn to chat history",
+                          endpoint=i.endpoint_name, error=str(e))
+
+            # Observability: record request in the same log as live paths,
+            # tagged with fallback_used=False so operators can distinguish
+            # cache-served turns from graph-served ones via total_latency_ms.
+            _hit_latency_ms = int((time.perf_counter() - _hit_start) * 1000)
+            _fire_and_forget(chat_store.log_request(
+                thread_id=i.thread_id,
+                endpoint=i.endpoint_name,
+                query_preview=i.query[:300],
+                user_language=(i.preferred_language or "en"),
+                tasks_planned=[],
+                agents_used=cached.agents_used or [],
+                total_latency_ms=_hit_latency_ms,
+                total_tokens=cached.tokens_consumed or 0,
+                fallback_used=False,
+                is_blocked=False,
+            ))
+
             # On cache hit, replay the originally-captured per-LLM-call
             # token breakdown if it was stored. Older cache entries (pre
             # token_usage support) only stored the aggregate int — synthesise
@@ -289,21 +330,21 @@ async def run_chat_pipeline(
             # rely on `conversation_turn`, `query_rewritten`,
             # `effective_query` being present on EVERY done event;
             # omitting them on cache hits broke consumers that treat the
-            # payload as invariant. Cache hits use turn=0, query not
-            # rewritten (no memory step ran), effective_query=None.
+            # payload as invariant. Cache hits use turn from save_turn,
+            # query not rewritten (no memory step ran), effective_query=None.
             yield _sse({
                 "type": "done",
                 "agents_used": cached.agents_used,
                 "token_usage": cached_token_usage,
                 "thread_id": i.thread_id,
-                "conversation_turn": 0,
+                "conversation_turn": cached_turn,
                 "query_rewritten": False,
                 "effective_query": None,
                 "source_metadata": cached.source_metadata,  # kept for backward compat
                 "cached": True,
             })
             log.info("Cache hit", endpoint=i.endpoint_name,
-                     agents=cached.agents_used)
+                     agents=cached.agents_used, turn=cached_turn)
             return
 
     # --- Integration URL handling ------------------------------------------
@@ -352,6 +393,17 @@ async def run_chat_pipeline(
     all_source_metadata: list[dict] = []
     effective_query = i.query
     query_rewritten = False
+    # Track whether any agent fell back to web-grounded search (Tier 3).
+    # If true, the response reflects a non-deterministic branch (ES-hits
+    # vs web-fallback flips on repeat calls when the relevance gate is
+    # borderline), so we must NOT cache it — the next user with the same
+    # query would get the wrong branch pinned for the TTL. See the
+    # RESPONSE_CACHE_ENABLED comment in core/settings.py.
+    any_fallback_used = False
+    # Track whether the guardrail rewrote final_response into a block
+    # message. Caching a block would replay it to every subsequent user
+    # of the same query text for the TTL.
+    turn_is_blocked = False
 
     # Per-turn typed state captured for Level 1 of the follow-up simplification
     # (see docs/followup_pipeline_simplification_plan.md). Persisted alongside
@@ -477,6 +529,12 @@ async def run_chat_pipeline(
                         for name, r in update["agent_results"].items():
                             if hasattr(r, "tokens_consumed"):
                                 total_tokens += r.tokens_consumed or 0
+                            # Any agent that fell back to web-grounded
+                            # search (Tier 3) taints the response for
+                            # caching purposes — see any_fallback_used
+                            # init comment above.
+                            if getattr(r, "fallback_used", False):
+                                any_fallback_used = True
                             # Mark the turn as producing a modifiable draft
                             # artefact whenever Drafting returned content
                             # without an error. Level 2 uses this signal to
@@ -492,6 +550,9 @@ async def run_chat_pipeline(
 
                     if "source_metadata" in update and update["source_metadata"]:
                         all_source_metadata = update["source_metadata"]
+
+                    if "is_blocked" in update and update["is_blocked"]:
+                        turn_is_blocked = True
 
     except TimeoutError:
         log.error("Stream timed out after 300s",
@@ -593,23 +654,34 @@ async def run_chat_pipeline(
     # tests/integration/test_api.py::test_stream_final_event_has_result).
     token_usage_dict = token_tracker.to_dict(include_calls=True)
 
-    # Cache first-turn responses (skip if files/integration were used to keep
-    # cache keys clean and avoid stale-content serving)
+    # Cache first-turn responses. We SKIP caching when:
+    #   - uploads / integration context were used (per-request content)
+    #   - the guardrail rewrote the response into a block message
+    #     (would replay the block to every future user of the same query)
+    #   - any agent fell back to web-grounded search (the response reflects
+    #     a non-deterministic branch — see any_fallback_used init comment)
     cacheable = (
         i.enable_cache
         and i.is_first_turn
         and final_response
         and not i.file_context
         and not integration_context_dict
+        and not turn_is_blocked
+        and not any_fallback_used
     )
     if cacheable:
-        response_cache.set(i.query, CacheEntry(
-            response=final_response,
-            source_metadata=all_source_metadata,
-            agents_used=agents_used,
-            tokens_consumed=total_tokens,
-            token_usage=token_usage_dict,
-        ))
+        response_cache.set(
+            i.query,
+            CacheEntry(
+                response=final_response,
+                source_metadata=all_source_metadata,
+                agents_used=agents_used,
+                tokens_consumed=total_tokens,
+                token_usage=token_usage_dict,
+            ),
+            language=(i.preferred_language or ""),
+            cite_appendix=i.cite_appendix,
+        )
 
     # Done event — includes the detailed per-agent / per-model / per-call
     # token breakdown captured by the request-scoped tracker.

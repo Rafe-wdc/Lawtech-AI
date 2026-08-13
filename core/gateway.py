@@ -614,7 +614,11 @@ async def search(data: SearchRequest, request: Request):
     # --- Cache check: skip graph for repeated first-turn queries ---
     _is_first_turn = not data.globalThreadId  # no thread = first turn
     if _is_first_turn:
-        cached = response_cache.get(data.prompt_query)
+        cached = response_cache.get(
+            data.prompt_query,
+            language=(data.preferred_language or ""),
+            cite_appendix=data.cite_appendix,
+        )
         if cached:
             _latency_ms = int((time.perf_counter() - _req_start) * 1000)
             log.info("Cache hit, returning cached response",
@@ -626,12 +630,57 @@ async def search(data: SearchRequest, request: Request):
                 "reasoning_tokens": 0, "cost_usd": 0.0,
                 "by_agent": {}, "calls": [],
             }
+
+            # Persist the turn even on a cache hit — otherwise Turn 2 loads
+            # empty history from Postgres and the assistant "forgets" Turn 1.
+            _cached_turn = 0
+            try:
+                _cached_turn = await chat_store.save_turn(
+                    thread_id, data.prompt_query, cached.response,
+                    user_intent_json="",
+                    task="",
+                    tasks_planned_json=json.dumps(cached.agents_used or []),
+                    primary_artifact_kind="",
+                )
+            except Exception as e:
+                log.error("Failed to save cached turn to chat history",
+                          thread_id=thread_id[:12], error=str(e))
+
+            # Observability: same log row shape as the live path so
+            # dashboards keep working. fallback_used=False (only
+            # non-fallback responses reach the cache in the first place).
+            _fire_and_forget(chat_store.log_request(
+                thread_id=thread_id,
+                endpoint="/pyapi/search",
+                query_preview=data.prompt_query[:300],
+                user_language=(data.preferred_language or "en"),
+                tasks_planned=[],
+                agents_used=cached.agents_used or [],
+                total_latency_ms=_latency_ms,
+                total_tokens=cached.tokens_consumed or 0,
+                fallback_used=False,
+                is_blocked=False,
+            ))
+
+            # Regenerate followup suggestions on demand — cheap relative to
+            # the pipeline we just skipped, and the schema expects them.
+            _cached_followups: list[str] = []
+            try:
+                _cached_followups = await _generate_followup_suggestions(
+                    data.prompt_query, cached.response, cached.agents_used or [],
+                )
+            except Exception as e:
+                log.warning("Cached followup suggestions failed",
+                            error=str(e))
+
             return SearchResponse(
                 globalThreadId=thread_id,
                 result=cached.response,
                 token_usage=cached_token_usage,
                 source=cached.source_metadata,
                 agents_used=cached.agents_used,
+                conversation_turn=_cached_turn,
+                followup_suggestions=_cached_followups,
             )
 
     initial_state = _build_initial_state(
@@ -702,9 +751,17 @@ async def search(data: SearchRequest, request: Request):
         METRICS["llm_tokens_total"].labels(model="total", token_type="output").inc(total_tokens)
 
     # --- Log request to SQLite (fire-and-forget) ---
+    # Handle both dataclass AgentResult (the norm) and dict shapes. The
+    # earlier `isinstance(r, dict)` filter silently dropped every real
+    # AgentResult, so _fallback_used was permanently False.
+    def _agent_fallback_used(r) -> bool:
+        if isinstance(r, dict):
+            return bool(r.get("fallback_used"))
+        return bool(getattr(r, "fallback_used", False))
+
     _fallback_used = any(
-        r.get("fallback_used") for r in final_state.get("agent_results", {}).values()
-        if isinstance(r, dict)
+        _agent_fallback_used(r)
+        for r in final_state.get("agent_results", {}).values()
     )
     _fire_and_forget(chat_store.log_request(
         thread_id=thread_id,
@@ -796,14 +853,29 @@ async def search(data: SearchRequest, request: Request):
             log.warning("Followup suggestions failed", error=str(e))
 
     # --- Cache store: save first-turn responses for future hits ---
-    if _is_first_turn and final_response and not final_state.get("is_blocked"):
-        response_cache.set(data.prompt_query, CacheEntry(
-            response=final_response,
-            source_metadata=final_state.get("source_metadata", []),
-            agents_used=agents_used,
-            tokens_consumed=total_tokens,
-            token_usage=_token_tracker.to_dict(include_calls=True),
-        ))
+    # Skip caching when any agent fell back to web-grounded search: those
+    # responses reflect a non-deterministic branch (ES-hits vs web-fallback
+    # flips on repeat calls when the relevance gate is borderline), so
+    # replaying them for the TTL would pin the wrong branch for future
+    # users. See the RESPONSE_CACHE_ENABLED comment in core/settings.py.
+    if (
+        _is_first_turn
+        and final_response
+        and not final_state.get("is_blocked")
+        and not _fallback_used
+    ):
+        response_cache.set(
+            data.prompt_query,
+            CacheEntry(
+                response=final_response,
+                source_metadata=final_state.get("source_metadata", []),
+                agents_used=agents_used,
+                tokens_consumed=total_tokens,
+                token_usage=_token_tracker.to_dict(include_calls=True),
+            ),
+            language=(data.preferred_language or ""),
+            cite_appendix=data.cite_appendix,
+        )
 
     return SearchResponse(
         globalThreadId=thread_id,

@@ -61,11 +61,14 @@ from core.clients import (
     is_gemini_flash_available, record_gemini_flash_failure,
     record_gemini_flash_success,
 )
-from core.settings import ES_INDICES
+from core.settings import ES_INDICES, TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt, detect_source_languages
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.self_refine import self_refine
+from core.source_registry import (
+    SourceRegistry, source_from_hc, source_from_legislation, source_from_sci,
+)
 
 log = get_logger("Drafting")
 
@@ -770,11 +773,144 @@ async def _acquire_reference_via_web(
 # real grounding instead of begging the model not to hallucinate.
 # ---------------------------------------------------------------------------
 
-async def _gather_relevant_context(query: str) -> dict[str, str]:
-    """Run the domain retrievers in parallel; return labelled blocks.
+# ---------------------------------------------------------------------------
+# Source-registry population for the drafting critic.
+#
+# `self_refine`'s `unretrieved_citation` category needs the list of sources
+# the pipeline actually retrieved. Without it the critic is handed the literal
+# "(none — the caller passed no source registry ...)" string and told to skip
+# the category, so hallucinated case citations inside drafts went unchecked —
+# the output where a fake citation does the most damage.
+#
+# `_gather_relevant_context` already retrieves exactly those sources seconds
+# earlier and used to discard the structured hits, keeping only formatted
+# prompt text. These helpers lift them into a SourceRegistry instead.
+#
+# Why SourceMetadata as an intermediate: the ES tools return plain dicts, but
+# the adapters in core.source_registry read attributes via getattr (they were
+# written against SourceMetadata). Passing a dict straight to them silently
+# returns None for every record and yields an EMPTY registry — which looks
+# like the fix landed while changing nothing. Building SourceMetadata first
+# reuses the adapters' citation formatting verbatim instead of duplicating it.
+# ---------------------------------------------------------------------------
 
-    Each block is a string ready to drop into the generation prompt.
-    Returns {} when ES is down — generation still proceeds (degraded).
+# Mirrors `tools/shared/sci_judgment_tools.py::_format_hit` output:
+#     **{parties}** (DB ID: {db_id})
+#     - Case No: {case_no}
+#     - Date: {judgment_date}
+#     ...
+#     - PDF: {pdf_url}
+_SCI_HEADER_RE = re.compile(
+    r"^\*\*(?P<parties>.+?)\*\*\s+\(DB ID:\s*(?P<db_id>[^)]+)\)", re.M,
+)
+_SCI_FIELD_RE = re.compile(
+    r"^- (?P<key>Case No|Date|PDF):\s*(?P<value>.+)$", re.M,
+)
+
+# Registry snippets are grounding hints, not content. Keep them short — the
+# registry is checkpointed by LangGraph and serialized into prompts.
+_REGISTRY_SNIPPET_CHARS = 200
+
+
+def _clean_na(value: str | None) -> str:
+    """`_format_hit` writes the literal 'N/A' for missing fields."""
+    v = (value or "").strip()
+    return "" if v in ("", "N/A") else v
+
+
+def _sci_records(block: str) -> list:
+    """Recover structured SCI records from `_format_hit` display output.
+
+    Every SCI tool returns formatted prose rather than data, so parsing that
+    format back is the only structured handle available. Coupled to
+    `_format_hit` by design — `tests/test_drafting_source_registry.py`
+    asserts the round-trip, so a format change fails loudly instead of
+    silently emptying the SCI half of the whitelist.
+
+    Reimplementing the SCI ES query inline was rejected: `search_by_topic`'s
+    BM25 + phrase-boost weighting was recently tuned, and duplicating it
+    invites the copy-paste divergence already spread across the agents.
+    """
+    if not block:
+        return []
+    records = []
+    matches = list(_SCI_HEADER_RE.finditer(block))
+    for i, m in enumerate(matches):
+        seg_end = matches[i + 1].start() if i + 1 < len(matches) else len(block)
+        fields = {
+            fm.group("key"): fm.group("value").strip()
+            for fm in _SCI_FIELD_RE.finditer(block[m.end():seg_end])
+        }
+        pdf = _clean_na(fields.get("PDF"))
+        rec = source_from_sci(SourceMetadata(
+            source_type="sci_judgment",
+            agent_name="SCI_Judgment",
+            db_id=m.group("db_id").strip(),
+            parties=m.group("parties").strip(),
+            case_no=_clean_na(fields.get("Case No")),
+            judgment_date=_clean_na(fields.get("Date")),
+            pdf_links=[{"url": pdf}] if pdf else [],
+        ))
+        if rec:
+            records.append(rec)
+    return records
+
+
+def _legislation_records(result, *, source_type: str, agent_name: str) -> list:
+    """Lift legislation / newacts ES hits into registry records.
+
+    `search_legislation` hits carry no `section_number`, so their citation
+    degrades to the act name alone — accurate, since that is genuinely all
+    that was retrieved. Act name is the source basename without extension,
+    matching how `drafting_node` already renders template names.
+    """
+    out = []
+    for h in (result or {}).get("hits", []):
+        act = os.path.splitext(os.path.basename(h.get("source") or ""))[0]
+        rec = source_from_legislation(SourceMetadata(
+            source_type=source_type,
+            agent_name=agent_name,
+            section_number=(h.get("section_number") or "").strip() or None,
+            act_name=act or None,
+            content=[(h.get("content") or "")[:_REGISTRY_SNIPPET_CHARS]],
+        ))
+        if rec:
+            out.append(rec)
+    return out
+
+
+def _judgment_records(result) -> list:
+    """Lift High Court judgment ES hits into registry records.
+
+    `search_judgments` returns no `year` field, so the citation is
+    "<parties> <court>" without a year — again, all that was retrieved.
+    """
+    out = []
+    for h in (result or {}).get("hits", []):
+        rec = source_from_hc(SourceMetadata(
+            source_type="judgment",
+            agent_name="Judgment",
+            court_name=h.get("court_name") or None,
+            petitioner_names=h.get("petitioner_names") or [],
+            respondent_names=h.get("respondent_names") or [],
+            content=[(h.get("content") or "")[:_REGISTRY_SNIPPET_CHARS]],
+        ))
+        if rec:
+            out.append(rec)
+    return out
+
+
+async def _gather_relevant_context(query: str) -> tuple[dict[str, str], SourceRegistry]:
+    """Run the domain retrievers in parallel; return labelled blocks plus a
+    registry of what was actually retrieved.
+
+    Each block is a string ready to drop into the generation prompt. The
+    registry feeds `self_refine`'s `unretrieved_citation` whitelist so the
+    critic can tell a real citation from an invented one.
+
+    Returns ({}, empty registry) when ES is down — generation still proceeds
+    (degraded), and `self_refine` no-ops on an empty registry exactly as it
+    does today.
     """
     def _safe_invoke(tool, kwargs):
         try:
@@ -842,10 +978,26 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
     s = _format_sci(sci_t)
     if s: blocks["sci"] = s
 
+    # Lift the same hits into the citation whitelist. All four retrievers are
+    # covered deliberately: a partial whitelist is worse than none. Give the
+    # critic statutes and High Court cases but no Supreme Court cases, and it
+    # flags legitimately-retrieved SC citations as `unretrieved_citation` —
+    # the refiner then strips or replaces correct citations. That would be a
+    # regression, not a fix.
+    registry = SourceRegistry()
+    registry.extend(_legislation_records(
+        newacts_t, source_type="newacts", agent_name="Newacts"))
+    registry.extend(_legislation_records(
+        legis_t, source_type="legislation", agent_name="Legislation"))
+    registry.extend(_judgment_records(judg_t))
+    registry.extend(_sci_records(
+        sci_t if isinstance(sci_t, str) else str(sci_t or "")))
+
     log.info("Context gather completed",
              blocks=list(blocks.keys()),
+             registry_records=len(registry),
              total_chars=sum(len(v) for v in blocks.values()))
-    return blocks
+    return blocks, registry
 
 
 # ---------------------------------------------------------------------------
@@ -875,6 +1027,233 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
 # `drafting_node`) don't change.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# No-case-facts guard — placeholder mode.
+#
+# THE BUG THIS FIXES
+# ==================
+# Every fact-grounding rule in the drafting prompts is CONDITIONAL on a case
+# source existing:
+#
+#   config/prompts.py:1310  "do NOT substitute canonical example values
+#                            *when the source names different real parties*"
+#   drafting.py (closing)   "MUST come VERBATIM from the UPLOADED SOURCE
+#                            DOCUMENTS block or the USER QUERY"
+#
+# When the user supplies neither — "Draft a bail application for cheating
+# under Section 420 IPC" names no party, no FIR, no court — every one of
+# those guards evaluates to a no-op. What survives is the emphatic heading
+# "USE REAL FACTS FROM THE SOURCE, NOT PLACEHOLDERS" (prompts.py:1302), and
+# the reference template full of `____` blanks waiting to be filled.
+#
+# The model resolves that by inventing plausible particulars. Observed over
+# three identical requests: two runs invented party names, C.R. numbers and
+# police stations; the third correctly emitted [ACCUSED'S NAME] placeholders.
+# Same query, same temperature (0.0), same retrieved template — the variance
+# came from an ambiguous instruction, not from sampling.
+#
+# The critic cannot catch it either: `canonical_example_substitution` only
+# flags a fixed list of training-set names (Nashik, Priyanka, …), and the
+# invented values were different ones; meanwhile `placeholder_marker`
+# (core/self_refine.py:496) penalises placeholders as MAJOR — so the correct
+# behaviour is the one being punished.
+#
+# This block makes the correct behaviour explicit and unconditional for the
+# zero-facts case, instead of leaving it to chance.
+# ---------------------------------------------------------------------------
+
+_NO_CASE_FACTS_DIRECTIVE = (
+    "\n\n## NO CASE FACTS WERE SUPPLIED — PLACEHOLDER MODE IS MANDATORY\n"
+    "No source documents were uploaded for this matter, and the USER QUERY "
+    "names the document type but not the case particulars.\n\n"
+    "Therefore EVERY case-specific value is 'genuinely absent' and MUST be "
+    "emitted as a clearly-bracketed placeholder. This OVERRIDES any general "
+    "preference for concrete values.\n\n"
+    "Use placeholders — never invented values — for at least:\n"
+    "  [ACCUSED'S NAME]  [AGE]  [OCCUPATION]  [ADDRESS]  [COURT]\n"
+    "  [DISTRICT/STATE]  [FIR / C.R. NUMBER]  [POLICE STATION]  [YEAR]\n"
+    "  [DATE OF ARREST]  [DATE]  [AMOUNT]  [ADVOCATE'S NAME]  [CASE NUMBER]\n\n"
+    "Do NOT assert any of the following unless the USER QUERY states it. "
+    "These are factual claims about a real person, and they are exactly what "
+    "gets invented to fill a template's blanks:\n"
+    "  - that the applicant is in judicial custody, or any date of arrest\n"
+    "  - that the applicant has no criminal antecedents\n"
+    "  - that the investigation is complete, or that no recovery is pending\n"
+    "  - that the applicant is the sole breadwinner, or who depends on them\n"
+    "  - that the applicant is a permanent resident, or where they work\n"
+    "  - any party name, FIR number, police station, court, date or amount\n\n"
+    "Where the REFERENCE DRAFT carries such an assertion as boilerplate, keep "
+    "the sentence but bracket the unverified part — e.g. "
+    "\"[IF APPLICABLE: The applicant is the sole breadwinner of the family and "
+    "[DEPENDANTS] are dependent on him.]\" — rather than asserting it flatly "
+    "or deleting the clause.\n\n"
+    "A draft full of honest placeholders is CORRECT and useful: the advocate "
+    "fills them in. A draft with invented particulars is a filing-level defect."
+)
+
+
+def _case_facts_present(user_facts: str | None) -> bool:
+    """True when the request carried actual case material to draft from.
+
+    Only uploaded/pasted source text counts. The USER QUERY is always
+    present and may or may not carry particulars; the directive above tells
+    the model to use whatever the query does supply, so we do not try to
+    parse facts out of it here.
+    """
+    return bool(user_facts and user_facts.strip())
+
+
+# --- Grounding validation (regex only — no LLM call, no added latency) -----
+#
+# Runs only in the zero-facts case, where ANY case-specific particular is by
+# definition ungrounded. Deliberately NOT a general-purpose hallucination
+# detector: with real source documents present, deciding whether a value is
+# grounded needs the source, and that is `self_refine`'s job.
+
+_BRACKETED_SPAN = re.compile(r"\[[^\]]{0,160}\]")
+
+# Concrete particulars that cannot be known without case facts.
+_UNGROUNDED_VALUE_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("fir_number", re.compile(
+        r"\b(?:C\.?\s?R\.?|F\.?\s?I\.?\s?R\.?)\s*(?:No\.?|Number)?\s*:?\s*"
+        r"\d{1,5}\s*(?:/|\s+of\s+)\s*\d{2,4}", re.I)),
+    ("police_station", re.compile(
+        r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2}\s+Police\s+Station\b")),
+    ("person_name", re.compile(
+        r"\b(?:Mr|Mrs|Ms|Shri|Smt|Sri)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\b")),
+    ("explicit_date", re.compile(
+        r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|"
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|"
+        r"July|August|September|October|November|December)\s+\d{4}\b", re.I)),
+    ("money_amount", re.compile(r"\bRs\.?\s*[\d][\d,]{2,}")),
+)
+
+# Factual assertions about the applicant that a template supplies as
+# boilerplate and the model then states as fact.
+_UNGROUNDED_ASSERTION_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("judicial_custody", re.compile(
+        r"in judicial custody|in custody since|arrested on", re.I)),
+    ("no_antecedents", re.compile(
+        r"no criminal antecedent|clean antecedent|never been (?:convicted|arrested)", re.I)),
+    ("investigation_status", re.compile(
+        r"investigation is (?:substantially |now )?complete|"
+        r"no recovery (?:is )?(?:pending|to be made)", re.I)),
+    ("breadwinner", re.compile(r"sole (?:bread ?winner|earning member)", re.I)),
+    ("dependants", re.compile(r"(?:aged|elderly|old) parents", re.I)),
+    ("residence_employment", re.compile(r"permanent resident", re.I)),
+)
+
+
+def validate_draft_grounding(draft: str, query: str) -> dict:
+    """Find case-specific claims that no supplied fact can support.
+
+    Bracketed spans are stripped first, so `[ACCUSED'S NAME]` and
+    `[IF APPLICABLE: ... sole breadwinner ...]` are correct output and are
+    not flagged — only bare assertions are.
+
+    Anything the USER QUERY itself stated is grounded and allowed through.
+
+    Returns {"unsupported": [(kind, text)], "placeholder_count": int}.
+    """
+    if not draft:
+        return {"unsupported": [], "placeholder_count": 0}
+
+    placeholder_count = len(_BRACKETED_SPAN.findall(draft))
+    bare = _BRACKETED_SPAN.sub(" ", draft)
+    q = (query or "").lower()
+
+    unsupported: list[tuple[str, str]] = []
+    for kind, pat in _UNGROUNDED_VALUE_PATTERNS + _UNGROUNDED_ASSERTION_PATTERNS:
+        for m in pat.finditer(bare):
+            hit = m.group(0).strip()
+            if hit.lower() in q:          # the user said it — grounded
+                continue
+            unsupported.append((kind, hit))
+
+    return {"unsupported": unsupported, "placeholder_count": placeholder_count}
+
+
+_REGENERATION_CORRECTION = (
+    "\n\n## CORRECTION REQUIRED — YOUR PREVIOUS ATTEMPT INVENTED CASE FACTS\n"
+    "The draft you produced asserted case-specific particulars that were "
+    "never supplied: {kinds}.\n"
+    "Reproduce the same document and the same structure, but replace every "
+    "such particular with a bracketed placeholder, and bracket every "
+    "unverified factual assertion about the applicant as "
+    "\"[IF APPLICABLE: ...]\". Invent nothing."
+)
+
+
+async def _enforce_grounding(
+    *,
+    draft: str,
+    query: str,
+    facts_present: bool,
+    regenerate,
+) -> str:
+    """Validate grounding and, where cheap, correct it.
+
+    Runs ONLY when no case facts were supplied — that is the case where any
+    concrete particular is by definition invented. With real source
+    documents present, judging groundedness requires reading the source,
+    which is `self_refine`'s job, not a regex's.
+
+    Costs one regex pass. The single regeneration fires only on a detected
+    violation, so a clean draft adds no latency at all — deliberate, given
+    self_refine already accounts for ~35% of request time on some paths.
+    """
+    if not draft or facts_present:
+        return draft
+
+    report = validate_draft_grounding(draft, query)
+    unsupported = report["unsupported"]
+    kinds = sorted({k for k, _ in unsupported})
+
+    if not unsupported:
+        log.info(
+            "DraftingValidation passed",
+            unsupported_facts=0,
+            placeholders_preserved=report["placeholder_count"] > 0,
+            placeholder_count=report["placeholder_count"],
+        )
+        return draft
+
+    # Log kinds and counts, never the invented values themselves — those are
+    # fabricated case particulars and there is no reason to persist them.
+    log.warning(
+        "DraftingValidation found ungrounded case facts",
+        unsupported_facts=len(unsupported),
+        kinds=kinds,
+        placeholder_count=report["placeholder_count"],
+        action="regenerate" if regenerate else "log_only",
+    )
+
+    if not regenerate:
+        return draft
+
+    try:
+        corrected = await regenerate(
+            _REGENERATION_CORRECTION.format(kinds=", ".join(kinds))
+        )
+    except Exception as e:
+        log.warning("Grounding regeneration failed — returning first draft",
+                    error=short_err(e))
+        return draft
+
+    if not corrected or not corrected.strip():
+        return draft
+
+    after = validate_draft_grounding(corrected, query)
+    log.info(
+        "DraftingValidation after regeneration",
+        unsupported_before=len(unsupported),
+        unsupported_after=len(after["unsupported"]),
+        placeholder_count=after["placeholder_count"],
+    )
+    # Keep the regenerated draft only if it is actually better.
+    return corrected if len(after["unsupported"]) < len(unsupported) else draft
+
+
 async def _generate_single_pass(
     query: str,
     user_facts: str,
@@ -884,6 +1263,7 @@ async def _generate_single_pass(
     progress_emit,
     gathered_context: dict[str, str] | None = None,
     review_and_redraft_mode: bool = False,
+    extra_instruction: str = "",
 ) -> str:
     """Produce the full document in one Gemini 2.5 Pro call.
 
@@ -1004,6 +1384,17 @@ async def _generate_single_pass(
         "DRAFT — its values belong to a different matter. Output ONLY the "
         "document itself — no preamble, no postscript, no meta-commentary."
     )
+
+    # Appended LAST so it is the most recent instruction the model sees.
+    # The clause above already permits placeholders for absent values, but
+    # it is a trailing sub-clause competing with the emphatic "USE REAL
+    # FACTS ... NOT PLACEHOLDERS" heading in DRAFTING_SYSTEM_PROMPT. With no
+    # case source at all, that ambiguity resolved toward invention in 2 of 3
+    # observed runs. This makes it unambiguous.
+    if not _case_facts_present(user_facts):
+        user_block += _NO_CASE_FACTS_DIRECTIVE
+    if extra_instruction:
+        user_block += extra_instruction
 
     # Temperature 0 + larger thinking budget. The previous default
     # (temperature 0.4) was producing creative deviations from the CASE
@@ -1656,6 +2047,12 @@ async def _generate_section_pair(
         "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
     )
 
+    # Same guard as the single-pass path. Note the instruction immediately
+    # above is conditioned on "the real parties and dates named in the
+    # source" — with no source, it constrains nothing.
+    if not _case_facts_present(user_facts):
+        user_block += _NO_CASE_FACTS_DIRECTIVE
+
     llm = get_gemini_pro(
         temperature=0.0,
         max_output_tokens=12000,
@@ -2172,6 +2569,15 @@ async def _generate_draft(
         )
         strategy.sections = strategy.sections[:_FANOUT_HARD_CAP]
 
+    facts_present = _case_facts_present(user_facts)
+    log.info(
+        "Drafting context assembled",
+        case_facts_supplied=facts_present,
+        case_facts_chars=len(user_facts or ""),
+        context_blocks=len(gathered_context or {}),
+        placeholder_mode=not facts_present,
+    )
+
     if not strategy.should_fanout or not strategy.sections:
         log.info(
             "Drafting: single-pass selected",
@@ -2179,7 +2585,7 @@ async def _generate_draft(
             section_count=len(strategy.sections),
             reasoning=strategy.reasoning[:200],
         )
-        return await _generate_single_pass(
+        draft = await _generate_single_pass(
             query=query,
             user_facts=user_facts,
             reference_draft=reference_draft,
@@ -2188,6 +2594,20 @@ async def _generate_draft(
             progress_emit=progress_emit,
             gathered_context=gathered_context,
             review_and_redraft_mode=review_and_redraft_mode,
+        )
+        return await _enforce_grounding(
+            draft=draft, query=query, facts_present=facts_present,
+            regenerate=lambda extra: _generate_single_pass(
+                query=query,
+                user_facts=user_facts,
+                reference_draft=reference_draft,
+                user_intent=user_intent,
+                user_language=user_language,
+                progress_emit=progress_emit,
+                gathered_context=gathered_context,
+                review_and_redraft_mode=review_and_redraft_mode,
+                extra_instruction=extra,
+            ),
         )
 
     log.info(
@@ -2200,7 +2620,7 @@ async def _generate_draft(
         f"Drafting {len(strategy.sections)} sections one by one...",
         step="generate",
     )
-    return await _generate_sectionwise(
+    draft = await _generate_sectionwise(
         sections=strategy.sections,
         query=query,
         user_facts=user_facts,
@@ -2210,6 +2630,15 @@ async def _generate_draft(
         progress_emit=progress_emit,
         gathered_context=gathered_context,
         review_and_redraft_mode=review_and_redraft_mode,
+    )
+    # No `regenerate` on this path: redoing N sections costs N Pro calls
+    # (~25s each), and a single corrective pass over an assembled
+    # sectionwise draft risks flattening the section structure the fan-out
+    # produced. Violations are logged so the gap is visible rather than
+    # silent — see FIX_REGISTER Q-18.
+    return await _enforce_grounding(
+        draft=draft, query=query, facts_present=facts_present,
+        regenerate=None,
     )
 
 
@@ -2282,7 +2711,18 @@ async def drafting_node(state: LegalAgentState) -> dict:
         from tools.shared.vectordb_tools import get_full_attachment
         for cid in fc.chromadb_collections:
             try:
-                attached = get_full_attachment.invoke({"collection_id": cid})
+                # Off-thread + bounded: `get_full_attachment` is a synchronous
+                # ChromaDB read that returns the ENTIRE document (up to ~3.5M
+                # chars for a 500-page PDF). Called directly, it blocks the
+                # event loop for the whole read, stalling every other in-flight
+                # request. `agents/document.py:238-243` already makes this exact
+                # call correctly; this call site was the one that got missed.
+                attached = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        lambda c=cid: get_full_attachment.invoke({"collection_id": c})
+                    ),
+                    timeout=TIMEOUT_CHROMADB_SEC,
+                )
                 full_text = (attached or {}).get("full_text", "")
                 source_file = (attached or {}).get("source_file") or "attached"
                 if full_text and source_file not in seen_names:
@@ -2536,11 +2976,12 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = user_facts
             reference_source = "<uploaded:review_and_redraft>"
             reference_kind = "uploaded"
-            gathered_ctx = await _gather_relevant_context(query)
+            gathered_ctx, gathered_registry = await _gather_relevant_context(query)
         else:
             progress("drafting", "Searching templates and relevant law...",
                      step="reference")
-            (reference_text, reference_source, reference_kind), gathered_ctx = \
+            (reference_text, reference_source, reference_kind), \
+                (gathered_ctx, gathered_registry) = \
                 await asyncio.gather(
                     _acquire_reference_draft(
                         query,
@@ -2616,6 +3057,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     user_query=query,
                     intent=intent_obj,
                     source_languages=source_langs,
+                    source_registry=gathered_registry,
                 )
                 if refined_draft != draft:
                     log.info(
@@ -2682,7 +3124,24 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 if draft_warnings else {"reference_kind": reference_kind}
             ),
         )
-        state_update = {"agent_results": {"Drafting": result}}
+        # Publish the retrieved sources on the state channel so the
+        # orchestrator's synthesis and critic can see them.
+        #
+        # `sources` above reports only the reference TEMPLATE — the BNS
+        # sections, legislation and HC/SC judgments pulled by
+        # `_gather_relevant_context` are not in it. Without this write they are
+        # visible to drafting's own critic (via the `source_registry` argument
+        # to `self_refine`) but invisible to everything downstream, so a
+        # multi-agent synthesis could flag drafting's genuinely-retrieved
+        # citations as unsourced.
+        #
+        # Merged by the `merge_source_registries` reducer declared on
+        # `LegalAgentState.source_registry` (core/state.py). This is the first
+        # production writer of that channel; before it, the reducer never fired.
+        state_update = {
+            "agent_results": {"Drafting": result},
+            "source_registry": gathered_registry,
+        }
 
     except Exception as e:
         from core.metrics import record_agent_error

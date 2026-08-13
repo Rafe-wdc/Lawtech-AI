@@ -22,6 +22,7 @@ from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.source_registry import (
     SourceRegistry,
+    merge_source_registries,
     source_from_sci,
     source_from_hc,
     source_from_legislation,
@@ -1542,8 +1543,24 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # self_refine critic/refiner read from this registry so citations,
     # quoted statutes, and PDF URLs in the final answer are traceable to
     # what was actually retrieved — never fabricated from training memory.
-    # Merged into state via the merge_source_registries reducer.
-    source_registry = _build_source_registry(agent_results)
+    #
+    # Two inputs, merged:
+    #   1. `state["source_registry"]` — written directly by agents during
+    #      fan-out and merged by the `merge_source_registries` reducer
+    #      (core/state.py). This carries sources an agent retrieved but does
+    #      NOT report in `AgentResult.sources` — e.g. Drafting reports only
+    #      its reference template there, while the BNS sections, legislation
+    #      and judgments it pulled via `_gather_relevant_context` would
+    #      otherwise be invisible to synthesis and to the critic below.
+    #   2. `_build_source_registry(agent_results)` — derived from every
+    #      agent's reported `AgentResult.sources`.
+    #
+    # Deriving from agent_results alone was the previous behaviour; the state
+    # channel is additive, so agents that write nothing lose nothing.
+    source_registry = merge_source_registries(
+        state.get("source_registry"),
+        _build_source_registry(agent_results),
+    )
 
     log.info("Synthesize phase started",
              agents_received=list(agent_results.keys()),
@@ -1669,15 +1686,24 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "final_response": cleaned,
                 "source_metadata": _serialize_sources(result),
                 "tokens_consumed": result.tokens_consumed,
+                # Persist rather than discard — see the pass-through note below.
+                "source_registry": source_registry,
             }
 
         log.info("Single agent pass-through",
                  agent=name, content_len=len(result.content),
-                 tokens=result.tokens_consumed)
+                 tokens=result.tokens_consumed,
+                 registry_size=len(source_registry))
         return_dict = {
             "final_response": result.content,
             "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
+            # The registry was built above and, until now, thrown away on this
+            # path — the cost was paid and the result discarded. Persisting it
+            # costs nothing and is the prerequisite for running the critic on
+            # single-agent answers, which today return with no citation
+            # grounding at all.
+            "source_registry": source_registry,
         }
         return return_dict
 

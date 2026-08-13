@@ -156,6 +156,36 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
         )
 
     if not docs:
+        # Tier 2 — query rewrite + retry, before falling through to the web.
+        #
+        # `task` is "Constitution" or "Maxim", and `_REWRITE_PROMPTS` has had a
+        # tailored entry for each since the helper was written — but no caller
+        # ever passed those names, so both prompts were dead and this agent
+        # jumped straight from "ES missed" to Google. CLAUDE.md's "all domain
+        # agents have a 3-tier fallback" was aspirational here.
+        #
+        # Mirrors the Legislation ladder (agents/legislation.py:397-414).
+        # NOTE: the rewritten query is used ONLY to re-search. The relevance
+        # gate below still judges against the user's ORIGINAL query — we want
+        # to know whether the docs answer what was actually asked, not whether
+        # they match our own paraphrase.
+        progress(agent_label, "No results — rewriting query...", step="fallback")
+        from core.agent_fallback import rewrite_query_for_domain
+        rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, task)
+        if rewritten != query:
+            progress(agent_label, "Retrying with refined query...",
+                     detail=rewritten[:80], substep=True, step="fallback")
+            log.info("Retrying with rewritten query", task=task,
+                     rewritten=rewritten[:100])
+            try:
+                docs = await asyncio.to_thread(_retrieve_from_es, task, rewritten)
+                if docs:
+                    log.info("Retry search succeeded", task=task, hit_count=len(docs))
+            except Exception as retry_err:
+                log.warning("Retry search failed", task=task, error=str(retry_err))
+
+    # Tier 3 — web search fallback, only once the retry has also come up empty.
+    if not docs:
         progress(agent_label, "No results — searching the web...", step="fallback")
         log.warning("No documents found in ES, using web search fallback", task=task)
         from core.agent_fallback import web_search_fallback

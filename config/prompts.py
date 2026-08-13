@@ -1180,22 +1180,40 @@ SYNTHESIS_TABLE_PROMPT += (
 # footer stack. See docs/drafting_simplification_plan.md.
 # ---------------------------------------------------------------------------
 
-# 1) DRAFTING_PICKER_PROMPT — v1 pattern (file paths only, no previews) with
-# 'none' as a valid output so absence of a usable reference becomes a real
-# signal that triggers web fallback. Index census (2026-06-28) confirmed
-# avg filename length 66.9 chars, 0.8% opaque; file paths alone are
-# discriminative enough for a single Flash Lite call.
+# 1) DRAFTING_PICKER_PROMPT — 'none' is a valid output so absence of a usable
+# reference becomes a real signal that triggers web fallback.
+#
+# Candidates now arrive as a file path PLUS an "OPENING LINES" preview. The
+# 2026-06-28 census (avg filename 66.9 chars, 0.8% opaque) justified names
+# alone, but names cannot separate templates that are all called "bail
+# application": four runs of one query picked Section 439 CrPC (Sessions),
+# Section 436 (Magistrate) and Section 307 IPC (attempted murder) — the last
+# for a CHEATING case. The cause title in the opening lines names the forum
+# and the provision, which is exactly what disambiguates them.
 DRAFTING_PICKER_PROMPT = """You are picking ONE reference template for an Indian-law drafting request.
 
-You are given the user's drafting query and a list of candidate file names from
-our drafting-templates corpus. The file names ARE the metadata — each name
-describes what document the file contains (e.g. "Format For First Bail
-Application Under Section 478 Of Bhartiya Nagarik Suraksha Sanhita, 2023
-(BNSS).csv" is a bail-application template).
+You are given the user's drafting query and a list of candidate templates from
+our drafting-templates corpus. Each candidate shows its file path and, where
+available, an "OPENING LINES" preview of the template's first few lines.
+
+Use BOTH. File names are descriptive (e.g. "Format For First Bail Application
+Under Section 478 Of Bhartiya Nagarik Suraksha Sanhita, 2023 (BNSS).csv"), but
+several templates can share a generic name. The OPENING LINES carry the cause
+title, which names the FORUM and the PROVISION — and those decide the fit:
+
+  "IN THE COURT OF HON'BLE SESSIONS COURT ___"  -> Sessions-Court application
+  "BEFORE THE HON'BLE MAGISTRATE ___"           -> Magistrate application
+
+When a file name lists several statutory sections, it is describing the
+template's own example matter — NOT a claim that it suits every one of them.
+Prefer the candidate whose forum and provision match the user's request. A
+template for a different offence class (e.g. an attempt-to-murder bail
+application when the user asked about cheating) is a WRONG pick even if the
+file name happens to mention the user's section.
 
 ## Your task
 
-Pick the ONE file name that best fits what the user is asking for, OR return
+Pick the ONE file path that best fits what the user is asking for, OR return
 the literal string "none" if NO file in the list matches what the user wants.
 
 "none" is the RIGHT answer when:

@@ -1,4 +1,4 @@
-name: Test & Deploy (dev → Vultr)
+﻿name: Test & Deploy (dev â†’ Vultr)
 
 # Deploys the dev branch to the Vultr test box. Use this branch for
 # pre-production validation; once dev is stable, merge to main and the
@@ -12,7 +12,7 @@ on:
     branches: [dev]
 
 jobs:
-  # ── Job 1: Fast syntax + import check ─────────────────────────────────────
+  # â”€â”€ Job 1: Fast syntax + import check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   test:
     name: Syntax & Import Check
     runs-on: ubuntu-latest
@@ -59,11 +59,11 @@ jobs:
           python -c "from core.logger import get_logger; print('logger OK')"
           echo "All imports OK"
 
-  # ── Job 1b: Structural checks (stdlib only, seconds, cannot flake) ───────
+  # â”€â”€ Job 1b: Structural checks (stdlib only, seconds, cannot flake) â”€â”€â”€â”€â”€â”€â”€
   # Deliberately separated from `unit` below: these parse the source with
   # `ast` and import nothing from the application, so they need no
   # dependencies, no API keys and no models. That makes this the one gate
-  # that is safe to hard-block on — it cannot fail for environmental reasons.
+  # that is safe to hard-block on â€” it cannot fail for environmental reasons.
   structural:
     name: Structural Checks
     runs-on: ubuntu-latest
@@ -82,9 +82,9 @@ jobs:
         # request. Two such calls shipped undetected before this existed.
         run: python tests/test_no_blocking_calls.py
 
-  # ── Job 1c: Offline unit tests (real logic, needs the full dep set) ──────
+  # â”€â”€ Job 1c: Offline unit tests (real logic, needs the full dep set) â”€â”€â”€â”€â”€â”€
   # These import the agent modules, which transitively pull torch /
-  # transformers / sentence-transformers — so the lock file is required even
+  # transformers / sentence-transformers â€” so the lock file is required even
   # though no model is ever loaded (EMBEDDING_SERVICE_URL short-circuits the
   # eager load, and nothing dials it).
   #
@@ -109,7 +109,7 @@ jobs:
 
       - name: Run offline unit tests
         env:
-          # Dummy values — settings.py raises at import without them.
+          # Dummy values â€” settings.py raises at import without them.
           # No API call is made by any test below.
           OPENAI_API_KEY: sk-dummy
           GOOGLE_API_KEY: AIza-dummy
@@ -124,9 +124,10 @@ jobs:
             tests/test_no_blocking_calls.py \
             tests/test_client_singletons.py \
             tests/test_drafting_grounding.py \
-            tests/test_self_refine_unparseable.py
+            tests/test_self_refine_unparseable.py \
+            tests/test_drafting_template_picker.py
 
-  # ── Job 2: Integration tests against live server (optional) ──────────────
+  # â”€â”€ Job 2: Integration tests against live server (optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   # Runs only when INTEGRATION_TEST_URL repo variable is set. Hits the dev
   # box (Vultr) via /pyapiv2 prefix. Production integration runs are in
   # deploy-prod.yml against api.lawttorney.com.
@@ -141,7 +142,7 @@ jobs:
     needs: [test, deploy]
     runs-on: ubuntu-latest
     # Gate: set INTEGRATION_TEST_URL as a repository variable (not secret)
-    # GitHub → Settings → Variables → Actions → New repository variable
+    # GitHub â†’ Settings â†’ Variables â†’ Actions â†’ New repository variable
     if: vars.INTEGRATION_TEST_URL != ''
     continue-on-error: true   # informational, doesn't block anything
 
@@ -167,7 +168,7 @@ jobs:
         # timeouts to tool.lawttorney.com (likely nginx upstream cycling
         # or Cloudflare-style burst rate-limiting). Prod is healthy from
         # other IPs at the same instant, so this is purely a CI-side
-        # network blip. Auto-retry tolerates ≤3 transient blips per test
+        # network blip. Auto-retry tolerates â‰¤3 transient blips per test
         # without masking real regressions.
         run: |
           pytest tests/integration/test_api.py -v \
@@ -176,10 +177,10 @@ jobs:
             --reruns 2 --reruns-delay 5 \
             -x
 
-  # ── Job 3: Deploy to Vultr dev box (dev only) ────────────────────────────
+  # â”€â”€ Job 3: Deploy to Vultr dev box (dev only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   deploy:
     name: Deploy to dev (Vultr)
-    # Was `needs: test` — i.e. gated on a syntax + import check only, which
+    # Was `needs: test` â€” i.e. gated on a syntax + import check only, which
     # cannot catch a logic regression. `structural` and `unit` now block the
     # deploy as well. If a red `unit` ever needs to be bypassed in an
     # emergency, drop it from this list rather than deleting the job.
@@ -243,8 +244,8 @@ jobs:
             pip install -q -r requirements.txt
 
             # Full restart required because preload_app=True means HUP only
-            # respawns workers with the SAME preloaded code — new .py files
-            # on disk are never re-imported. Stop → start ensures fresh import.
+            # respawns workers with the SAME preloaded code â€” new .py files
+            # on disk are never re-imported. Stop â†’ start ensures fresh import.
             MASTER_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "0")
             if [ "$MASTER_PID" -gt "0" ] 2>/dev/null; then
               echo "Stopping gunicorn master (PID $MASTER_PID)..."
@@ -256,7 +257,7 @@ jobs:
               done
               echo "Gunicorn stopped"
             fi
-            # Start fresh — new master loads updated code from disk
+            # Start fresh â€” new master loads updated code from disk
             nohup /root/v2_multi_agent/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app > /dev/null 2>&1 &
             echo "Gunicorn started fresh (new PID: $(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null))"
 
@@ -266,7 +267,7 @@ jobs:
             # round-robins across all 16 workers. If a worker is still in
             # FastAPI lifespan startup (PG pool + graph compile), that
             # request will TLS-handshake-timeout. Require 3 CONSECUTIVE
-            # healthy polls (≈10s of stable readiness) before declaring
+            # healthy polls (â‰ˆ10s of stable readiness) before declaring
             # the deploy done.
             CONSECUTIVE_OK=0
             NEEDED=3

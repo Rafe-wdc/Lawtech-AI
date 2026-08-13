@@ -389,21 +389,46 @@ async def _translate_query_for_es_match(
         return ""
 
 
-async def _pick_reference_source(
-    query: str, file_paths: list[str],
-) -> str | None:
-    """Single Gemini Flash Lite call. Picks the best-fitting file name from
-    the candidate list, or returns None when no candidate fits (caller falls
-    back to web search).
+# How much of each candidate template to show the picker. The opening lines
+# of an Indian legal draft carry the cause title — which names the forum and
+# the provision — so a couple of hundred characters is enough to tell a
+# Sessions-Court 439 bail application from a Magistrate 436 one.
+_PICKER_PREVIEW_CHARS = 220
 
-    File paths alone (no previews) — the 2026-06-28 index census confirmed
-    corpus filenames are richly descriptive (avg 66.9 chars, 0.8% opaque).
+
+async def _pick_reference_source(
+    query: str, candidates: "list[tuple[str, str]] | list[str]",
+) -> str | None:
+    """Single Gemini Flash Lite call. Picks the best-fitting template, or
+    returns None when no candidate fits (caller falls back to web search).
+
+    Accepts either bare paths or (path, preview) pairs. The preview matters:
+    the 2026-06-28 census found filenames descriptive (avg 66.9 chars, 0.8%
+    opaque) and the picker ran on names alone for that reason — but names
+    alone cannot separate templates that are all called "bail application".
+
+    Observed: four runs of one query picked three different templates —
+    Section 439 CrPC (Sessions), Section 436 (Magistrate), and Section 307
+    IPC (attempted murder) for a CHEATING case. The picker's own logged
+    reasoning showed it guessing from a filename that listed several
+    sections. Since the reference template is the sole source of document
+    structure, a wrong pick means a wrong document.
+
+    The opening lines disambiguate them immediately:
+
+        IN THE COURT OF HON'BLE SESSIONS COURT _____   -> 439, Sessions
+        BEFORE THE HON'BLE MAGISTRATE __               -> 436, Magistrate
 
     Falls back to None on any error so traffic never breaks — the worst
-    case is a web fallback fire instead of a silent bad pick.
+    case is a web fallback instead of a silent bad pick.
     """
-    if not file_paths:
+    if not candidates:
         return None
+    # Normalise to (path, preview); older callers may pass bare paths.
+    pairs: list[tuple[str, str]] = [
+        (c, "") if isinstance(c, str) else c for c in candidates
+    ]
+    file_paths = [p for p, _ in pairs]
     try:
         from langchain.chat_models import init_chat_model
         from config.prompts import DRAFTING_PICKER_PROMPT
@@ -413,7 +438,13 @@ async def _pick_reference_source(
             temperature=0.0,
         ).with_structured_output(_PickerChoice, include_raw=True)
 
-        candidates_block = "\n".join(f"- {p}" for p in file_paths)
+        # Each candidate is its path followed by an indented preview of the
+        # template's opening lines. The path stays verbatim on the `- ` line
+        # so the caller's exact-match check still resolves the choice.
+        candidates_block = "\n".join(
+            f"- {p}" + (f"\n    OPENING LINES: {pv}" if pv else "")
+            for p, pv in pairs
+        )
         prompt = ChatPromptTemplate.from_template(DRAFTING_PICKER_PROMPT)
         chain = prompt | llm
 
@@ -493,29 +524,68 @@ async def _acquire_reference_draft(
             search_query = translated
 
     sanitized = _sanitize_es_input(search_query)
+    # `collapse` on source.keyword makes size:100 return 100 DISTINCT templates
+    # rather than 100 passages. Without it a single long template can occupy
+    # many slots, so the candidate list handed to the picker could be far
+    # shorter than 100 and the right template might never appear at all.
+    #
+    # Pulling page_content as well gives the picker an opening-lines preview.
+    # Under collapse each hit is the top-scoring passage of its document, and
+    # for these templates that is the head of the draft — which is exactly the
+    # part that names the court and the provision.
     bm25_body = {
         "size": 100,
         "query": {"match": {"page_content": sanitized}},
-        "_source": ["source"],
+        "collapse": {"field": "source.keyword"},
+        "_source": ["source", "page_content"],
     }
 
+    hits = []
     try:
         with log_time(log, "ES match for reference candidates"):
             response = await asyncio.to_thread(es.search, index=index, body=bm25_body)
         hits = response["hits"]["hits"]
     except Exception as e:
-        log.warning("ES candidate search failed; going to web",
+        # Retry without collapse: if source.keyword is missing on this index
+        # the collapse clause errors out, and losing candidate previews is far
+        # better than losing the corpus and falling through to a web draft.
+        log.warning("Collapsed candidate search failed; retrying without collapse",
                     error=short_err(e))
-        hits = []
+        try:
+            fallback_body = {
+                "size": 100,
+                "query": {"match": {"page_content": sanitized}},
+                "_source": ["source", "page_content"],
+            }
+            response = await asyncio.to_thread(
+                es.search, index=index, body=fallback_body)
+            hits = response["hits"]["hits"]
+        except Exception as e2:
+            log.warning("ES candidate search failed; going to web",
+                        error=short_err(e2))
+            hits = []
 
-    # Distinct file paths preserving order (best-scoring first)
+    # Distinct file paths preserving order (best-scoring first), each paired
+    # with a short preview of its opening lines.
     seen: set[str] = set()
-    file_paths: list[str] = []
+    candidates: list[tuple[str, str]] = []
     for hit in hits:
-        src = hit.get("_source", {}).get("source", "")
-        if src and src not in seen:
-            seen.add(src)
-            file_paths.append(src)
+        src_doc = hit.get("_source", {}) or {}
+        src = src_doc.get("source", "")
+        if not src or src in seen:
+            continue
+        seen.add(src)
+        preview = " ".join((src_doc.get("page_content") or "").split())
+        candidates.append((src, preview[:_PICKER_PREVIEW_CHARS]))
+
+    file_paths: list[str] = [p for p, _ in candidates]
+
+    log.info(
+        "Reference candidates assembled",
+        passages_returned=len(hits),
+        distinct_templates=len(file_paths),
+        with_preview=sum(1 for _, pv in candidates if pv),
+    )
 
     progress_emit(
         "drafting",
@@ -541,7 +611,7 @@ async def _acquire_reference_draft(
     # the LLM reasons about English file names against English intent —
     # regional-script tokens against English paths produced picker-rejections
     # even when a good template existed in the corpus.
-    picked = await _pick_reference_source(search_query, file_paths)
+    picked = await _pick_reference_source(search_query, candidates)
 
     if picked is None:
         log.info("Picker rejected all candidates; synthesizing via web")

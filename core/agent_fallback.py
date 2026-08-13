@@ -3,7 +3,10 @@
 Shared resilience layer for all domain agents. When an agent's primary
 data source (Elasticsearch) returns empty, these utilities provide:
 
-1. rewrite_query_for_domain() — GPT-4o-mini rewrites the query for better search
+1. rewrite_query_for_domain() — Gemini Flash Lite rewrites the query for better
+   search. NOTE: only rewrites for agent names present in `_REWRITE_PROMPTS`;
+   any other name returns the query UNCHANGED, with no error. Add a prompt
+   entry before adding a call site, or the retry is a silent no-op.
 2. web_search_fallback() — Gemini 2.5 Flash + Google Search grounding
 
 Pattern borrowed from scenario_node() in agents/scenario.py.
@@ -71,8 +74,13 @@ _REWRITE_PROMPTS: dict[str, str] = {
 def rewrite_query_for_domain(query: str, agent_name: str) -> str:
     """Rewrite a query to improve search results for a specific agent domain.
 
-    Uses GPT-4o-mini for fast, cheap query rewriting.
+    Uses Gemini Flash Lite for fast, cheap query rewriting.
     Returns the original query if rewriting fails or produces no change.
+
+    IMPORTANT: `agent_name` must be a key of `_REWRITE_PROMPTS`. Unknown names
+    return the original query silently — so a caller added without a matching
+    prompt entry gets a no-op retry that looks like it works. Currently keyed:
+    Newacts, Legislation, Judgment, Constitution, Maxim.
     """
     system_prompt = _REWRITE_PROMPTS.get(agent_name)
     if not system_prompt:

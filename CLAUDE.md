@@ -271,12 +271,26 @@ DRAFTING_SIMPLIFICATION_E2E=1 pytest tests/test_drafting_simplification.py::Test
 
 ## Agent Resilience
 
-All domain agents have a 3-tier fallback:
+The intended ladder is:
 1. **Primary search** — Elasticsearch/ChromaDB retrieval
-2. **Query rewrite + retry** — GPT-4o-mini rewrites query, retries search
+2. **Query rewrite + retry** — Gemini Flash Lite rewrites query, retries search
 3. **Web search fallback** — Gemini 2.5 Flash + Google Search grounding
 
 Shared utilities in `core/agent_fallback.py`.
+
+**Tier 2 is NOT universal — check before assuming it.** `rewrite_query_for_domain`
+returns the query unchanged for any `agent_name` missing from `_REWRITE_PROMPTS`,
+with no error, so a call site added without a matching prompt entry is a silent
+no-op. Current state:
+
+| Agent | Tier 2 |
+|---|---|
+| Legislation, Judgment | LLM rewrite + retry |
+| Constitution, Maxim | LLM rewrite + retry (added 2026-08-08) |
+| Newacts | regex rewrite + retry (`_regex_fallback_metadata`, no LLM call) |
+| SCI_Judgment, GST_Judgment | tool-level retry only — forces a topic search when the ReAct loop made no tool call |
+| Drafting | none — goes straight to web on picker miss |
+| Scenario, Legal_Concepts, Non_legal, Document | N/A — no searchable ES primary to retry |
 
 ## Code Style
 

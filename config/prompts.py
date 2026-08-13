@@ -1196,25 +1196,55 @@ You are given the user's drafting query and a list of candidate templates from
 our drafting-templates corpus. Each candidate shows its file path and, where
 available, an "OPENING LINES" preview of the template's first few lines.
 
-Use BOTH. File names are descriptive (e.g. "Format For First Bail Application
-Under Section 478 Of Bhartiya Nagarik Suraksha Sanhita, 2023 (BNSS).csv"), but
-several templates can share a generic name. The OPENING LINES carry the cause
-title, which names the FORUM and the PROVISION — and those decide the fit:
+Use BOTH, and apply the two steps below IN ORDER.
+
+## STEP 1 — DOCUMENT TYPE. A hard gate. Apply this FIRST.
+
+Decide what KIND of document the user asked for. Then eliminate every candidate
+that is a different kind. Do this BEFORE looking at which sections or Acts are
+mentioned anywhere.
+
+These are different document types. They are NEVER interchangeable:
+
+  bail application  ·  anticipatory bail application  ·  complaint
+  legal notice / demand notice / s.138 notice        ·  plaint or suit
+  writ petition  ·  appeal  ·  revision              ·  affidavit
+  reply / written statement / rejoinder              ·  agreement / deed / MOU
+
+The OPENING LINES tell you the type directly — a template usually announces
+itself, e.g. "Draft Heading: Format for Complaint Under Section 420 IPC" is a
+COMPLAINT, whatever else it mentions.
+
+**A shared statutory section does NOT make two document types interchangeable.**
+The section describes the OFFENCE; it says nothing about the document. A
+complaint about cheating under s.420 is NOT a valid reference for a bail
+application about cheating under s.420. Choosing it because both mention s.420
+is exactly the error this step exists to prevent.
+
+If NO candidate survives Step 1, return "none". A web-synthesised reference of
+the RIGHT type is better than a corpus template of the WRONG type.
+
+## STEP 2 — forum and provision, among the survivors only
+
+The cause title in the OPENING LINES names the forum:
 
   "IN THE COURT OF HON'BLE SESSIONS COURT ___"  -> Sessions-Court application
   "BEFORE THE HON'BLE MAGISTRATE ___"           -> Magistrate application
 
-When a file name lists several statutory sections, it is describing the
-template's own example matter — NOT a claim that it suits every one of them.
-Prefer the candidate whose forum and provision match the user's request. A
-template for a different offence class (e.g. an attempt-to-murder bail
-application when the user asked about cheating) is a WRONG pick even if the
-file name happens to mention the user's section.
+When a file name lists several statutory sections, it is describing that
+template's own example matter — NOT a claim that it suits every one of them. A
+bail template for a different offence class (attempt to murder when the user
+asked about cheating) is a poor pick, though still better than the wrong
+document type.
 
 ## Your task
 
 Pick the ONE file path that best fits what the user is asking for, OR return
 the literal string "none" if NO file in the list matches what the user wants.
+
+Before answering, state in `reasoning` what document TYPE the user asked for
+and what type your chosen file is. If those two do not match, you have made an
+error — return "none" instead.
 
 "none" is the RIGHT answer when:
   - The user is asking for a document type the corpus does not appear to contain

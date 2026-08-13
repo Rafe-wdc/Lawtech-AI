@@ -163,6 +163,26 @@ class TestPickerPromptUsesThePreviews:
         assert '"none"' in DRAFTING_PICKER_PROMPT, (
             "'none' triggers the web fallback — it must survive this change")
 
+    def test_document_type_is_a_hard_gate_applied_first(self):
+        """Previews alone were not enough.
+
+        With previews but only guidance, the picker read the preview,
+        correctly identified the file as a COMPLAINT, and chose it anyway
+        for a bail application — its own logged reasoning said so. The type
+        rule has to be an ordered gate, not a preference.
+        """
+        low = DRAFTING_PICKER_PROMPT.lower()
+        assert "step 1" in low and "step 2" in low, "the gate must be ordered"
+        assert "never interchangeable" in low
+        assert "shared statutory section does not make two document types" in low, (
+            "this is the exact error to prevent: picking a complaint for a "
+            "bail application because both cite s.420")
+
+    def test_picker_must_state_the_type_match_in_its_reasoning(self):
+        """Forcing the comparison into the output makes the error self-evident."""
+        low = DRAFTING_PICKER_PROMPT.lower()
+        assert "reasoning" in low and "do not match" in low
+
 
 # --- Standalone runner (venv has no pytest) ---------------------------------
 

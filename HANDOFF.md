@@ -185,7 +185,83 @@ Edit tool.
 
 ## What is still open
 
-### Q-15 — court awareness in template selection *(highest-value remaining)*
+### 🔴 Q-19 — THE CRITIC INVENTS CASE FACTS BY FILLING IN PLACEHOLDERS
+
+**Start here. This is a live regression, introduced by the fixes on this branch, and it
+is worse than the bug they were meant to fix.**
+
+Observed 13 Aug, request `b8553d2f`, query
+`"Draft a bail application for cheating under Section 420 Indian Penal Code"` with **no
+case facts supplied**. The delivered draft contained:
+
+```
+Rohan Sharma · Age 35 · Businessman · 123, ABC Colony, Kothrud, Pune - 411038
+Crime Register No. 123 of 2024 · Kothrud Police Station · Yerwada Central Jail
+arrested 01/01/2024 · "aged parents, wife, and two minor children"
+```
+
+All fabricated. None of it was in the query.
+
+**The generator did its job.** The log proves the draft was correct when it left
+`_generate_draft`:
+
+```
+16:58:27  DraftingValidation | unsupported_facts=5 | placeholder_count=46
+16:58:39  Critique   | violation_count=4
+16:59:14  Refinement | 7912 -> 8508
+16:59:26  Critique   | violation_count=12 | critical=2
+16:59:55  Refinement | 8508 -> 9124
+17:00:01  Self-refine max iterations exhausted
+```
+
+**46 placeholders went in; three critique-and-refine cycles turned them into invented
+particulars.**
+
+#### Mechanism — three changes on this branch colliding
+
+1. **Q-18** makes the generator emit `[ACCUSED'S NAME]`-style placeholders when no case
+   facts exist. Correct behaviour.
+2. **`placeholder_marker`** in `CRITIQUE_PROMPT` (`core/self_refine.py:496`, pre-existing)
+   flags surviving placeholders as a **MAJOR** violation — *"the drafting prompt forbids
+   these"*.
+3. **Q-1** forces `self_refine` to run whenever a populated registry exists, and **R-6**
+   raised `max_output_tokens` 4096 -> 16384 so the critique now parses and its violations
+   are actually applied. Before R-6 the JSON truncated and everything was silently
+   discarded — which is why this only surfaced now.
+
+So the critic treats correct placeholders as defects and the refiner **invents values to
+remove them**. The two halves of the system are enforcing opposite rules.
+
+`_enforce_grounding` cannot catch it: it runs inside `_generate_draft`, **before**
+`self_refine` in `drafting_node`.
+
+#### Fix direction (not implemented — the user asked for no code changes)
+
+The critic must know when placeholder mode was active. Options, roughly in order:
+
+1. **Thread the no-case-facts signal into `self_refine`** and suppress
+   `placeholder_marker` for that call. Smallest change, addresses the root.
+2. **Re-run `validate_draft_grounding` after `self_refine`** and prefer the
+   pre-refinement draft when the refined one has more ungrounded facts. A safety net
+   rather than a fix, but cheap and catches any future variant.
+3. **Narrow `placeholder_marker`** so it targets only genuine leakage markers
+   (`[CITE: ...]`, `TBD`, `FILL IN`, `<insert party>`) and never legitimate field
+   placeholders like `[ACCUSED'S NAME]`.
+
+1 and 2 together are probably right. **Verify by re-running the query above and confirming
+the delivered draft still contains placeholders, not names.**
+
+#### Also visible in that run
+
+- `Intent extraction failed; using default_intent | error=` — the extractor threw an
+  empty error and the request proceeded with a default intent. Unrelated, worth a look.
+- **244 seconds** end to end, of which `self_refine` was ~83s across three cycles. It also
+  grew the draft 7912 -> 9124 chars while never reaching `passes=True`
+  (`max iterations exhausted`, 4 violations still open). Relevant to `C-2`.
+
+---
+
+### Q-15 — court awareness in template selection
 
 Nothing tells the picker which court the user is filing in. Q-8 fixed *document type*;
 **forum** is still unaddressed, and it is the lawyer's original complaint. The

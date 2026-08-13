@@ -2,8 +2,8 @@
 
 **For the next Claude Code session picking this up.**
 
-Branch `fix/audit-coverage`, based on `3a0d77b`. Written 13 Aug 2026.
-**Nothing is committed.** Everything below sits in the working tree.
+Branch `fix/audit-coverage`, based on `3a0d77b`. Last updated 13 Aug 2026.
+**15 commits, all local. Nothing has been pushed.**
 
 ---
 
@@ -11,114 +11,147 @@ Branch `fix/audit-coverage`, based on `3a0d77b`. Written 13 Aug 2026.
 
 ### 1. The working tree is SHARED with another session
 
-A second Claude Code session is actively building **OCR blur detection** in this same
-tree. Its files are **not yours**:
+A second Claude Code session is actively building **OCR blur detection** here. These are
+**not yours** and must never be committed by you:
 
 ```
 core/file_processor.py   core/gateway.py   frontend.html
-scripts/check_image_ocr.py
-tests/test_blur_detect.py
+scripts/check_image_ocr.py               tests/test_blur_detect.py
 blurry image.jpg   real_blur.png   non-disclosure-agreement-uplead-791x1024.jpg
 ```
 
-**Never run `git add .`** — it would commit their half-finished feature. Stage by
-explicit path, always. Their tests pass (14) and there is no overlap with the files
-below, but the two change-sets must not be merged into one commit.
+**Never `git add .`** — stage by explicit path, always. Their tests pass (14) and there is
+no file overlap with the work below, but the two change-sets must stay separate.
 
-### 2. Test files are gitignored
+### 2. Two directory trees exist — use the nested one
 
-`.gitignore:157` excludes `tests/test_*.py`. Committing any test written here needs
-`git add -f`.
+```
+C:\Users\Admin\Downloads\Lawtech-AI\             ← stale copy, NOT the repo
+C:\Users\Admin\Downloads\Lawtech-AI\Lawtech-AI\  ← the repo (.git, models/, frontend.html)
+```
 
-### 3. There is no pytest in the venv
+The user has already lost a test run to this: uvicorn started from the parent, served a
+different codebase, 404'd the frontend and reported "models not found".
 
-Every test suite has a `__main__` runner, so run them directly:
+### 3. Tests are gitignored and there is no pytest
+
+`.gitignore:157` excludes `tests/test_*.py`, so committing any test needs `git add -f`.
+(`HANDOFF.md` is excluded too, at `.gitignore:88`.)
+
+Every suite has a `__main__` runner:
 
 ```powershell
 .\.venv\Scripts\python.exe tests\test_drafting_grounding.py
 ```
 
-The venv also has **no pip** — use `uv pip install --python .\.venv\Scripts\python.exe ...`
-if you need something.
+The venv has **no pip** either — use `uv pip install --python .\.venv\Scripts\python.exe ...`.
+
+⚠️ Running the full suite in one loop has **timed out at 5 minutes**. Run suites
+individually, or in batches of three or four.
 
 ---
 
 ## Where the real tracker lives
 
-**`FIX_REGISTER.md`** — the single source of truth: every item, its status, why it
-matters, and four proposals that were investigated and **deliberately rejected** (with
-reasons, so nobody re-proposes them). Item IDs (Q-1, R-4, …) are stable; use them.
+**`FIX_REGISTER.md`** — every item, its status, why it matters, and four proposals that
+were investigated and **deliberately rejected** with reasons. Item IDs (Q-1, R-4 …) are
+stable; use them. It is one commit behind the newest work — the commit messages below
+carry the rest.
 
-`IMPROVEMENT_GAPS.md` and `PROPOSAL_improvements.md` are older analysis documents. Both
-were corrected on 9 Aug — they had a **false security assurance** and four stale entries.
-Treat them as background, not as tracking.
+`IMPROVEMENT_GAPS.md` and `PROPOSAL_improvements.md` are older analysis. Both were
+corrected on 9 Aug — they contained a **false security assurance** and four stale entries.
+Background, not tracking.
 
 ---
 
-## What was done — 9 fixes
+## What was done — 15 commits
 
-**9 files, +757 / −36. 7 test files, 63 tests, all passing.**
+Read `git log` for the full reasoning; each message states root cause and evidence.
 
-| ID | Fix | Files |
-|---|---|---|
-| **Q-1** | Drafting critic now receives the retrieved-source whitelist, so invented case citations get checked | `agents/drafting.py` |
-| **Q-2** | Constitution & Maxim retry with a rewritten query before falling back to web search | `agents/constitution_maxim.py` |
-| **Q-3** | `source_registry` state channel made live — first production writer for a reducer that had zero callers | `agents/drafting.py`, `agents/orchestrator.py` |
-| **Q-18** | Drafting invented case facts when none were supplied — placeholder mode + regex validator | `agents/drafting.py` |
-| **R-1** | Two blocking calls freezing the event loop | `agents/newacts.py`, `agents/drafting.py` |
-| **R-4** | Three singletons could be built twice under concurrency (two load models) | `core/clients.py` |
-| **R-6** | `self_refine` crashed on unparseable critique output and shipped drafts under a "passed" log | `core/self_refine.py` |
-| **P-1** | Deploy pipeline ran zero tests; now gated on 63 | `.github/workflows/deploy.yml` |
-| **P-3a** | Doc corrections — wrong model name, false "all agents have 3-tier fallback" claim | `CLAUDE.md`, `core/agent_fallback.py` |
+```
+fd96a44  fix(drafting): statutory currency (IPC/BNS) and omissions that expose the litigant
+e73494d  fix(drafting): require explicit paragraph numbering; stop truncating the critique
+0191b22  fix(drafting): bracket the whole assertion, not just the values inside it
+5806a4b  fix(drafting): make document type a hard gate in the template picker
+dc32b1a  fix(ci): repair deploy.yml encoding damaged by a PowerShell rewrite
+cd6301a  fix(drafting): give the template picker content, not just file names
+d1594ce  security: read the test API key from the environment, never hardcode it
+28480c7  docs: add HANDOFF.md
+7e9a4ac  ci(deploy): gate deployment on real tests, and add the fix register
+108bac8  fix(constitution-maxim): add the missing tier-2 query-rewrite retry
+4e473a9  fix(self-refine): stop reporting a crashed critique as a pass
+944128b  fix(clients): guard singleton construction against concurrent first requests
+f753722  fix(newacts): run the retry search off the event loop
+7def69a  fix(drafting): ground the citation critic and stop inventing case facts
+1560099  docs(fallback): correct model name and the 3-tier fallback claim
+```
 
-Full write-ups with root-cause analysis are in `FIX_REGISTER.md`. Do not re-derive them.
-
-### Test suites
+**8 test suites, 77 tests.** All passing as of `e73494d`; `fd96a44` is prompt text only
+and was verified by import plus the picker suite.
 
 ```
 tests/test_drafting_source_registry.py      13   Q-1
 tests/test_constitution_maxim_retry.py      10   Q-2
 tests/test_source_registry_state_channel.py 12   Q-3
-tests/test_no_blocking_calls.py              4   R-1  (AST guard, all agent modules)
+tests/test_no_blocking_calls.py              4   R-1  (AST guard, validated pre-fix)
 tests/test_client_singletons.py              5   R-4  (has a negative control)
 tests/test_drafting_grounding.py            12   Q-18
 tests/test_self_refine_unparseable.py        7   R-6
+tests/test_drafting_template_picker.py      14   Q-8
 ```
 
 ---
 
-## What is actually VERIFIED vs merely reasoned
+## VERIFIED in production vs merely reasoned
 
-This distinction matters. Do not inherit optimism.
+**Do not inherit optimism.** Everything else is a mechanism argument from reading code.
 
-| Fix | Evidence |
+| Fix | Evidence from real request logs |
 |---|---|
-| **Q-3** | ✅ Live — `registry_size=9` and `=15` observed in real request logs |
-| **Q-1** | ✅ Live — `registry_records=14` observed on a real drafting request |
-| **Q-18** | ✅ Live — `placeholder_mode=True`, `placeholder_count=41`, and **no invented names / FIR numbers / police stations** in the output |
-| **R-1, R-4, R-6, P-1** | Structural — proven by tests, not by traffic |
-| **Q-2** | ❌ **Never fired in production.** See below. |
+| **Q-1** | ✅ `registry_records=14` |
+| **Q-3** | ✅ `registry_size=9`, `=15` |
+| **Q-18** | ✅ `placeholder_mode=True`, `placeholder_count=31–41`, zero invented names/FIR/police stations |
+| **Q-8** | ✅ `Picker chose … First bail Application under s.483 BNSS`, reasoning states the type match |
+| **R-6** | ✅ Caught a live failure and named its cause (see below) |
+| R-1, R-4, P-1 | Structural — tests only |
+| **Q-2** | ❌ **Never fired in production** |
+
+### R-6 earned its keep immediately
+
+It surfaced a failure that had been invisible:
+
+```
+Critique output failed schema validation — NOT verified
+  parsing_error=OutputParserException: Failed to parse Critique from completion
+  {"passes": false, "confidence": 0.9, "violations": [{"field": "legal_artifact", …
+  raw_chars=4397
+Self-refine returning UNVERIFIED — refined=True
+```
+
+The critique JSON was **truncated** at `max_output_tokens=4096`. The critic had found 5
+violations; the output was cut off mid-string, the parse failed, and **none were applied**
+— while the log said "Self-refine passed". Raised to 16384 in `e73494d`.
+
+Expect `self_refine` to change drafts **more** now that its findings actually land.
 
 ### Q-2 is correct code for a situation that barely occurs
 
-Worth knowing before anyone builds on it. The retry only fires when Elasticsearch returns
-**zero** results. Three things prevent that:
+The retry only fires when ES returns **zero** results. Three things prevent that:
 
-1. The orchestrator **already rewrites the query per agent** before the agent runs — a
-   plain-English question arrives as `"Right to property compensation eminent domain
-   Article 31 Article 300A"`. (Ironically this is the same call `C-6` flags as redundant.)
-2. The ES query uses `should` + `minimum_should_match: 1`, so **any single matching term
-   returns hits**. English queries return *irrelevant* results, never zero.
+1. The orchestrator **already rewrites the query per agent**, so a plain-English question
+   arrives as `"Right to property compensation eminent domain Article 31 Article 300A"`.
+   (Ironically the same call `C-6` flags as redundant.)
+2. The ES query uses `should` + `minimum_should_match: 1` — any single matching term
+   returns hits. English queries return *irrelevant* results, never zero.
 3. Non-English queries that *do* return zero often route to `Legal_Concepts`, which is
    web-only and never touches ES.
 
-Probed empirically: no English query returned zero hits; only Devanagari / transliterated
-regional queries did. **Q-2's real value is non-English queries**, not the vocabulary
-mismatch originally claimed.
+Probed empirically: **no English query returned zero hits.** Only Devanagari and
+transliterated regional ones did. Q-2's real value is non-English queries.
 
-The bigger gap this exposed: when the relevance gate **rejects** results, the agent goes
-straight to web search and the tier-2 retry never gets a chance. That is where the volume
-is, and it is not yet an item.
+**The bigger gap it exposed, not yet an item:** when the relevance gate **rejects**
+results, the agent goes straight to web search and the tier-2 retry never gets a chance.
+That is where the volume is.
 
 ---
 
@@ -128,11 +161,8 @@ is, and it is not yet an item.
 |---|---|
 | `.env` | Real keys present, including ES. Gitignored (`.gitignore:2`). |
 | Embedding models | Downloaded and verified — BGE-large 1279 MB, MiniLM 87 MB |
-| **Elasticsearch** | ✅ **Reachable from this machine** — confirmed by real query results |
-| Server | Runs; the user has been driving it manually |
-| pytest | Not installed (see above) |
-
-### Running the server
+| **Elasticsearch** | ✅ **Reachable** — confirmed by live queries against the real corpus |
+| pytest | Not installed |
 
 ```powershell
 cd C:\Users\Admin\Downloads\Lawtech-AI\Lawtech-AI
@@ -140,142 +170,115 @@ cd C:\Users\Admin\Downloads\Lawtech-AI\Lawtech-AI
 ```
 
 gunicorn does **not** work on Windows (`import fcntl`). UI is at `/`, not `/frontend`.
-`/pyapi/health` returns **503** without a local ES on `localhost:9200` — that is expected
-and not a fault. The search field is `Promptquery`, not `query`.
+`/pyapi/health` returns 503 without a local ES — expected. The search field is
+`Promptquery`, not `query`.
 
-### Running tests
+⚠️ **Test runs write into `logs/agent.log`.** This already caused one wrong conclusion —
+72 "successful retries" that were entirely test fixtures. When reading logs for production
+evidence, **filter out `req=-`** and look only at real request IDs.
 
-```powershell
-$env:OPENAI_API_KEY='x'; $env:GOOGLE_API_KEY='x'; $env:EMBEDDING_SERVICE_URL='http://localhost:1'
-.\.venv\Scripts\python.exe tests\test_drafting_grounding.py
-```
-
-The suites set those themselves, but setting them explicitly avoids surprises. No test
-makes an API call. `EMBEDDING_SERVICE_URL` skips the ~1.4 GB eager model load.
-
-⚠️ **Test runs write into `logs/agent.log`.** This has already caused one wrong
-conclusion — 72 "successful retries" that were entirely test fixtures. When reading logs
-for production evidence, **filter out `req=-`** (test/startup noise) and look only at
-real request IDs.
+⚠️ **Do not rewrite whole files through PowerShell `Set-Content`.** It re-encoded
+`deploy.yml` and mangled every box-drawing character (`dc32b1a` was the repair). Use the
+Edit tool.
 
 ---
 
-## The next task — Q-8, template selection
+## What is still open
 
-This is the biggest remaining problem and the analysis is already done. It explains both
-the varying document structure **and** the lawyer's wrong-court-format complaint.
+### Q-15 — court awareness in template selection *(highest-value remaining)*
 
-### The bug
+Nothing tells the picker which court the user is filing in. Q-8 fixed *document type*;
+**forum** is still unaddressed, and it is the lawyer's original complaint. The
+`UserIntent` extractor already runs on every request — extract the forum and boost or
+filter on it. May need a re-index if the drafting index has no court field.
 
-`agents/drafting.py` picks its reference template like this:
+### Drafting gaps from a lawyer's review — 2 of 6 remain
 
-```
-BM25 match on page_content (size 100)
-  → dedupe to unique file paths
-  → an LLM picks one, seeing ONLY THE FILENAMES
-```
+A lawyer reviewed real output. Fixed: paragraph numbering (`e73494d`), statutory currency
+IPC↔BNS, prior-bail disclosure, verification clause, advocate enrolment block (`fd96a44`).
 
-The template **is** the document's structure, so a wrong pick means a wrong document.
-Four runs of the identical query produced **three different templates**:
+**Still open:**
+- **Court designation hardcoded to "Sessions Judge"** — regular bail for a 420-only matter
+  may be maintainable before a Magistrate. This is Q-15, not a prompt fix.
+- **Ungrounded assertions persist** — `unsupported_facts=4`, still asserting sole
+  breadwinner / permanent resident / no antecedents / judicial custody. `0191b22` made
+  bracketing a hard rule and compliance is partial across the 5 section-wise calls. May
+  improve now the critic can actually apply its findings.
 
-| Run | Template | Sections |
-|---|---|---|
-| 1, 2 | Bail Application under **Section 439** CrPC | 9 |
-| 3 | First bail Application under **Section 436** CrPC | 5 |
-| 4 | Bail Application for **Section 307** IPC *(attempted murder)* | 6 |
+### Untested — the last three commits
 
-Run 4 is the clearest failure — a Section 307 template for a cheating case. The picker's
-own logged reasoning shows it guessing from a filename that lists several sections.
+Nobody has run a draft since `0191b22`, `e73494d`, `fd96a44`. One run of
+`"Draft a bail application for cheating under Section 420 Indian Penal Code"` should
+confirm: numbered paragraphs, the BNS counterpart cited inline, a prior-bail disclosure
+paragraph, and `unsupported_facts` trending toward 0.
 
-### The fix, in order of cost
+### S-1 — security, partially done
 
-1. **Show the picker the first ~200 chars of each candidate.** The opening line of every
-   template names the court and provision:
-   ```
-   IN THE COURT OF HON'BLE SESSIONS COURT _____   ← Section 439, Sessions
-   BEFORE THE HON'BLE MAGISTRATE __               ← Section 436, Magistrate
-   ```
-   No re-index. Likely ends the roulette on its own.
-2. **ES `collapse` on `source.keyword`** so `size: 100` returns 100 *distinct* templates
-   rather than 100 passages. Log `len(file_paths)` first to confirm the funnel is
-   actually collapsing. No re-index.
-3. **Q-15** — feed the court/forum from `UserIntent` into selection. May need a re-index
-   if the drafting index has no court field.
+The hardcoded key is **removed from all 12 files** (`d1594ce`) and reads from
+`LAWTECH_TEST_API_KEY` with an empty default. **The user still needs to rotate it** — it
+remains in git history — and set `ADMIN_API_KEY` to a value *different* from `API_KEYS`.
+They are currently identical, which is what turned a leaked user key into a leaked admin
+key. Repo is private, so urgency is moderate.
 
-### ⚠️ Hard constraint
+### Other standing items
 
-`CLAUDE.md` invariant #5 **forbids** reintroducing `GENERIC_COURT_SKELETONS`,
-`DOC_TYPE_TO_FOOTER_KIND`, or any doc-type taxonomy. That approach existed and was
-deliberately removed. **The reference template is the structural anchor** — the fix
-belongs in *choosing a better template*, never in hard-coding formats.
-
-Read the "Drafting invariants (do not regress)" section of `CLAUDE.md` before touching
-`agents/drafting.py`. There are six of them and they are load-bearing.
+- **Q-18 gap:** the section-wise path logs grounding violations but does not regenerate —
+  N sections means N Pro calls. Bail applications take that path.
+- **`self_refine` costs ~33–35% of request latency** (25.6s of 72s; 36s of 110s). Relevant
+  to `C-2` — but **Q-1 increased** its usage, so the two pull in opposite directions and
+  must be priced together.
+- **C-1 is a trap.** `IMPROVEMENT_GAPS.md` calls four scenario calls "cheap extraction on
+  an expensive model". They are **Google-Search-grounded generation**, two of which produce
+  the user-facing answer. Downgrading is a quality regression. Corrected in the register.
 
 ---
 
-## Other open items worth knowing
+## Hard constraints
 
-**S-1 — security, unscheduled.** The API key is hardcoded in **12 committed files**, and
-`ADMIN_API_KEY` is set to the same value, so that committed string grants admin access.
-Independent of all code work; needs a rotation decision.
+`CLAUDE.md` has a **"Drafting invariants (do not regress)"** section — six of them, all
+load-bearing. Read it before touching `agents/drafting.py`.
 
-**Q-18's known gap.** The section-wise generation path **logs** grounding violations but
-does not regenerate — redoing N sections costs N Pro calls. Bail applications take that
-path, so a violation there still reaches the user, visibly in logs.
-
-**`self_refine` costs ~33–35% of request latency** (measured twice: 25.6s of 72s, 36s of
-110s). Relevant to `C-2`. Note **Q-1 increased** its usage on drafting, so Q-1 and C-2
-pull in opposite directions and should be priced together.
-
-**C-1 is a trap.** `IMPROVEMENT_GAPS.md` describes four "cheap extraction calls on an
-expensive model". They are actually **Google-Search-grounded generation** — two of them
-produce the user-facing answer. Downgrading them is a quality regression, not a saving.
-Already corrected in the register; do not act on the original claim.
+Invariant #5 forbids reintroducing `GENERIC_COURT_SKELETONS`, `DOC_TYPE_TO_FOOTER_KIND`,
+or any doc-type taxonomy. **The reference template is the structural anchor.** Fixes belong
+in *choosing a better template*, never in hard-coding formats. The `4B` block added in
+`fd96a44` sits close to that line deliberately — it is scoped to omissions that *expose
+the litigant*, not general enrichment. Keep it that way.
 
 ---
 
 ## The lesson that matters most
 
-**Five times** a documented claim did not survive being checked:
+**Six times** a documented claim did not survive being checked:
 
 | Claim | Reality |
 |---|---|
-| "Reuse the existing adapters" | They read attributes; the ES tools return dicts — would have shipped an empty registry |
-| "The rewrite helper exists and works" | For 5 agent names; silently returns the query unchanged for all others |
+| "Reuse the existing adapters" | They read attributes; ES tools return dicts — would have shipped an empty registry |
+| "The rewrite helper exists and works" | For 5 agent names; silently returns the query unchanged for the rest |
 | `translate_draft` is wired up | Registered in `AGENT_TOOLS`, which drafting never reads — unreachable |
 | "Four cheap extraction calls" (C-1) | All four are grounded generation |
 | `SYSTEM_MAP.md` documents kNN + RRF | Zero matches in `*.py` — never built |
+| "The picker funnel collapses" *(mine)* | Probing showed 100 passages already gave 100 distinct templates |
 
-Every one would have produced a change that **looks landed and is not**: green tests,
+Every one would have produced a change that **looks landed and is not** — green tests,
 clean diff, no behaviour change.
 
 **Rule:** treat every *"X already exists, just call it"* as unverified until you have read
-X's signature and confirmed the data you plan to hand it is the shape it expects.
+X's signature and confirmed your data is the shape it expects.
 
-Two tests here exist purely because of this pattern and both caught real errors —
-`tests/test_no_blocking_calls.py` (validated against the pre-fix commit, where it
-correctly flags both original bugs) and the negative control in
-`tests/test_client_singletons.py` (proves the harness generates real concurrency).
-Keep that discipline.
+**A second lesson, from Q-8 and Q-18:** in prompts, *guidance loses to competing pressure;
+an ordered hard gate does not.* The picker was given content previews and still chose a
+complaint for a bail application — its own reasoning said so. Only a Step 1 / Step 2 gate
+fixed it. The same pattern applied to assertion bracketing. If a prompt fix half-works,
+make it a gate rather than adding more words.
+
+Two tests exist purely to defend this discipline and both caught real errors:
+`test_no_blocking_calls.py` (validated against the pre-fix commit, where it correctly
+flags both original bugs) and the negative control in `test_client_singletons.py` (proves
+the harness generates real concurrency). Keep them.
 
 ---
 
-## Suggested commit plan
+## Before you push
 
-Six commits, staged by explicit path:
-
-| # | Scope | Files |
-|---|---|---|
-| 1 | Q-1 + Q-3 citation grounding *(also carries R-1's drafting hunk)* | `drafting.py`, `orchestrator.py`, 2 tests |
-| 2 | Q-2 + P-3a | `constitution_maxim.py`, `agent_fallback.py`, `CLAUDE.md`, 1 test |
-| 3 | R-1 blocking calls | `newacts.py`, 1 test |
-| 4 | R-4 singleton races | `clients.py`, 1 test |
-| 5 | Q-18 + R-6 drafting grounding & critic fail-open | `drafting.py`, `self_refine.py`, 2 tests |
-| 6 | P-1 CI gate + docs | `deploy.yml`, `FIX_REGISTER.md` |
-
-Commits 1 and 5 both touch `drafting.py`; hunk-splitting was judged too risky in a shared
-tree, so state that in the message rather than pretending it is clean.
-
-**Do not push without asking the user.** Committing to this branch deploys nothing —
-`deploy.yml` fires only on push to `dev`, and prod is a manual dispatch from `main`.
+Nothing is pushed. Committing to this branch deploys nothing — `deploy.yml` fires only on
+push to `dev`, and prod is a manual dispatch from `main`. **Ask the user before pushing.**

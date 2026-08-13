@@ -59,6 +59,73 @@ jobs:
           python -c "from core.logger import get_logger; print('logger OK')"
           echo "All imports OK"
 
+  # ── Job 1b: Structural checks (stdlib only, seconds, cannot flake) ───────
+  # Deliberately separated from `unit` below: these parse the source with
+  # `ast` and import nothing from the application, so they need no
+  # dependencies, no API keys and no models. That makes this the one gate
+  # that is safe to hard-block on — it cannot fail for environmental reasons.
+  structural:
+    name: Structural Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: No blocking I/O on async paths
+        # Catches synchronous ES / ChromaDB calls made directly from an
+        # `async def`, which freeze the event loop for every concurrent
+        # request. Two such calls shipped undetected before this existed.
+        run: python tests/test_no_blocking_calls.py
+
+  # ── Job 1c: Offline unit tests (real logic, needs the full dep set) ──────
+  # These import the agent modules, which transitively pull torch /
+  # transformers / sentence-transformers — so the lock file is required even
+  # though no model is ever loaded (EMBEDDING_SERVICE_URL short-circuits the
+  # eager load, and nothing dials it).
+  #
+  # Curated list, not `pytest tests/`: much of tests/ needs live ES, real API
+  # keys, or PDF fixtures that are gitignored. Add a suite here only once it
+  # is known to pass offline.
+  unit:
+    name: Unit Tests (offline)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned dependencies
+        run: pip install --quiet -r requirements.lock.txt
+
+      - name: Run offline unit tests
+        env:
+          # Dummy values — settings.py raises at import without them.
+          # No API call is made by any test below.
+          OPENAI_API_KEY: sk-dummy
+          GOOGLE_API_KEY: AIza-dummy
+          # Skips the ~1.4 GB eager embedding-model load in core/clients.py.
+          # Never dialled, because nothing here embeds.
+          EMBEDDING_SERVICE_URL: http://localhost:1
+        run: |
+          pytest -v --tb=short \
+            tests/test_drafting_source_registry.py \
+            tests/test_constitution_maxim_retry.py \
+            tests/test_source_registry_state_channel.py \
+            tests/test_no_blocking_calls.py \
+            tests/test_client_singletons.py \
+            tests/test_drafting_grounding.py \
+            tests/test_self_refine_unparseable.py
+
   # ── Job 2: Integration tests against live server (optional) ──────────────
   # Runs only when INTEGRATION_TEST_URL repo variable is set. Hits the dev
   # box (Vultr) via /pyapiv2 prefix. Production integration runs are in
@@ -112,7 +179,11 @@ jobs:
   # ── Job 3: Deploy to Vultr dev box (dev only) ────────────────────────────
   deploy:
     name: Deploy to dev (Vultr)
-    needs: test
+    # Was `needs: test` — i.e. gated on a syntax + import check only, which
+    # cannot catch a logic regression. `structural` and `unit` now block the
+    # deploy as well. If a red `unit` ever needs to be bypassed in an
+    # emergency, drop it from this list rather than deleting the job.
+    needs: [test, structural, unit]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
 

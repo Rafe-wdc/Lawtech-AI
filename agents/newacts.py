@@ -806,7 +806,18 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 try:
                     retry_es_query = _build_newacts_query(retry_meta, query)
                     es = get_es_client()
-                    retry_resp = es.search(index=ES_INDICES["newacts"], body=retry_es_query)
+                    # Off-thread: the opensearch-py client is synchronous, so
+                    # calling it directly here would block the event loop for
+                    # the whole round-trip — stalling every other in-flight
+                    # request, not just this one. Every other ES call in this
+                    # module already goes through to_thread (either directly,
+                    # or via the sync `_build_and_search*` helpers above); this
+                    # retry path was the one that got missed.
+                    retry_resp = await asyncio.to_thread(
+                        es.search,
+                        index=ES_INDICES["newacts"],
+                        body=retry_es_query,
+                    )
                     hits = retry_resp["hits"]["hits"]
                     if hits:
                         log.info("Retry search succeeded", hit_count=len(hits))

@@ -1355,6 +1355,43 @@ user's ask requires) document in a single response.
    sources. NEVER mix specific values and bracketed placeholders for the
    SAME field type within the same draft — pick one convention.
 
+4A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA.
+   The new criminal codes commenced on 1 July 2024. Offences committed ON OR
+   AFTER that date are charged under the BNS/BNSS/BSA; offences BEFORE it
+   remain under the IPC/CrPC/IEA, and pending matters continue under the old
+   codes. Which applies therefore depends on the DATE OF THE OFFENCE, which
+   you usually will not know.
+   Do NOT silently pick one. When the offence date is not stated:
+     - cite the provision the user named, and
+     - give its counterpart inline on first use, e.g. "Section 420 of the
+       Indian Penal Code, 1860 [Section 318 of the Bharatiya Nyaya Sanhita,
+       2023, for offences on or after 01.07.2024]", and
+     - do the same for the procedural provision (s.439 CrPC / s.483 BNSS).
+   The RELEVANT LEGAL CONTEXT block above carries the retrieved mapping — use
+   it rather than reciting one from memory. Filing under a repealed code for a
+   2025 offence is a defect the drafter cannot see.
+
+4B. PROCEDURAL DISCLOSURES THE DRAFTER MUST NOT SILENTLY OMIT.
+   Some conventions exist to protect the litigant, and leaving them out is a
+   real risk rather than a stylistic choice. Where the document type calls for
+   them, include them — bracketed when the facts are unknown:
+     - Bail applications: a paragraph disclosing whether any earlier bail
+       application has been made, and its outcome. Indian courts treat
+       non-disclosure of a previous unsuccessful application as a serious
+       lapse. Use e.g. "[STATE WHETHER ANY PREVIOUS BAIL APPLICATION HAS BEEN
+       FILED. If yes, give the court, case number, date and outcome. If none,
+       state: No previous application for bail has been filed by the Applicant
+       in this matter before this or any other Court.]"
+     - VERIFICATION must separate the two things it is verifying: paragraphs
+       of FACT are verified as true to personal knowledge; paragraphs of LEGAL
+       SUBMISSION are verified as believed true on advice of counsel. Do not
+       merge them into one clause — a registry may treat that as defective.
+     - The advocate block needs a name, enrolment number and address for
+       service, not a bare name. Bracket what is unknown.
+   This is not a licence to add sections the reference draft does not have —
+   invariant: the reference remains the structural anchor. It covers omissions
+   that expose the litigant, not general enrichment.
+
    CRITICAL — do NOT substitute canonical Indian-legal example values
    from your training data when the source names different real parties.
    Common substitution set to reject: "Priyanka", "Sneha", "Bhausaheb",

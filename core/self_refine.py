@@ -1395,6 +1395,15 @@ def _format_violations(violations: list[Violation]) -> str:
     return "\n\n".join(lines)
 
 
+# Marker for a critique that did not actually run to a verdict — the call
+# errored, its output failed schema validation, or the circuit breaker was
+# open. All three return `passes=True` so a critic outage never blocks a
+# user response, but that is a FAIL-OPEN, not a clean pass. Paired with
+# `confidence=0.0`, it lets the refine loop log the difference instead of
+# reporting "Self-refine passed" for a check that never happened.
+_UNVERIFIED_NOTE = "critique did not complete — response NOT verified"
+
+
 async def _critique(
     user_query: str,
     intent: UserIntent,
@@ -1427,7 +1436,7 @@ async def _critique(
         log.warning("Gemini Flash circuit open — skipping critique",
                     fast_fail=True)
         return Critique(passes=True, confidence=0.0,
-                        overall_quality_notes="critique skipped (Flash circuit open)")
+                        overall_quality_notes=_UNVERIFIED_NOTE)
 
     try:
         with log_time(log, "Self-refine critique"):
@@ -1462,7 +1471,38 @@ async def _critique(
                 local_timeout=45,
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
-        result: Critique = raw_and_parsed["parsed"]
+        result: Critique | None = raw_and_parsed.get("parsed")
+
+        if result is None:
+            # `with_structured_output(..., include_raw=True)` returns
+            # {"raw", "parsed", "parsing_error"} and sets `parsed` to None
+            # when the model's output does not validate against the schema.
+            #
+            # Previously this line was `raw_and_parsed["parsed"]` followed by
+            # `result.passes`, which raised AttributeError on None. The generic
+            # `except` below swallowed it as "Critique LLM call failed", so the
+            # actual cause — a schema violation — never reached the logs, and a
+            # parse failure was indistinguishable from a clean pass.
+            #
+            # Observed in production 2026-08-13: the post-refinement
+            # verification critique failed to parse, the draft shipped
+            # unverified after the refiner had grown it by 1,288 characters,
+            # and the log line read "Self-refine passed".
+            #
+            # The API call itself succeeded, so the circuit breaker records a
+            # success — only the parse failed.
+            record_gemini_flash_success()
+            perr = raw_and_parsed.get("parsing_error")
+            log.warning(
+                "Critique output failed schema validation — NOT verified",
+                parsing_error=short_err(perr) if perr else "none reported",
+                raw_chars=len(str(getattr(raw_and_parsed.get("raw"), "content", "") or "")),
+            )
+            return Critique(
+                passes=True, confidence=0.0,
+                overall_quality_notes=_UNVERIFIED_NOTE,
+            )
+
         record_gemini_flash_success()
         log.info(
             "Critique result",
@@ -1482,7 +1522,7 @@ async def _critique(
             exc_info=True,
         )
         return Critique(passes=True, confidence=0.0,
-                        overall_quality_notes="critique failed")
+                        overall_quality_notes=_UNVERIFIED_NOTE)
 
 
 async def _refine(
@@ -1645,12 +1685,31 @@ async def self_refine(
         )
         history.append(critique)
         if critique.passes:
-            log.info(
-                "Self-refine passed",
-                iteration=iteration,
-                confidence=round(critique.confidence, 2),
-                cumulative_violations=sum(len(c.violations) for c in history),
+            # Distinguish a genuine pass from a fail-open. `_critique`
+            # returns passes=True with confidence=0.0 whenever it could not
+            # reach a verdict (call error, unparseable output, circuit open).
+            # Logging both as "Self-refine passed" hid a real production
+            # failure: a post-refinement check crashed, and the draft shipped
+            # unverified under a success message.
+            unverified = (
+                critique.confidence == 0.0
+                and critique.overall_quality_notes == _UNVERIFIED_NOTE
             )
+            if unverified:
+                log.warning(
+                    "Self-refine returning UNVERIFIED — critique never reached a verdict",
+                    iteration=iteration,
+                    refined=iteration > 0,
+                    reason=critique.overall_quality_notes,
+                    cumulative_violations=sum(len(c.violations) for c in history),
+                )
+            else:
+                log.info(
+                    "Self-refine passed",
+                    iteration=iteration,
+                    confidence=round(critique.confidence, 2),
+                    cumulative_violations=sum(len(c.violations) for c in history),
+                )
             return current, history
         # If confidence is too low, the critic isn't trustworthy — stop
         # rather than refine on a shaky verdict (see 2026 research:

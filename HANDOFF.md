@@ -259,6 +259,79 @@ the delivered draft still contains placeholders, not names.**
   grew the draft 7912 -> 9124 chars while never reaching `passes=True`
   (`max iterations exhausted`, 4 violations still open). Relevant to `C-2`.
 
+#### UPDATE (14 Aug) — verified against the real run + a prompt-wiring audit
+
+The `b8553d2f` draft was read end-to-end against the "Untested — last three commits"
+checklist below. **It failed 4/4 criteria, not just the invented facts:**
+
+| Criterion | Result |
+|---|---|
+| `unsupported_facts` → 0 | ❌ became a fully-populated fiction (the Q-19 core, above) |
+| Numbered paragraphs (`e73494d`) | ❌ delivered as unnumbered running prose *(verify vs literal `\n1.` in logs — a rendered list can paste without visible numbers)* |
+| BNS counterpart inline (`fd96a44`) | ❌ only `s.420 IPC` / `s.439 CrPC`; **no** `s.318 BNS` / `s.483 BNSS` — and the picker chose the **BNSS §483** template, so the draft mixes a new-code template with old-code citations |
+| Prior-bail disclosure (`fd96a44`) | ❌ no such paragraph |
+
+**Prompt-wiring audit settled the "stripped vs never-there" fork by code read, not a re-run:**
+
+- The section-wise path uses `DRAFTING_SECTION_PAIR_PROMPT` (`agents/drafting.py:1902`).
+- `4A` (statutory currency, worked example `s.439 CrPC / s.483 BNSS`) and `4B` (procedural
+  disclosures incl. **prior-bail**) are inline in `DRAFTING_SYSTEM_PROMPT` **only**
+  (`config/prompts.py:1358`, `:1374`) — *before* its `+=` append. The section prompt
+  inherits only the shared `INDIAN_LEGAL_*` blocks (`config/prompts.py:1772`), which
+  contain **neither** 4A nor 4B.
+- Consequence: **prior-bail disclosure NEVER reaches the section-wise generator** (bail
+  always fans out), so it was *never wired*, not stripped. **Currency** reaches the section
+  path only as a weak one-liner (`config/prompts.py:1735`); the strong version is
+  `SYSTEM_PROMPT`-only. **Numbering** *is* in the section prompt (`:1721`, `:1749`).
+
+**Corrected attribution (this retracts the "self_refine is the common regressor for all
+four" reframe):**
+
+| Failure | Owner |
+|---|---|
+| Invented facts | `self_refine` — the placeholder/critic collision above. Confirmed. |
+| Prior-bail missing | **Prompt-wiring gap** (generation), NOT `self_refine`. |
+| Currency missing | **Weak section-prompt wiring** (generation); possibly compounded by refine. |
+| Numbering missing | Wired to the section path → still ambiguous; the probe below decides it. |
+
+#### Consolidated fix set (supersedes the "Fix direction" list above)
+
+0. **One-line pre-refine probe — now needed ONLY for numbering.** Log whether the draft
+   leaving `_generate_draft` contains literal `\n1.` markers. Currency and prior-bail are
+   already resolved by the grep; this splits "generator didn't follow" from "refiner
+   stripped" for numbering alone.
+1. **Suppress `placeholder_marker` in placeholder mode.** Thread `facts_present=False`
+   from `drafting_node` into `self_refine`. Removes the destructive pressure while keeping
+   Q-1's `unretrieved_citation` check alive. *(fixes invented facts)*
+2. **Post-refine grounding net.** Re-run `validate_draft_grounding` after `self_refine`;
+   keep the pre-refine draft if the refined one has more ungrounded facts. The **only**
+   catch on the section-wise path, where `_enforce_grounding` merely logs. *(fixes facts)*
+3. **Wire 4A (full) + 4B into the section path** — best done by **moving 4A/4B into the
+   shared block both prompts append**, so a document-type disclosure can't silently diverge
+   between the two generators again. *(fixes prior-bail + currency — generation, not
+   `self_refine`)*
+- ⛔ **REJECTED — 3(b) "short-circuit `self_refine` on placeholder-mode section-wise
+  drafts."** That re-disables Q-1's fabricated-citation check on precisely the drafts it
+  was built for — trading invented facts for uncaught invented case-law, the worse defect
+  for a filed document. Do not.
+4. **C-2** (abort-if-not-improving + tighter gating): measure **after** — Q-1 and C-2 pull
+   opposite ways and must be priced together.
+
+**Do 0 + 1 + 2 + 3 together.** 1+2 close the facts regression (Q-1-safe); 3 closes
+prior-bail + currency; 0 tells you whether numbering also needs 3 or a prompt fix.
+
+#### Generalize once closed — this is not bail-specific
+
+A document-type-agnostic component (`self_refine`'s placeholder rule) plus a section-path
+wiring gap (4A/4B) break document-type-specific fixes. **Every** doc type routed through
+section-wise generation + refine is exposed. Run the regression across **legal notice,
+plaint, affidavit** — not bail alone — since the standing goal is broad drafting quality,
+not patching one type at a time.
+
+**Verify (all four must hold on re-run, no case facts):** placeholders not names
+(`unsupported_facts=0`); numbered paragraphs; `s.318 BNS` + `s.483 BNSS` counterparts
+inline; a prior-bail disclosure paragraph.
+
 ---
 
 ### Q-15 — court awareness in template selection

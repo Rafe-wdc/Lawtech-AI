@@ -58,11 +58,30 @@ _log = get_logger("Clients")
 
 _es_client: _SearchClient | None = None
 
+# Guards CONSTRUCTION of `_es_client` only. Deliberately not `_es_lock` below —
+# that one guards the circuit-breaker counters, and holding it across client
+# construction would block every `is_es_available()` check.
+_es_client_lock = threading.Lock()
+
 
 def get_es_client(max_retries: int = 3, timeout: int = 30) -> _SearchClient:
-    """Get or create singleton search client (OpenSearch or Elasticsearch)."""
+    """Get or create singleton search client (OpenSearch or Elasticsearch).
+
+    Double-checked locking: agents call this from `asyncio.to_thread`, so two
+    concurrent first requests can genuinely both observe `None` and each build
+    a client. The loser's client is then silently dropped, leaking its
+    connection pool, and "Search client initialized" logs twice.
+    """
     global _es_client
-    if _es_client is None:
+    # Fast path — no lock once initialised (the common case, every request).
+    if _es_client is not None:
+        return _es_client
+
+    with _es_client_lock:
+        # Re-check: another thread may have built it while we waited.
+        if _es_client is not None:
+            return _es_client
+
         kwargs: dict = {
             "request_timeout": timeout,
             "max_retries": max_retries,
@@ -92,7 +111,7 @@ def get_es_client(max_retries: int = 3, timeout: int = 30) -> _SearchClient:
             ssl=ES_USE_SSL,
             auth=bool(ES_USER),
         )
-    return _es_client
+        return _es_client
 
 
 # --- Elasticsearch Circuit Breaker ---
@@ -389,6 +408,20 @@ def get_chroma_client():
 _retriever_embeddings = None
 _qa_embeddings = None
 
+# Guards construction of the two embedding singletons. Same double-checked
+# pattern as `_es_client_lock`, but the stakes are higher here: on the local
+# path each of these loads a sentence-transformers model into memory
+# (BGE-large ≈ 1.3 GB, MiniLM ≈ 90 MB), single-threaded under
+# OMP_NUM_THREADS=1. Two concurrent first callers would each load a full copy
+# and one would then be discarded.
+#
+# Normally the eager block below preloads both at import, which hides the
+# race. It is reachable whenever that preload does NOT run or does not
+# succeed — i.e. when EMBEDDING_SERVICE_URL is set (preload skipped), or when
+# the eager load raised and was swallowed as a warning, leaving these None for
+# the first concurrent requests to fight over.
+_embeddings_lock = threading.Lock()
+
 
 def get_retriever_embeddings():
     """BGE-large-en-v1.5 for legal document retrieval (ES hybrid search, ChromaDB).
@@ -397,7 +430,12 @@ def get_retriever_embeddings():
     client (production) or a local HuggingFaceEmbeddings (development).
     """
     global _retriever_embeddings
-    if _retriever_embeddings is None:
+    if _retriever_embeddings is not None:
+        return _retriever_embeddings
+
+    with _embeddings_lock:
+        if _retriever_embeddings is not None:
+            return _retriever_embeddings
         if EMBEDDING_SERVICE_URL:
             from .embedding_client import RemoteEmbeddings
             _retriever_embeddings = RemoteEmbeddings(
@@ -409,7 +447,7 @@ def get_retriever_embeddings():
                 model_kwargs={"device": "cpu"},
                 encode_kwargs={"normalize_embeddings": True},
             )
-    return _retriever_embeddings
+        return _retriever_embeddings
 
 
 def get_qa_embeddings():
@@ -419,7 +457,12 @@ def get_qa_embeddings():
     client (production) or a local HuggingFaceEmbeddings (development).
     """
     global _qa_embeddings
-    if _qa_embeddings is None:
+    if _qa_embeddings is not None:
+        return _qa_embeddings
+
+    with _embeddings_lock:
+        if _qa_embeddings is not None:
+            return _qa_embeddings
         if EMBEDDING_SERVICE_URL:
             from .embedding_client import RemoteEmbeddings
             _qa_embeddings = RemoteEmbeddings(
@@ -430,7 +473,7 @@ def get_qa_embeddings():
                 model_name=EMBEDDING_MODELS["pdf_qa"],
                 model_kwargs={"device": "cpu"},
             )
-    return _qa_embeddings
+        return _qa_embeddings
 
 
 # --- Eager-load both embedding models in local mode ---

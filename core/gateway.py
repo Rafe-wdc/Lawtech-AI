@@ -907,6 +907,11 @@ async def chat_with_files(
     integration_token: Optional[str] = Form(None),
     cite_appendix: Optional[bool] = Form(None),
     regenerate_of: Optional[str] = Form(None),  # Sagar bug #5
+    # "Use it anyway" — the user's override for the blur gate. When true,
+    # newly-uploaded images skip the sharpness check, AND any image this
+    # thread whose OCR output was withheld as unreadable is retried and
+    # accepted as-is. See OCR_STATUS_UNREADABLE in core/file_processor.py.
+    force_ocr: Optional[bool] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -1004,7 +1009,10 @@ async def chat_with_files(
 
                 async def _run_fp():
                     try:
-                        return await process_files(file_tuples, thread_id, writer=_fp_writer)
+                        return await process_files(
+                            file_tuples, thread_id, writer=_fp_writer,
+                            force_ocr=bool(force_ocr),
+                        )
                     finally:
                         _fp_events.put_nowait(_FP_SENTINEL)
 
@@ -1065,6 +1073,41 @@ async def chat_with_files(
                             await _fp_task
                         except (asyncio.CancelledError, Exception):
                             pass
+
+            elif force_ocr:
+                # "Use it anyway" with no new attachment — the common shape,
+                # since the user is confirming an image they already sent.
+                # process_files is never reached in this branch (it is gated
+                # on `file_tuples`), so the deferred OCR is driven here.
+                from core.file_processor import ocr_retry_unreadable_files
+                yield f"data: {json.dumps({'type': 'file_processing', 'message': 'Reading the image you confirmed...'})}\n\n"
+                _reocr_events: asyncio.Queue = asyncio.Queue()
+
+                def _reocr_writer(evt: dict) -> None:
+                    _reocr_events.put_nowait(evt)
+
+                try:
+                    _reocr_task = asyncio.create_task(
+                        ocr_retry_unreadable_files(thread_id, writer=_reocr_writer)
+                    )
+                    while not _reocr_task.done() or not _reocr_events.empty():
+                        try:
+                            evt = await asyncio.wait_for(_reocr_events.get(), timeout=0.5)
+                            yield f"data: {json.dumps(evt)}\n\n"
+                        except asyncio.TimeoutError:
+                            continue
+                    collections = await _reocr_task
+                    if collections:
+                        # Surface the newly-readable text to THIS turn rather
+                        # than making the user ask again.
+                        file_context_dict = {
+                            "chromadb_collections": collections,
+                            "file_names": [],
+                            "extracted_texts": [],
+                            "summary": f"Read {len(collections)} previously-skipped image(s)",
+                        }
+                except Exception as e:
+                    log.error("OCR retry failed", error=short_err(e))
 
             # Delegate the rest (integration + agent graph + persistence) to the
             # shared pipeline. Note that the pipeline emits its own thread_id event,

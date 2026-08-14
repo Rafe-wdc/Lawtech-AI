@@ -1701,9 +1701,28 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 12. OUTPUT ONLY THE SECTION BODIES — no preamble, no postscript, no meta-commentary, no markdown fences. The orchestrator concatenates your output to DOCUMENT SO FAR verbatim.
 """
 
+# 4A/4B parity for the section-wise path. The single-pass DRAFTING_SYSTEM_PROMPT
+# carries statutory-currency (4A) and procedural-disclosure (4B, incl. prior-bail)
+# rules INLINE; the section-writer prompt never inherited them, so multi-section
+# documents (bail applications always fan out) silently dropped the BNS/BNSS
+# counterpart and the prior-bail disclosure (see FIX_REGISTER Q-19 audit). This
+# block ports that content so both generation paths enforce the same disclosures.
+DRAFTING_SECTIONWISE_DISCLOSURES = """
+STATUTORY CURRENCY & PROCEDURAL DISCLOSURES (mandatory — these mirror rules 4A/4B of the single-pass prompt).
+
+A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA. The new criminal codes commenced on 1 July 2024; which code applies depends on the DATE OF THE OFFENCE, which you usually will not know. When the offence date is not stated, do NOT silently pick one: cite the provision the user named AND give its counterpart inline on first use — e.g. "Section 420 of the Indian Penal Code, 1860 [Section 318 of the Bharatiya Nyaya Sanhita, 2023, for offences on or after 01.07.2024]" — and do the same for the procedural provision (s.439 CrPC / s.483 BNSS). Use the mapping in the RELEVANT LEGAL CONTEXT block rather than reciting one from memory.
+
+B. PROCEDURAL DISCLOSURES THE DRAFTER MUST NOT SILENTLY OMIT. Where the document type calls for them, include them — bracketed when the facts are unknown:
+   - Bail applications: a paragraph disclosing whether any earlier bail application has been made, and its outcome. Indian courts treat non-disclosure of a previous unsuccessful application as a serious lapse. Use e.g. "[STATE WHETHER ANY PREVIOUS BAIL APPLICATION HAS BEEN FILED. If yes, give the court, case number, date and outcome. If none, state: No previous application for bail has been filed by the Applicant in this matter before this or any other Court.]"
+   - VERIFICATION must separate paragraphs of FACT (verified true to personal knowledge) from paragraphs of LEGAL SUBMISSION (believed true on advice of counsel).
+   - The advocate block needs a name, enrolment number and address for service, not a bare name — bracket what is unknown.
+This is not a licence to add sections the reference draft does not have; the reference remains the structural anchor. It covers omissions that expose the litigant, not general enrichment.
+"""
+
 # Append the same Indian-legal discipline blocks DRAFTING_SYSTEM_PROMPT uses,
 # so the section writer inherits jurisdiction guardrails, citation format,
-# language register, output format, and behavioural discipline.
+# language register, output format, and behavioural discipline — plus the
+# 4A/4B statutory-currency + procedural-disclosure parity block above.
 DRAFTING_SECTION_PAIR_PROMPT += (
     "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
@@ -1711,6 +1730,7 @@ DRAFTING_SECTION_PAIR_PROMPT += (
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+    + "\n" + DRAFTING_SECTIONWISE_DISCLOSURES
 )
 
 

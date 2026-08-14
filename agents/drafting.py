@@ -3066,13 +3066,42 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     step="self_refine",
                 )
                 source_langs = detect_source_languages(user_facts)
+                # Q-19: with no case facts supplied, the draft's case-specific
+                # fields are intentionally bracketed placeholders. Tell the
+                # critic so it does not treat them as defects (fix #1), and
+                # keep the pre-refine draft if refinement regresses grounding
+                # (fix #2 — the only net on the section-wise path, which does
+                # not regenerate). The probe records whether numbering survived
+                # generation, to separate "generator never emitted it" from
+                # "refiner stripped it".
+                placeholder_mode = not _case_facts_present(user_facts)
+                _pre_refine_numbered = bool(re.search(r"(?m)^\s{0,3}\d+\.\s", draft))
+                log.info(
+                    "Pre-refine draft probe",
+                    placeholder_mode=placeholder_mode,
+                    has_numbered_paragraphs=_pre_refine_numbered,
+                    pre_refine_len=len(draft),
+                )
                 refined_draft, refine_history = await self_refine(
                     draft,
                     user_query=query,
                     intent=intent_obj,
                     source_languages=source_langs,
                     source_registry=gathered_registry,
+                    placeholder_mode=placeholder_mode,
                 )
+                # Post-refine grounding net (placeholder mode only): if the
+                # refiner invented case facts, the refined draft has MORE
+                # ungrounded facts than the clean pre-refine one — revert.
+                if placeholder_mode and refined_draft != draft:
+                    _pre_ung = len(validate_draft_grounding(draft, query)["unsupported"])
+                    _post_ung = len(validate_draft_grounding(refined_draft, query)["unsupported"])
+                    if _post_ung > _pre_ung:
+                        log.warning(
+                            "Self-refine regressed grounding — keeping pre-refine draft",
+                            pre_unsupported=_pre_ung, post_unsupported=_post_ung,
+                        )
+                        refined_draft = draft
                 if refined_draft != draft:
                     log.info(
                         "Self-refine altered draft",

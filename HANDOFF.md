@@ -185,10 +185,11 @@ Edit tool.
 
 ## What is still open
 
-### 🔴 Q-19 — THE CRITIC INVENTS CASE FACTS BY FILLING IN PLACEHOLDERS
+### ✅ Q-19 — THE CRITIC INVENTED CASE FACTS BY FILLING IN PLACEHOLDERS (FIXED 14 Aug, commit `464673e`)
 
-**Start here. This is a live regression, introduced by the fixes on this branch, and it
-is worse than the bug they were meant to fix.**
+**RESOLVED — see the "RESOLVED (14 Aug)" block at the END of this entry for the fix and the
+verified before/after. Everything below it (the original diagnosis, the prompt-wiring
+audit, the consolidated plan) is retained as the record of how it was found and fixed.**
 
 Observed 13 Aug, request `b8553d2f`, query
 `"Draft a bail application for cheating under Section 420 Indian Penal Code"` with **no
@@ -331,6 +332,64 @@ not patching one type at a time.
 **Verify (all four must hold on re-run, no case facts):** placeholders not names
 (`unsupported_facts=0`); numbered paragraphs; `s.318 BNS` + `s.483 BNSS` counterparts
 inline; a prior-bail disclosure paragraph.
+
+#### RESOLVED (14 Aug) — fix landed (commit `464673e`) and verified against real runs
+
+Implemented **0 + 1 + 2 + 3** (3(b) stayed rejected). Three files, +73 lines, staged by
+explicit path, **not pushed**:
+
+- **`core/self_refine.py`** — `self_refine` gained `placeholder_mode`; drops
+  `placeholder_marker` violations before the refiner sees them. `unretrieved_citation`
+  (Q-1) and every other category still run.
+- **`agents/drafting.py`** — post-refine grounding net (revert to pre-refine draft if
+  refinement increases ungrounded facts) + the pre-refine numbering probe.
+- **`config/prompts.py`** — ported 4A currency + 4B disclosures (incl. prior-bail) into
+  `DRAFTING_SECTION_PAIR_PROMPT` via a new `DRAFTING_SECTIONWISE_DISCLOSURES` block.
+
+**Verified before/after** (fresh runs, delivered output read from bytes, not paste):
+
+| | Baseline (`b8553d2f` bail / `b8f89040` notice) | After (`022faf96` bail / `53281276` notice) |
+|---|---|---|
+| Fabricated identity facts | Rohan Sharma, C.R.123, Kothrud PS, Yerwada / Arjun Sharma, Rajesh Kumar, INV/PCI | **NONE** — clean bracketed placeholders on both |
+| Character assertions | asserted as fact | bracketed `[IF APPLICABLE: …]` |
+| Numbered paragraphs | reported missing | present in raw (1→13; probe `has_numbered_paragraphs=True`) — paste flattens the ordered list |
+| Prior-bail disclosure | absent | present (fix #3) |
+| BNSS §483 procedural counterpart | absent | present (fix #3) |
+
+**Proven vs shadowed:** fix #2 (net) and fix #3 (disclosures) are demonstrated in delivered
+output. **Fix #1 was NOT exercised on bail** — because the critique kept failing to parse
+(see Q-20), `self_refine` returned UNVERIFIED and never ran the refiner, so the clean
+generator draft shipped by default. Fix #1 remains correct as the safety layer for when the
+critique parses; the notice run (`53281276`) is where the refine loop actually ran and the
+net confirmed 0 ungrounded facts.
+
+**Residuals** (none block the fix; ranked): (1) **Q-20** — critique truncates/fails schema
+on bail, disabling `self_refine` + Q-1 + `duplicate_section_block`; (2) duplicate
+cause-title block (would be caught by `duplicate_section_block` if the critique parsed);
+(3) BNS §318 substantive counterpart still not emitted (only procedural §483 — 4A
+half-followed by the generator); (4) `self_refine` non-convergence → `C-2`; (5) Grounds
+numbering continues past 10 rather than restarting (prompt-design choice, not a bug).
+
+---
+
+### 🔵 Q-20 — THE DRAFTING CRITIQUE INTERMITTENTLY RETURNS UNPARSEABLE JSON
+
+Surfaced while verifying Q-19. On the bail runs (`022faf96`, `a11d72dc`) the critic returned
+`OutputParserException: Failed to parse Critique from completion {…}` with `raw_chars≈4300`
+— the JSON is cut off mid-string (e.g. `"issue": "…the intent was extracted `). `_critique`
+handles it gracefully (returns `passes=True, confidence=0`, `_UNVERIFIED_NOTE`), so the
+request survives — **but `self_refine` then does nothing.**
+
+Why it matters: a silently-disabled `self_refine` also disables **Q-1's `unretrieved_citation`
+check** (fabricated case-law would not be caught) and the `duplicate_section_block` check
+(the duplicate cause-title in `a11d72dc` slipped through). On Q-19 it happened to *help*
+(the refiner could not invent), but that is luck, not design.
+
+Not a truncation-budget issue: `max_output_tokens=16384`, `thinking_budget=0`, yet it cuts
+at ~1,100 tokens — so it is Gemini structured-output flakiness on the nested
+`Critique`→`list[Violation]` schema, not R-6 again. Candidate directions: retry once on
+`parsing_error`; simplify/loosen the structured-output schema; or fall back to a
+non-structured critique parse. Needs its own investigation — do not fold into Q-19.
 
 ---
 

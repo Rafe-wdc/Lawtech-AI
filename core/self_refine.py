@@ -1626,6 +1626,7 @@ async def self_refine(
     refiner_llm=None,
     source_languages: tuple[str, ...] = (),
     source_registry: object = None,
+    placeholder_mode: bool = False,
 ) -> tuple[str, list[Critique]]:
     """Generate-critique-refine loop over an existing response.
 
@@ -1689,6 +1690,28 @@ async def self_refine(
             user_query, critic_intent, current, critic_llm,
             retrieved_sources_whitelist=_whitelist,
         )
+        # Q-19 fix: in placeholder mode (drafting produced a no-case-facts
+        # draft whose case-specific fields are intentionally bracketed
+        # placeholders), the `placeholder_marker` category is INVERTED — the
+        # brackets are correct output, not defects. Drop those violations
+        # before they reach the refiner, which would otherwise "fix" them by
+        # inventing case facts (the Q-19 regression). Every other category —
+        # including `unretrieved_citation`, the fabricated-citation check Q-1
+        # switched on — still applies, so this narrows the critic, it does not
+        # disable it.
+        if placeholder_mode and critique.violations:
+            _kept = [v for v in critique.violations if v.field != "placeholder_marker"]
+            _dropped = len(critique.violations) - len(_kept)
+            if _dropped:
+                log.info(
+                    "Self-refine: suppressed placeholder_marker violations "
+                    "(placeholder mode — bracketed fields are correct output)",
+                    dropped=_dropped, remaining=len(_kept), iteration=iteration,
+                )
+                critique = critique.model_copy(update={
+                    "violations": _kept,
+                    "passes": critique.passes or not _kept,
+                })
         history.append(critique)
         if critique.passes:
             # Distinguish a genuine pass from a fail-open. `_critique`

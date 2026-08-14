@@ -189,6 +189,18 @@ _MOJIBAKE_REPLACEMENTS = [
 
 _CITE_PLACEHOLDER_RE = re.compile(r"\[CITE:[^\]]*\]", flags=re.IGNORECASE)
 _EMPTY_NUMBERED_PARA_RE = re.compile(r"(?m)^\s*\d+\.\s*$\n?")
+# Running body-paragraph counter for section-wise continuation (Q-19b).
+# Captures line-leading "N. text" markers; the caller scopes this to the body
+# region (before the Prayer/List/Verification tail) so the LIST OF DOCUMENTS'
+# own 1.,2.,3. sequence and block-quoted statute numbers do not inflate it.
+_NUMBERED_PARA_RE = re.compile(r"(?m)^\s*(\d+)\.\s+\S")
+# First heading of the numbered-body TAIL — from here on the document runs its
+# own local numbering (Prayer uses (a)/(b); List of Documents restarts at 1;
+# Verification is unnumbered), so it is excluded from the body counter.
+_BODY_TAIL_RE = re.compile(
+    r"(?im)^\s*#*\s*(prayer|verification|list of documents|schedule of|"
+    r"affidavit in support|vakalatnama)\b"
+)
 
 _HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
@@ -1885,6 +1897,8 @@ async def _generate_section_pair(
     user_facts: str,
     reference_draft: str,
     prior_text: str,
+    next_para_no: int = 1,
+    header_already_emitted: bool = False,
     gathered_context: dict[str, str] | None,
     user_intent,
     user_language: str,
@@ -1918,7 +1932,7 @@ async def _generate_section_pair(
     for offset, sec in enumerate(sections_to_write):
         position = section_position_start + offset
         section_lines.append(
-            f"{offset + 1}. **{sec.heading}** — {sec.summary or '(see structure in reference)'}\n"
+            f"- **{sec.heading}** — {sec.summary or '(see structure in reference)'}\n"
             f"   (Section {position} of {total_sections} in the full document; "
             f"slug: `{sec.id}`)"
         )
@@ -1978,17 +1992,27 @@ async def _generate_section_pair(
         )
 
     if prior_text and prior_text.strip():
+        _header_rule = (
+            "The cause title / court header / addressee / party-and-`**vs**` "
+            "block has ALREADY been emitted above — do NOT emit any court "
+            "header, cause title, `**vs**` block, or party-label block again; "
+            "begin directly with your own `## ` section heading(s). "
+        ) if header_already_emitted else ""
         prior_block = (
             "## DOCUMENT SO FAR (sections of THIS document already drafted — "
             "continue numbering and party labels from here; do NOT re-emit "
             "any of this content)\n"
             f"{prior_text.strip()}\n\n"
+            "NUMBERING STATE (computed by code, authoritative — overrides any "
+            "count you infer by reading the text above): your FIRST numbered "
+            f"body paragraph MUST be exactly {next_para_no}. Do NOT restart at "
+            f"1. {_header_rule}\n\n"
         )
     else:
         prior_block = (
             "## DOCUMENT SO FAR\n"
-            "(This is the FIRST section batch — no prior content. Start the "
-            "global paragraph counter at 1 where appropriate.)\n\n"
+            "(This is the FIRST section batch — no prior content. Your first "
+            f"numbered body paragraph is {next_para_no}.)\n\n"
         )
 
     user_block = (
@@ -2008,8 +2032,10 @@ async def _generate_section_pair(
         "numbered paragraph by paragraph, because the VERIFICATION clause "
         "refers to them by number (\"the contents of paragraphs 1 to 12 are "
         "true\"). Write an explicit Arabic numeral and a full stop at the "
-        "start of every substantive paragraph — `1.`, `2.`, `3.` — and "
-        "CONTINUE the sequence from the last number used in DOCUMENT SO FAR. "
+        "start of every substantive paragraph — `1.`, `2.`, `3.`. "
+        f"Your FIRST body paragraph MUST be numbered {next_para_no} (the "
+        "authoritative continuation count under NUMBERING STATE above — it "
+        "overrides any number you infer by reading DOCUMENT SO FAR). "
         "Do NOT restart at 1, and do NOT leave paragraphs unnumbered and rely "
         "on the renderer to number them: markdown list auto-numbering is not "
         "paragraph numbering and does not survive export to a filed document. "
@@ -2186,6 +2212,21 @@ async def _generate_sectionwise(
             )
 
         prior_text = "\n\n".join(completed)
+        # Q-19b: compute the running body-paragraph counter as CODE state so
+        # numbering continuity is enforced, not left to the model re-reading
+        # free text (the root cause of the "1., 1., 1." restarts). Scope to the
+        # body region before the Prayer/List/Verification tail so the LIST OF
+        # DOCUMENTS' own 1.,2.,3. and block-quoted statute numbers (e.g. "420.")
+        # never inflate the count; the <=99 guard drops 3-digit statute numbers.
+        _tail = _BODY_TAIL_RE.search(prior_text)
+        _body_region = prior_text[: _tail.start()] if _tail else prior_text
+        _body_nums = [
+            int(n) for n in _NUMBERED_PARA_RE.findall(_body_region) if int(n) <= 99
+        ]
+        next_para_no = (max(_body_nums) + 1) if _body_nums else 1
+        # The judge places the cause-title/header as the FIRST section, so every
+        # pair after the first must NOT re-emit a court header / party block.
+        header_already_emitted = bool(completed)
 
         pair_user_facts = user_facts
         if chunking_enabled:
@@ -2253,6 +2294,8 @@ async def _generate_sectionwise(
                     user_facts=pair_user_facts,
                     reference_draft=reference_draft,
                     prior_text=prior_text,
+                    next_para_no=next_para_no,
+                    header_already_emitted=header_already_emitted,
                     gathered_context=gathered_context,
                     user_intent=user_intent,
                     user_language=user_language,

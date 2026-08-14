@@ -181,11 +181,21 @@ def _md_to_docx(doc, md_text: str):
             i += 1
             continue
 
-        # Ordered list (1. 2. etc.)
+        # Ordered list (1. 2. etc.). Legal drafts number paragraphs LITERALLY —
+        # the verification clause refers to them by number ("the contents of
+        # paragraphs 1 to 22 are true"), so the count must be stable and
+        # continuous. Word's "List Number" style STRIPS the literal number and
+        # auto-renumbers, which RESTARTS at every heading/interruption (e.g.
+        # after "## Grounds for Bail") — corrupting the exact numbering the
+        # drafter computed. Keep the literal "1. " as text in a hanging-indent
+        # paragraph so the filed document matches the source verbatim. (The
+        # HTML console has the same defect in its own renderMarkdown; this fix
+        # is the one that matters for the filed .docx.)
         if re.match(r"^\d+\.\s+", stripped):
-            text = re.sub(r"^\d+\.\s+", "", stripped)
-            p = doc.add_paragraph(style="List Number")
-            _add_formatted_text(p, text)
+            p = doc.add_paragraph()
+            p.paragraph_format.left_indent = Cm(0.8)
+            p.paragraph_format.first_line_indent = Cm(-0.8)
+            _add_formatted_text(p, stripped)   # keep the literal number
             i += 1
             continue
 

@@ -393,6 +393,36 @@ non-structured critique parse. Needs its own investigation — do not fold into 
 
 ---
 
+### Q-19b — SECTION-WISE NUMBERING RESTARTS + DUPLICATED CAUSE TITLE (FIXED 14 Aug, commit `f7f0d0e`)
+
+User reported the rendered bail draft showed numbering repeating "1., 1., 1." and the cause
+title appearing 2-3x. Root cause (found via a 5-agent diagnosis workflow, adversarially
+verified): the section-wise path generated each pair as a stateless call with NO computed
+continuation state - numbering continuity was left to the model re-reading free-text
+prior_text, and the per-pair task list was re-numbered from 1. every call (drafting.py:1921),
+nudging a restart; later pairs also re-emitted the cause title / party block.
+
+Fix (in _generate_sectionwise / _generate_section_pair): compute next_para_no as authoritative
+CODE state, SCOPED to the body region before the Prayer/Verification/List-of-Documents tail (so
+the List's own 1.,2.,3. and 3-digit statute numbers cannot inflate or forward-jump it); pass
+header_already_emitted=bool(completed) so every pair after the first is hard-told NOT to emit a
+court header / cause title / vs / party block; and bullet the per-pair task list instead of
+re-numbering it from 1. Invariant-safe (generation-input state, not a critic/skeleton/regex-gate).
+
+Verified (`9babdea4`): cause title exactly once (was 2-3x), one party block, body numbering
+continuous 1->15, List of Documents correctly its own 1->11. Q-19 placeholders + BNS/prior-bail
+disclosures intact. The adversarial verifier's corrections are baked in (body-scoped counter,
+not a naive global max; body-region-only acceptance test).
+
+Residual (scoped out): the fan-out JUDGE prompt (config/prompts.py:1568) still positively splits
+a bail application into overlapping SUBSTANTIVE sections (grounds + parity + medical/family) ->
+occasional grounds-content overlap. Plan-time judge-merge / CRITIQUE_PROMPT issue, separate from
+this numbering/header fix. Header suppression substantially reduces but does not GUARANTEE zero
+duplication; for a hard guarantee, add an assembly-time collapse of a duplicated cause-title/vs
+block inside _generate_sectionwise (keep it there, not validate_draft, to stay invariant-#4-safe).
+
+---
+
 ### Q-15 — court awareness in template selection
 
 Nothing tells the picker which court the user is filing in. Q-8 fixed *document type*;

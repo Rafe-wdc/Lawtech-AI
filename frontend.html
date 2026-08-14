@@ -3009,14 +3009,25 @@ function renderMarkdown(text) {
       var indent = m[1].length;
       var marker = m[2];
       var content = m[3];
-      var tag = /^\d+\./.test(marker) ? 'ol' : 'ul';
+      var isOrdered = /^\d+\./.test(marker);
+      var tag = isOrdered ? 'ol' : 'ul';
       var level = Math.floor(indent / 2);
 
       while (stack.length > level + 1) {
         result += '</' + stack.pop() + '>';
       }
       if (stack.length <= level) {
-        result += '<' + tag + '>';
+        // Preserve the LITERAL paragraph number. Legal drafts number
+        // paragraphs explicitly (1., 2., 3.) and separate them with blank
+        // lines, so each becomes its own single-item <ol>. Without start=,
+        // every fragment restarts at 1 ("1., 1., 1."). Emit <ol start="N">
+        // from the actual marker so the real number is shown and continues.
+        var startAttr = '';
+        if (isOrdered) {
+          var n = parseInt(marker, 10);
+          if (!isNaN(n) && n !== 1) startAttr = ' start="' + n + '"';
+        }
+        result += '<' + tag + startAttr + '>';
         stack.push(tag);
       }
       result += '<li>' + content + '</li>';

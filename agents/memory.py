@@ -276,13 +276,32 @@ def _rewrite_query(
             log.debug("Summary has context, proceeding with rewrite",
                       summary_len=len(summary_content))
 
-        # Format history as text — cap at last 10 messages to stay within token budget
+        # Format history as text — cap at last 10 messages to stay within token budget.
+        # AI-message truncation policy is contextual: for language-conversion
+        # directives ("convert above to marathi", "in Hindi", etc.) the entire
+        # prior assistant response IS the translation target — truncating at
+        # 1500 chars produced partial translations (a 22k draft translated to
+        # ~1.5k Marathi). For search / general follow-ups, the 1500-char cap
+        # is still correct — feeding a 22k draft as context for "find related
+        # cases" wastes tokens and pushes the rewriter to compress its output.
+        # Detect the directive shape once, then apply the right cap per branch.
+        try:
+            from agents.drafting import _DIRECTIVE_VERBS_RE
+            _is_directive_followup = bool(query and _DIRECTIVE_VERBS_RE.search(query))
+        except Exception:
+            _is_directive_followup = False
+
         history_lines = []
         for msg in chat_history[-10:]:
             if isinstance(msg, HumanMessage):
                 history_lines.append(f"User: {msg.content}")
             elif isinstance(msg, AIMessage):
-                content = (msg.content[:1500] + "...") if msg.content and len(msg.content) > 1500 else (msg.content or "")
+                if _is_directive_followup:
+                    # Full prior draft — the rewriter needs to inline it verbatim
+                    # so the drafting agent has the actual content to modify.
+                    content = msg.content or ""
+                else:
+                    content = (msg.content[:1500] + "...") if msg.content and len(msg.content) > 1500 else (msg.content or "")
                 history_lines.append(f"Assistant: {content}")
 
         chat_history_text = "\n".join(history_lines)

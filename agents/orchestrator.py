@@ -10,6 +10,7 @@ Uses: Gemini 2.5 Flash Lite for task classification, planning, and synthesis.
 from __future__ import annotations
 
 import asyncio
+import os
 from pydantic import BaseModel, Field
 from typing import Literal
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
@@ -643,6 +644,116 @@ def _extract_user_intent(
         return query, default_intent()
 
 
+# ---------------------------------------------------------------------------
+# Move 3 Phase A — DynamicPlanner (behind DYNAMIC_ORCHESTRATOR env flag)
+#
+# Replaces the parallel _classify_and_plan + _extract_user_intent pair with
+# a SINGLE Gemini Flash call that returns a DynamicPlan (task + agents +
+# reasoning + intent + normalized_query + cite_appendix_recommended +
+# self-critique). Off by default; enable with DYNAMIC_ORCHESTRATOR=1.
+#
+# See docs/dynamic_orchestrator_plan.md for the design and
+# config/prompts.py::DYNAMIC_PLANNER_PROMPT for the prompt.
+# ---------------------------------------------------------------------------
+
+def _dynamic_orchestrator_enabled() -> bool:
+    """Feature flag: enable the DynamicPlanner. Off by default until validated."""
+    return os.getenv("DYNAMIC_ORCHESTRATOR", "0") == "1"
+
+
+def _dynamic_plan(
+    query: str,
+    chat_summary: str = "",
+    previous_intent: UserIntent | None = None,
+) -> "DynamicPlan":
+    """Single-call planning: task + agents + intent + normalized_query.
+
+    Replaces the parallel pair `_classify_and_plan` + `_extract_user_intent`
+    with one Gemini Flash structured-output call. Returns a `DynamicPlan`
+    (config/intent.py) that downstream code destructures into the same shape
+    the legacy pair produced.
+
+    On any failure returns `default_dynamic_plan()` so callers have a safe
+    minimal-default fallback (Legal_Concepts, empty intent). Never raises —
+    the planner is a soft enhancement, not a hard dependency.
+    """
+    from config.intent import DynamicPlan, default_dynamic_plan
+    from config.prompts import DYNAMIC_PLANNER_PROMPT, wrap_untrusted
+
+    try:
+        with log_time(log, "DynamicPlanner (v3)"):
+            # Use Gemini Flash for the planning call — fast + cheap. The plan
+            # is metadata about routing/intent, not user-visible content, so
+            # Flash's reasoning is more than enough. Full-quality Pro would
+            # double the cost without changing the routing decision.
+            llm = get_gemini_flash(temperature=0.0).with_structured_output(
+                DynamicPlan, include_raw=True,
+            )
+            prompt = ChatPromptTemplate.from_template(DYNAMIC_PLANNER_PROMPT)
+            chain = prompt | llm
+
+            prev_hint = "(no previous turn — this is a fresh conversation)"
+            if previous_intent is not None:
+                _fmt = getattr(
+                    getattr(previous_intent, "response_format", None), "value",
+                    str(getattr(previous_intent, "response_format", "")),
+                )
+                _artifact = getattr(
+                    getattr(previous_intent, "legal_artifact", None), "value",
+                    str(getattr(previous_intent, "legal_artifact", "")),
+                )
+                prev_hint = (
+                    f"- response_format: {_fmt or 'unspecified'}\n"
+                    f"- format_explicit: {getattr(previous_intent, 'format_explicit', False)}\n"
+                    f"- language: {getattr(previous_intent, 'language', 'en')}\n"
+                    f"- language_explicit: {getattr(previous_intent, 'language_explicit', False)}\n"
+                    f"- strict_language: {getattr(previous_intent, 'strict_language', False)}\n"
+                    f"- response_depth: {getattr(previous_intent, 'response_depth', 'standard')}\n"
+                    f"- legal_artifact: {_artifact or 'unspecified'}"
+                )
+            raw_and_parsed = chain.invoke({
+                "query":                wrap_untrusted(query),
+                "chat_summary":         wrap_untrusted(chat_summary or ""),
+                "previous_intent_hint": prev_hint,
+            })
+
+        from core.token_tracker import record as _record_tokens
+        _record_tokens("Orchestrator", "dynamic_plan",
+                       raw_and_parsed.get("raw"))
+
+        plan = raw_and_parsed.get("parsed")
+        if plan is None:
+            raw_msg = raw_and_parsed.get("raw")
+            parsing_error = raw_and_parsed.get("parsing_error")
+            raw_content = str(getattr(raw_msg, "content", "") or "")
+            log.warning(
+                "DynamicPlanner returned no parsed output; using default plan",
+                parsing_error=short_err(parsing_error) if parsing_error else "none",
+                raw_content_preview=raw_content[:400],
+            )
+            return default_dynamic_plan()
+
+        log.info(
+            "DynamicPlanner result",
+            task=plan.task,
+            agents=plan.agents,
+            confidence=plan.overall_confidence,
+            cite_appendix=plan.cite_appendix_recommended,
+            language=plan.intent.language,
+            language_explicit=plan.intent.language_explicit,
+            self_critique=plan.self_critique[:120],
+        )
+        return plan
+
+    except Exception as e:
+        from config.intent import default_dynamic_plan
+        log.warning(
+            "DynamicPlanner failed; using default plan",
+            error=short_err(e), exc_info=True,
+        )
+        return default_dynamic_plan()
+
+
 def _legacy_response_instructions(intent: UserIntent) -> str:
     """Project a structured UserIntent into the natural-language string that
     the SYNTHESIS prompts inject as `{response_instructions}`.
@@ -1220,23 +1331,57 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # in so short Turn-N directives ("in Marathi") inherit the prior
         # legal_artifact / task shape instead of reclassifying from scratch.
         _previous_intent = state.get("previous_intent")
-        intent_coro = asyncio.wait_for(
-            asyncio.to_thread(
-                _extract_user_intent, _original_query, summary or "",
-                _previous_intent,
-            ),
-            timeout=10,
-        )
-        classify_coro = asyncio.wait_for(
-            asyncio.to_thread(
-                _classify_and_plan, classify_query,
-                chat_summary=summary if summary else None,
-            ),
-            timeout=30,
-        )
-        results = await asyncio.gather(
-            intent_coro, classify_coro, return_exceptions=True,
-        )
+
+        # Move 3 Phase A — DynamicPlanner branch. When DYNAMIC_ORCHESTRATOR=1,
+        # replace the parallel _classify_and_plan + _extract_user_intent pair
+        # with ONE Gemini Flash call that returns a DynamicPlan (task +
+        # agents + intent + normalized_query + cite_appendix + self-critique).
+        # Off by default until validated. Fallback: default_dynamic_plan()
+        # on any failure, then the rest of the node proceeds normally.
+        if _dynamic_orchestrator_enabled():
+            log.info("Plan phase: using DynamicPlanner (Move 3 Phase A)")
+            try:
+                dynamic_plan = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _dynamic_plan, _original_query, summary or "",
+                        _previous_intent,
+                    ),
+                    timeout=30,
+                )
+            except asyncio.TimeoutError:
+                from config.intent import default_dynamic_plan
+                log.warning("DynamicPlanner timed out; using default plan")
+                dynamic_plan = default_dynamic_plan()
+            # Adapt the DynamicPlan into the same variables the legacy
+            # dual-call path produces below. Downstream code (rest of this
+            # function + `state` writes) reads task/agents_planned/
+            # extracted_intent/response_instructions and doesn't care where
+            # they came from.
+            results = [
+                (dynamic_plan.normalized_query, dynamic_plan.intent),
+                (dynamic_plan.task, list(dynamic_plan.agents)),
+            ]
+            # Stash the DynamicPlan so the rest of the node can read
+            # cite_appendix_recommended and other planner-decided flags.
+            state["_dynamic_plan"] = dynamic_plan
+        else:
+            intent_coro = asyncio.wait_for(
+                asyncio.to_thread(
+                    _extract_user_intent, _original_query, summary or "",
+                    _previous_intent,
+                ),
+                timeout=10,
+            )
+            classify_coro = asyncio.wait_for(
+                asyncio.to_thread(
+                    _classify_and_plan, classify_query,
+                    chat_summary=summary if summary else None,
+                ),
+                timeout=30,
+            )
+            results = await asyncio.gather(
+                intent_coro, classify_coro, return_exceptions=True,
+            )
 
         # Process intent result first — it gives us normalized_query +
         # typed UserIntent + the natural-language projection injected into

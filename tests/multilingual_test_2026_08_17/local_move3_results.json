@@ -1,0 +1,585 @@
+{
+  "endpoint": "local_move3",
+  "url": "http://localhost:5000/pyapi/search",
+  "thread_id": "3fcd5110-665a-4d3d-9a43-9f25a5331609",
+  "turns": [
+    {
+      "id": 1,
+      "label": "prompt-1-mega",
+      "elapsed_s": 121.29,
+      "status": 200,
+      "request": {
+        "url": "http://localhost:5000/pyapi/search",
+        "body": {
+          "Promptquery": "prompt 1: Research Prompt: Section 125 of CrPC\n \nScenario:\n \nDraft a civil suit for partition along with a prayer for temporary injunction. Facts: Rupa is an adopted daughter of the deceased owner. She has no siblings. Her father died 5 years ago, leaving behind two flats in Pune. The only legal heirs are Rupa and her mother. Her name is not yet on the property documents. Her mother is attempting to dispossess her and has expressed intent to transfer the properties to her cousin. The suit should include legal provisions for partition of the properties, declaration of her share, and a temporary injunction restraining the mother or any third party from selling, transferring, or creating third-party rights in the properties until disposal of the suit.\n \nDraft a civil suit for damages arising from medical negligence, incorporating detailed legal reasoning and relevant case laws. Scenario: My client, Mrs. Anjali Deshmukh, aged 42, and a resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the procedure, the attending surgeon, Dr. Rakesh Nair, negligently caused damage to her bile duct. Following the surgery, she experienced severe abdominal pain and had to be admitted to another hospital for corrective surgery. As a result, she incurred additional medical expenses amounting to ₹3.5 lakhs and endured significant physical pain and mental agony. Despite repeated follow-ups, both the hospital and the doctor have refused to acknowledge their negligence or offer any compensation. Mrs. Deshmukh now seeks damages of ₹25 lakhs, covering medical expenses, mental harassment, pain and suffering, and anticipated costs of future treatment.\n \nCitations:\n \n1. Rupa is a adopted child. She doesnt have any siblings. her father passed away 5 years ago. She and her mothers are only legal heirs. Her father had 2 flats in pune. Her mother told her to leave the house and her mother says that she'll transfer the property to her cousins name. now rupa is scared that she won't get any share in the properties (her name is still not on the legal papers of the properties). Give me 5 plus Case law or Citations According to the Scenario.\n \n2. Provide case laws on the admissibility of electronic evidence under Section 65B of the Indian Evidence Act.\n \n3. Provide citations or case laws related to anticipatory bail\n \nArgument Generation:\n \nMy client, Mrs. Anjali Deshmukh, aged 42, resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the surgery, due to the negligence of the attending surgeon, Dr. Rakesh Nair, her bile duct was damaged. Post-surgery, she suffered from severe abdominal pain and had to be admitted again for corrective surgery at another hospital. She incurred additional medical expenses of ₹3.5 lakhs and suffered immense mental agony and physical pain. Despite repeated follow-ups, the hospital and the doctor refused to acknowledge their mistake or compensate her. She now seeks compensation of ₹25 lakhs for medical expenses, mental harassment, pain and suffering, and future treatment costs. give me arguments on behalf of plaintiff and defendant.\n \nमाझ्या क्लायंट, श्रीमती अंजली देशमुख, वय ४२, पुण्यातील रहिवासी, यांची १२ मार्च २०२४ रोजी XYZ मल्टीस्पेशालिटी हॉस्पिटलमध्ये पित्ताशयाची शस्त्रक्रिया झाली. शस्त्रक्रियेदरम्यान, उपस्थित सर्जन डॉ. राकेश नायर यांच्या निष्काळजीपणामुळे, त्यांच्या पित्तनलिकेचे नुकसान झाले. शस्त्रक्रियेनंतर, त्यांना तीव्र पोटदुखीचा त्रास झाला आणि त्यांना दुसऱ्या रुग्णालयात सुधारात्मक शस्त्रक्रियेसाठी पुन्हा दाखल करावे लागले. त्यांना ३.५ लाख रुपयांचा अतिरिक्त वैद्यकीय खर्च आला आणि प्रचंड मानसिक त्रास आणि शारीरिक वेदना सहन कराव्या लागल्या. वारंवार पाठपुरावा करूनही, रुग्णालय आणि डॉक्टरांनी त्यांची चूक मान्य करण्यास किंवा तिला भरपाई देण्यास नकार दिला. आता त्या वैद्यकीय खर्च, मानसिक छळ, वेदना आणि त्रास आणि भविष्यातील उपचार खर्चासाठी २५ लाख रुपयांची भरपाई मागत आहेत. मला युक्तिवाद द्या.\n \nMy client is facing a criminal case under Section 420 IPC for alleged cheating. However, there was no fraudulent intention from the beginning, and it was purely a civil dispute arising from a failed business agreement. Give me arguments to defend the client and emphasize that this is a case of civil liability, not criminal cheating.\n \nConsumer Laws:\n \nScenario 1: Defective Product Liability Prompt: Priya purchases a brand-new refrigerator from a well-known electronics store. After a week, it stops working, and the manufacturer refuses to repair or replace it, claiming that the issue was caused by improper installation. What legal options does Priya have under the Consumer Protection Act, 2019, to address this defect?\n \nPdf : Review this draft and suggest changes, if any.",
+          "globalThreadId": "3fcd5110-665a-4d3d-9a43-9f25a5331609"
+        }
+      },
+      "response": {
+        "globalThreadId": "3fcd5110-665a-4d3d-9a43-9f25a5331609",
+        "result": "## Cause Title\n\nIN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, PUNE\n\nCIVIL SUIT NO. __________ OF 2024\n\nRupa D/o. Late [Father's Name]\nAge: [e.g., 28 years], Occupation: [e.g., Service]\nResiding at: [Address in Pune]\n\n.....Plaintiff\n\n**vs**\n\n[Mother's Name] W/o. Late [Father's Name]\nAge: [e.g., 55 years], Occupation: [e.g., Homemaker]\nResiding at: [Address of one of the suit properties in Pune]\n\n.....Defendant\n\n## Suit for Partition and Temporary Injunction\n\nA SUIT FOR PARTITION, DECLARATION, SEPARATE POSSESSION, AND PERMANENT & TEMPORARY INJUNCTION\n\nThe suit is filed under the provisions of the Hindu Succession Act, 1956, particularly Section 8 thereof, for partition and separate possession of the Plaintiff's share; under the Specific Relief Act, 1963 for a declaration of the Plaintiff's rights; and under Order XXXIX Rules 1 and 2 read with Section 151 of the Code of Civil Procedure, 1908, for a temporary injunction restraining the Defendant from alienating or creating third-party interests in the suit properties.\n\n## Facts of the Case\n\n1. That the Plaintiff, Rupa, is the adopted daughter of Late [Father's Name] and the Defendant, [Mother's Name]. The Plaintiff has no siblings. The Plaintiff and the Defendant constitute a Hindu joint family.\n\n2. That the Plaintiff's father, the late [Father's Name], passed away intestate approximately five years ago, leaving behind the Plaintiff and the Defendant as his only legal heirs and successors.\n\n3. That during his lifetime, the Plaintiff's father had acquired two residential flats situated in Pune from his own earnings and savings. The said properties, hereinafter referred to as the \"suit properties\", are more particularly described in the Schedule of Properties annexed hereto.\n\n4. That upon the demise of the Plaintiff's father, the Plaintiff and the Defendant, being his sole Class I heirs under the Hindu Succession Act, 1956, jointly succeeded to the entirety of his estate, including the two suit properties. Consequently, the Plaintiff and the Defendant each have an equal, undivided one-half (1/2) share in the suit properties and are in joint possession thereof.\n\n5. That despite the Plaintiff being a rightful co-owner, her name has not yet been mutated or entered into the official property records or documents pertaining to the suit properties.\n\n6. That recently, the Defendant's behaviour towards the Plaintiff has become hostile. The Defendant has been attempting to dispossess the Plaintiff from the family home and has explicitly threatened to sell and transfer the suit properties to her cousin, thereby depriving the Plaintiff of her legitimate and legal share.\n\n7. That the Plaintiff, upon learning of the Defendant's intentions, requested the Defendant to effect a partition of the suit properties by metes and bounds and to allot the Plaintiff her rightful 1/2 share. However, the Defendant has outright refused to do so and is actively taking steps to alienate the properties.\n\n8. That the cause of action for the present suit first arose when the Defendant threatened to dispossess the Plaintiff and alienate the suit properties, and continues to subsist.\n\n## Legal Provisions\n\n9. That the parties are Hindus and are governed by the Mitakshara School of Hindu Law. The succession to the properties of the Plaintiff's deceased father is governed by the provisions of the Hindu Succession Act, 1956.\n\n10. That as per Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule to the said Act. The Plaintiff, being the daughter, and the Defendant, being the widow, are the only Class I heirs of the deceased and are therefore entitled to an equal share in his estate.\n\n11. That the Plaintiff has a prima facie case and the balance of convenience lies in her favour. If the Defendant is not\nrestrained by an order of temporary injunction from alienating, transferring, or creating any third-party rights in the\nsuit properties during the pendency of this suit, the Plaintiff will suffer irreparable loss and injury which cannot be\ncompensated in terms of money. The very purpose of the suit would be defeated, leading to a multiplicity of proceedings.\nThis warrants the grant of interim relief under Order XXXIX Rules 1 and 2 of the Code of Civil Procedure, 1908.\n\n12. That the suit properties are situated within the territorial jurisdiction of this Hon'ble Court.\n\n13. That the suit is valued for the purposes of court fees and jurisdiction as per the Maharashtra Court Fees Act, 1959, and the requisite court fee has been paid thereon.\n\n14. That the suit is filed within the period of limitation as prescribed under the Limitation Act, 1963.\n\n## Plaintiff's Entitlement and Share\n\n15. That the Plaintiff, being the legally adopted daughter of the deceased, holds the same status and rights as a\nnatural-born daughter under Hindu law. By virtue of Section 12 of the Hindu Adoptions and Maintenance Act, 1956, an\nadopted child is deemed to be the child of his or her adoptive father or mother for all purposes with effect from the\ndate of the adoption. All ties of the child in the family of his or her birth are severed and replaced by those created\nby the adoption in the adoptive family.\n\n16. That upon the intestate demise of the Plaintiff's father, his entire estate devolved upon his Class I heirs as specified in the Schedule to the Hindu Succession Act, 1956. The Plaintiff (daughter) and the Defendant (widow) are the only two Class I heirs.\n\n17. That accordingly, the Plaintiff is legally entitled to an equal, undivided one-half (1/2) share, right, title, and interest in all the assets left behind by her deceased father, including the two suit properties more particularly described in the Schedule hereto. The Defendant is entitled to the remaining one-half (1/2) share.\n\n18. That the non-mutation of the Plaintiff's name in the property records does not, in any manner, extinguish or diminish her vested legal right in the suit properties. It is a settled principle of law that mutation of entries in revenue or municipal records is for fiscal purposes only and does not create or extinguish title to the property. The Plaintiff's title is derived by succession under the law, which is automatic upon the death of the intestate owner.\n\n## Grounds for Temporary Injunction\n\n19. That the Plaintiff has a strong prima facie case in her favour, as her status as a Class I heir and her entitlement to a 1/2 share in the suit properties is established by the provisions of the Hindu Succession Act, 1956. The Defendant has no right to deal with the entire property to the exclusion of the Plaintiff.\n\n20. That the balance of convenience lies overwhelmingly in favour of the Plaintiff and against the Defendant. Granting\nan injunction would only require the Defendant to maintain the status quo of the properties until the rights of the\nparties are adjudicated by this Hon'ble Court, causing no prejudice to the Defendant's own 1/2 share. Conversely,\nrefusing the injunction would allow the Defendant to act upon her threats to alienate the properties, which would create\nirreversible third-party rights, lead to a multiplicity of proceedings, and render the present suit for partition\ninfructuous.\n\n21. That the Plaintiff will suffer irreparable loss and injury if the temporary injunction is not granted. The Defendant has explicitly threatened to sell and transfer the suit properties to her cousin to defeat the Plaintiff's legitimate claim. If such a transfer is effected, the Plaintiff will be wrongfully deprived of her rightful share in her family properties. The loss of an immovable property, especially a residential home, cannot be adequately compensated in monetary terms.\n\n22. That the Defendant's actions are malafide and specifically intended to oust the Plaintiff from her legal inheritance. Therefore, it is just and necessary, in the interest of justice, that the Defendant, her agents, servants, or anyone claiming through her, be restrained by an order of temporary injunction from selling, transferring, alienating, mortgaging, or creating any third-party interest or charge in respect of the suit properties during the pendency of this suit.\n\n## Jurisdiction and Valuation\n\n23. That the suit properties are situated in Pune, which is within the territorial jurisdiction of this Hon'ble Court. Therefore, this Hon'ble Court has the jurisdiction to try and entertain the present suit.\n\n24. That the suit is for partition and separate possession of the Plaintiff's share in the suit properties. As the Plaintiff is in joint possession of the suit properties, the suit is valued for the purpose of court fees under Section 6(1)(vii) of the Maharashtra Court Fees Act, 1959, and the requisite fixed court fee has been paid thereon. A separate fixed court fee has also been paid for the relief of injunction.\n\n25. That for the purpose of pecuniary jurisdiction, the suit is valued at the market value of the Plaintiff's one-half (1/2) share in the suit properties, which is estimated at Rs. [Value of Plaintiff's 1/2 share]. The said valuation is within the pecuniary jurisdiction of this Hon'ble Court.\n\n## Prayer\n\nIt is, therefore, most humbly and respectfully prayed that this Hon'ble Court may be pleased to:\n\n(a) Pass a preliminary decree for partition, declaring that the Plaintiff is the owner of and is entitled to a one-half (1/2) undivided share, right, title, and interest in the suit properties more particularly described in the Schedule of Properties annexed hereto.\n\n(b) Appoint a Court Commissioner to effect the partition of the suit properties by metes and bounds and, upon receiving the Commissioner's report, pass a final decree putting the Plaintiff in separate, vacant, and peaceful possession of her one-half (1/2) share in the suit properties.\n\n(c) Pass an order of temporary injunction under Order XXXIX Rules 1 and 2 read with Section 151 of the Code of Civil Procedure, 1908, restraining the Defendant, her agents, servants, assigns, or any person claiming through or under her, from selling, alienating, transferring, mortgaging, gifting, leasing, or creating any third-party rights, title, or interest of any nature whatsoever in the suit properties during the pendency of the present suit.\n\n(d) Pass a decree of permanent injunction restraining the Defendant and her representatives from obstructing or interfering with the Plaintiff's possession and enjoyment of the suit properties.\n\n(e) Award the costs of this suit to the Plaintiff from the Defendant.\n\n(f) Grant any other and further relief as this Hon'ble Court may deem fit and proper in the facts and circumstances of the case and in the interest of justice.\n\n## Verification\n\nI, Rupa, the Plaintiff above-named, do hereby solemnly state and verify that the contents of the foregoing paragraphs 1 to 25 of the plaint are true and correct to the best of my knowledge, information, and belief, and that nothing material has been concealed therefrom.\n\nVerified at Pune, this [Date] day of [Month], 2024.\n\n(Signature of Plaintiff)\n**Rupa**\nPlaintiff\n\n---\n\n## REFERENCES & CITATIONS\n\n\n### SCENARIO CITATIONS:\n### Arguments for the Plaintiff (Mrs. Anjali Deshmukh)\n\nThe plaintiff, Mrs. Anjali Deshmukh, would argue that Dr. Rakesh Nair and XYZ Multispecialty Hospital are liable for medical negligence based on the following grounds:\n\n1.  **Duty of Care:** Dr. Rakesh Nair, as the operating surgeon, owed a duty of care to Mrs. Anjali Deshmukh to exercise reasonable skill and care during the gallbladder surgery. Similarly, XYZ Multispecialty Hospital owed a duty to provide adequate facilities and ensure that its medical professionals adhered to the accepted standards of care. This duty arises from the doctor-patient relationship and the hospital-patient relationship.\n2.  **Breach of Duty (Negligence):**\n-   **Failure to Exercise Reasonable Skill and Care:** The core of the plaintiff's argument is that Dr. Nair negligently\ndamaged her bile duct during the surgery. This constitutes a breach of the duty to exercise the ordinary degree of skill\nand care that a reasonably competent medical practitioner would have exercised in the same circumstances. The Supreme\nCourt has consistently held that a medical professional is expected to exercise a reasonable degree of care and skill,\nand not every slip or error can be termed as negligence. However, a clear deviation from accepted surgical practice\nleading to an injury that would not ordinarily occur without negligence can establish a breach.\n    -   **Application of *Res Ipsa Loquitur*:** The principle of *res ipsa loquitur* (the thing speaks for itself) may be invoked, suggesting that the damage to the bile duct during a routine gallbladder surgery is an event that would not typically occur in the absence of negligence. While not a rule of law, it is a rule of evidence that shifts the burden of explanation to the defendant.\n    -   **Violation of Accepted Medical Standards:** The injury to the bile duct indicates that the surgical procedure was not performed in accordance with a practice accepted as proper by a responsible body of medical men skilled in that particular art, as per the modified Bolam test applied in India.\n3.  **Causation:** The negligent act of damaging the bile duct directly led to severe post-surgery complications, necessitating corrective surgery at another hospital. This establishes a direct causal link between Dr. Nair's negligence and the subsequent harm suffered by Mrs. Deshmukh, including additional medical expenses, physical pain, and mental agony.\n4.  **Damages:** Mrs. Deshmukh is entitled to compensation for the damages incurred, including:\n    -   **Medical Expenses:** ₹3.5 lakhs already spent on corrective surgery and related treatment.\n    -   **Pain and Suffering:** Compensation for the severe pain and discomfort experienced due to the complications and subsequent surgery.\n    -   **Mental Agony and Harassment:** Damages for the mental distress, anxiety, and harassment caused by the negligence, the need for further surgery, and the refusal of compensation.\n    -   **Future Treatment:** Potential costs for any future medical treatment or follow-up care necessitated by the bile duct injury.\n\n### Arguments for the Defendant (Dr. Rakesh Nair and XYZ Multispecialty Hospital)\n\nThe defendants, Dr. Rakesh Nair and XYZ Multispecialty Hospital, would contend that there was no medical negligence and would raise the following arguments:\n\n1.  **Adherence to Standard of Care:** Dr. Rakesh Nair exercised the requisite degree of care and skill expected of a reasonably competent surgeon. The Supreme Court has clarified that a medical professional cannot be held liable for negligence merely because a procedure was unsuccessful or a complication arose, provided they acted with reasonable competence and followed accepted medical practices.\n2.  **Inherent Risks of Surgery:** Gallbladder surgery, like any surgical procedure, carries inherent risks and potential complications, including bile duct injury, even when performed with due care and skill. Such complications can arise due to anatomical variations, unforeseen circumstances, or the complexity of the patient's condition, and do not necessarily indicate negligence.\n3.  **No *Res Ipsa Loquitur*:** The defendants would argue that the principle of *res ipsa loquitur* is not strictly applicable in all cases of surgical complications. They would assert that bile duct injuries can occur despite the surgeon exercising all reasonable precautions, and thus, the mere occurrence of the injury does not automatically imply negligence. The burden remains on the plaintiff to prove specific acts of negligence.\n4.  **Absence of Gross Negligence:** For a medical professional to be held liable in criminal negligence, the negligence must be of a \"gross\" or \"reckless\" degree. While this case is likely a civil claim, the standard for civil negligence also requires a clear departure from the ordinary standard of care, not merely an error of judgment.\n5.  **Contestation of Quantum of Damages:** The defendants would challenge the quantum of damages sought by the plaintiff, arguing that the amount of ₹25 lakhs is excessive and not fully substantiated. They may argue that some components of the claim, such as mental harassment or future treatment, are speculative or not directly attributable to any alleged negligence. They would demand strict proof of all claimed expenses and losses.\n\n### Relevant Case Laws\n\n1.  *Jacob Mathew v. State of Punjab, (2005) 6 SCC 1*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2005\n    -   **Bench:** 3-Judge Bench\n-   **Key Legal Principle / Ratio Decidendi:** This landmark judgment established the standard for medical negligence in\nIndia, holding that a medical professional is not liable for negligence if he has acted in accordance with a practice\naccepted as proper by a responsible body of medical men skilled in that particular art. An error of judgment is not\nnecessarily negligence. The negligence must be gross for criminal liability, while for civil liability, it must be a\nfailure to exercise reasonable skill and care.\n2.  *Kusum Sharma v. Batra Hospital and Medical Research Centre, (2010) 3 SCC 480*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2010\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** Reaffirmed the principles laid down in *Jacob Mathew*, emphasizing that doctors are not liable for every mishap or complication. It reiterated that a doctor must bring to his task a reasonable degree of skill and knowledge and must exercise a reasonable degree of care. A mere error of judgment or an accident, even if fatal, is not necessarily negligence.\n3.  *V. Kishan Rao v. Nikhil Super Speciality Hospital, (2010) 5 SCC 513*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2010\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** Held that in cases of medical negligence, the principle of *res ipsa loquitur* can be applied, particularly when the injury sustained by the patient is such that it would not have ordinarily occurred without negligence. The burden then shifts to the hospital/doctor to explain the circumstances.\n4.  *Dr. Balram Prasad v. Dr. Kunal Saha, (2014) 1 SCC 384*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2014\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** This case dealt with the quantum of compensation in medical negligence cases, affirming that compensation should be just and adequate, taking into account medical expenses, pain and suffering, loss of earning, and future prospects. It highlighted the importance of a holistic approach to assessing damages.\n5.  *Malay Kumar Ganguly v. Sukumar Mukherjee, (2009) 9 SCC 221*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2009\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** Emphasized the vicarious liability of hospitals for the negligence of their doctors, especially when the doctors are on the panel or employed by the hospital. It also delved into the assessment of damages for medical negligence, including for pain, suffering, and loss of enjoyment of life.\n\n### PDF Links\n\n-   Union of India v. Rajeev Bansal, 2024 INSC 754 ([Judgment PDF](https://api.sci.gov.in/supremecourt/2024/29848/29848_2024_1_1501_51705_Judgement_16-Aug-2024.pdf))\n\n### SCI_JUDGMENT CITATIONS:\nHere are some relevant Supreme Court judgments on the topics you requested:\n\n### Case law on partition suit adopted daughter property rights\n\n-   *Vineeta Sharma v. Rakesh Sharma*, C.A. No.-005633-005633 - 2023, decided on 11-08-2020 (DB ID: 39822)\n    -   **Key Legal Principle:** This landmark judgment held that a daughter has equal coparcenary rights in ancestral property by birth, similar to a son, and these rights cannot be denied on the ground that she was born before the enactment of the Hindu Succession (Amendment) Act, 2005. The Court emphasized that the rights of parties in a partition suit should be settled once and for all.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2018/32601/32601_2018_33_1501_23387_Judgement_11-Aug-2020.pdf)\n\n-   *Pharez John Abraham (Dead) by Lrs. v. Arul Jothi Sivasubramaniam K. and Ors. Etc. Etc.*, C.A. No.-007207-007208 - 2008, decided on 02-07-2019 (DB ID: 38725)\n    -   **Key Legal Principle:** This case reiterated that in a suit for partition, every co-sharer has a right to claim their share. It also touched upon the rights of an adopted child, stating that an adopted child has the same rights as a natural daughter or son of the adoptive parents.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2007/30467/30467_2007_4_1501_14633_Judgement_02-Jul-2019.pdf)\n\n### Case law on medical negligence damages\n\n-   *State of Haryana v. Santra*, C.A. No.-002897-002897 - 2000, decided on 24-04-2000 (DB ID: 16350)\n    -   **Key Legal Principle:** This case dealt with a claim for damages due to medical negligence. The Court affirmed that even individuals from economically weaker sections, who earn their livelihood on a daily basis, cannot be denied a claim for damages on account of medical negligence.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/16386.pdf)\n\n-   *P.G. Inst. of Medical Education & Research v. Jaspal Singh*, C.A. No.-007950-007950 - 2002, decided on 29-05-2009 (DB ID: 27236)\n    -   **Key Legal Principle:** This judgment discussed the concept of medical negligence and the liability of medical institutions and doctors. It highlighted that the cause of action for negligence arises only when damage occurs, as damage is a necessary ingredient of this tort. It also distinguished between the degree of negligence required for civil liability (damages) and criminal liability.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/34847.pdf)\n\n### Case law on admissibility of electronic evidence Section 65B Indian Evidence Act\n\n-   *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal*, C.A. No.-020825-020826 - 2017, decided on 14-07-2020 (DB ID: 39783)\n    -   **Key Legal Principle:** This significant judgment clarified the mandatory nature of the certificate required under Section 65B(4) of the Indian Evidence Act, 1872, for the admissibility of electronic records. The Court held that the certificate is a condition precedent for the admissibility of electronic evidence, except in cases where the original electronic record itself is produced.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2017/39058/39058_2017_34_1501_22897_Judgement_14-Jul-2020.pdf)\n\n-   *Anvar P.V. v. P.K. Basheer*, C.A. No.-004226-004226 - 2012, decided on 18-09-2014 (DB ID: 33078)\n    -   **Key Legal Principle:** This case established that electronic records produced for the inspection of the court are documentary evidence under Section 3 of the Indian Evidence Act. It further clarified that if an electronic record is used as primary evidence under Section 62 of the Evidence Act, it is admissible without compliance with the conditions in Section 65B. However, if it is secondary evidence, the procedure prescribed under Section 65B must be followed.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/41931.pdf)\n\n### Case law on anticipatory bail\n\n-   *Pokar Ram v. State of Rajasthan and Anr*, decided on 17-04-1985 (DB ID: 8011)\n    -   **Key Legal Principle:** This case highlights the circumstances under which anticipatory bail may be granted or cancelled. The Court emphasized that anticipatory bail should not be granted in a routine manner and that the discretion to grant such bail must be exercised judiciously, considering the facts and circumstances of each case.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/9307.pdf)\n\n-   *Priya Indoria v. The State of Karnataka*, Crl.A. No.-003549-003552 - 2023, decided on 20-11-2023 (DB ID: 43183)\n    -   **Key Legal Principle:** This recent judgment discusses various aspects of anticipatory bail, including the High Court's power to grant it and the scope of such orders. It also touches upon the concept of limited or transit anticipatory bail.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2023/7943/7943_2023_14_1501_48299_Judgement_20-Nov-2023.pdf)\n\n### PDF Links:\n\n-   *Vineeta Sharma v. Rakesh Sharma, C.A. No.-005633-005633 - 2023* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2018/32601/32601_2018_33_1501_23387_Judgement_11-Aug-2020.pdf))\n-   *Pharez John Abraham (Dead) by Lrs. v. Arul Jothi Sivasubramaniam K. and Ors. Etc. Etc., C.A. No.-007207-007208 - 2008* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2007/30467/30467_2007_4_1501_14633_Judgement_02-Jul-2019.pdf))\n-   *State of Haryana v. Santra, C.A. No.-002897-002897 - 2000* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/16386.pdf))\n-   *P.G. Inst. of Medical Education & Research v. Jaspal Singh, C.A. No.-007950-007950 - 2002* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/34847.pdf))\n-   *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal, C.A. No.-020825-020826 - 2017* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2017/39058/39058_2017_34_1501_22897_Judgement_14-Jul-2020.pdf))\n-   *Anvar P.V. v. P.K. Basheer, C.A. No.-004226-004226 - 2012* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/41931.pdf))\n-   *Pokar Ram v. State of Rajasthan and Anr* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/9307.pdf))\n-   *Priya Indoria v. The State of Karnataka, Crl.A. No.-003549-003552 - 2023* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2023/7943/7943_2023_14_1501_48299_Judgement_20-Nov-2023.pdf))\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "token_usage": {
+          "input_tokens": 115391,
+          "output_tokens": 15443,
+          "total_tokens": 130834,
+          "cache_read_tokens": 36788,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 6699,
+          "cost_usd": 0.262063,
+          "by_agent": {
+            "Orchestrator": {
+              "input": 5751,
+              "output": 1978,
+              "total": 7729,
+              "cache_read": 0,
+              "calls": 2,
+              "cost_usd": 0.001367
+            },
+            "Drafting": {
+              "input": 72940,
+              "output": 9748,
+              "total": 82688,
+              "cache_read": 36788,
+              "calls": 7,
+              "cost_usd": 0.240395
+            },
+            "SCI_Judgment": {
+              "input": 18477,
+              "output": 2411,
+              "total": 20888,
+              "cache_read": 0,
+              "calls": 2,
+              "cost_usd": 0.01157
+            },
+            "SelfRefine": {
+              "input": 18223,
+              "output": 1306,
+              "total": 19529,
+              "cache_read": 0,
+              "calls": 1,
+              "cost_usd": 0.008732
+            }
+          },
+          "calls": [
+            {
+              "agent": "Orchestrator",
+              "step": "dynamic_plan",
+              "input": 3906,
+              "output": 998,
+              "total": 4904,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.00079
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "rewrite_per_agent_queries",
+              "input": 1845,
+              "output": 980,
+              "total": 2825,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000576
+            },
+            {
+              "agent": "Drafting",
+              "step": "pick_reference",
+              "input": 4740,
+              "output": 71,
+              "total": 4811,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000502
+            },
+            {
+              "agent": "Drafting",
+              "step": "fanout_judge",
+              "input": 3596,
+              "output": 519,
+              "total": 4115,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000567
+            },
+            {
+              "agent": "SCI_Judgment",
+              "step": "react_msg_1",
+              "input": 7876,
+              "output": 111,
+              "total": 7987,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.00264
+            },
+            {
+              "agent": "SCI_Judgment",
+              "step": "react_msg_6",
+              "input": 10601,
+              "output": 2300,
+              "total": 12901,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.00893
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 11811,
+              "output": 1752,
+              "total": 13563,
+              "cache_read": 4087,
+              "cache_creation": 0,
+              "reasoning": 1457,
+              "cost_usd": 0.046854
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 12118,
+              "output": 2282,
+              "total": 14400,
+              "cache_read": 8174,
+              "cache_creation": 0,
+              "reasoning": 1491,
+              "cost_usd": 0.052878
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 12913,
+              "output": 2163,
+              "total": 15076,
+              "cache_read": 8175,
+              "cache_creation": 0,
+              "reasoning": 1432,
+              "cost_usd": 0.052091
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 13636,
+              "output": 2480,
+              "total": 16116,
+              "cache_read": 8176,
+              "cache_creation": 0,
+              "reasoning": 1932,
+              "cost_usd": 0.061165
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 14126,
+              "output": 481,
+              "total": 14607,
+              "cache_read": 8176,
+              "cache_creation": 0,
+              "reasoning": 387,
+              "cost_usd": 0.026337
+            },
+            {
+              "agent": "SelfRefine",
+              "step": "critique",
+              "input": 18223,
+              "output": 1306,
+              "total": 19529,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.008732
+            }
+          ]
+        },
+        "source": [
+          {
+            "source_type": "drafting",
+            "title": "SUIT FOR PARTITION AND SEPARATE POSSESSION",
+            "content": [
+              "Draft Heading: Specimen/Draft/Format of SUIT FOR PARTITION AND SEPARATE POSSESSION.\nDraft Content: IN THE COURT OF THE PRINCIPAL CIVIL JUDGE, (City Name), (District Name), (State Name)\n                                                                                SUIT NO. _________ OF 2023\n\n(Plaint"
+            ],
+            "doc_link": null,
+            "file_name": "/content/formats_and_all_drafts/SUIT FOR PARTITION AND SEPARATE POSSESSION.csv",
+            "agent_name": "Drafting",
+            "relevance_score": null,
+            "template_type": "SUIT FOR PARTITION AND SEPARATE POSSESSION"
+          },
+          {
+            "source_type": "scenario",
+            "title": "AI-Generated Legal Analysis",
+            "content": [
+              "Response generated by AI with web search grounding"
+            ],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Scenario",
+            "relevance_score": null
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "VINEETA SHARMA VS RAKESH SHARMA",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/supremecourt/2018/32601/32601_2018_33_1501_23387_Judgement_11-Aug-2020.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "C.A. No.-005633-005633 - 2023",
+            "judgment_date": "11-08-2020",
+            "bench": "HON'BLE MR. JUSTICE C.T. RAVIKUMAR HON'BLE MR. JUSTICE SUDHANSHU DHULIA",
+            "judgment_by": "HON'BLE MR. JUSTICE ARUN MISHRA",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/supremecourt/2018/32601/32601_2018_33_1501_23387_Judgement_11-Aug-2020.pdf"
+              }
+            ],
+            "parties": "VINEETA SHARMA VS RAKESH SHARMA",
+            "db_id": "39822"
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "PHAREZ JOHN ABRAHAM(DEAD) BY LRS. VS ARUL JOTHI SIVASUBRAMANIAM K.  AND ORS. ETC. ETC.",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/supremecourt/2007/30467/30467_2007_4_1501_14633_Judgement_02-Jul-2019.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "C.A. No.-007207-007208 - 2008",
+            "judgment_date": "02-07-2019",
+            "bench": "HON'BLE MR. JUSTICE ARUN MISHRA HON'BLE MR. JUSTICE M.R. SHAH",
+            "judgment_by": "HON'BLE MR. JUSTICE M.R. SHAH",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/supremecourt/2007/30467/30467_2007_4_1501_14633_Judgement_02-Jul-2019.pdf"
+              }
+            ],
+            "parties": "PHAREZ JOHN ABRAHAM(DEAD) BY LRS. VS ARUL JOTHI SIVASUBRAMANIAM K.  AND ORS. ETC. ETC.",
+            "db_id": "38725"
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "STATE OF HARYANA VS SANTRA",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/jonew/judis/16386.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "C.A. No.-002897-002897 - 2000",
+            "judgment_date": "24-04-2000",
+            "bench": "S.S.AHMADD.P.WADHWA",
+            "judgment_by": "N/A",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/jonew/judis/16386.pdf"
+              }
+            ],
+            "parties": "STATE OF HARYANA VS SANTRA",
+            "db_id": "16350"
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "P.G.INST.OF MEDICAL EDUCATION & RESEARCH VS JASPAL SINGH .",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/jonew/judis/34847.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "C.A. No.-007950-007950 - 2002",
+            "judgment_date": "29-05-2009",
+            "bench": "N/A",
+            "judgment_by": "N/A",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/jonew/judis/34847.pdf"
+              }
+            ],
+            "parties": "P.G.INST.OF MEDICAL EDUCATION & RESEARCH VS JASPAL SINGH .",
+            "db_id": "27236"
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "ARJUN PANDITRAO KHOTKAR VS KAILASH KUSHANRAO GORANTYAL",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/supremecourt/2017/39058/39058_2017_34_1501_22897_Judgement_14-Jul-2020.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "C.A. No.-020825-020826 - 2017",
+            "judgment_date": "14-07-2020",
+            "bench": "HON'BLE MR. JUSTICE ROHINTON FALI NARIMAN HON'BLE MR. JUSTICE S. RAVINDRA BHAT HON'BLE MR. JUSTICE V. RAMASUBRAMANIAN",
+            "judgment_by": "HON'BLE MR. JUSTICE ROHINTON FALI NARIMAN",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/supremecourt/2017/39058/39058_2017_34_1501_22897_Judgement_14-Jul-2020.pdf"
+              }
+            ],
+            "parties": "ARJUN PANDITRAO KHOTKAR VS KAILASH KUSHANRAO GORANTYAL",
+            "db_id": "39783"
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "ANVAR P.V. VS P.K.BASHEER .",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/jonew/judis/41931.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "C.A. No.-004226-004226 - 2012",
+            "judgment_date": "18-09-2014",
+            "bench": "CHIEF JUSTICEKURIAN JOSEPHROHINTON FALI NARIMAN",
+            "judgment_by": "N/A",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/jonew/judis/41931.pdf"
+              }
+            ],
+            "parties": "ANVAR P.V. VS P.K.BASHEER .",
+            "db_id": "33078"
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "POKAR RAM VS STATE OF RAJASTHAN AND ANR",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/jonew/judis/9307.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "- 0",
+            "judgment_date": "17-04-1985",
+            "bench": "DESAID.A.",
+            "judgment_by": "N/A",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/jonew/judis/9307.pdf"
+              }
+            ],
+            "parties": "POKAR RAM VS STATE OF RAJASTHAN AND ANR",
+            "db_id": "8011"
+          },
+          {
+            "source_type": "sci_judgment",
+            "title": "PRIYA INDORIA VS THE STATE OF KARNATAKA",
+            "content": [],
+            "doc_link": "https://api.sci.gov.in/supremecourt/2023/7943/7943_2023_14_1501_48299_Judgement_20-Nov-2023.pdf",
+            "file_name": null,
+            "agent_name": "SCI_Judgment",
+            "relevance_score": null,
+            "case_no": "Crl.A. No.-003549-003552 - 2023",
+            "judgment_date": "20-11-2023",
+            "bench": "HON'BLE MRS. JUSTICE B.V. NAGARATHNA HON'BLE MR. JUSTICE UJJAL BHUYAN",
+            "judgment_by": "HON'BLE MRS. JUSTICE B.V. NAGARATHNA",
+            "pdf_links": [
+              {
+                "label": "Judgment PDF",
+                "url": "https://api.sci.gov.in/supremecourt/2023/7943/7943_2023_14_1501_48299_Judgement_20-Nov-2023.pdf"
+              }
+            ],
+            "parties": "PRIYA INDORIA VS THE STATE OF KARNATAKA",
+            "db_id": "43183"
+          }
+        ],
+        "agents_used": [
+          "Drafting",
+          "Scenario",
+          "SCI_Judgment"
+        ],
+        "effective_query": "prompt 1: Research Prompt: Section 125 of Code of Criminal Procedure 1973\n \nScenario:\n \nDraft a civil suit for partition along with a prayer for temporary injunction. Facts: Rupa is an adopted daughter of the deceased owner. She has no siblings. Her father died 5 years ago, leaving behind two flats in Pune. The only legal heirs are Rupa and her mother. Her name is not yet on the property documents. Her mother is attempting to dispossess her and has expressed intent to transfer the properties to her cousin. The suit should include legal provisions for partition of the properties, declaration of her share, and a temporary injunction restraining the mother or any third party from selling, transferring, or creating third-party rights in the properties until disposal of the suit.\n \nDraft a civil suit for damages arising from medical negligence, incorporating detailed legal reasoning and relevant case laws. Scenario: My client, Mrs. Anjali Deshmukh, aged 42, and a resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the procedure, the attending surgeon, Dr. Rakesh Nair, negligently caused damage to her bile duct. Following the surgery, she experienced severe abdominal pain and had to be admitted to another hospital for corrective surgery. As a result, she incurred additional medical expenses amounting to ₹3.5 lakhs and endured significant physical pain and mental agony. Despite repeated follow-ups, both the hospital and the doctor have refused to acknowledge their negligence or offer any compensation. Mrs. Deshmukh now seeks damages of ₹25 lakhs, covering medical expenses, mental harassment, pain and suffering, and anticipated costs of future treatment.\n \nCitations:\n \n1. Rupa is a adopted child. She doesnt have any siblings. her father passed away 5 years ago. She and her mothers are only legal heirs. Her father had 2 flats in pune. Her mother told her to leave the house and her mother says that she'll transfer the property to her cousins name. now rupa is scared that she won't get any share in the properties (her name is still not on the legal papers of the properties). Give me 5 plus Case law or Citations According to the Scenario.\n \n2. Provide case laws on the admissibility of electronic evidence under Section 65B of the Indian Evidence Act.\n \n3. Provide citations or case laws related to anticipatory bail\n \nArgument Generation:\n \nMy client, Mrs. Anjali Deshmukh, aged 42, resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the surgery, due to the negligence of the attending surgeon, Dr. Rakesh Nair, her bile duct was damaged. Post-surgery, she suffered from severe abdominal pain and had to be admitted again for corrective surgery at another hospital. She incurred additional medical expenses of ₹3.5 lakhs and suffered immense mental agony and physical pain. Despite repeated follow-ups, the hospital and the doctor refused to acknowledge their mistake or compensate her. She now seeks compensation of ₹25 lakhs for medical expenses, mental harassment, pain and suffering, and future treatment costs. give me arguments on behalf of plaintiff and defendant.\n \nमाझ्या क्लायंट, श्रीमती अंजली देशमुख, वय ४२, पुण्यातील रहिवासी, यांची १२ मार्च २०२४ रोजी XYZ मल्टीस्पेशालिटी हॉस्पिटलमध्ये पित्ताशयाची शस्त्रक्रिया झाली. शस्त्रक्रियेदरम्यान, उपस्थित सर्जन डॉ. राकेश नायर यांच्या निष्काळजीपणामुळे, त्यांच्या पित्तनलिकेचे नुकसान झाले. शस्त्रक्रियेनंतर, त्यांना तीव्र पोटदुखीचा त्रास झाला आणि त्यांना दुसऱ्या रुग्णालयात सुधारात्मक शस्त्रक्रियेसाठी पुन्हा दाखल करावे लागले. त्यांना ३.५ लाख रुपयांचा अतिरिक्त वैद्यकीय खर्च आला आणि प्रचंड मानसिक त्रास आणि शारीरिक वेदना सहन कराव्या लागल्या. वारंवार पाठपुरावा करूनही, रुग्णालय आणि डॉक्टरांनी त्यांची चूक मान्य करण्यास किंवा तिला भरपाई देण्यास नकार दिला. आता त्या वैद्यकीय खर्च, मानसिक छळ, वेदना आणि त्रास आणि भविष्यातील उपचार खर्चासाठी २५ लाख रुपयांची भरपाई मागत आहेत. मला युक्तिवाद द्या.\n \nMy client is facing a criminal case under Section 420 Indian Penal Code 1860 for alleged cheating. However, there was no fraudulent intention from the beginning, and it was purely a civil dispute arising from a failed business agreement. Give me arguments to defend the client and emphasize that this is a case of civil liability, not criminal cheating.\n \nConsumer Laws:\n \nScenario 1: Defective Product Liability Prompt: Priya purchases a brand-new refrigerator from a well-known electronics store. After a week, it stops working, and the manufacturer refuses to repair or replace it, claiming that the issue was caused by improper installation. What legal options does Priya have under the Consumer Protection Act, 2019, to address this defect?\n \nPdf : Review this draft and suggest changes, if any.",
+        "query_rewritten": true,
+        "conversation_turn": 1,
+        "followup_suggestions": [
+          "Can Rupa claim past rents?",
+          "What if mother already sold a flat?",
+          "What evidence is needed for injunction?"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "label": "prompt-2-convert-to-marathi",
+      "elapsed_s": 150.78,
+      "status": 200,
+      "request": {
+        "url": "http://localhost:5000/pyapi/search",
+        "body": {
+          "Promptquery": "Convert above text into marathi",
+          "globalThreadId": "3fcd5110-665a-4d3d-9a43-9f25a5331609"
+        }
+      },
+      "response": {
+        "globalThreadId": "3fcd5110-665a-4d3d-9a43-9f25a5331609",
+        "result": "## वाद शीर्षक\n\nपुणे येथील दिवाणी न्यायाधीश, वरिष्ठ स्तर यांच्या न्यायालयात\n\nदिवाणी दावा क्र. __________ 2024\n\nरुपा, कै. [Father's Name] यांची कन्या\nवय: [उदा. 28 वर्षे], व्यवसाय: [उदा. सेवा]\nरा. [Address in Pune]\n\n.....वादी\n\n**विरुद्ध**\n\n[Mother's Name], कै. [Father's Name] यांची पत्नी\nवय: [उदा. 55 वर्षे], व्यवसाय: [उदा. गृहिणी]\nरा. [Address of one of the suit properties in Pune]\n\n.....प्रतिवादी\n\n## वाटप आणि तात्पुरत्या मनाई हुकुमासाठीचा दावा\n\nवाटप, घोषणा, स्वतंत्र ताबा, आणि कायम व तात्पुरत्या मनाई हुकुमासाठीचा दावा\n\nहा दावा under the provisions of the Hindu Succession Act, 1956, विशेषतः त्यातील Section 8 नुसार, वादीच्या हिश्श्याच्या वाटप आणि स्वतंत्र ताब्यासाठी; as per the Specific Relief Act, 1963 वादीच्या हक्कांच्या घोषणेसाठी; आणि Code of Civil Procedure, 1908 च्या Order XXXIX Rules 1 and 2 read with Section 151, प्रतिवादीला दावा मालमत्तांचे हस्तांतरण करण्यापासून किंवा त्यामध्ये तृतीय-पक्षाचे हितसंबंध निर्माण करण्यापासून रोखण्यासाठी तात्पुरत्या मनाई हुकुमासाठी दाखल करण्यात आला आहे.\n\n## प्रकरणाची तथ्ये\n\n1. वादी, रुपा, ही कै. [Father's Name] आणि प्रतिवादी, [Mother's Name] यांची दत्तक कन्या आहे. वादीला भावंड नाहीत. वादी आणि प्रतिवादी हे हिंदू संयुक्त कुटुंब आहेत.\n\n2. वादीचे वडील, कै. [Father's Name], यांचे सुमारे पाच वर्षांपूर्वी मृत्युपत्र न करता निधन झाले, त्यांच्यामागे वादी आणि प्रतिवादी हेच त्यांचे एकमेव कायदेशीर वारसदार आणि उत्तराधिकारी म्हणून राहिले.\n\n3. त्यांच्या हयातीत, वादीच्या वडिलांनी स्वतःच्या कमाईतून आणि बचतीतून पुणे येथे स्थित दोन निवासी सदनिका संपादित केल्या होत्या. सदर मालमत्ता, यापुढे \"दावा मालमत्ता\" म्हणून संदर्भित, यासोबत जोडलेल्या मालमत्तांच्या परिशिष्टात अधिक तपशीलवार वर्णन केल्या आहेत.\n\n4. वादीच्या वडिलांच्या निधनानंतर, वादी आणि प्रतिवादी, Hindu Succession Act, 1956 नुसार त्यांचे एकमेव Class I heirs असल्याने, त्यांच्या संपूर्ण मालमत्तेचा, ज्यात दोन दावा मालमत्तांचा समावेश आहे, संयुक्तपणे वारसा हक्क प्राप्त केला. परिणामी, वादी आणि प्रतिवादी प्रत्येकी दावा मालमत्तांमध्ये समान, अविभक्त एक-द्वितीयांश (1/2) हिस्सा धारण करतात आणि त्यांचा संयुक्त ताबा आहे.\n\n5. वादी हक्कदार सह-मालक असूनही, तिचे नाव अद्याप दावा मालमत्तांशी संबंधित अधिकृत मालमत्ता नोंदी किंवा दस्तऐवजांमध्ये फेरफार किंवा नोंद केलेले नाही.\n\n6. अलीकडे, प्रतिवादीचे वादीप्रतीचे वर्तन शत्रुत्वाचे झाले आहे. प्रतिवादी वादीला कौटुंबिक घरातून बेदखल करण्याचा प्रयत्न करत आहे आणि दावा मालमत्ता तिच्या चुलत भावाला विकण्याची आणि हस्तांतरित करण्याची स्पष्ट धमकी दिली आहे, ज्यामुळे वादीला तिचा कायदेशीर आणि वैध हिस्सा मिळणार नाही.\n\n7. प्रतिवादीच्या हेतूंबद्दल समजल्यानंतर, वादीने प्रतिवादीला दावा मालमत्तांचे मोजमापानुसार वाटप करण्याची आणि वादीला तिचा योग्य 1/2 हिस्सा देण्याची विनंती केली. तथापि, प्रतिवादीने स्पष्टपणे नकार दिला आहे आणि मालमत्तांचे हस्तांतरण करण्यासाठी सक्रियपणे पावले उचलत आहे.\n\n8. प्रस्तुत दाव्याचे कारण प्रतिवादीने वादीला बेदखल करण्याची आणि दावा मालमत्ता हस्तांतरित करण्याची धमकी दिली तेव्हा प्रथम उद्भवले आणि ते अजूनही अस्तित्वात आहे.\n\n## कायदेशीर तरतुदी\n\n9. पक्षकार हिंदू आहेत आणि ते मिताक्षरा हिंदू कायद्याच्या शाखेनुसार शासित आहेत. वादीच्या मृत वडिलांच्या मालमत्तेचे उत्तराधिकार is governed by the provisions of the Hindu Succession Act, 1956.\n\n10. As per Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule to the said Act. वादी, कन्या असल्याने, आणि प्रतिवादी, विधवा असल्याने, मृत व्यक्तीचे एकमेव Class I heirs आहेत आणि म्हणूनच त्यांना त्याच्या मालमत्तेत समान हिस्सा मिळण्याचा हक्क आहे.\n\n11. वादीकडे प्रथमदर्शनी प्रकरण आहे आणि सोयीचे संतुलन तिच्या बाजूने आहे. जर प्रतिवादीला या दाव्याच्या प्रलंबित असताना\nदावा मालमत्तांचे हस्तांतरण, विक्री किंवा त्यामध्ये कोणत्याही तृतीय-पक्षाचे हक्क निर्माण करण्यापासून तात्पुरत्या मनाई\nहुकुमाद्वारे रोखले नाही, तर वादीचे भरून न येणारे नुकसान आणि इजा होईल, ज्याची पैशांच्या स्वरूपात भरपाई होऊ शकत नाही.\nदाव्याचा मूळ उद्देशच निष्फळ होईल, ज्यामुळे अनेक कार्यवाही होतील. यामुळे Code of Civil Procedure, 1908 च्या Order XXXIX\nRules 1 and 2 अंतर्गत अंतरिम दिलासा मंजूर करणे आवश्यक आहे.\n\n12. दावा मालमत्ता या माननीय न्यायालयाच्या प्रादेशिक अधिकारक्षेत्रात स्थित आहेत.\n\n13. Maharashtra Court Fees Act, 1959 नुसार न्यायालयीन शुल्क आणि अधिकारक्षेत्रासाठी दाव्याचे मूल्यांकन करण्यात आले आहे आणि आवश्यक न्यायालयीन शुल्क भरले आहे.\n\n14. Limitation Act, 1963 अंतर्गत विहित केलेल्या मुदतीत हा दावा दाखल करण्यात आला आहे.\n\n## वादीचा हक्क आणि हिस्सा\n\n15. वादी, मृत व्यक्तीची कायदेशीररित्या दत्तक घेतलेली मुलगी असल्याने, हिंदू कायद्यानुसार नैसर्गिक मुलीप्रमाणे समान दर्जा आणि हक्क धारण करते. As per Section 12 of the Hindu Adoptions and Maintenance Act, 1956, दत्तक घेतल्याच्या तारखेपासून दत्तक मूल सर्व उद्देशांसाठी त्याच्या दत्तक वडील किंवा आईचे मूल मानले जाते. मुलाचे जन्म कुटुंबातील सर्व संबंध तोडले जातात आणि दत्तक कुटुंबामध्ये दत्तक घेतल्याने निर्माण झालेल्या संबंधांनी त्यांची जागा घेतली जाते.\n\n16. वादीच्या वडिलांच्या मृत्युपत्र न करता झालेल्या निधनानंतर, त्यांची संपूर्ण मालमत्ता devolved upon his Class I heirs as specified in the Schedule to the Hindu Succession Act, 1956. वादी (कन्या) आणि प्रतिवादी (विधवा) हे एकमेव दोन Class I heirs आहेत.\n\n17. त्यानुसार, वादीला तिच्या मृत वडिलांनी मागे ठेवलेल्या सर्व मालमत्तांमध्ये, ज्यात यासोबत जोडलेल्या परिशिष्टात अधिक तपशीलवार वर्णन केलेल्या दोन दावा मालमत्तांचा समावेश आहे, समान, अविभक्त एक-द्वितीयांश (1/2) हिस्सा, हक्क, मालकी आणि हितसंबंध मिळण्याचा कायदेशीर हक्क आहे. प्रतिवादीला उर्वरित एक-द्वितीयांश (1/2) हिस्सा मिळण्याचा हक्क आहे.\n\n18. मालमत्ता नोंदींमध्ये वादीच्या नावाची फेरफार नोंद न केल्याने, दावा मालमत्तांमधील तिचा निहित कायदेशीर हक्क कोणत्याही प्रकारे संपुष्टात येत नाही किंवा कमी होत नाही. हे कायद्याचे एक स्थापित तत्व आहे की महसूल किंवा नगरपालिका नोंदींमधील फेरफार नोंदी केवळ वित्तीय उद्देशांसाठी असतात आणि मालमत्तेवरील मालकी हक्क निर्माण करत नाहीत किंवा संपुष्टात आणत नाहीत. वादीचा मालकी हक्क कायद्यानुसार उत्तराधिकाराने प्राप्त झाला आहे, जो मृत्युपत्र न केलेल्या मालकाच्या मृत्यूनंतर आपोआप होतो.\n\n## तात्पुरत्या मनाई हुकुमासाठीची कारणे\n\n19. वादीच्या बाजूने एक मजबूत प्रथमदर्शनी प्रकरण आहे, कारण as per the provisions of the Hindu Succession Act, 1956, Class I heir म्हणून तिचा दर्जा आणि दावा मालमत्तांमध्ये 1/2 हिस्सा मिळण्याचा तिचा हक्क स्थापित झाला आहे. प्रतिवादीला वादीला वगळून संपूर्ण मालमत्तेचा व्यवहार करण्याचा कोणताही अधिकार नाही.\n\n20. सोयीचे संतुलन मोठ्या प्रमाणात वादीच्या बाजूने आणि प्रतिवादीच्या विरोधात आहे. मनाई हुकूम दिल्यास प्रतिवादीला फक्त या\nमाननीय न्यायालयाद्वारे पक्षकारांच्या हक्कांचा न्यायनिर्णय होईपर्यंत मालमत्तांची यथास्थिती राखणे आवश्यक असेल, ज्यामुळे\nप्रतिवादीच्या स्वतःच्या 1/2 हिश्श्याला कोणताही पूर्वग्रह निर्माण होणार नाही. याउलट, मनाई हुकूम नाकारल्यास प्रतिवादीला\nमालमत्ता हस्तांतरित करण्याच्या तिच्या धमक्यांवर कार्यवाही करण्याची परवानगी मिळेल, ज्यामुळे अपरिवर्तनीय तृतीय-पक्षाचे\nहक्क निर्माण होतील, अनेक कार्यवाही होतील आणि प्रस्तुत वाटप दावा निष्फळ ठरेल.\n\n21. तात्पुरता मनाई हुकूम मंजूर न केल्यास वादीचे भरून न येणारे नुकसान आणि इजा होईल. प्रतिवादीने वादीचा कायदेशीर दावा निष्फळ करण्यासाठी दावा मालमत्ता तिच्या चुलत भावाला विकण्याची आणि हस्तांतरित करण्याची स्पष्ट धमकी दिली आहे. जर असे हस्तांतरण झाले, तर वादीला तिच्या कौटुंबिक मालमत्तेतील तिच्या योग्य हिश्श्यापासून अन्यायकारकपणे वंचित केले जाईल. स्थावर मालमत्तेचे, विशेषतः निवासी घराचे नुकसान, आर्थिक स्वरूपात पुरेसे भरपाई केले जाऊ शकत नाही.\n\n22. प्रतिवादीची कृती दुर्भावनापूर्ण आहे आणि वादीला तिच्या कायदेशीर वारसा हक्कातून बाहेर काढण्याच्या विशिष्ट हेतूने केली गेली आहे. म्हणूनच, न्यायाच्या हितासाठी हे न्यायोचित आणि आवश्यक आहे की प्रतिवादी, तिचे एजंट, नोकर किंवा तिच्याद्वारे दावा करणारी कोणतीही व्यक्ती, या दाव्याच्या प्रलंबित असताना दावा मालमत्तांच्या संदर्भात विक्री, हस्तांतरण, गहाण ठेवणे, किंवा कोणताही तृतीय-पक्षाचा हितसंबंध किंवा भार निर्माण करण्यापासून तात्पुरत्या मनाई हुकुमाद्वारे रोखले जावे.\n\n## अधिकारक्षेत्र आणि मूल्यांकन\n\n23. दावा मालमत्ता पुणे येथे स्थित आहेत, जे या माननीय न्यायालयाच्या प्रादेशिक अधिकारक्षेत्रात येते. म्हणूनच, या माननीय न्यायालयाला प्रस्तुत दावा चालवण्याचा आणि त्यावर विचार करण्याचा अधिकार आहे.\n\n24. हा दावा दावा मालमत्तांमध्ये वादीच्या हिश्श्याच्या वाटप आणि स्वतंत्र ताब्यासाठी आहे. वादी दावा मालमत्तांच्या संयुक्त ताब्यात असल्याने, under Section 6(1)(vii) of the Maharashtra Court Fees Act, 1959 न्यायालयीन शुल्कासाठी दाव्याचे मूल्यांकन केले आहे आणि आवश्यक निश्चित न्यायालयीन शुल्क भरले आहे. मनाईच्या दिलासासाठी स्वतंत्र निश्चित न्यायालयीन शुल्क देखील भरले आहे.\n\n25. आर्थिक अधिकारक्षेत्राच्या उद्देशासाठी, दाव्याचे मूल्यांकन दावा मालमत्तांमधील वादीच्या एक-द्वितीयांश (1/2) हिश्श्याच्या बाजार मूल्यावर केले आहे, जे अंदाजे रु. [Value of Plaintiff's 1/2 share] आहे. सदर मूल्यांकन या माननीय न्यायालयाच्या आर्थिक अधिकारक्षेत्रात आहे.\n\n## प्रार्थना\n\nम्हणून, अत्यंत नम्रपणे आणि आदरपूर्वक प्रार्थना केली जाते की या माननीय न्यायालयाने कृपा करून:\n\n(अ) वाटपासाठी एक प्राथमिक हुकूमनामा पारित करावा, ज्यात असे घोषित करावे की वादी यासोबत जोडलेल्या मालमत्तांच्या परिशिष्टात अधिक तपशीलवार वर्णन केलेल्या दावा मालमत्तांमध्ये एक-द्वितीयांश (1/2) अविभक्त हिस्सा, हक्क, मालकी आणि हितसंबंधांची मालक आहे आणि त्यासाठी पात्र आहे.\n\n(ब) दावा मालमत्तांचे मोजमापानुसार वाटप करण्यासाठी न्यायालय आयुक्ताची नियुक्ती करावी आणि आयुक्तांचा अहवाल प्राप्त झाल्यावर, वादीला तिच्या दावा मालमत्तांमधील एक-द्वितीयांश (1/2) हिश्श्याचा स्वतंत्र, रिकामा आणि शांततापूर्ण ताबा देण्यासाठी अंतिम हुकूमनामा पारित करावा.\n\n(क) Code of Civil Procedure, 1908 च्या Order XXXIX Rules 1 and 2 read with Section 151 तात्पुरत्या मनाईचा आदेश पारित करावा, ज्यात प्रतिवादी, तिचे एजंट, नोकर, अभिहस्तांकिती किंवा तिच्याद्वारे किंवा तिच्या अंतर्गत दावा करणाऱ्या कोणत्याही व्यक्तीला, या दाव्याच्या प्रलंबित असताना दावा मालमत्तांची विक्री, हस्तांतरण, गहाण, भेट, भाडेपट्ट्याने देणे किंवा कोणत्याही स्वरूपाचे तृतीय-पक्षाचे हक्क, मालकी किंवा हितसंबंध निर्माण करण्यापासून रोखण्यात यावे.\n\n(ड) प्रतिवादी आणि तिच्या प्रतिनिधींना वादीच्या दावा मालमत्तांच्या ताब्यात आणि उपभोगात अडथळा किंवा हस्तक्षेप करण्यापासून रोखण्यासाठी कायमस्वरूपी मनाईचा हुकूमनामा पारित करावा.\n\n(इ) या दाव्याचा खर्च वादीला प्रतिवादीकडून प्रदान करावा.\n\n(फ) या प्रकरणातील तथ्ये आणि परिस्थितीनुसार आणि न्यायाच्या हितासाठी माननीय न्यायालयाला योग्य वाटेल असा इतर कोणताही आणि पुढील दिलासा प्रदान करावा.\n\n## सत्यापन\n\nमी, रुपा, उपरोक्त वादी, याद्वारे गांभीर्यपूर्वक कथन आणि सत्यापित करते की उपरोक्त दाव्याच्या परिच्छेद 1 ते 25 मधील मजकूर माझ्या माहिती, ज्ञान आणि विश्वासानुसार सत्य आणि अचूक आहे आणि त्यातून कोणतीही महत्त्वाची बाब लपवून ठेवलेली नाही.\n\nपुणे येथे सत्यापित, आज दिनांक [Date] [Month], 2024.\n\n(वादीची सही)\n**रुपा**\nवादी\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "token_usage": {
+          "input_tokens": 109401,
+          "output_tokens": 19028,
+          "total_tokens": 134213,
+          "cache_read_tokens": 2620,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 4295,
+          "cost_usd": 0.224528,
+          "by_agent": {
+            "Orchestrator": {
+              "input": 2894,
+              "output": 342,
+              "total": 3236,
+              "cache_read": 2620,
+              "calls": 1,
+              "cost_usd": 0.000426
+            },
+            "Drafting": {
+              "input": 43888,
+              "output": 7910,
+              "total": 57582,
+              "cache_read": 0,
+              "calls": 5,
+              "cost_usd": 0.1163
+            },
+            "SelfRefine": {
+              "input": 62619,
+              "output": 10776,
+              "total": 73395,
+              "cache_read": 0,
+              "calls": 3,
+              "cost_usd": 0.107802
+            }
+          },
+          "calls": [
+            {
+              "agent": "Orchestrator",
+              "step": "dynamic_plan",
+              "input": 2894,
+              "output": 342,
+              "total": 3236,
+              "cache_read": 2620,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000426
+            },
+            {
+              "agent": "Drafting",
+              "step": "translate_query",
+              "input": 6853,
+              "output": 7,
+              "total": 6860,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000688
+            },
+            {
+              "agent": "Drafting",
+              "step": "pick_reference",
+              "input": 3326,
+              "output": 51,
+              "total": 3377,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000353
+            },
+            {
+              "agent": "Drafting",
+              "step": "web_grounded",
+              "input": 11376,
+              "output": 2212,
+              "total": 19372,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.008943
+            },
+            {
+              "agent": "Drafting",
+              "step": "fanout_judge",
+              "input": 4217,
+              "output": 48,
+              "total": 4265,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000441
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate",
+              "input": 18116,
+              "output": 5592,
+              "total": 23708,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 2731,
+              "cost_usd": 0.105875
+            },
+            {
+              "agent": "SelfRefine",
+              "step": "critique",
+              "input": 24233,
+              "output": 2297,
+              "total": 26530,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.013012
+            },
+            {
+              "agent": "SelfRefine",
+              "step": "refine",
+              "input": 14183,
+              "output": 4395,
+              "total": 18578,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 1564,
+              "cost_usd": 0.077319
+            },
+            {
+              "agent": "SelfRefine",
+              "step": "critique",
+              "input": 24203,
+              "output": 4084,
+              "total": 28287,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.017471
+            }
+          ]
+        },
+        "source": [
+          {
+            "source_type": "drafting",
+            "title": "Reference draft (web-synthesised: <web:picker-rejected>)",
+            "content": [
+              "## वाद शीर्षक\n\nपुणे येथील वरिष्ठ स्तर दिवाणी न्यायाधीश यांच्या न्यायालयात\n\nदिवाणी दावा क्र. __________ सन 2024 चा\n\nरुपा, कै. [वडिलांचे नाव] यांची कन्या\nवय: [उदा. 28 वर्षे], व्यवसाय: [उदा. सेवा]\nरा. [पुण्यातील पत्ता]\n\n.....वादी\n\n**विरुद्ध**\n\n[आईचे नाव], कै. [वडिलांचे नाव] यांची पत्नी\nवय: [उदा. 55 वर्"
+            ],
+            "doc_link": null,
+            "file_name": "<web:picker-rejected>",
+            "agent_name": "Drafting",
+            "relevance_score": null,
+            "template_type": "web-synthesized"
+          }
+        ],
+        "agents_used": [
+          "Drafting"
+        ],
+        "effective_query": "Convert above text into marathi\n\n---\n\nPRIOR DRAFT (the text the user wants to modify per the directive above):\n\n## Cause Title\n\nIN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, PUNE\n\nCIVIL SUIT NO. __________ OF 2024\n\nRupa D/o. Late [Father's Name]\nAge: [e.g., 28 years], Occupation: [e.g., Service]\nResiding at: [Address in Pune]\n\n.....Plaintiff\n\n**vs**\n\n[Mother's Name] W/o. Late [Father's Name]\nAge: [e.g., 55 years], Occupation: [e.g., Homemaker]\nResiding at: [Address of one of the suit properties in Pune]\n\n.....Defendant\n\n## Suit for Partition and Temporary Injunction\n\nA SUIT FOR PARTITION, DECLARATION, SEPARATE POSSESSION, AND PERMANENT & TEMPORARY INJUNCTION\n\nThe suit is filed under the provisions of the Hindu Succession Act, 1956, particularly Section 8 thereof, for partition and separate possession of the Plaintiff's share; under the Specific Relief Act, 1963 for a declaration of the Plaintiff's rights; and under Order XXXIX Rules 1 and 2 read with Section 151 of the Code of Civil Procedure, 1908, for a temporary injunction restraining the Defendant from alienating or creating third-party interests in the suit properties.\n\n## Facts of the Case\n\n1. That the Plaintiff, Rupa, is the adopted daughter of Late [Father's Name] and the Defendant, [Mother's Name]. The Plaintiff has no siblings. The Plaintiff and the Defendant constitute a Hindu joint family.\n\n2. That the Plaintiff's father, the late [Father's Name], passed away intestate approximately five years ago, leaving behind the Plaintiff and the Defendant as his only legal heirs and successors.\n\n3. That during his lifetime, the Plaintiff's father had acquired two residential flats situated in Pune from his own earnings and savings. The said properties, hereinafter referred to as the \"suit properties\", are more particularly described in the Schedule of Properties annexed hereto.\n\n4. That upon the demise of the Plaintiff's father, the Plaintiff and the Defendant, being his sole Class I heirs under the Hindu Succession Act, 1956, jointly succeeded to the entirety of his estate, including the two suit properties. Consequently, the Plaintiff and the Defendant each have an equal, undivided one-half (1/2) share in the suit properties and are in joint possession thereof.\n\n5. That despite the Plaintiff being a rightful co-owner, her name has not yet been mutated or entered into the official property records or documents pertaining to the suit properties.\n\n6. That recently, the Defendant's behaviour towards the Plaintiff has become hostile. The Defendant has been attempting to dispossess the Plaintiff from the family home and has explicitly threatened to sell and transfer the suit properties to her cousin, thereby depriving the Plaintiff of her legitimate and legal share.\n\n7. That the Plaintiff, upon learning of the Defendant's intentions, requested the Defendant to effect a partition of the suit properties by metes and bounds and to allot the Plaintiff her rightful 1/2 share. However, the Defendant has outright refused to do so and is actively taking steps to alienate the properties.\n\n8. That the cause of action for the present suit first arose when the Defendant threatened to dispossess the Plaintiff and alienate the suit properties, and continues to subsist.\n\n## Legal Provisions\n\n9. That the parties are Hindus and are governed by the Mitakshara School of Hindu Law. The succession to the properties of the Plaintiff's deceased father is governed by the provisions of the Hindu Succession Act, 1956.\n\n10. That as per Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule to the said Act. The Plaintiff, being the daughter, and the Defendant, being the widow, are the only Class I heirs of the deceased and are therefore entitled to an equal share in his estate.\n\n11. That the Plaintiff has a prima facie case and the balance of convenience lies in her favour. If the Defendant is not\nrestrained by an order of temporary injunction from alienating, transferring, or creating any third-party rights in the\nsuit properties during the pendency of this suit, the Plaintiff will suffer irreparable loss and injury which cannot be\ncompensated in terms of money. The very purpose of the suit would be defeated, leading to a multiplicity of proceedings.\nThis warrants the grant of interim relief under Order XXXIX Rules 1 and 2 of the Code of Civil Procedure, 1908.\n\n12. That the suit properties are situated within the territorial jurisdiction of this Hon'ble Court.\n\n13. That the suit is valued for the purposes of court fees and jurisdiction as per the Maharashtra Court Fees Act, 1959, and the requisite court fee has been paid thereon.\n\n14. That the suit is filed within the period of limitation as prescribed under the Limitation Act, 1963.\n\n## Plaintiff's Entitlement and Share\n\n15. That the Plaintiff, being the legally adopted daughter of the deceased, holds the same status and rights as a\nnatural-born daughter under Hindu law. By virtue of Section 12 of the Hindu Adoptions and Maintenance Act, 1956, an\nadopted child is deemed to be the child of his or her adoptive father or mother for all purposes with effect from the\ndate of the adoption. All ties of the child in the family of his or her birth are severed and replaced by those created\nby the adoption in the adoptive family.\n\n16. That upon the intestate demise of the Plaintiff's father, his entire estate devolved upon his Class I heirs as specified in the Schedule to the Hindu Succession Act, 1956. The Plaintiff (daughter) and the Defendant (widow) are the only two Class I heirs.\n\n17. That accordingly, the Plaintiff is legally entitled to an equal, undivided one-half (1/2) share, right, title, and interest in all the assets left behind by her deceased father, including the two suit properties more particularly described in the Schedule hereto. The Defendant is entitled to the remaining one-half (1/2) share.\n\n18. That the non-mutation of the Plaintiff's name in the property records does not, in any manner, extinguish or diminish her vested legal right in the suit properties. It is a settled principle of law that mutation of entries in revenue or municipal records is for fiscal purposes only and does not create or extinguish title to the property. The Plaintiff's title is derived by succession under the law, which is automatic upon the death of the intestate owner.\n\n## Grounds for Temporary Injunction\n\n19. That the Plaintiff has a strong prima facie case in her favour, as her status as a Class I heir and her entitlement to a 1/2 share in the suit properties is established by the provisions of the Hindu Succession Act, 1956. The Defendant has no right to deal with the entire property to the exclusion of the Plaintiff.\n\n20. That the balance of convenience lies overwhelmingly in favour of the Plaintiff and against the Defendant. Granting\nan injunction would only require the Defendant to maintain the status quo of the properties until the rights of the\nparties are adjudicated by this Hon'ble Court, causing no prejudice to the Defendant's own 1/2 share. Conversely,\nrefusing the injunction would allow the Defendant to act upon her threats to alienate the properties, which would create\nirreversible third-party rights, lead to a multiplicity of proceedings, and render the present suit for partition\ninfructuous.\n\n21. That the Plaintiff will suffer irreparable loss and injury if the temporary injunction is not granted. The Defendant has explicitly threatened to sell and transfer the suit properties to her cousin to defeat the Plaintiff's legitimate claim. If such a transfer is effected, the Plaintiff will be wrongfully deprived of her rightful share in her family properties. The loss of an immovable property, especially a residential home, cannot be adequately compensated in monetary terms.\n\n22. That the Defendant's actions are malafide and specifically intended to oust the Plaintiff from her legal inheritance. Therefore, it is just and necessary, in the interest of justice, that the Defendant, her agents, servants, or anyone claiming through her, be restrained by an order of temporary injunction from selling, transferring, alienating, mortgaging, or creating any third-party interest or charge in respect of the suit properties during the pendency of this suit.\n\n## Jurisdiction and Valuation\n\n23. That the suit properties are situated in Pune, which is within the territorial jurisdiction of this Hon'ble Court. Therefore, this Hon'ble Court has the jurisdiction to try and entertain the present suit.\n\n24. That the suit is for partition and separate possession of the Plaintiff's share in the suit properties. As the Plaintiff is in joint possession of the suit properties, the suit is valued for the purpose of court fees under Section 6(1)(vii) of the Maharashtra Court Fees Act, 1959, and the requisite fixed court fee has been paid thereon. A separate fixed court fee has also been paid for the relief of injunction.\n\n25. That for the purpose of pecuniary jurisdiction, the suit is valued at the market value of the Plaintiff's one-half (1/2) share in the suit properties, which is estimated at Rs. [Value of Plaintiff's 1/2 share]. The said valuation is within the pecuniary jurisdiction of this Hon'ble Court.\n\n## Prayer\n\nIt is, therefore, most humbly and respectfully prayed that this Hon'ble Court may be pleased to:\n\n(a) Pass a preliminary decree for partition, declaring that the Plaintiff is the owner of and is entitled to a one-half (1/2) undivided share, right, title, and interest in the suit properties more particularly described in the Schedule of Properties annexed hereto.\n\n(b) Appoint a Court Commissioner to effect the partition of the suit properties by metes and bounds and, upon receiving the Commissioner's report, pass a final decree putting the Plaintiff in separate, vacant, and peaceful possession of her one-half (1/2) share in the suit properties.\n\n(c) Pass an order of temporary injunction under Order XXXIX Rules 1 and 2 read with Section 151 of the Code of Civil Procedure, 1908, restraining the Defendant, her agents, servants, assigns, or any person claiming through or under her, from selling, alienating, transferring, mortgaging, gifting, leasing, or creating any third-party rights, title, or interest of any nature whatsoever in the suit properties during the pendency of the present suit.\n\n(d) Pass a decree of permanent injunction restraining the Defendant and her representatives from obstructing or interfering with the Plaintiff's possession and enjoyment of the suit properties.\n\n(e) Award the costs of this suit to the Plaintiff from the Defendant.\n\n(f) Grant any other and further relief as this Hon'ble Court may deem fit and proper in the facts and circumstances of the case and in the interest of justice.\n\n## Verification\n\nI, Rupa, the Plaintiff above-named, do hereby solemnly state and verify that the contents of the foregoing paragraphs 1 to 25 of the plaint are true and correct to the best of my knowledge, information, and belief, and that nothing material has been concealed therefrom.\n\nVerified at Pune, this [Date] day of [Month], 2024.\n\n(Signature of Plaintiff)\n**Rupa**\nPlaintiff\n\n---\n\n## REFERENCES & CITATIONS\n\n\n### SCENARIO CITATIONS:\n### Arguments for the Plaintiff (Mrs. Anjali Deshmukh)\n\nThe plaintiff, Mrs. Anjali Deshmukh, would argue that Dr. Rakesh Nair and XYZ Multispecialty Hospital are liable for medical negligence based on the following grounds:\n\n1.  **Duty of Care:** Dr. Rakesh Nair, as the operating surgeon, owed a duty of care to Mrs. Anjali Deshmukh to exercise reasonable skill and care during the gallbladder surgery. Similarly, XYZ Multispecialty Hospital owed a duty to provide adequate facilities and ensure that its medical professionals adhered to the accepted standards of care. This duty arises from the doctor-patient relationship and the hospital-patient relationship.\n2.  **Breach of Duty (Negligence):**\n-   **Failure to Exercise Reasonable Skill and Care:** The core of the plaintiff's argument is that Dr. Nair negligently\ndamaged her bile duct during the surgery. This constitutes a breach of the duty to exercise the ordinary degree of skill\nand care that a reasonably competent medical practitioner would have exercised in the same circumstances. The Supreme\nCourt has consistently held that a medical professional is expected to exercise a reasonable degree of care and skill,\nand not every slip or error can be termed as negligence. However, a clear deviation from accepted surgical practice\nleading to an injury that would not ordinarily occur without negligence can establish a breach.\n    -   **Application of *Res Ipsa Loquitur*:** The principle of *res ipsa loquitur* (the thing speaks for itself) may be invoked, suggesting that the damage to the bile duct during a routine gallbladder surgery is an event that would not typically occur in the absence of negligence. While not a rule of law, it is a rule of evidence that shifts the burden of explanation to the defendant.\n    -   **Violation of Accepted Medical Standards:** The injury to the bile duct indicates that the surgical procedure was not performed in accordance with a practice accepted as proper by a responsible body of medical men skilled in that particular art, as per the modified Bolam test applied in India.\n3.  **Causation:** The negligent act of damaging the bile duct directly led to severe post-surgery complications, necessitating corrective surgery at another hospital. This establishes a direct causal link between Dr. Nair's negligence and the subsequent harm suffered by Mrs. Deshmukh, including additional medical expenses, physical pain, and mental agony.\n4.  **Damages:** Mrs. Deshmukh is entitled to compensation for the damages incurred, including:\n    -   **Medical Expenses:** ₹3.5 lakhs already spent on corrective surgery and related treatment.\n    -   **Pain and Suffering:** Compensation for the severe pain and discomfort experienced due to the complications and subsequent surgery.\n    -   **Mental Agony and Harassment:** Damages for the mental distress, anxiety, and harassment caused by the negligence, the need for further surgery, and the refusal of compensation.\n    -   **Future Treatment:** Potential costs for any future medical treatment or follow-up care necessitated by the bile duct injury.\n\n### Arguments for the Defendant (Dr. Rakesh Nair and XYZ Multispecialty Hospital)\n\nThe defendants, Dr. Rakesh Nair and XYZ Multispecialty Hospital, would contend that there was no medical negligence and would raise the following arguments:\n\n1.  **Adherence to Standard of Care:** Dr. Rakesh Nair exercised the requisite degree of care and skill expected of a reasonably competent surgeon. The Supreme Court has clarified that a medical professional cannot be held liable for negligence merely because a procedure was unsuccessful or a complication arose, provided they acted with reasonable competence and followed accepted medical practices.\n2.  **Inherent Risks of Surgery:** Gallbladder surgery, like any surgical procedure, carries inherent risks and potential complications, including bile duct injury, even when performed with due care and skill. Such complications can arise due to anatomical variations, unforeseen circumstances, or the complexity of the patient's condition, and do not necessarily indicate negligence.\n3.  **No *Res Ipsa Loquitur*:** The defendants would argue that the principle of *res ipsa loquitur* is not strictly applicable in all cases of surgical complications. They would assert that bile duct injuries can occur despite the surgeon exercising all reasonable precautions, and thus, the mere occurrence of the injury does not automatically imply negligence. The burden remains on the plaintiff to prove specific acts of negligence.\n4.  **Absence of Gross Negligence:** For a medical professional to be held liable in criminal negligence, the negligence must be of a \"gross\" or \"reckless\" degree. While this case is likely a civil claim, the standard for civil negligence also requires a clear departure from the ordinary standard of care, not merely an error of judgment.\n5.  **Contestation of Quantum of Damages:** The defendants would challenge the quantum of damages sought by the plaintiff, arguing that the amount of ₹25 lakhs is excessive and not fully substantiated. They may argue that some components of the claim, such as mental harassment or future treatment, are speculative or not directly attributable to any alleged negligence. They would demand strict proof of all claimed expenses and losses.\n\n### Relevant Case Laws\n\n1.  *Jacob Mathew v. State of Punjab, (2005) 6 SCC 1*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2005\n    -   **Bench:** 3-Judge Bench\n-   **Key Legal Principle / Ratio Decidendi:** This landmark judgment established the standard for medical negligence in\nIndia, holding that a medical professional is not liable for negligence if he has acted in accordance with a practice\naccepted as proper by a responsible body of medical men skilled in that particular art. An error of judgment is not\nnecessarily negligence. The negligence must be gross for criminal liability, while for civil liability, it must be a\nfailure to exercise reasonable skill and care.\n2.  *Kusum Sharma v. Batra Hospital and Medical Research Centre, (2010) 3 SCC 480*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2010\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** Reaffirmed the principles laid down in *Jacob Mathew*, emphasizing that doctors are not liable for every mishap or complication. It reiterated that a doctor must bring to his task a reasonable degree of skill and knowledge and must exercise a reasonable degree of care. A mere error of judgment or an accident, even if fatal, is not necessarily negligence.\n3.  *V. Kishan Rao v. Nikhil Super Speciality Hospital, (2010) 5 SCC 513*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2010\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** Held that in cases of medical negligence, the principle of *res ipsa loquitur* can be applied, particularly when the injury sustained by the patient is such that it would not have ordinarily occurred without negligence. The burden then shifts to the hospital/doctor to explain the circumstances.\n4.  *Dr. Balram Prasad v. Dr. Kunal Saha, (2014) 1 SCC 384*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2014\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** This case dealt with the quantum of compensation in medical negligence cases, affirming that compensation should be just and adequate, taking into account medical expenses, pain and suffering, loss of earning, and future prospects. It highlighted the importance of a holistic approach to assessing damages.\n5.  *Malay Kumar Ganguly v. Sukumar Mukherjee, (2009) 9 SCC 221*\n    -   **Court:** Supreme Court of India\n    -   **Year:** 2009\n    -   **Bench:** 2-Judge Bench\n    -   **Key Legal Principle / Ratio Decidendi:** Emphasized the vicarious liability of hospitals for the negligence of their doctors, especially when the doctors are on the panel or employed by the hospital. It also delved into the assessment of damages for medical negligence, including for pain, suffering, and loss of enjoyment of life.\n\n### PDF Links\n\n-   Union of India v. Rajeev Bansal, 2024 INSC 754 ([Judgment PDF](https://api.sci.gov.in/supremecourt/2024/29848/29848_2024_1_1501_51705_Judgement_16-Aug-2024.pdf))\n\n### SCI_JUDGMENT CITATIONS:\nHere are some relevant Supreme Court judgments on the topics you requested:\n\n### Case law on partition suit adopted daughter property rights\n\n-   *Vineeta Sharma v. Rakesh Sharma*, C.A. No.-005633-005633 - 2023, decided on 11-08-2020 (DB ID: 39822)\n    -   **Key Legal Principle:** This landmark judgment held that a daughter has equal coparcenary rights in ancestral property by birth, similar to a son, and these rights cannot be denied on the ground that she was born before the enactment of the Hindu Succession (Amendment) Act, 2005. The Court emphasized that the rights of parties in a partition suit should be settled once and for all.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2018/32601/32601_2018_33_1501_23387_Judgement_11-Aug-2020.pdf)\n\n-   *Pharez John Abraham (Dead) by Lrs. v. Arul Jothi Sivasubramaniam K. and Ors. Etc. Etc.*, C.A. No.-007207-007208 - 2008, decided on 02-07-2019 (DB ID: 38725)\n    -   **Key Legal Principle:** This case reiterated that in a suit for partition, every co-sharer has a right to claim their share. It also touched upon the rights of an adopted child, stating that an adopted child has the same rights as a natural daughter or son of the adoptive parents.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2007/30467/30467_2007_4_1501_14633_Judgement_02-Jul-2019.pdf)\n\n### Case law on medical negligence damages\n\n-   *State of Haryana v. Santra*, C.A. No.-002897-002897 - 2000, decided on 24-04-2000 (DB ID: 16350)\n    -   **Key Legal Principle:** This case dealt with a claim for damages due to medical negligence. The Court affirmed that even individuals from economically weaker sections, who earn their livelihood on a daily basis, cannot be denied a claim for damages on account of medical negligence.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/16386.pdf)\n\n-   *P.G. Inst. of Medical Education & Research v. Jaspal Singh*, C.A. No.-007950-007950 - 2002, decided on 29-05-2009 (DB ID: 27236)\n    -   **Key Legal Principle:** This judgment discussed the concept of medical negligence and the liability of medical institutions and doctors. It highlighted that the cause of action for negligence arises only when damage occurs, as damage is a necessary ingredient of this tort. It also distinguished between the degree of negligence required for civil liability (damages) and criminal liability.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/34847.pdf)\n\n### Case law on admissibility of electronic evidence Section 65B Indian Evidence Act\n\n-   *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal*, C.A. No.-020825-020826 - 2017, decided on 14-07-2020 (DB ID: 39783)\n    -   **Key Legal Principle:** This significant judgment clarified the mandatory nature of the certificate required under Section 65B(4) of the Indian Evidence Act, 1872, for the admissibility of electronic records. The Court held that the certificate is a condition precedent for the admissibility of electronic evidence, except in cases where the original electronic record itself is produced.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2017/39058/39058_2017_34_1501_22897_Judgement_14-Jul-2020.pdf)\n\n-   *Anvar P.V. v. P.K. Basheer*, C.A. No.-004226-004226 - 2012, decided on 18-09-2014 (DB ID: 33078)\n    -   **Key Legal Principle:** This case established that electronic records produced for the inspection of the court are documentary evidence under Section 3 of the Indian Evidence Act. It further clarified that if an electronic record is used as primary evidence under Section 62 of the Evidence Act, it is admissible without compliance with the conditions in Section 65B. However, if it is secondary evidence, the procedure prescribed under Section 65B must be followed.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/41931.pdf)\n\n### Case law on anticipatory bail\n\n-   *Pokar Ram v. State of Rajasthan and Anr*, decided on 17-04-1985 (DB ID: 8011)\n    -   **Key Legal Principle:** This case highlights the circumstances under which anticipatory bail may be granted or cancelled. The Court emphasized that anticipatory bail should not be granted in a routine manner and that the discretion to grant such bail must be exercised judiciously, considering the facts and circumstances of each case.\n    -   [Judgment PDF](https://api.sci.gov.in/jonew/judis/9307.pdf)\n\n-   *Priya Indoria v. The State of Karnataka*, Crl.A. No.-003549-003552 - 2023, decided on 20-11-2023 (DB ID: 43183)\n    -   **Key Legal Principle:** This recent judgment discusses various aspects of anticipatory bail, including the High Court's power to grant it and the scope of such orders. It also touches upon the concept of limited or transit anticipatory bail.\n    -   [Judgment PDF](https://api.sci.gov.in/supremecourt/2023/7943/7943_2023_14_1501_48299_Judgement_20-Nov-2023.pdf)\n\n### PDF Links:\n\n-   *Vineeta Sharma v. Rakesh Sharma, C.A. No.-005633-005633 - 2023* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2018/32601/32601_2018_33_1501_23387_Judgement_11-Aug-2020.pdf))\n-   *Pharez John Abraham (Dead) by Lrs. v. Arul Jothi Sivasubramaniam K. and Ors. Etc. Etc., C.A. No.-007207-007208 - 2008* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2007/30467/30467_2007_4_1501_14633_Judgement_02-Jul-2019.pdf))\n-   *State of Haryana v. Santra, C.A. No.-002897-002897 - 2000* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/16386.pdf))\n-   *P.G. Inst. of Medical Education & Research v. Jaspal Singh, C.A. No.-007950-007950 - 2002* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/34847.pdf))\n-   *Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal, C.A. No.-020825-020826 - 2017* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2017/39058/39058_2017_34_1501_22897_Judgement_14-Jul-2020.pdf))\n-   *Anvar P.V. v. P.K. Basheer, C.A. No.-004226-004226 - 2012* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/41931.pdf))\n-   *Pokar Ram v. State of Rajasthan and Anr* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/9307.pdf))\n-   *Priya Indoria v. The State of Karnataka, Crl.A. No.-003549-003552 - 2023* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2023/7943/7943_2023_14_1501_48299_Judgement_20-Nov-2023.pdf))\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "query_rewritten": true,
+        "conversation_turn": 2,
+        "followup_suggestions": [
+          "वादामध्ये काय माहिती भरू?",
+          "तात्पुरत्या मनाई हुकुमाची प्रक्रिया?",
+          "दावा दाखल करण्याची अंतिम मुदत?"
+        ]
+      }
+    }
+  ]
+}

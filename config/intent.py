@@ -448,3 +448,121 @@ def default_intent() -> UserIntent:
     treat this object identically to receiving no intent at all.
     """
     return UserIntent(confidence=0.0)
+
+
+# ---------------------------------------------------------------------------
+# DynamicPlan — Move 3 Phase A
+# ---------------------------------------------------------------------------
+#
+# Merges the outputs of _classify_and_plan + _extract_user_intent +
+# _validate_and_enrich_plan into a single Pydantic schema populated by ONE
+# Gemini call (`_dynamic_plan()` in agents/orchestrator.py).
+#
+# Design principles (from docs/dynamic_orchestrator_plan.md):
+#   - One rich LLM call beats multiple small ones
+#   - Planner reasons about citation appendix directly (no _select_citation_agents)
+#   - Planner is honest about confidence (self_critique for the PlanCritic loop)
+#   - Behind DYNAMIC_ORCHESTRATOR=1 env flag; off by default until proven
+# ---------------------------------------------------------------------------
+
+TASK_TYPES = (
+    "Drafting", "Judgment", "Legislation", "Constitution",
+    "Scenario", "Maxim", "Newacts", "Legal_Concepts",
+    "SCI_Judgment", "GST_Judgment", "Document",
+    "Non_legal", "Other",
+)
+
+
+class DynamicPlan(BaseModel):
+    """Single-call planning output: task + agents + intent + citation reasoning.
+
+    Populated by `_dynamic_plan()` (agents/orchestrator.py). Read by
+    `orchestrator_plan_node` when DYNAMIC_ORCHESTRATOR=1.
+
+    Backwards compat: `.intent` is the full `UserIntent`, unchanged from
+    Phase 4. `.task` + `.agents` are the same shape the legacy
+    `_classify_and_plan` produced. `.cite_appendix_recommended` is the new
+    planner-decided flag that replaces the `_select_citation_agents` +
+    `_validate_and_enrich_plan` filter logic.
+    """
+
+    model_config = ConfigDict(use_enum_values=False, validate_assignment=True)
+
+    # Routing (subsumes _classify_and_plan)
+    task: Literal[
+        "Drafting", "Judgment", "Legislation", "Constitution",
+        "Scenario", "Maxim", "Newacts", "Legal_Concepts",
+        "SCI_Judgment", "GST_Judgment", "Document",
+        "Non_legal", "Other",
+    ] = Field(..., description="Primary task type.")
+
+    agents: list[str] = Field(
+        ..., min_length=1, max_length=4,
+        description="Agent names to fan out to (1-4). Names must be in the "
+                    "canonical agent set. The primary task's agent MUST be "
+                    "present. Additional agents represent bundled asks the "
+                    "user made in the same query.",
+    )
+
+    reasoning: str = Field(
+        ..., max_length=800,
+        description="1-3 sentence narrative of why this task + agent set was "
+                    "picked. Logged for observability.",
+    )
+
+    # Intent (subsumes _extract_user_intent → UserIntent)
+    intent: UserIntent = Field(
+        default_factory=default_intent,
+        description="Structured user directives. Same schema as Phase 4 UserIntent.",
+    )
+
+    # Normalized query — same as UserIntent extractor's normalized_query output
+    normalized_query: str = Field(
+        "", max_length=8000,
+        description="English-normalized version of the user's query, "
+                    "abbreviations expanded, proper nouns preserved. Empty "
+                    "when normalization was skipped (already English + short).",
+    )
+
+    # Citation-appendix reasoning (subsumes _select_citation_agents heuristics)
+    cite_appendix_recommended: bool = Field(
+        False,
+        description="True iff Drafting task and the draft would benefit from a "
+                    "case-law / statute citations appendix (tax appellate "
+                    "written submissions, quasi-judicial ITAT/CIT(A)/NCLT/etc. "
+                    "pleadings). False for correspondence-style drafts (legal "
+                    "notices, office applications) and simple plaints/bail "
+                    "applications where the body already carries the citations.",
+    )
+
+    # Self-critique (drives the PlanCritic loop in Phase B)
+    overall_confidence: float = Field(
+        ..., ge=0.0, le=1.0,
+        description="Planner's confidence in this whole plan. <0.75 triggers "
+                    "the PlanCritic loop (Phase B). Threshold-tuned in prod.",
+    )
+    self_critique: str = Field(
+        "", max_length=400,
+        description="What the planner is uncertain about. Empty when fully "
+                    "confident. Used by the PlanCritic (Phase B) to decide "
+                    "whether to re-plan.",
+    )
+
+
+def default_dynamic_plan() -> DynamicPlan:
+    """Safe fallback plan when the DynamicPlanner LLM fails.
+
+    Legal_Concepts is the safest catch-all: its agent runs a web-search-
+    grounded explanation so the user gets *something* useful regardless of
+    topic. Mirrors the fallback semantics of `_classify_task_regex_fallback`.
+    """
+    return DynamicPlan(
+        task="Legal_Concepts",
+        agents=["Legal_Concepts"],
+        reasoning="DynamicPlanner failure — falling back to safest catch-all.",
+        intent=default_intent(),
+        normalized_query="",
+        cite_appendix_recommended=False,
+        overall_confidence=0.0,
+        self_critique="Planner LLM failed; used minimal-default plan.",
+    )

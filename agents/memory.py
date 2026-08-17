@@ -191,6 +191,7 @@ def _rewrite_query(
     chat_history: list[Union[HumanMessage, AIMessage]],
     previous_task: str = "",
     previous_artifact_kind: str = "",
+    previous_artifact_content: str = "",
 ) -> str:
     """Rewrite a follow-up query into a standalone query using conversation context.
 
@@ -200,6 +201,13 @@ def _rewrite_query(
     turn — the drafting fast-path (Level 2) needs the raw "in Marathi"
     directive intact, and the rewriter would otherwise expand it into a
     300+ char query that the fast-path detector then rejects.
+
+    `previous_artifact_content` (Move 2 — typed thread memory as knowledge)
+    holds the FULL prior AI response when it was a modifiable artifact
+    (a legal draft). When Turn N is a directive follow-up on that artifact,
+    we skip the rewriter LLM call entirely and emit a deterministic rewrite
+    that inlines the full artifact. Cheaper, faster, and eliminates any
+    chance the rewriter LLM mangles / paraphrases / omits content.
     """
     try:
         # Skip if no history at all
@@ -215,6 +223,37 @@ def _rewrite_query(
         ):
             log.debug("Skipping rewrite — fresh chat placeholder")
             return query
+
+        # Move 2 (typed thread memory as knowledge): when the user's follow-up
+        # is a directive on a prior drafting artifact AND the full artifact is
+        # available in typed state, emit a deterministic rewrite. Skips the
+        # rewriter LLM entirely — no truncation, no paraphrase risk, no LLM
+        # latency. Downstream drafting agent receives the exact prior draft
+        # to modify per the directive.
+        try:
+            from agents.drafting import _DIRECTIVE_VERBS_RE
+            _is_directive = bool(query and _DIRECTIVE_VERBS_RE.search(query))
+        except Exception:
+            _is_directive = False
+        if (
+            _is_directive
+            and previous_artifact_kind == "draft"
+            and previous_artifact_content
+            and len(previous_artifact_content) >= 500
+        ):
+            log.info(
+                "Deterministic rewrite (Move 2: typed thread memory)",
+                directive_preview=query.strip()[:80],
+                artifact_chars=len(previous_artifact_content),
+                previous_task=previous_task,
+            )
+            return (
+                f"{query.strip()}\n\n"
+                f"---\n\n"
+                f"PRIOR DRAFT (the text the user wants to modify per the "
+                f"directive above):\n\n"
+                f"{previous_artifact_content}"
+            )
 
         # PR 3b: preserve short directive follow-ups on prior drafts.
         # When the previous turn was Drafting and produced a modifiable
@@ -607,7 +646,7 @@ async def memory_node(state: LegalAgentState) -> dict:
                 query = await asyncio.wait_for(
                     asyncio.to_thread(
                         _rewrite_query, query, chat_history,
-                        prev_task, prev_artifact_kind,
+                        prev_task, prev_artifact_kind, prev_artifact_content,
                     ),
                     timeout=15,
                 )

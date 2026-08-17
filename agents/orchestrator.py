@@ -601,7 +601,30 @@ def _extract_user_intent(
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "extract_user_intent",
                        raw_and_parsed.get("raw"))
-        result = raw_and_parsed["parsed"]
+        # `include_raw=True` returns {raw, parsed, parsing_error}. `parsed` is
+        # None whenever the LLM output can't be coerced into QueryAnalysisV2
+        # (invalid JSON, extra prose, Pydantic validation failure, safety-
+        # filter strip, truncation). The prior code dereferenced .intent
+        # unconditionally and crashed with a misleading AttributeError that
+        # HID the real parsing_error LangChain captured (Break #5, see
+        # tests/multilingual_test_2026_08_17/pipeline_investigation.md).
+        result = raw_and_parsed.get("parsed")
+        if result is None:
+            raw_msg = raw_and_parsed.get("raw")
+            parsing_error = raw_and_parsed.get("parsing_error")
+            raw_content = str(getattr(raw_msg, "content", "") or "")
+            finish_reason = (
+                (getattr(raw_msg, "response_metadata", {}) or {}).get("finish_reason")
+                if raw_msg is not None else None
+            )
+            log.warning(
+                "Intent extraction returned no parsed output; using default_intent",
+                parsing_error=short_err(parsing_error) if parsing_error else "none",
+                raw_content_preview=raw_content[:400],
+                raw_content_len=len(raw_content),
+                raw_finish_reason=finish_reason,
+            )
+            return query, default_intent()
         log.info("User intent extracted",
                  format=result.intent.response_format.value,
                  format_explicit=result.intent.format_explicit,
@@ -878,6 +901,33 @@ def _validate_and_enrich_plan(
             log.info("Plan enriched: wants_gst_rulings → GST_Judgment",
                      plan=tasks_planned)
 
+    # Break #6 (pipeline_investigation.md): the extractor populates 6 wants_*
+    # fields but this validator historically honoured only 2. When the LLM
+    # classifier misses a required content agent AND the intent extractor
+    # caught the ask, we should pull it back in. Cap at 4 total agents to
+    # match the tasks_planned[:4] limit applied upstream.
+    if intent.wants_scenario_analysis and "Scenario" not in tasks_planned:
+        if len(tasks_planned) < 4:
+            tasks_planned.append("Scenario")
+            log.info("Plan enriched: wants_scenario_analysis → Scenario",
+                     plan=tasks_planned)
+
+    if intent.wants_constitution and "Constitution" not in tasks_planned:
+        if len(tasks_planned) < 4:
+            tasks_planned.append("Constitution")
+            log.info("Plan enriched: wants_constitution → Constitution",
+                     plan=tasks_planned)
+
+    if intent.wants_maxim and "Maxim" not in tasks_planned:
+        if len(tasks_planned) < 4:
+            tasks_planned.append("Maxim")
+            log.info("Plan enriched: wants_maxim → Maxim",
+                     plan=tasks_planned)
+
+    # NOTE: wants_statute_text is deliberately not routed here. Choosing
+    # between Newacts (IPC/BNS/CrPC/BNSS/IEA/BSA) and Legislation (everything
+    # else) needs the `intent.named_acts` list — a follow-up refinement.
+
     return tasks_planned
 
 
@@ -914,6 +964,15 @@ _REVIEW_REDRAFT_VERBS_RE = re.compile(
 )
 
 _CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment")
+
+# Agents that _select_citation_agents auto-adds as the drafting appendix.
+# When cite_appendix is OFF, these are the ONLY agents that should be
+# stripped from a classifier-picked plan. Content agents (Legal_Concepts,
+# Scenario, Maxim, Constitution, Non_legal, Document) must be preserved
+# because they represent distinct user asks bundled with a drafting request.
+_CITATION_APPENDIX_AGENTS = frozenset({
+    "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts", "Legislation",
+})
 
 
 def _has_review_redraft_verbs(query: str) -> bool:
@@ -1380,8 +1439,19 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                      citation_agents=citation_agents,
                      source="request" if _flag is not None else "env_default")
         else:
-            tasks_planned = [t for t in tasks_planned if t == "Drafting" or t == "Document"][:3]
-            log.info("Drafting citation appendix skipped",
+            # Preserve non-citation content agents (Legal_Concepts, Scenario,
+            # Maxim, Constitution, Non_legal) the LLM classifier picked. Only
+            # strip agents that would have been AUTO-ADDED as the citation
+            # appendix (Judgment, SCI/GST_Judgment, Newacts, Legislation) —
+            # those are the ones the flag is meant to suppress. The old
+            # `[Drafting|Document][:3]` filter nuked classifier-picked content
+            # agents too, silently dropping multi-intent asks bundled inside
+            # drafting requests (Break #1 in the pipeline_investigation report).
+            _kept = [t for t in tasks_planned if t not in _CITATION_APPENDIX_AGENTS]
+            _stripped = [t for t in tasks_planned if t in _CITATION_APPENDIX_AGENTS]
+            tasks_planned = _kept[:4]
+            log.info("Drafting citation appendix skipped — content agents preserved",
+                     kept=tasks_planned, stripped=_stripped,
                      source="request" if _flag is not None else "env_default")
     else:
         # Bumped from [:3] to [:4] on 2026-06-30 so multi-intent enrichment

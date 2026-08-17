@@ -92,6 +92,24 @@ Two distinct followup shapes to recognise:
           / generation request, the way the user originally phrased their
           first ask (with the new directive folded in).
 
+      CRITICAL — resolving "above text" / "this response" / "the previous
+      answer": when the directive refers to something with a positional
+      reference ("convert ABOVE TEXT into marathi", "translate THIS response
+      to Hindi", "make THE PREVIOUS answer more concise"), the target is
+      the ASSISTANT'S most recent response in the conversation history —
+      NOT any content the user pasted in their prior USER prompt (case-fact
+      paragraphs, example templates, embedded excerpts).
+
+      For LANGUAGE-CONVERSION directives ("convert to X", "translate to X",
+      "in X language" applied to a prior draft), the reconstructed query
+      MUST INLINE the assistant's prior response VERBATIM so the downstream
+      drafting agent has the actual content to translate. Do NOT summarise
+      or reference the prior draft abstractly — paste the full text
+      preceded by `Convert the following text into <language>:`. This is
+      the ONLY way the drafting agent can produce a faithful translation
+      rather than reconstructing a new draft from scratch (which drifts
+      into unrelated subject matter).
+
 Rules:
 1. The rewritten query must be understandable WITHOUT the conversation history.
 2. Preserve all legal specificity: section numbers, act names, party names, dates, amounts, grounds.
@@ -119,6 +137,37 @@ DIRECTIVE followups (language switch):
 - History: "User asked: Prepare an NDPS bail application... Assistant produced a Marathi draft on the previous turn."
   + Query: "in English"
   → "Prepare the same NDPS bail application in English language for an accused in judicial custody for seven months under Section 20(b) of the NDPS Act, on the same grounds discussed (Section 42(2) non-compliance, panch witness contradictions, FSL sample delay) and the same prayer structure as previously discussed."
+
+- History: "User asked to draft a civil suit for partition between Rupa (adopted daughter) and her mother over two flats in Pune. The user's prompt also contained a paragraph in Marathi describing a separate medical negligence matter. Assistant produced the partition suit draft in English:
+    ## Cause Title
+    IN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, PUNE
+    CIVIL SUIT NO. ______ OF 2024
+    Rupa D/o. Late [Deceased Father's Name] ...
+    ..... Plaintiff
+    vs
+    [Mother's Name] W/o. Late [Deceased Father's Name] ...
+    ..... Defendant
+    ## Facts of the Case
+    1. The Plaintiff is the adopted daughter ...
+    ... (full draft continues) ..."
+  + Query: "Convert above text into marathi"
+  → "Convert the following text into Marathi:
+    ## Cause Title
+    IN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, PUNE
+    CIVIL SUIT NO. ______ OF 2024
+    Rupa D/o. Late [Deceased Father's Name] ...
+    ..... Plaintiff
+    vs
+    [Mother's Name] W/o. Late [Deceased Father's Name] ...
+    ..... Defendant
+    ## Facts of the Case
+    1. The Plaintiff is the adopted daughter ...
+    ... (full assistant draft inlined verbatim) ..."
+  Note: the assistant's ENTIRE prior draft is pasted into the rewritten
+  query. Do NOT switch subject matter to the medical-negligence paragraph
+  in the user's earlier prompt — 'above text' refers to the assistant's
+  most recent output, and it must be inlined so the drafting agent can
+  translate it directly rather than reconstruct a new draft.
 
 DIRECTIVE followups (format / scope):
 - History: "User asked to compare Section 130 and Section 131 of Indian Evidence Act."
@@ -555,6 +604,9 @@ async def memory_node(state: LegalAgentState) -> dict:
              history_messages=len(chat_history),
              file_context_restored=restored_file_context is not None)
 
+    # Import at call site to avoid pulling core.state into module import time
+    from core.state import _RESET_AGENT_RESULTS, _RESET_SOURCE_METADATA
+
     result: dict = {
         "query": query,
         "chat_history": chat_history,
@@ -567,6 +619,16 @@ async def memory_node(state: LegalAgentState) -> dict:
         "previous_task": prev_task,
         "previous_artifact_kind": prev_artifact_kind,
         "previous_artifact_content": prev_artifact_content,
+        # Turn-boundary reset for agent_results. Without this, the checkpointer
+        # carries prior-turn results into the current turn and the synth layer
+        # mixes stale content with fresh (Break #2, pipeline_investigation.md).
+        # The sentinel is stripped by the reducer; downstream code sees a
+        # clean {} to start with.
+        "agent_results": {_RESET_AGENT_RESULTS: True},
+        # Companion reset for source_metadata (same cross-turn leak family).
+        # Without this, prior-turn source lists accumulate in the response
+        # payload and inflate the citations block with unrelated sources.
+        "source_metadata": [_RESET_SOURCE_METADATA],
     }
     # CRITICAL: Only set file_context if we're RESTORING from history.
     # If new files were uploaded this turn (fc.has_content), do NOT touch

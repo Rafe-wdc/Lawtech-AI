@@ -85,9 +85,34 @@ class AgentResult:
     meta: dict = field(default_factory=dict)
 
 
+# Sentinel key: when a state update contains it, the reducer discards
+# `existing` and starts fresh from just the other keys in `new`. Turn-
+# boundary nodes (memory_node) emit this to reset agent_results across
+# graph invocations without breaking within-turn parallel fan-out.
+# Without the reset, the checkpointer persists agent_results across turns
+# and the synth layer sees stale prior-turn results as if fresh
+# (Break #2 in tests/multilingual_test_2026_08_17/pipeline_investigation.md).
+_RESET_AGENT_RESULTS = "__RESET_TURN__"
+
+
 def _merge_agent_results(existing: dict, new: dict) -> dict:
-    """Custom reducer: merge new agent results into existing dict without overwriting."""
+    """Merge new agent results into existing dict without overwriting.
+
+    Special case: when `new` contains the reset sentinel `__RESET_TURN__`,
+    discard `existing` and keep only the OTHER keys from `new` (the sentinel
+    itself is stripped). This lets the memory node clear stale prior-turn
+    results at each turn boundary while preserving within-turn parallel-
+    fan-out merge semantics that every domain agent depends on.
+    """
+    if _RESET_AGENT_RESULTS in new:
+        return {k: v for k, v in new.items() if k != _RESET_AGENT_RESULTS}
     return {**existing, **new}
+
+
+# Reset sentinel object for source_metadata. A list-of-dicts field can't use
+# a key-based sentinel like `_RESET_AGENT_RESULTS`; a single-element list
+# containing exactly this sentinel is treated as "reset" by the reducer.
+_RESET_SOURCE_METADATA = {"__RESET_SOURCE_METADATA__": True}
 
 
 def _cap_source_metadata(existing: list, new: list) -> list:
@@ -95,7 +120,14 @@ def _cap_source_metadata(existing: list, new: list) -> list:
 
     Prevents unbounded state growth in multi-turn threads where each turn
     adds sources from multiple agents (typically 20-50 per turn).
+
+    Special case: when `new` is exactly `[_RESET_SOURCE_METADATA]`, discard
+    `existing` and return an empty list. Turn-boundary nodes emit this to
+    prevent prior-turn sources from leaking into the current turn's payload
+    (companion fix to `_RESET_AGENT_RESULTS`).
     """
+    if new == [_RESET_SOURCE_METADATA]:
+        return []
     combined = existing + new
     return combined[-100:] if len(combined) > 100 else combined
 

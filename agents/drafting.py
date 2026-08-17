@@ -176,10 +176,24 @@ If any rule in the default drafting system prompt below CONTRADICTS this MODE OV
 # path); a false negative degrades to the slow path (no regression vs today).
 _DIRECTIVE_VERBS_RE = re.compile(
     r"\b("
-    # Language switches (English + native-script triggers)
-    r"in\s+(marathi|hindi|english|tamil|telugu|kannada|malayalam|bengali|"
+    # Language switches — the `in|into` alternation catches both "in Marathi"
+    # and "into Marathi" (Break #3, tests/multilingual_test_2026_08_17/
+    # pipeline_investigation.md — the prior `\bin\s+` missed "into marathi"
+    # because "into" has no word boundary between "in" and "to").
+    r"(in|into)\s+(marathi|hindi|english|tamil|telugu|kannada|malayalam|bengali|"
     r"punjabi|gujarati|urdu|odia|assamese|sanskrit)|"
-    r"translate\s+to|translate\s+into|"
+    # Verb-form directives — the prior list had only "translate to/into"
+    # (loose match, would fire on "translate to json"). Adding "convert /
+    # render / rewrite / give me" scoped to a language target so common
+    # phrasings ("convert above text into marathi", "render this in Hindi",
+    # "rewrite in Tamil", "give me this in Bengali") all trip the fast-path
+    # WITHOUT firing on non-language conversions ("convert to json").
+    r"(translate|convert|render|rewrite)\s+(to|into|in\s+)?\s*(marathi|hindi|"
+    r"english|tamil|telugu|kannada|malayalam|bengali|punjabi|gujarati|urdu|"
+    r"odia|assamese|sanskrit)|"
+    r"give\s+(me|us)\s+(this|it|the\s+response)\s+in\s+(marathi|hindi|english|"
+    r"tamil|telugu|kannada|malayalam|bengali|punjabi|gujarati|urdu|odia|"
+    r"assamese|sanskrit)|"
     r"in\s+english\s+please|in\s+hindi\s+please|"
     r"मराठीत|हिंदी\s*में|मराठी\s*मध्ये|मराठीमधे|"
     r"marathi\s+madhe|hindi\s+mein|"

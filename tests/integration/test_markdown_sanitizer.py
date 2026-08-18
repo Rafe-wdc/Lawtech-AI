@@ -85,9 +85,11 @@ def test_redundant_separator_inside_body_dropped():
     assert out.count("|---|---|") == 1, f"body separator not dropped:\n{out}"
 
 
-def test_multiline_cell_folded_with_br():
+def test_multiline_cell_folded_with_space():
     """Numbered list content on continuation lines inside a cell must
-    fold back into the parent row via <br>."""
+    fold back into the parent row with a single space. HTML `<br>`
+    would be prettier but the frontend renderer escapes raw HTML, so
+    space-fold is the safe universal choice."""
     src = _dedent(
         """
         | Key | Value |
@@ -100,12 +102,12 @@ def test_multiline_cell_folded_with_br():
         """
     )
     out = sanitize_markdown(src)
-    # Continuation lines must be gone; the row must be single-line with <br>.
+    # Continuation lines must be gone; the row must be single-line.
     lines = [l for l in out.strip().split("\n") if l.strip()]
     steps_row = next(l for l in lines if l.startswith("| Steps"))
-    assert "<br>1. First" in steps_row, f"first item not folded:\n{steps_row}"
-    assert "<br>2. Second" in steps_row
-    assert "<br>3. Third" in steps_row
+    assert "<br>" not in steps_row, f"HTML <br> leaked into output:\n{steps_row}"
+    assert "Do this: 1. First 2. Second 3. Third" in steps_row, \
+        f"content not merged with space:\n{steps_row}"
     assert steps_row.rstrip().endswith("|"), f"row not closed:\n{steps_row}"
 
 
@@ -132,12 +134,13 @@ def test_incident_response_shape():
     # bare --- must be gone
     for line in out.split("\n"):
         assert line.strip() != "---", f"bare rule survived: {out}"
-    # multi-line cell folded
+    # multi-line cell folded onto one line, no HTML injected
     conditions_row = next(
         l for l in out.split("\n") if l.startswith("| Conditions")
     )
-    assert "<br>1. Intention." in conditions_row
-    assert "<br>1. Intent." in conditions_row
+    assert "<br>" not in conditions_row, f"HTML leaked: {conditions_row}"
+    assert "Causing death with: 1. Intention. 2. Knowledge." in conditions_row
+    assert "Murder if: 1. Intent. 2. Bodily injury." in conditions_row
     assert conditions_row.rstrip().endswith("|")
 
 
@@ -198,18 +201,35 @@ def test_empty_input_returns_empty():
 
 # ---------- _strip_html_from_response (chat_runner) ----------
 
-def test_strip_preserves_br():
-    """<br> must survive the strip — it's needed inside table cells."""
+def test_strip_br_becomes_space():
+    """`<br>` becomes a space, not a newline. LLMs emit `<br>` inside
+    table cells to break lists — a newline there would terminate the
+    row and break the table. Space keeps the row intact. Loses a
+    visual break in rare prose-only cases but preserves tables."""
     src = "line1<br>line2"
     out = _strip_html_from_response(src)
-    assert "<br>" in out, f"<br> stripped: {out}"
+    assert "<br>" not in out
+    assert "\n" not in out
+    assert "line1 line2" in out
 
 
-def test_strip_preserves_hr():
-    """<hr> must survive the strip."""
+def test_strip_br_preserves_table_row():
+    """Realistic case: LLM emits a table row with <br> in a cell.
+    The strip must not split the row across lines."""
+    src = "| Steps | Do:<br>1. First<br>2. Second |"
+    out = _strip_html_from_response(src)
+    # Row still on one line, closed with |
+    assert out.count("\n") == 0
+    assert out.rstrip().endswith("|")
+    assert "Do: 1. First 2. Second" in out
+
+
+def test_strip_hr_becomes_markdown_rule():
+    """`<hr>` becomes a markdown horizontal rule."""
     src = "top<hr>bottom"
     out = _strip_html_from_response(src)
-    assert "<hr>" in out
+    assert "<hr>" not in out
+    assert "---" in out
 
 
 def test_strip_removes_script_tag():
@@ -231,7 +251,8 @@ def test_strip_removes_arbitrary_tags():
 
 
 def test_strip_end_to_end_with_sanitizer():
-    """Sanitizer folds cell content with <br>; strip must NOT undo it."""
+    """Sanitizer folds cell content with a space, and the strip pass
+    doesn't inject any HTML back. Result: single-line row, no HTML."""
     src = _dedent(
         """
         | A | B |
@@ -243,12 +264,10 @@ def test_strip_end_to_end_with_sanitizer():
     )
     sanitized = sanitize_markdown(src)
     stripped = _strip_html_from_response(sanitized)
-    # <br> must still be in the pipeline output — otherwise the table breaks
-    assert "<br>" in stripped, \
-        f"<br> lost between sanitize_markdown and _strip_html_from_response:\n{stripped}"
-    # And there must be no literal `\n1. First` inside the row
+    assert "<br>" not in stripped, f"HTML leaked into final output:\n{stripped}"
     steps_row = next(l for l in stripped.split("\n") if l.startswith("| Steps"))
     assert steps_row.rstrip().endswith("|")
+    assert "Do: 1. First 2. Second" in steps_row
 
 
 def test_very_large_input_short_circuits():

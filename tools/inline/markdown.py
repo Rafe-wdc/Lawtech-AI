@@ -120,8 +120,13 @@ def sanitize_markdown(content: str) -> str:
         start with `|` (numbered items, prose spilled into cell) until
         either the row's stripped form ends with `|` (properly closed)
         or we hit a blank line / new pipe row / EOF. Continuation lines
-        join via ``<br>`` so the frontend renderer preserves the visual
-        line break inside the cell.
+        join with a single space — HTML `<br>` would be prettier
+        (preserves the visual line break), but the frontend markdown
+        renderer escapes raw HTML by default (secure react-markdown /
+        marked config), so `<br>` renders as literal text and looks
+        worse than a joined line. Space-joined keeps the content
+        readable via the "1. ... 2. ... 3." numeric prefixes the LLM
+        emits.
         """
         row = lines[start]
         j = start + 1
@@ -134,8 +139,8 @@ def sanitize_markdown(content: str) -> str:
                 break  # a new row starts
             if nxt_stripped.startswith('```'):
                 break  # code fence
-            # fold this continuation line into the row via <br>
-            row = row.rstrip() + '<br>' + nxt_stripped
+            # fold this continuation line into the row with a space
+            row = row.rstrip() + ' ' + nxt_stripped
             j += 1
         return row, j
 

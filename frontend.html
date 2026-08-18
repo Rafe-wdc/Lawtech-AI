@@ -1840,6 +1840,69 @@ function renderPersistentFiles(fileNames) {
     (fileNames.length > 8 ? `<span class="persistent-file-tag">+${fileNames.length-8} more</span>` : '');
 }
 
+// Readability gate — OCR ran on an uploaded image but returned nothing
+// trustworthy (garbled or empty), so the backend withheld the text rather
+// than feed it to the agents. Render a persistent notice (the transient
+// status line is overwritten by the next event) with a one-click override
+// that re-sends with force_ocr=true.
+function renderUnreadableWarning(evt) {
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+
+  const box = document.createElement('div');
+  box.className = 'unreadable-warning';
+  box.style.cssText =
+    'margin:10px 0;padding:12px 14px;border-radius:8px;' +
+    'border:1px solid #e0b400;background:#fff8e1;color:#5c4600;' +
+    'font-size:14px;line-height:1.5;';
+
+  const text = document.createElement('div');
+  text.textContent = evt.message || "I couldn't read that image reliably.";
+  box.appendChild(text);
+
+  if (evt.can_force_ocr) {
+    const btn = document.createElement('button');
+    btn.textContent = 'Use it anyway';
+    btn.style.cssText =
+      'margin-top:10px;padding:6px 14px;border-radius:6px;cursor:pointer;' +
+      'border:1px solid #b38f00;background:#ffd54f;color:#3e2f00;font-weight:600;';
+    btn.onclick = () => {
+      btn.disabled = true;
+      btn.textContent = 'Using it...';
+      forceOcrNextSend = true;
+      // Re-send as a normal turn. The backend finds the stored unreadable
+      // file by thread_id, so the image does not need re-attaching.
+      const input = document.getElementById('chatInput');
+      if (input) input.value = 'Please read the image I uploaded and continue.';
+      sendChat();
+    };
+    box.appendChild(btn);
+  }
+
+  container.appendChild(box);
+  container.scrollTop = container.scrollHeight;
+}
+
+// Advisory file notice — low resolution, partially-illegible page, or the OCR
+// service being unavailable. Distinct from renderUnreadableWarning: the answer
+// still arrives, so this is information to read alongside it, not a decision
+// to make. Deliberately no action button — there is nothing to confirm.
+function renderFileNotice(evt) {
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+
+  const box = document.createElement('div');
+  box.className = 'file-notice file-notice-' + (evt.stage || 'info');
+  box.style.cssText =
+    'margin:8px 0;padding:10px 12px;border-radius:8px;' +
+    'border:1px solid #b6c8e0;background:#eef4fb;color:#24405e;' +
+    'font-size:13px;line-height:1.5;';
+  box.textContent = evt.message || '';
+
+  container.appendChild(box);
+  container.scrollTop = container.scrollHeight;
+}
+
 // Auto-resize textarea
 function autoResizeTextarea(el) {
   el.style.height = 'auto';
@@ -1931,6 +1994,10 @@ async function sendChat() {
   loadSessionList(); // refresh sidebar
 }
 
+// Set by the "Use it anyway" button when the readability gate withheld an image.
+// Consumed and cleared by the next send, so it never leaks into later turns.
+let forceOcrNextSend = false;
+
 async function sendChatWithFiles(query, threadId) {
   const formData = new FormData();
   formData.append('query', query);
@@ -1940,6 +2007,10 @@ async function sendChatWithFiles(query, threadId) {
   // Integration JWT — backend ignores when not present
   const intToken = getIntegrationToken();
   if (intToken) formData.append('integration_token', intToken);
+  if (forceOcrNextSend) {
+    formData.append('force_ocr', 'true');
+    forceOcrNextSend = false;   // one-shot
+  }
   pendingFiles.forEach(f => formData.append('files', f));
 
   addLog('info', `POST /pyapi/chat (files: ${pendingFiles.length}) \u2014 "${query.substring(0, 60)}..."`);
@@ -2002,8 +2073,22 @@ async function sendChatWithFiles(query, threadId) {
           persistThread(evt.data, currentTurnCount);
           document.getElementById('threadId').value = currentThreadId;
         } else if (evt.type === 'file_processing') {
-          const fileList = (evt.files || []).slice(0,4).join(' · ');
-          statusEl.innerHTML = `<span class="typing-indicator"></span> ${escapeHtml(evt.message)}${fileList ? ' — ' + escapeHtml(fileList) : ''}`;
+          if (evt.stage === 'unreadable_warning') {
+            // OCR ran but produced nothing trustworthy, so its output was
+            // withheld. Show this persistently (the transient status line is
+            // overwritten by the next event) with a one-click override.
+            renderUnreadableWarning(evt);
+          } else if (evt.stage === 'low_resolution_warning'
+                     || evt.stage === 'partial_read_warning'
+                     || evt.stage === 'ocr_unavailable') {
+            // Advisory, not blocking — the answer still arrives. No override
+            // button: there is nothing for the user to confirm, only
+            // something for them to know while reading the answer.
+            renderFileNotice(evt);
+          } else {
+            const fileList = (evt.files || []).slice(0,4).join(' · ');
+            statusEl.innerHTML = `<span class="typing-indicator"></span> ${escapeHtml(evt.message)}${fileList ? ' — ' + escapeHtml(fileList) : ''}`;
+          }
           // Update persistent files bar when files are confirmed processed
           if (evt.files && evt.files.length) renderPersistentFiles(evt.files);
         } else if (evt.type === 'status') {

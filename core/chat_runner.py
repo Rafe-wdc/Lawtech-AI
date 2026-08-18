@@ -68,21 +68,35 @@ def _sse(event: dict) -> str:
 # already strips HTML from drafting outputs, but ANY agent (Legislation,
 # Judgment, Scenario, Constitution/Maxim, etc.) could in principle emit
 # HTML the frontend renders as literal text. This is the last line of
-# defense between the LLM and the user. Converts <br>/<hr> to markdown
-# equivalents, then strips every remaining HTML-shaped tag while keeping
-# the inner content. Idempotent: safe to apply to already-clean text.
+# defense between the LLM and the user.
+#
+# <br> and <hr> are DELIBERATELY preserved. They are the only way to
+# express a line break or horizontal rule INSIDE a markdown table cell
+# (where "\n" terminates the row and breaks the table). The upstream
+# sanitize_markdown folds multi-line cell content via <br>; converting
+# them to "\n" here would undo that fold and re-break the same tables
+# the sanitizer just fixed. Both tags are structural, not executable —
+# no XSS surface. Every other tag is stripped by _FINAL_TAG_RE.
 _FINAL_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _FINAL_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _FINAL_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
+
+# Placeholder tokens used to shuttle <br>/<hr> past the general tag
+# strip. Chosen to be tokens the LLM will never legitimately produce.
+_BR_SENTINEL = "\x00LAWTECHBRSENTINEL\x00"
+_HR_SENTINEL = "\x00LAWTECHHRSENTINEL\x00"
 
 
 def _strip_html_from_response(text: str) -> str:
     """Strip HTML tags from a final response. See module-level comment."""
     if not text or "<" not in text:
         return text
-    out = _FINAL_BR_RE.sub("\n", text)
-    out = _FINAL_HR_RE.sub("\n---\n", out)
+    # Swap <br>/<hr> for sentinel tokens so the general tag strip
+    # doesn't erase them; restore after.
+    out = _FINAL_BR_RE.sub(_BR_SENTINEL, text)
+    out = _FINAL_HR_RE.sub(_HR_SENTINEL, out)
     out, n = _FINAL_TAG_RE.subn("", out)
+    out = out.replace(_BR_SENTINEL, "<br>").replace(_HR_SENTINEL, "<hr>")
     if n:
         log.warning("Final-response HTML strip", tags_removed=n,
                     preview=text[:200])

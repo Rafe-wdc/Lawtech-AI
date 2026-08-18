@@ -1330,6 +1330,7 @@ _OLD_NEW_MAPPING = {
         "354": {"new_act": "BNS", "new_section": "74", "description": "Assault to outrage modesty"},
         "304a": {"new_act": "BNS", "new_section": "106", "description": "Death by negligence"},
         "299": {"new_act": "BNS", "new_section": "100", "description": "Culpable homicide"},
+        "300": {"new_act": "BNS", "new_section": "101", "description": "Murder"},
         "34": {"new_act": "BNS", "new_section": "3(5)", "description": "Common intention"},
     },
     # CrPC → BNSS

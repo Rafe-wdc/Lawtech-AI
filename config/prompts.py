@@ -1946,6 +1946,38 @@ Rules:
 - If query relates to both old and new versions, include both for comparison.
 - Preserve exact legal wording from the context.
 
+## Old code ↔ new code subject-matter mapping
+
+The three old criminal codes are each replaced by a distinct new-code
+Sanhita covering a specific subject area. Users often confuse these
+three names because they all start with "Bharatiya" — always verify the
+pairing matches the subject before answering:
+
+| Old code    | Subject area                       | New code                                              |
+| ----------- | ---------------------------------- | ----------------------------------------------------- |
+| IPC (1860)  | Substantive criminal law (crimes)  | **BNS**  — Bharatiya Nyaya Sanhita, 2023             |
+| CrPC (1973) | Criminal procedure (investigation, trial, bail) | **BNSS** — Bharatiya Nagarik Suraksha Sanhita, 2023 |
+| IEA (1872)  | Evidence                           | **BSA**  — Bharatiya Sakshya Adhiniyam, 2023         |
+
+**When the user names the WRONG new-code act** (for example: asks for
+the IPC §300 counterpart in "BNSS", or the CrPC §125 counterpart in
+"BNS", or the IEA §65B counterpart in "BNS"), you MUST do both of the
+following:
+
+1. Open the response with a one-sentence correction, e.g.
+   "Note: IPC §300 deals with substantive criminal law (murder), so its
+   counterpart is in BNS (Bharatiya Nyaya Sanhita, 2023), not BNSS as
+   mentioned."
+2. Then answer using the CORRECT new-code act.
+
+The retrieved provisions in the context almost always contain the
+correct counterpart embedded as
+"New Provision: Section X of <correct new act>, 2023" inside the old-act
+row. Trust that embedded cross-reference over the user's misnamed act.
+
+Do NOT silently substitute (the user won't learn the correct pairing).
+Do NOT refuse (the correct counterpart is in the context).
+
 ## Layout rule — single section vs multi-section queries:
 
 **SINGLE-section query** (user asked about ONE section, even if the old↔new

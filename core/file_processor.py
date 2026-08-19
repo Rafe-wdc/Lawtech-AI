@@ -76,6 +76,34 @@ OCR_CACHE_DIR = os.path.join(CHROMA_STORE_ROOT, ".ocr_cache")
 # not served to users. Change to "v3" etc. on any future OCR-quality fix.
 OCR_CACHE_VERSION = "v2"
 
+# thread_files.ocr_status value meaning "OCR ran on this image but produced
+# nothing usable, so its output was withheld pending the user's confirmation".
+# Distinct from "failed" (the OCR CALL errored) and "" (nothing to OCR).
+# `ocr_retry_unreadable_files` looks for exactly this.
+#
+# WHY THIS IS A POST-OCR GATE, NOT A PRE-OCR ONE
+# ==============================================
+# The first implementation scored image sharpness BEFORE the Vision call
+# (variance-of-Laplacian over tiles) and skipped OCR on a low score. Measured
+# against real uploads on 2026-08-10, it was worse than useless:
+#
+#   a genuinely blurry scanned memo   scored 13,244   ("very sharp")
+#   a sharp, readable Aadhaar photo   scored    107   ("nearly blurry")
+#
+# Photocopier grain and scan noise are high-frequency energy, and so is
+# sharpness — no edge-based statistic separates them. A second, independent
+# algorithm (re-blur / Crete) failed on the same samples. Global scalar
+# metrics also cannot express partial blur: a page blurred over 75% of its
+# area still scored as sharp, because the readable quarter carried the score.
+#
+# `_ocr_result_is_usable` measures the thing that actually matters — did
+# readable text come out — and is already trusted in production.
+#
+# KNOWN GAP: a page that is HALF readable yields valid text for that half and
+# passes this gate. `chars_per_megapixel` is logged on every image so that
+# failure mode is measurable before deciding whether it needs solving.
+OCR_STATUS_UNREADABLE = "ocr_unreadable"
+
 # ChromaDB chunk size for evidence PDFs. Raised to 15000 in the RAG
 # attachment routing plan (docs/rag_attachment_routing_plan.md, Phase A,
 # 2026-06-28) — large chunks pair with Gemini Pro's 1M context window so
@@ -164,6 +192,11 @@ class ProcessedFile:
     page_count: int = 0
     gemini_supported: bool = False
     error: str | None = None
+    # Mirrors thread_files.ocr_status. Set to OCR_STATUS_UNREADABLE when the
+    # readability gate withheld an image's OCR output; persisted after the row
+    # is inserted (save_thread_file does not write this column) so a later
+    # "use it anyway" can find the file and re-run it without a re-upload.
+    ocr_status: str = ""
 
 
 @dataclass
@@ -858,6 +891,21 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
     pass the same quality check as the PDF path — degenerate-loop output
     is NOT cached, so a re-upload of a problem image gets a real re-run.
 
+    RETURN CONTRACT (changed 2026-08-10 — callers depend on the distinction):
+        returns ""   the model ran and transcribed nothing. This is a
+                     statement ABOUT THE IMAGE and is legitimate grounds to
+                     tell the user it could not be read.
+        raises       the call itself failed — bad credentials, quota, network,
+                     all 3 attempts exhausted. This says nothing about the
+                     image and MUST NOT surface as an image-quality warning.
+
+    Previously both cases returned "". On 2026-08-10 an invalid
+    GOOGLE_API_KEY produced three 401s and the readability gate told the user
+    their document was "too unclear to read" — blaming the customer's file for
+    our outage. `_vision_ocr_pdf` had already learned this (see the
+    `_ocr_pdf_at_dpi` docstring on separating "empty scan" from "every batch
+    errored"); this brings the image path in line.
+
     Bug report 2026-06-19: user attached 3 JPEGs of a real apartment dispute
     + 1 scanned PDF and asked "Prepare a legal notice". Drafting produced an
     employment-dues notice with 40 [placeholders], zero references to the
@@ -946,10 +994,25 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
         return text
 
     except Exception as e:
+        # RAISE, don't return "". Swallowing the exception made an
+        # infrastructure failure indistinguishable from an unreadable image:
+        # on 2026-08-10 an invalid GOOGLE_API_KEY produced three 401s, this
+        # handler returned "", and the readability gate told the user their
+        # document was "too unclear to read" — blaming the customer's file
+        # for our outage. In production a Gemini blip would do that to every
+        # upload at once.
+        #
+        # `_vision_ocr_pdf` already learned this lesson; see the
+        # `_ocr_pdf_at_dpi` docstring on distinguishing "empty scan" from
+        # "every batch errored". This brings the image path in line.
+        #
+        # Callers must treat an exception as "we could not read it" and an
+        # empty return as "the model read nothing" — only the second is
+        # grounds to warn the user about image quality.
         log.error("Image Vision OCR failed",
                   file=filename or os.path.basename(file_path),
                   error=str(e)[:200])
-        return ""
+        raise
 
 
 def _ocr_pdf_at_dpi(
@@ -1552,6 +1615,327 @@ async def _background_ocr_and_store(
         log.error("Background OCR failed", file=filename, error=str(e))
 
 
+# Resolution floor for reliable text recognition.
+#
+# Unlike blur, resolution IS reliably measurable and IS the dominant cause of
+# misread text. The OCR literature is consistent: 300 DPI is the standard,
+# accuracy degrades measurably below 200, and below 150 character accuracy
+# drops under 90% because distinct glyphs collapse into the same few-pixel
+# blob ("e" and "c" become identical).
+#
+# Measured case (2026-08-10): a 467x401 scan of a full memorandum page —
+# roughly 55 DPI — produced fluent, confident, and WRONG output. The surname
+# "Kanayan" was transcribed as "KHACHATAN". Nothing downstream could have
+# caught that: the text was clean, well-formed and plausible. The only honest
+# signal was that the image never contained enough pixels to be read.
+#
+# THE DECISION IS MADE ON PIXELS, NOT ESTIMATED DPI — and that distinction
+# was learned the hard way. An earlier cut estimated DPI by assuming every
+# image spanned an 11in page, then warned below 150 DPI. Measured against
+# real uploads it flagged 3 of 5 GOOD files, including an Aadhaar card and a
+# PAN card that both OCR'd perfectly:
+#
+#   Aadhaar  1200x1600  ->  "145 DPI"  ->  warned   (actually ~350 DPI:
+#                                                    a card is 3.4in, not 11)
+#   PAN      1040x780   ->   "95 DPI"  ->  warned   (same mistake)
+#
+# We cannot know the physical size of the thing photographed, so DPI is
+# genuinely unknowable from the file alone. Absolute pixel count is not.
+#
+# 800px is calibrated against the observed split:
+#   FAILED (wrong name):  467px long edge
+#   FAILED (unreadable):  566px
+#   WORKED:              1040px, 1599px, 1600px
+# It sits in the empty gap between them, biased low so ordinary phone photos
+# and card scans never nag. Raising it re-creates the false positives above.
+_MIN_LONG_EDGE_PX = 800
+
+# Used ONLY for the telemetry field, never for the decision or the user
+# message — see above for why it cannot be trusted as an absolute number.
+_ASSUMED_PAGE_LONG_EDGE_IN = 11.0
+
+
+def estimate_dpi(width: int, height: int) -> float:
+    """Rough DPI, assuming the long edge spans a portrait page."""
+    if width <= 0 or height <= 0:
+        return 0.0
+    return max(width, height) / _ASSUMED_PAGE_LONG_EDGE_IN
+
+
+def _resolution_warning(width: int, height: int) -> tuple[bool, float]:
+    """(too_low, estimated_dpi). Zero dimensions → no warning (fail open)."""
+    if width <= 0 or height <= 0:
+        return False, 0.0
+    return max(width, height) < _MIN_LONG_EDGE_PX, estimate_dpi(width, height)
+
+
+def low_resolution_user_message(filename: str, width: int, height: int) -> str:
+    """Actionable, honest, and specific about WHY the text may be wrong.
+
+    Two deliberate choices:
+
+    - Never says "blurry". The image may be perfectly in focus and still lack
+      the pixels to resolve individual characters. Saying "blurry" would send
+      the user chasing the wrong fix.
+    - Quotes the PIXEL dimensions, not an estimated DPI. We cannot know the
+      physical size of what was photographed, so any DPI figure would be a
+      guess dressed up as a measurement.
+
+    It names the fields most likely to be wrong, because in a legal document
+    a misread party name or case number is the error that actually costs
+    something.
+    """
+    return (
+        f"\"{filename}\" is a small image ({width}x{height} pixels). I can "
+        f"still read it, but at this size individual letters are only a few "
+        f"pixels tall, so names, numbers and dates may be transcribed "
+        f"incorrectly — please double-check them against the original. For "
+        f"reliable results, rescan or rephotograph the document at 300 DPI "
+        f"or higher."
+    )
+
+
+# `[illegible]` is what the OCR prompt instructs the model to write where it
+# cannot read a word. Counting them costs nothing and tells us how much of the
+# page the model itself gave up on.
+_ILLEGIBLE_RE = re.compile(r"\[illegible\]", re.IGNORECASE)
+
+
+def count_illegible_markers(text: str) -> int:
+    return len(_ILLEGIBLE_RE.findall(text or ""))
+
+
+# One or two markers on a long page is normal (a smudged word, a stamp over
+# text) and not worth interrupting the user for. Three means the model gave up
+# repeatedly and the answer will have real holes in it.
+_ILLEGIBLE_WARN_THRESHOLD = 3
+
+
+def _ocr_output_is_unreadable(text: str) -> tuple[bool, str]:
+    """Should we WARN THE USER that we could not read this image?
+
+    Deliberately stricter than `_ocr_result_is_usable`, because the two have
+    opposite cost functions:
+
+      `_ocr_result_is_usable`  drives the PDF high-DPI retry. A false
+                               "unusable" costs one extra OCR call, so it is
+                               tuned to fire readily — it treats `too_short`
+                               ("insufficient signal to decide", <50 long
+                               tokens) as unusable.
+
+      this function            drives a user-visible warning that withholds
+                               the text. A false "unreadable" tells someone
+                               their perfectly good document is bad. An
+                               Aadhaar card, a PAN card, a one-paragraph
+                               notice and a receipt ALL sit under 50 tokens.
+
+    So `too_short` is explicitly NOT grounds to warn: it means we cannot
+    tell, and when we cannot tell we say nothing. Only genuine failures
+    qualify — nothing came out (`empty`) or what came out is gibberish
+    (`garbled`).
+
+    Returns (should_warn, reason).
+    """
+    usable, reason = _ocr_result_is_usable(text)
+    if usable:
+        return False, reason
+    if reason.startswith("garbled") or reason == "empty":
+        return True, reason
+    # too_short and anything else new: not confident enough to accuse the
+    # user's document of being bad.
+    return False, reason
+
+
+def _image_ocr_telemetry(local_path: str, text: str, quality_reason: str) -> dict:
+    """Per-image OCR-quality fields, logged for EVERY image upload.
+
+    `chars_per_megapixel` is the partial-blur tell and the reason this exists.
+    The readability gate below catches a page that is WHOLLY unreadable, but a
+    page that is half readable returns valid text for its good half and sails
+    through — the user then gets a confident answer built on half a document,
+    silently. A dense page yielding sparse text is what that looks like from
+    the OCR side.
+
+    Nothing consumes this yet by design: it is here so the failure mode can be
+    measured on real traffic before anyone decides whether it needs solving.
+    Never raises — telemetry must not be able to fail an upload.
+    """
+    chars = len(text or "")
+    fields = {
+        "ocr_char_count": chars,
+        "ocr_quality_verdict": quality_reason,
+        "chars_per_megapixel": 0.0,
+        "illegible_markers": count_illegible_markers(text),
+        "estimated_dpi": 0.0,
+        "width": 0,
+        "height": 0,
+    }
+    try:
+        from PIL import Image
+        with Image.open(local_path) as im:
+            w, h = im.size
+        fields["width"], fields["height"] = w, h
+        fields["estimated_dpi"] = round(estimate_dpi(w, h), 1)
+        mp = (w * h) / 1_000_000.0
+        if mp > 0:
+            fields["chars_per_megapixel"] = round(chars / mp, 1)
+    except Exception as e:
+        log.debug("OCR telemetry: could not read image dimensions",
+                  file=os.path.basename(local_path or "?"), error=str(e)[:120])
+    return fields
+
+
+def unreadable_user_message(filename: str) -> str:
+    """User-facing text when OCR output was not usable. Plain and actionable —
+    no scores, no jargon, and it names the file so a multi-upload turn is
+    unambiguous."""
+    return (
+        f"I couldn't reliably read the text in \"{filename}\" — the image is "
+        f"too unclear for accurate recognition, so I've set its contents aside "
+        f"rather than work from text I don't trust. "
+        f"For best results, retake it in good light with the document flat and "
+        f"the camera steady, then upload again. "
+        f"If you'd rather I work with what I could make out, say \"use it anyway\"."
+    )
+
+
+async def ocr_retry_unreadable_files(
+    thread_id: str,
+    writer: Optional[Callable[[dict], None]] = None,
+) -> list[str]:
+    """OCR the images this thread previously skipped as blurry.
+
+    The user's "use it anyway" path. Images rejected by the blur gate are
+    still written to disk and to `thread_files`, so this can read them back
+    and run the Vision call that was deferred — no re-upload needed.
+
+    Returns the ChromaDB collection ids created, so the caller can merge
+    them into the turn's FileContext and make the text available to agents
+    on this same turn rather than the next one.
+
+    Never raises: a failure here degrades to "the image still has no text",
+    which is the state the user was already in.
+    """
+    from core.chat_store import chat_store
+
+    def emit(evt: dict) -> None:
+        if writer:
+            try:
+                writer(evt)
+            except Exception:
+                pass
+
+    try:
+        rows = await chat_store.load_thread_files(thread_id)
+    except Exception as e:
+        log.warning("Could not load thread files for OCR retry",
+                    thread_id=thread_id[:8], error=str(e)[:200])
+        return []
+
+    pending = [
+        r for r in rows
+        if (r.get("ocr_status") or "") == OCR_STATUS_UNREADABLE
+        and (r.get("local_path") or "")
+    ]
+    if not pending:
+        log.info("OCR retry requested but nothing is pending",
+                 thread_id=thread_id[:8])
+        return []
+
+    log.info("OCR retry starting", thread_id=thread_id[:8], files=len(pending))
+    collections: list[str] = []
+
+    for row in pending:
+        filename = row.get("filename") or "image"
+        local_path = row["local_path"]
+        file_id = row.get("file_id") or ""
+
+        if not os.path.exists(local_path):
+            # Upload dirs are cleaned by the daily prod cron; an old thread
+            # can lose its file. Say so rather than failing silently.
+            log.warning("OCR retry: stored file is gone",
+                        file=filename, path=local_path)
+            await _safe_status(thread_id, file_id, "failed",
+                               "stored image no longer available")
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_retry_failed",
+                "message": f"\"{filename}\" is no longer available — please upload it again.",
+                "file": filename,
+            })
+            continue
+
+        emit({
+            "type": "file_processing",
+            "stage": "image_ocr_start",
+            "message": f"Reading {filename} as requested...",
+            "file": filename,
+        })
+
+        try:
+            text = await asyncio.wait_for(
+                asyncio.to_thread(_vision_ocr_image, local_path, filename),
+                timeout=120,
+            )
+        except Exception as e:
+            log.error("OCR retry failed", file=filename, error=str(e)[:200])
+            await _safe_status(thread_id, file_id, "failed", str(e)[:500])
+            continue
+
+        if not text.strip():
+            # The expected outcome for a genuinely unreadable photo — this is
+            # the gate having been right. Tell the user plainly.
+            log.warning("OCR retry produced no text", file=filename)
+            await _safe_status(thread_id, file_id, "failed", "OCR produced no text")
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_retry_empty",
+                "message": (
+                    f"I tried reading \"{filename}\" but couldn't make out any "
+                    f"text — the image is too unclear. A sharper photo would help."
+                ),
+                "file": filename,
+            })
+            continue
+
+        collection_id = f"inline_{thread_id}_{file_id[:8]}"
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(_store_in_chromadb, text, collection_id, filename),
+                timeout=CHROMA_STORE_TIMEOUT_S,
+            )
+            collections.append(collection_id)
+            await _safe_status(thread_id, file_id, "complete")
+            log.info("OCR retry complete", file=filename,
+                     chars=len(text), collection=collection_id)
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_retry_done",
+                "message": f"Read {filename}.",
+                "file": filename,
+            })
+        except Exception as e:
+            log.error("OCR retry ChromaDB store failed",
+                      file=filename, error=str(e)[:200])
+            await _safe_status(thread_id, file_id, "failed", str(e)[:500])
+
+    return collections
+
+
+async def _safe_status(thread_id: str, file_id: str,
+                       status: str, error: str = "") -> None:
+    """update_ocr_status that never propagates — status writes are telemetry,
+    not something worth failing a user's turn over."""
+    if not file_id:
+        return
+    try:
+        from core.chat_store import chat_store
+        await chat_store.update_ocr_status(thread_id, file_id, status, error)
+    except Exception as e:
+        log.debug("update_ocr_status failed", file_id=file_id[:8],
+                  status=status, error=str(e)[:200])
+
+
 # --- Text-only extractors (for DOCX / XLSX that Gemini Files API can't handle) ---
 
 def _extract_docx_text(file_path: str) -> str:
@@ -1704,6 +2088,7 @@ async def process_files(
     files: list[tuple[str, str, int]],
     thread_id: str,
     writer: Optional[Callable[[dict], None]] = None,
+    force_ocr: bool = False,
 ) -> FileContext:
     """Process uploaded files with local storage + Gemini Files API persistence.
 
@@ -2199,7 +2584,82 @@ async def process_files(
                     asyncio.to_thread(_vision_ocr_image, local_path, pf.original_name),
                     timeout=120,
                 )
-                if text.strip():
+
+                # --- Readability gate (post-OCR) --------------------------
+                # Ask the OCR output whether it is usable, rather than asking
+                # the pixels whether they look sharp. See the comment on
+                # OCR_STATUS_UNREADABLE for why the pre-OCR version was
+                # removed. `force_ocr` is the user's explicit override and
+                # bypasses the gate entirely.
+                unreadable, quality_reason = _ocr_output_is_unreadable(text)
+                _tel = _image_ocr_telemetry(local_path, text, quality_reason)
+                log.info("Image OCR quality", file=pf.original_name, **_tel)
+
+                # Resolution caveat — fires even when the text reads as
+                # "clean", because that is exactly the dangerous case: at
+                # ~55 DPI the model produces fluent, confident, WRONG output
+                # (measured: "Kanayan" -> "KHACHATAN"). No downstream check
+                # can catch a plausible misread; only the pixel count can.
+                _low_res, _dpi = _resolution_warning(_tel["width"], _tel["height"])
+                if _low_res and not unreadable and text.strip():
+                    log.warning("Low-resolution image — text may be misread",
+                                file=pf.original_name, estimated_dpi=_dpi,
+                                width=_tel["width"], height=_tel["height"])
+                    emit({
+                        "type": "file_processing",
+                        "stage": "low_resolution_warning",
+                        "message": low_resolution_user_message(
+                            pf.original_name, _tel["width"], _tel["height"]),
+                        "file": pf.original_name,
+                        "width": _tel["width"],
+                        "height": _tel["height"],
+                    })
+
+                # The model's own admission of defeat. It is instructed to
+                # write [illegible] rather than guess; when it does, say so,
+                # because the answer will be built on a page with holes.
+                if _tel["illegible_markers"] >= _ILLEGIBLE_WARN_THRESHOLD:
+                    log.warning("OCR left illegible markers",
+                                file=pf.original_name,
+                                count=_tel["illegible_markers"])
+                    emit({
+                        "type": "file_processing",
+                        "stage": "partial_read_warning",
+                        "message": (
+                            f"Parts of \"{pf.original_name}\" could not be read "
+                            f"({_tel['illegible_markers']} passages). My answer "
+                            f"will be based on the rest of the page — a clearer "
+                            f"copy would fill the gaps."
+                        ),
+                        "file": pf.original_name,
+                        "illegible_markers": _tel["illegible_markers"],
+                    })
+
+                if not force_ocr and unreadable:
+                    # OCR ran and produced nothing trustworthy. Withhold the
+                    # output rather than feeding garbage to the agents, and
+                    # tell the user why in terms they can act on.
+                    pf.ocr_status = OCR_STATUS_UNREADABLE
+                    log.warning("Image OCR unusable — withholding text",
+                                file=pf.original_name, reason=quality_reason)
+                    emit({
+                        "type": "file_processing",
+                        "stage": "unreadable_warning",
+                        "message": unreadable_user_message(pf.original_name),
+                        "file": pf.original_name,
+                        "reason": quality_reason,
+                        # The frontend renders a "Use it anyway" action from this.
+                        "can_force_ocr": True,
+                    })
+                    # Deliberately NOT `continue` — the loop tail appends to
+                    # ctx.files and writes the thread_files row, and both are
+                    # required for `ocr_retry_unreadable_files` to find this
+                    # file when the user confirms.
+
+                elif text.strip():
+                    if force_ocr and unreadable:
+                        log.info("Unreadable OCR accepted on user override",
+                                 file=pf.original_name, reason=quality_reason)
                     # Phase B: every image's OCR text goes to ChromaDB.
                     collection_id = f"inline_{thread_id}_{pf.file_id[:8]}"
                     try:
@@ -2224,10 +2684,38 @@ async def process_files(
                     log.warning("Image OCR returned no text",
                                 file=pf.original_name)
             except asyncio.TimeoutError:
-                log.error("Image OCR timed out",
-                          file=pf.original_name)
+                # Infrastructure, not image quality — say so, and do NOT
+                # emit a readability warning.
+                log.error("Image OCR timed out", file=pf.original_name)
+                pf.error = "Image OCR timed out"
+                emit({
+                    "type": "file_processing",
+                    "stage": "ocr_unavailable",
+                    "message": (
+                        f"Reading \"{pf.original_name}\" took too long and was "
+                        f"stopped. This is a problem on our side, not with your "
+                        f"file — please try again."
+                    ),
+                    "file": pf.original_name,
+                })
             except Exception as e:
-                pf.error = f"Image OCR failed: {e}"
+                # Same: a failed CALL is ours to own. The readability gate is
+                # never reached here, so the user is never told their image is
+                # unclear because of an outage (the 2026-08-10 401 incident).
+                pf.error = f"Image OCR failed: {short_err(e)}"
+                log.error("Image OCR call failed — not a quality verdict",
+                          file=pf.original_name, error=short_err(e))
+                emit({
+                    "type": "file_processing",
+                    "stage": "ocr_unavailable",
+                    "message": (
+                        f"I couldn't process \"{pf.original_name}\" just now — "
+                        f"the text-recognition service didn't respond. This is "
+                        f"a problem on our side, not with your file. Please try "
+                        f"again in a moment."
+                    ),
+                    "file": pf.original_name,
+                })
 
         # CSV: extract → ChromaDB (Phase B: no more dependence on Gemini URI).
         elif ext == ".csv":
@@ -2291,8 +2779,14 @@ async def process_files(
                 log.warning("txt/md read failed",
                             file=pf.original_name, error=str(e)[:200])
 
-        # If Gemini upload failed and no text was extracted, mark as error
-        if not pf.gemini_uri and not pf.extracted_text and not pf.chromadb_collection and not pf.error:
+        # If Gemini upload failed and no text was extracted, mark as error.
+        # A blur-skipped image legitimately has no content YET — that is a
+        # deliberate deferral awaiting the user's "use it anyway", not an
+        # extraction failure, and labelling it as one would both mislead the
+        # user and mask the real blur message.
+        if (not pf.gemini_uri and not pf.extracted_text
+                and not pf.chromadb_collection and not pf.error
+                and pf.ocr_status != OCR_STATUS_UNREADABLE):
             pf.error = "No content could be extracted from this file"
 
         ctx.files.append(pf)
@@ -2312,6 +2806,21 @@ async def process_files(
                       file=pf.original_name, timeout_s=SQLITE_SAVE_TIMEOUT_S)
         except Exception as e:
             log.error("Failed to save thread_file record", file=pf.original_name, error=str(e))
+
+        # ocr_status is NOT part of save_thread_file's INSERT column list, so
+        # it has to be written afterwards via its own UPDATE — which requires
+        # the row to already exist. Hence this sits below the save, not above.
+        if pf.ocr_status == OCR_STATUS_UNREADABLE:
+            try:
+                await chat_store.update_ocr_status(
+                    thread_id, pf.file_id, OCR_STATUS_UNREADABLE,
+                )
+            except Exception as e:
+                # Non-fatal: the user still sees the blur warning. They lose
+                # the one-click "use it anyway" (the file won't be found by
+                # ocr_retry_unreadable_files) and would need to re-upload.
+                log.warning("Could not persist ocr_unreadable status",
+                            file=pf.original_name, error=str(e)[:200])
 
         log.info("File processed",
                  file=pf.original_name, type=pf.file_type,

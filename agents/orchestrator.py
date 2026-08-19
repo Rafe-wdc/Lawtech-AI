@@ -23,6 +23,7 @@ from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.source_registry import (
     SourceRegistry,
+    merge_source_registries,
     source_from_sci,
     source_from_hc,
     source_from_legislation,
@@ -1014,23 +1015,56 @@ def _validate_and_enrich_plan(
     # classifier misses a required content agent AND the intent extractor
     # caught the ask, we should pull it back in. Cap at 4 total agents to
     # match the tasks_planned[:4] limit applied upstream.
-    if intent.wants_scenario_analysis and "Scenario" not in tasks_planned:
+    # When Drafting is the primary task, DO NOT enrich with Scenario /
+    # Constitution / Maxim from wants_* flags. The Drafting agent handles
+    # its own reasoning + retrieval via `_gather_relevant_context` + its
+    # system prompt. Enriching would run each content agent's LLM (~10s +
+    # ~5000 tokens) to produce output that the synthesis phase discards
+    # (see the 2026-08-19 double-draft fix in orchestrator_synthesize_node
+    # + the plan-phase strip in the cite_appendix=OFF branch). Without
+    # this guard, `_validate_and_enrich_plan` runs AFTER the strip and
+    # re-adds the very agents the strip just removed — burning tokens
+    # for no user-visible output. Callers who want a separate analysis
+    # alongside a draft should pass cite_appendix=true or issue an
+    # explicit follow-up turn.
+    _drafting_primary = "Drafting" in tasks_planned
+
+    if (intent.wants_scenario_analysis and "Scenario" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Scenario")
             log.info("Plan enriched: wants_scenario_analysis → Scenario",
                      plan=tasks_planned)
 
-    if intent.wants_constitution and "Constitution" not in tasks_planned:
+    if (intent.wants_constitution and "Constitution" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Constitution")
             log.info("Plan enriched: wants_constitution → Constitution",
                      plan=tasks_planned)
 
-    if intent.wants_maxim and "Maxim" not in tasks_planned:
+    if (intent.wants_maxim and "Maxim" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Maxim")
             log.info("Plan enriched: wants_maxim → Maxim",
                      plan=tasks_planned)
+
+    if _drafting_primary:
+        _dropped_wants = []
+        if intent.wants_scenario_analysis:
+            _dropped_wants.append("scenario_analysis")
+        if intent.wants_constitution:
+            _dropped_wants.append("constitution")
+        if intent.wants_maxim:
+            _dropped_wants.append("maxim")
+        if _dropped_wants:
+            log.info(
+                "Plan enrich: content-agent wants_* NOT routed "
+                "(Drafting primary — reasoning handled by drafting agent)",
+                dropped_wants=_dropped_wants,
+                plan=tasks_planned,
+            )
 
     # NOTE: wants_statute_text is deliberately not routed here. Choosing
     # between Newacts (IPC/BNS/CrPC/BNSS/IEA/BSA) and Legislation (everything
@@ -1581,20 +1615,40 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                      citation_agents=citation_agents,
                      source="request" if _flag is not None else "env_default")
         else:
-            # Preserve non-citation content agents (Legal_Concepts, Scenario,
-            # Maxim, Constitution, Non_legal) the LLM classifier picked. Only
-            # strip agents that would have been AUTO-ADDED as the citation
-            # appendix (Judgment, SCI/GST_Judgment, Newacts, Legislation) —
-            # those are the ones the flag is meant to suppress. The old
-            # `[Drafting|Document][:3]` filter nuked classifier-picked content
-            # agents too, silently dropping multi-intent asks bundled inside
-            # drafting requests (Break #1 in the pipeline_investigation report).
-            _kept = [t for t in tasks_planned if t not in _CITATION_APPENDIX_AGENTS]
-            _stripped = [t for t in tasks_planned if t in _CITATION_APPENDIX_AGENTS]
+            # Strip BOTH:
+            #   (1) citation-appendix agents (opt-in via cite_appendix=true);
+            #   (2) long-form content agents (Scenario, Constitution, Maxim,
+            #       Legal_Concepts) — the Drafting agent handles its own
+            #       reasoning + retrieval via `_gather_relevant_context` and
+            #       its system prompt, so a co-planned content agent burns
+            #       ~10s + ~5000 tokens producing output that the synthesis
+            #       phase now discards anyway (see the 2026-08-19 double-
+            #       draft fix in orchestrator_synthesize_node).
+            #
+            # Document IS preserved — it's how uploaded-file text reaches
+            # the pipeline when the user attached PDFs / images.
+            #
+            # 2026-08-17 (commit 3ce6f0c) removed the older
+            # `[Drafting|Document][:3]` filter to preserve "multi-intent
+            # asks bundled inside drafting requests." In practice the
+            # UserIntent extractor over-triggered `wants_scenario_analysis`
+            # / `wants_constitution` on plain drafting phrasing ("draft X
+            # incorporating detailed legal reasoning"), planning content
+            # agents that produced redundant full drafts. The safer default
+            # is: for a drafting query, the draft IS the response — extras
+            # go through cite_appendix=true or an explicit follow-up turn.
+            _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING = frozenset({
+                "Scenario", "Constitution", "Maxim", "Legal_Concepts",
+            })
+            _strip_set = _CITATION_APPENDIX_AGENTS | _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING
+            _kept = [t for t in tasks_planned if t not in _strip_set]
+            _stripped = [t for t in tasks_planned if t in _strip_set]
             tasks_planned = _kept[:4]
-            log.info("Drafting citation appendix skipped — content agents preserved",
-                     kept=tasks_planned, stripped=_stripped,
-                     source="request" if _flag is not None else "env_default")
+            log.info(
+                "Drafting: stripped citation-appendix + redundant content agents",
+                kept=tasks_planned, stripped=_stripped,
+                source="request" if _flag is not None else "env_default",
+            )
     else:
         # Bumped from [:3] to [:4] on 2026-06-30 so multi-intent enrichment
         # can fan out to BOTH SCI_Judgment AND Judgment alongside the
@@ -1822,8 +1876,24 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # self_refine critic/refiner read from this registry so citations,
     # quoted statutes, and PDF URLs in the final answer are traceable to
     # what was actually retrieved — never fabricated from training memory.
-    # Merged into state via the merge_source_registries reducer.
-    source_registry = _build_source_registry(agent_results)
+    #
+    # Two inputs, merged:
+    #   1. `state["source_registry"]` — written directly by agents during
+    #      fan-out and merged by the `merge_source_registries` reducer
+    #      (core/state.py). This carries sources an agent retrieved but does
+    #      NOT report in `AgentResult.sources` — e.g. Drafting reports only
+    #      its reference template there, while the BNS sections, legislation
+    #      and judgments it pulled via `_gather_relevant_context` would
+    #      otherwise be invisible to synthesis and to the critic below.
+    #   2. `_build_source_registry(agent_results)` — derived from every
+    #      agent's reported `AgentResult.sources`.
+    #
+    # Deriving from agent_results alone was the previous behaviour; the state
+    # channel is additive, so agents that write nothing lose nothing.
+    source_registry = merge_source_registries(
+        state.get("source_registry"),
+        _build_source_registry(agent_results),
+    )
 
     log.info("Synthesize phase started",
              agents_received=list(agent_results.keys()),
@@ -1949,15 +2019,24 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "final_response": cleaned,
                 "source_metadata": _serialize_sources(result),
                 "tokens_consumed": result.tokens_consumed,
+                # Persist rather than discard — see the pass-through note below.
+                "source_registry": source_registry,
             }
 
         log.info("Single agent pass-through",
                  agent=name, content_len=len(result.content),
-                 tokens=result.tokens_consumed)
+                 tokens=result.tokens_consumed,
+                 registry_size=len(source_registry))
         return_dict = {
             "final_response": result.content,
             "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
+            # The registry was built above and, until now, thrown away on this
+            # path — the cost was paid and the result discarded. Persisting it
+            # costs nothing and is the prerequisite for running the critic on
+            # single-agent answers, which today return with no citation
+            # grounding at all.
+            "source_registry": source_registry,
         }
         return return_dict
 
@@ -1971,7 +2050,39 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # had carefully extracted).
     if "Drafting" in valid_results:
         drafting_result = valid_results.pop("Drafting")
-        citation_results = valid_results  # Judgment, Legislation, Newacts, Document, ...
+
+        # Restrict citation_results to CITATION-SHAPED agents only. The plan
+        # phase already separates content agents (Scenario, Constitution,
+        # Maxim, Legal_Concepts) from citation agents (Judgment, SCI_Judgment,
+        # GST_Judgment, Legislation, Newacts, Document) but the previous
+        # `citation_results = valid_results` swept up EVERY non-Drafting
+        # agent — including content agents whose output is long-form legal
+        # analysis, not citation snippets. Dumping a full 10-15k-char legal
+        # analysis under `### SCENARIO CITATIONS:` inside the REFERENCES
+        # appendix produced a de-facto SECOND complete draft, which clients
+        # correctly read as "repeated draft."
+        # Client-reported bug 2026-08-19; fix confirmed against the medical-
+        # negligence and partition drafting prompts (draft_len roughly
+        # doubled → back to primary-draft-only length).
+        _CITATION_SHAPED_AGENTS = {
+            "Judgment", "SCI_Judgment", "GST_Judgment",
+            "Legislation", "Newacts", "Document",
+        }
+        _discarded_content = [
+            k for k in valid_results if k not in _CITATION_SHAPED_AGENTS
+        ]
+        citation_results = {
+            k: v for k, v in valid_results.items()
+            if k in _CITATION_SHAPED_AGENTS
+        }
+        if _discarded_content:
+            log.info(
+                "Drafting synthesis: dropped content agents from citation "
+                "appendix (long-form analysis is not citation-shaped and "
+                "dumping it doubles the draft)",
+                dropped=_discarded_content,
+                kept=list(citation_results.keys()),
+            )
 
         # When the user attached a file, the Document agent's analysis is
         # redundant with the drafting agent's content (drafting already

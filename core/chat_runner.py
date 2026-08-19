@@ -68,9 +68,24 @@ def _sse(event: dict) -> str:
 # already strips HTML from drafting outputs, but ANY agent (Legislation,
 # Judgment, Scenario, Constitution/Maxim, etc.) could in principle emit
 # HTML the frontend renders as literal text. This is the last line of
-# defense between the LLM and the user. Converts <br>/<hr> to markdown
-# equivalents, then strips every remaining HTML-shaped tag while keeping
-# the inner content. Idempotent: safe to apply to already-clean text.
+# defense between the LLM and the user. Converts <br>/<hr> to markdown-
+# safe equivalents, then strips every remaining HTML-shaped tag while
+# keeping the inner content. Idempotent: safe to apply to already-clean
+# text.
+#
+# `<br>` -> space. The LLM frequently emits `<br>` INSIDE table cells
+# to line-break numbered / bulleted content (e.g. "1. First<br>2. Second"
+# in a "Key Conditions" cell). Converting to "\n" (the naive markdown
+# equivalent) BREAKS the table because markdown table syntax requires
+# each row on one line — the "\n" terminates the row and the renderer
+# stops reading cells. Space keeps the row intact; the "1." / "2." /
+# "3." prefixes the LLM emits make the numbered structure visually
+# obvious even without an explicit line break. This loses a visual
+# break in the rare case an LLM uses `<br>` in prose outside a table,
+# but preserving broken tables is the higher-value trade.
+#
+# `<hr>` -> `\n---\n`: horizontal rules aren't inside tables in
+# practice, so the standard markdown equivalent is safe.
 _FINAL_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _FINAL_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _FINAL_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
@@ -80,7 +95,7 @@ def _strip_html_from_response(text: str) -> str:
     """Strip HTML tags from a final response. See module-level comment."""
     if not text or "<" not in text:
         return text
-    out = _FINAL_BR_RE.sub("\n", text)
+    out = _FINAL_BR_RE.sub(" ", text)
     out = _FINAL_HR_RE.sub("\n---\n", out)
     out, n = _FINAL_TAG_RE.subn("", out)
     if n:

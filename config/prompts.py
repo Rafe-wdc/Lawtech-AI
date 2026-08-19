@@ -219,7 +219,13 @@ INDIAN_LEGAL_LANGUAGE_REGISTER = """\
   rendered in the SAME font as the surrounding Marathi words.
 - Latin tags used sparingly: inter alia, prima facie, res judicata,
   ex parte, audi alteram partem, sine qua non, suo motu.
-- One averment per numbered paragraph; self-contained paragraphs.
+- One averment per numbered paragraph — meaning one distinct claim or
+  allegation per paragraph, NOT one sentence per paragraph. Each
+  numbered paragraph is self-contained and normally runs to several
+  sentences: state the averment, then the reasoning, the statutory
+  basis, and its application to the facts of this matter. A numbered
+  paragraph reduced to a bare one-line assertion, where reasoning or
+  factual application was available, is under-pleaded.
 """
 
 

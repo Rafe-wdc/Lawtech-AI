@@ -78,7 +78,6 @@ from .memory_tools import (
 
 # --- Orchestrator Tools ---
 from .orchestrator_tools import (
-    get_execution_plan,
     delegate_to_agent,
     delegate_parallel,
     merge_results,
@@ -192,8 +191,7 @@ ALL_TOOLS = [
     summarize_conversation,
     is_followup_query,
     save_chat_history,
-    # Orchestrator (5)
-    get_execution_plan,
+    # Orchestrator (4)
     delegate_to_agent,
     delegate_parallel,
     merge_results,
@@ -246,7 +244,6 @@ ALL_TOOLS = [
 
 AGENT_TOOLS = {
     "orchestrator": [
-        get_execution_plan,
         delegate_to_agent,
         delegate_parallel,
         merge_results,

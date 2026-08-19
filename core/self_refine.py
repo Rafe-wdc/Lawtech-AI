@@ -504,14 +504,6 @@ violations specific to Indian drafting practice:
   trailing_preposition — paragraph ends with a bare "in.", "of.",
     "by.", "to.", "under." — a citation sentence was truncated. MAJOR.
 
-  missing_procedural_section — when the draft is a civil suit / plaint
-    / writ / appeal and one or more of these mandatory blocks is
-    absent: Schedule of Properties, Valuation and Court Fee, List of
-    Documents (Order VII Rule 14 / Order XI Rule 14 CPC), Verification
-    (Order VI Rule 15 CPC), Affidavit in Support (Order XIX Rule 3 CPC),
-    or a separate Interim Application under Order XXXIX Rules 1 & 2
-    CPC when a temporary injunction is prayed for. MAJOR.
-
   duplicate_section_block — the draft contains two structurally-equivalent
     blocks that a real filing has only once. Common patterns to detect:
        (a) Two "Prayer" / "Prayer for Relief" / "PRAYER" blocks, each
@@ -610,14 +602,6 @@ violations specific to Indian drafting practice:
     / "versus" is MAJOR. Suggested_fix: replace the code-fenced
     "vs" with `**vs**` between blank lines.
 
-  fabricated_citation — a case name + citation that does not exist OR
-    that is NOT in the doctrinal stance's `key_cases` whitelist. The
-    drafting agent generates a stance JSON with vetted cases before
-    section generation; sections should cite ONLY those, or omit the
-    citation entirely. Any case appearing in the draft that is NOT in
-    `stance.key_cases` is suspect — flag MAJOR and ask the refiner
-    to either replace with a stance case or remove the citation lead-in.
-
   unverified_web_citation — [PIPELINE-LEVEL — applies to every response
     that touched web-grounded search, i.e. Scenario, Legal_Concepts, and
     any domain agent that fell back to the web layer.] Flag as MAJOR
@@ -669,8 +653,10 @@ violations specific to Indian drafting practice:
     attribution or retrieval id is still a MAJOR violation.
 
   unretrieved_citation — [PIPELINE-LEVEL — applies to scenario, multi-
-    agent, and single-agent responses; the source-registry version of
-    fabricated_citation.] Flag as MAJOR when the response cites any case
+    agent, and single-agent responses; audits every visible citation
+    against the SourceRegistry-derived allowed-citation whitelist that
+    the caller threads in as `retrieved_sources_whitelist`.] Flag as
+    MAJOR when the response cites any case
     name, quoted statutory provision, or PDF URL that is NOT present in
     the "## Retrieved Sources (allowed-citation whitelist)" block passed
     to you below. Also flag as MAJOR every bracketed placeholder like

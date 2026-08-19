@@ -591,8 +591,8 @@ Roughly 26 violation categories live in `CRITIQUE_PROMPT`
 
 | Group | Categories |
 |---|---|
-| Hallucinated citations | `fabricated_citation`, `unverified_web_citation`, `unretrieved_citation` (whitelist-driven), `orphan_citation_tail` |
-| Draft structure | `cause_title_collapsed`, `missing_cause_title_elements`, `paragraph_numbering_break`, `missing_procedural_section`, `duplicate_section_block`, `wrong_numbering_scheme_for_procedural_section` |
+| Hallucinated citations | `unverified_web_citation`, `unretrieved_citation` (whitelist-driven), `orphan_citation_tail` |
+| Draft structure | `cause_title_collapsed`, `missing_cause_title_elements`, `paragraph_numbering_break`, `duplicate_section_block`, `wrong_numbering_scheme_for_procedural_section` |
 | Legal correctness | `forbidden_statute_pair`, `prayer_relief_mismatch`, `missing_jurisdiction_clause`, `wrong_court_fees_act`, `missing_limitation_clause` |
 | Fact fidelity | `canonical_example_substitution` (guards against training-set names like Sneha/Priyanka/Nashik displacing the user's facts), `placeholder_marker`, `date_placeholder_inconsistency` |
 | Formatting | `raw_html`, `vs_in_code_block`, `trailing_preposition`, `wrong_footer_for_artifact` |

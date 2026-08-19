@@ -29,7 +29,7 @@ from core.source_registry import (
     source_from_web,
 )
 from config.prompts import (
-    TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT, SYNTHESIS_TABLE_PROMPT,
+    INJECTION_GUARD_PREAMBLE, SYNTHESIS_PROMPT, SYNTHESIS_TABLE_PROMPT,
     USER_INTENT_EXTRACTION_PROMPT,
     wrap_untrusted,
     DRAFT_SYNTHESIS_PROMPT, DRAFT_CITATION_PROMPT,
@@ -144,9 +144,10 @@ def _classify_task_regex_fallback(query: str) -> str:
     since its agent runs a web-search-grounded explanation that gives
     the user *something* useful regardless of topic.
 
-    Kept for back-compat with the call site in `_classify_task` where
-    no intent has been extracted yet (the extractor runs in parallel
-    with classification).
+    Called from orchestrator_plan_node as the ultimate fallback when
+    _classify_task_from_intent returns None AND the merged classify+plan
+    call has failed — Legal_Concepts is the safest catch-all since its
+    agent is web-grounded and returns *something* useful on any topic.
     """
     return "Legal_Concepts"
 
@@ -186,38 +187,6 @@ def _classify_task_from_intent(intent: UserIntent | None) -> str | None:
     return "Legal_Concepts"
 
 
-def _classify_task(query: str, chat_summary: str | None = None) -> str:
-    """Classify query into a task type using GPT-4o structured output.
-
-    Falls back to keyword-based classification if the LLM call fails
-    (rate-limit, timeout, structured-output parse error, etc.).
-    """
-    try:
-        with log_time(log, "Task classification"):
-            prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(
-                IdentifyTaskSchema, include_raw=True,
-            )
-            # Wrap untrusted inputs in spotlighting delimiters — defense against
-            # prompt injection. Combined with the preamble baked into the prompt
-            # template, this is the OWASP-recommended layered defense.
-            formatted = prompt.format(
-                query=wrap_untrusted(query),
-                chat_summary=wrap_untrusted(chat_summary or ""),
-            )
-            raw_and_parsed = llm.invoke(formatted)
-        from core.token_tracker import record as _record_tokens
-        _record_tokens("Orchestrator", "classify_task", raw_and_parsed.get("raw"))
-        result = raw_and_parsed["parsed"]
-        log.info("Task classified", task=result.task, query=query[:80])
-        return result.task
-    except Exception as e:
-        fallback = _classify_task_regex_fallback(query)
-        log.warning("Task classification LLM failed, using regex fallback",
-                    error=str(e), fallback=fallback, query=query[:80])
-        return fallback
-
-
 # --- Multi-Agent Planning ---
 
 class AgentPlan(BaseModel):
@@ -228,7 +197,7 @@ class AgentPlan(BaseModel):
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
 
-CLASSIFY_AND_PLAN_PROMPT = """You are an Indian legal query router. Output:
+CLASSIFY_AND_PLAN_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an Indian legal query router. Output:
 - `task`: the ONE primary task type (from the ordered list below)
 - `agents`: 1-4 agents to invoke (see fan-out rules)
 - `reasoning`: one sentence explaining the choice
@@ -312,6 +281,19 @@ CLASSIFY_AND_PLAN_PROMPT = """You are an Indian legal query router. Output:
 - Drafting + explicit "with case laws / citations / precedents" →
   add **Judgment** (also **SCI_Judgment** if SC scope named).
 
+### Multi-intent (CRITICAL)
+When the user's query bundles multiple distinct asks in one turn (e.g. draft
+a suit + explain a scenario + cite case laws + look up a specific act), include
+ALL relevant agents up to the 4-cap. Do NOT collapse to just the primary-task
+agent — the classifier's job is to honour the full request, not to pick a
+winner. Concrete examples:
+- "Draft a bail application AND cite recent SC precedents on Section 439 CrPC"
+  → [Drafting, SCI_Judgment, Newacts] (three agents, up to the cap).
+- "Explain Section 138 NI Act, give a demand notice format, and case laws"
+  → [Legislation, Drafting, Judgment, SCI_Judgment] (at the 4-cap).
+- "Give me the writ format under Article 226 and landmark judgments"
+  → [Drafting, Constitution, SCI_Judgment].
+
 ## Inputs
 User query: {query}
 Chat summary (optional, may be stale): {chat_summary}
@@ -332,9 +314,13 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
             )
             prompt = ChatPromptTemplate.from_template(CLASSIFY_AND_PLAN_PROMPT)
             chain = prompt | llm
+            # Wrap untrusted inputs in spotlighting delimiters — pairs with
+            # INJECTION_GUARD_PREAMBLE prepended to the prompt above. Without
+            # the wrapping, the preamble references delimiters that never
+            # appear in the input and is empty theater. F8 backport.
             raw_and_parsed = chain.invoke({
-                "query": query,
-                "chat_summary": chat_summary or "",
+                "query": wrap_untrusted(query),
+                "chat_summary": wrap_untrusted(chat_summary or ""),
             })
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "classify_and_plan", raw_and_parsed.get("raw"))
@@ -504,7 +490,18 @@ Rules:
 4. For Legislation: pick the SINGLE most relevant act for the user's primary legal issue. Do NOT list multiple acts.
 5. For Judgment: NEVER include fictional party names from the user's scenario. Use only legal topics and case type keywords.
 6. Return valid JSON object mapping agent name to rewritten query.
-7. CRITICAL: All rewritten queries MUST be in English, regardless of the input language. If the user query is in Hindi, Tamil, or any other language, translate the intent to English for every agent query.
+7. LANGUAGE HANDLING — two-tier by backend. Do NOT blindly force English.
+
+   ENGLISH-INDEXED AGENTS (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment) — translate the SURROUNDING NARRATIVE to English for retrieval efficiency, but PRESERVE VERBATIM every noun that carries retrieval signal: party names (both transliterated Latin form AND the original non-Latin form when present), section numbers, act names, dates, monetary amounts, and any explicit COUNT / SCOPE directive ("5 judgments", "top 3 cases", "landmark rulings only", "High Court only"). The rewritten query is an English sentence that CARRIES the native / original nouns, not a translation that DROPS them.
+   Example — input "मुझे BNSS की धारा 480 पर 5 सुप्रीम कोर्ट के जजमेंट दो":
+     SCI_Judgment: "Section 480 BNSS anticipatory bail Supreme Court cases (5 landmark judgments requested)"
+     Newacts:      "Section 480 BNSS anticipatory bail"
+   Example — input "श्री कैलास जगताप v. Ram Kumar case citations":
+     Judgment:     "Kailas Jagtap (श्री कैलास जगताप) v. Ram Kumar case citations"
+
+   LANGUAGE-FLEXIBLE AGENTS (Scenario, Constitution, Maxim, Legal_Concepts, Document, Drafting) — do NOT force English translation. Pass the query through in its ORIGINAL language (Hindi stays Hindi, Marathi stays Marathi). These agents run Gemini-based reasoning or Google Search grounding that handles Indian languages natively; forcing English translation loses register nuance without gaining retrieval efficiency. You may still optimise / clarify the query, but keep the OUTPUT language identical to the INPUT language.
+
+   If the input is already in English, this rule is a no-op for both tiers.
 
 User Query: {query}
 Agents: {agents}

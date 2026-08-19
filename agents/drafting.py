@@ -2186,17 +2186,33 @@ async def _generate_draft(
         chat_history=chat_history,
     )
 
-    # Hard code-level cap: prompt says "at most 15" but the LLM sometimes
-    # emits more, and 15 sequential Pro calls × ~25s ≈ 375s — over the
-    # 300s gunicorn timeout. Bug #9 in the prod inventory. Trim to 12
-    # deterministically so a mis-behaving judge can't blow the envelope.
+    # Hard code-level cap: prompt says "AT MOST 12" but the LLM sometimes
+    # emits more, and 12 sequential Pro calls × ~25s ≈ 300s sits at the
+    # gunicorn worker_timeout. Bug #9 in the prod inventory. When the
+    # judge over-emits, trim deterministically — but PRESERVE THE LAST
+    # SECTION (structurally the Prayer / Verification / Signature block
+    # per the judge prompt's section-list rules). The prior naive slice
+    # `[:cap]` silently dropped Prayer/Verification whenever the judge
+    # planned 13+ sections ending with them (F6 in the prompt audit).
+    # Fix: keep the first (cap-1) sections and the LAST — drops the
+    # middle. Prompt was also lowered from 15→12 so this trim path
+    # should now rarely fire.
     _FANOUT_HARD_CAP = 12
     if strategy.sections and len(strategy.sections) > _FANOUT_HARD_CAP:
+        preserved_last = strategy.sections[-1]
         log.warning(
-            "Fan-out judge emitted more sections than the hard cap — trimming",
+            "Fan-out judge emitted more sections than the hard cap — "
+            "trimming middle, preserving last section",
             emitted=len(strategy.sections), cap=_FANOUT_HARD_CAP,
+            preserved_last=getattr(preserved_last, "heading", ""),
+            dropped_middle=[
+                getattr(s, "heading", "")
+                for s in strategy.sections[_FANOUT_HARD_CAP - 1:-1]
+            ],
         )
-        strategy.sections = strategy.sections[:_FANOUT_HARD_CAP]
+        strategy.sections = (
+            strategy.sections[:_FANOUT_HARD_CAP - 1] + [preserved_last]
+        )
 
     if not strategy.should_fanout or not strategy.sections:
         log.info(

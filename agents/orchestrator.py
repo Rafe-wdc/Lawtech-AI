@@ -2000,7 +2000,39 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # had carefully extracted).
     if "Drafting" in valid_results:
         drafting_result = valid_results.pop("Drafting")
-        citation_results = valid_results  # Judgment, Legislation, Newacts, Document, ...
+
+        # Restrict citation_results to CITATION-SHAPED agents only. The plan
+        # phase already separates content agents (Scenario, Constitution,
+        # Maxim, Legal_Concepts) from citation agents (Judgment, SCI_Judgment,
+        # GST_Judgment, Legislation, Newacts, Document) but the previous
+        # `citation_results = valid_results` swept up EVERY non-Drafting
+        # agent — including content agents whose output is long-form legal
+        # analysis, not citation snippets. Dumping a full 10-15k-char legal
+        # analysis under `### SCENARIO CITATIONS:` inside the REFERENCES
+        # appendix produced a de-facto SECOND complete draft, which clients
+        # correctly read as "repeated draft."
+        # Client-reported bug 2026-08-19; fix confirmed against the medical-
+        # negligence and partition drafting prompts (draft_len roughly
+        # doubled → back to primary-draft-only length).
+        _CITATION_SHAPED_AGENTS = {
+            "Judgment", "SCI_Judgment", "GST_Judgment",
+            "Legislation", "Newacts", "Document",
+        }
+        _discarded_content = [
+            k for k in valid_results if k not in _CITATION_SHAPED_AGENTS
+        ]
+        citation_results = {
+            k: v for k, v in valid_results.items()
+            if k in _CITATION_SHAPED_AGENTS
+        }
+        if _discarded_content:
+            log.info(
+                "Drafting synthesis: dropped content agents from citation "
+                "appendix (long-form analysis is not citation-shaped and "
+                "dumping it doubles the draft)",
+                dropped=_discarded_content,
+                kept=list(citation_results.keys()),
+            )
 
         # When the user attached a file, the Document agent's analysis is
         # redundant with the drafting agent's content (drafting already

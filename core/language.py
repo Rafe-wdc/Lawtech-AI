@@ -790,6 +790,53 @@ def localize_prompt(
             f"words.\n"
         )
 
+        # Shared SUBSTANTIVE DEPTH block — appended to BOTH the strict and
+        # the non-strict directive so the length policy is identical on
+        # every regional path.
+        #
+        # Replaces the bare fragment "Do NOT pad or duplicate content to
+        # appear comprehensive." that previously closed the STRICT branch
+        # ONLY. That line was the single brevity instruction a regional
+        # request received and an English request never did (English block
+        # ≈ 300 chars, regional ≈ 5.2 KB), and because strict is the default
+        # for every Indian language it reached almost all regional traffic.
+        # With response_depth='standard' the intent-directive block that
+        # follows is empty, so it landed in the recency position as the
+        # literal last sentence of the system prompt — while also
+        # contradicting the 'USER DEPTH: comprehensive coverage' directive
+        # that _format_intent_directives emits on detailed requests.
+        #
+        # The anti-repetition intent is preserved; the compression
+        # side-effect is removed. Policy: complete legal reasoning without
+        # unnecessary repetition. See Issue 3 / Group A —
+        # docs/issue3_fix_implementation_plan.md.
+        substantive_depth_policy = (
+            f"\n\nSUBSTANTIVE DEPTH (length policy):\n"
+            f"Responding in {lang_name} changes the SCRIPT and VOCABULARY "
+            f"of your answer. It does NOT change its DEPTH. Produce the "
+            f"same legal substance you would produce for this identical "
+            f"request in English.\n"
+            f"- PRESERVE every piece of substantive legal content: legal "
+            f"reasoning, factual detail and its application to the matter, "
+            f"statutory provisions, section numbers, case-law references, "
+            f"explanations, arguments, consequences, and conclusions.\n"
+            f"- PRESERVE structure: headings, numbered paragraphs, and "
+            f"list hierarchy carry over unchanged. Do not collapse "
+            f"sections or drop numbering.\n"
+            f"- Each numbered point, ground, or averment is a DEVELOPED "
+            f"paragraph — state the point, give the reasoning that "
+            f"supports it, and apply it to the facts. Reducing a point to "
+            f"a single-line assertion when reasoning is available is a "
+            f"DEFECT, not brevity.\n"
+            f"- Do NOT summarise, compress, or shorten substantive legal "
+            f"content unless the user explicitly asked for a summary or a "
+            f"brief answer.\n"
+            f"- Equally, do NOT add redundant or repetitive content merely "
+            f"to increase length. Restating the same proposition in "
+            f"different words adds no depth. The standard is COMPLETE "
+            f"LEGAL REASONING WITHOUT UNNECESSARY REPETITION."
+        )
+
         if _is_strict_language(intent, lang):
             out += (
                 f"\n\nLANGUAGE INSTRUCTION (STRICT): The user demanded PURE "
@@ -802,7 +849,7 @@ def localize_prompt(
                 f"signature labels are ALSO in {lang_name}."
                 f"{fixed_english_anchors}\n"
                 f"{ceremonial_examples}"
-                f"Do NOT pad or duplicate content to appear comprehensive."
+                f"{substantive_depth_policy}"
             )
         else:
             out += (
@@ -811,6 +858,7 @@ def localize_prompt(
                 f"Prayer/Verification/court forms of address), placeholder "
                 f"brackets, and signature labels in {lang_name}."
                 f"{fixed_english_anchors}"
+                f"{substantive_depth_policy}"
             )
 
         # Cross-language source mismatch warning: when the user wants the

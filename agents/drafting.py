@@ -240,6 +240,18 @@ _FOLLOWUP_DIRECTIVE_MIN_PRIOR_CHARS = 500
 # through the whole follow-up chain.
 _DRAFT_INCOMPLETE_BANNER_MARKER = "**Draft incomplete**"
 
+# Marker `agents/memory.py` prepends (Move 2 deterministic rewrite) when it
+# inlines the complete prior draft into the query for a directive follow-up
+# ("convert the above text into Marathi", "shorten the above draft"). Its
+# presence proves the query ALREADY carries the source document, so hunting
+# for an additional ES/web reference template is both wasted work (measured
+# 24-37s of web synthesis per turn) and actively harmful — the picker
+# correctly rejects a translation task, the web fallback then synthesises an
+# unrelated template, and that template competes with the real prior draft
+# as a structural anchor. Kept as a prefix of the emitted sentence so a
+# reword of its tail cannot silently break the match.
+_INLINED_PRIOR_DRAFT_MARKER = "PRIOR DRAFT (the text the user wants to modify"
+
 
 def _fast_path_enabled() -> bool:
     """Env-flag gate. Off by default; ops flips DRAFTING_FOLLOWUP_FAST_PATH=1
@@ -2585,17 +2597,33 @@ async def _generate_draft(
         chat_history=chat_history,
     )
 
-    # Hard code-level cap: prompt says "at most 15" but the LLM sometimes
-    # emits more, and 15 sequential Pro calls × ~25s ≈ 375s — over the
-    # 300s gunicorn timeout. Bug #9 in the prod inventory. Trim to 12
-    # deterministically so a mis-behaving judge can't blow the envelope.
+    # Hard code-level cap: prompt says "AT MOST 12" but the LLM sometimes
+    # emits more, and 12 sequential Pro calls × ~25s ≈ 300s sits at the
+    # gunicorn worker_timeout. Bug #9 in the prod inventory. When the
+    # judge over-emits, trim deterministically — but PRESERVE THE LAST
+    # SECTION (structurally the Prayer / Verification / Signature block
+    # per the judge prompt's section-list rules). The prior naive slice
+    # `[:cap]` silently dropped Prayer/Verification whenever the judge
+    # planned 13+ sections ending with them (F6 in the prompt audit).
+    # Fix: keep the first (cap-1) sections and the LAST — drops the
+    # middle. Prompt was also lowered from 15→12 so this trim path
+    # should now rarely fire.
     _FANOUT_HARD_CAP = 12
     if strategy.sections and len(strategy.sections) > _FANOUT_HARD_CAP:
+        preserved_last = strategy.sections[-1]
         log.warning(
-            "Fan-out judge emitted more sections than the hard cap — trimming",
+            "Fan-out judge emitted more sections than the hard cap — "
+            "trimming middle, preserving last section",
             emitted=len(strategy.sections), cap=_FANOUT_HARD_CAP,
+            preserved_last=getattr(preserved_last, "heading", ""),
+            dropped_middle=[
+                getattr(s, "heading", "")
+                for s in strategy.sections[_FANOUT_HARD_CAP - 1:-1]
+            ],
         )
-        strategy.sections = strategy.sections[:_FANOUT_HARD_CAP]
+        strategy.sections = (
+            strategy.sections[:_FANOUT_HARD_CAP - 1] + [preserved_last]
+        )
 
     facts_present = _case_facts_present(user_facts)
     log.info(
@@ -3004,6 +3032,27 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = user_facts
             reference_source = "<uploaded:review_and_redraft>"
             reference_kind = "uploaded"
+            gathered_ctx, gathered_registry = await _gather_relevant_context(query)
+        elif _INLINED_PRIOR_DRAFT_MARKER in query:
+            # (c) Directive follow-up whose query already carries the full
+            #     prior draft (inlined by agents/memory.py). The prior draft
+            #     IS the source document — skip the ES picker and its web
+            #     fallback entirely. Still gather relevant legal context so
+            #     statutes/precedents remain available to the generator, and
+            #     still fall through to the normal generation + self_refine
+            #     flow below (this branch does NOT set use_upload_as_ref).
+            log.info(
+                "Prior draft inlined in query — skipping reference acquisition",
+                query_chars=len(query),
+            )
+            progress(
+                "drafting",
+                "Using your previous draft as the source document",
+                step="reference",
+            )
+            reference_text = ""
+            reference_source = "<prior_turn:inlined>"
+            reference_kind = "prior_turn"
             gathered_ctx, gathered_registry = await _gather_relevant_context(query)
         else:
             progress("drafting", "Searching templates and relevant law...",

@@ -1,0 +1,29 @@
+Research Prompt: Section 125 of CrPC
+
+Scenario:
+
+Draft a civil suit for partition along with a prayer for temporary injunction. Facts: Rupa is an adopted daughter of the deceased owner. She has no siblings. Her father died 5 years ago, leaving behind two flats in Pune. The only legal heirs are Rupa and her mother. Her name is not yet on the property documents. Her mother is attempting to dispossess her and has expressed intent to transfer the properties to her cousin. The suit should include legal provisions for partition of the properties, declaration of her share, and a temporary injunction restraining the mother or any third party from selling, transferring, or creating third-party rights in the properties until disposal of the suit.
+
+Draft a civil suit for damages arising from medical negligence, incorporating detailed legal reasoning and relevant case laws. Scenario: My client, Mrs. Anjali Deshmukh, aged 42, and a resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the procedure, the attending surgeon, Dr. Rakesh Nair, negligently caused damage to her bile duct. Following the surgery, she experienced severe abdominal pain and had to be admitted to another hospital for corrective surgery. As a result, she incurred additional medical expenses amounting to ₹3.5 lakhs and endured significant physical pain and mental agony. Despite repeated follow-ups, both the hospital and the doctor have refused to acknowledge their negligence or offer any compensation. Mrs. Deshmukh now seeks damages of ₹25 lakhs, covering medical expenses, mental harassment, pain and suffering, and anticipated costs of future treatment.
+
+Citations:
+
+1. Rupa is a adopted child. She doesnt have any siblings. her father passed away 5 years ago. She and her mothers are only legal heirs. Her father had 2 flats in pune. Her mother told her to leave the house and her mother says that she'll transfer the property to her cousins name. now rupa is scared that she won't get any share in the properties (her name is still not on the legal papers of the properties). Give me 5 plus Case law or Citations According to the Scenario.
+
+2. Provide case laws on the admissibility of electronic evidence under Section 65B of the Indian Evidence Act.
+
+3. Provide citations or case laws related to anticipatory bail
+
+Argument Generation:
+
+My client, Mrs. Anjali Deshmukh, aged 42, resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the surgery, due to the negligence of the attending surgeon, Dr. Rakesh Nair, her bile duct was damaged. Post-surgery, she suffered from severe abdominal pain and had to be admitted again for corrective surgery at another hospital. She incurred additional medical expenses of ₹3.5 lakhs and suffered immense mental agony and physical pain. Despite repeated follow-ups, the hospital and the doctor refused to acknowledge their mistake or compensate her. She now seeks compensation of ₹25 lakhs for medical expenses, mental harassment, pain and suffering, and future treatment costs. give me arguments on behalf of plaintiff and defendant.
+
+माझ्या क्लायंट, श्रीमती अंजली देशमुख, वय ४२, पुण्यातील रहिवासी, यांची १२ मार्च २०२४ रोजी XYZ मल्टीस्पेशालिटी हॉस्पिटलमध्ये पित्ताशयाची शस्त्रक्रिया झाली. शस्त्रक्रियेदरम्यान, उपस्थित सर्जन डॉ. राकेश नायर यांच्या निष्काळजीपणामुळे, त्यांच्या पित्तनलिकेचे नुकसान झाले. शस्त्रक्रियेनंतर, त्यांना तीव्र पोटदुखीचा त्रास झाला आणि त्यांना दुसऱ्या रुग्णालयात सुधारात्मक शस्त्रक्रियेसाठी पुन्हा दाखल करावे लागले. त्यांना ३.५ लाख रुपयांचा अतिरिक्त वैद्यकीय खर्च आला आणि प्रचंड मानसिक त्रास आणि शारीरिक वेदना सहन कराव्या लागल्या. वारंवार पाठपुरावा करूनही, रुग्णालय आणि डॉक्टरांनी त्यांची चूक मान्य करण्यास किंवा तिला भरपाई देण्यास नकार दिला. आता त्या वैद्यकीय खर्च, मानसिक छळ, वेदना आणि त्रास आणि भविष्यातील उपचार खर्चासाठी २५ लाख रुपयांची भरपाई मागत आहेत. मला युक्तिवाद द्या.
+
+My client is facing a criminal case under Section 420 IPC for alleged cheating. However, there was no fraudulent intention from the beginning, and it was purely a civil dispute arising from a failed business agreement. Give me arguments to defend the client and emphasize that this is a case of civil liability, not criminal cheating.
+
+Consumer Laws:
+
+Scenario 1: Defective Product Liability Prompt: Priya purchases a brand-new refrigerator from a well-known electronics store. After a week, it stops working, and the manufacturer refuses to repair or replace it, claiming that the issue was caused by improper installation. What legal options does Priya have under the Consumer Protection Act, 2019, to address this defect?
+
+Pdf : Review this draft and suggest changes, if any.

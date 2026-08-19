@@ -1018,23 +1018,56 @@ def _validate_and_enrich_plan(
     # classifier misses a required content agent AND the intent extractor
     # caught the ask, we should pull it back in. Cap at 4 total agents to
     # match the tasks_planned[:4] limit applied upstream.
-    if intent.wants_scenario_analysis and "Scenario" not in tasks_planned:
+    # When Drafting is the primary task, DO NOT enrich with Scenario /
+    # Constitution / Maxim from wants_* flags. The Drafting agent handles
+    # its own reasoning + retrieval via `_gather_relevant_context` + its
+    # system prompt. Enriching would run each content agent's LLM (~10s +
+    # ~5000 tokens) to produce output that the synthesis phase discards
+    # (see the 2026-08-19 double-draft fix in orchestrator_synthesize_node
+    # + the plan-phase strip in the cite_appendix=OFF branch). Without
+    # this guard, `_validate_and_enrich_plan` runs AFTER the strip and
+    # re-adds the very agents the strip just removed — burning tokens
+    # for no user-visible output. Callers who want a separate analysis
+    # alongside a draft should pass cite_appendix=true or issue an
+    # explicit follow-up turn.
+    _drafting_primary = "Drafting" in tasks_planned
+
+    if (intent.wants_scenario_analysis and "Scenario" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Scenario")
             log.info("Plan enriched: wants_scenario_analysis → Scenario",
                      plan=tasks_planned)
 
-    if intent.wants_constitution and "Constitution" not in tasks_planned:
+    if (intent.wants_constitution and "Constitution" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Constitution")
             log.info("Plan enriched: wants_constitution → Constitution",
                      plan=tasks_planned)
 
-    if intent.wants_maxim and "Maxim" not in tasks_planned:
+    if (intent.wants_maxim and "Maxim" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Maxim")
             log.info("Plan enriched: wants_maxim → Maxim",
                      plan=tasks_planned)
+
+    if _drafting_primary:
+        _dropped_wants = []
+        if intent.wants_scenario_analysis:
+            _dropped_wants.append("scenario_analysis")
+        if intent.wants_constitution:
+            _dropped_wants.append("constitution")
+        if intent.wants_maxim:
+            _dropped_wants.append("maxim")
+        if _dropped_wants:
+            log.info(
+                "Plan enrich: content-agent wants_* NOT routed "
+                "(Drafting primary — reasoning handled by drafting agent)",
+                dropped_wants=_dropped_wants,
+                plan=tasks_planned,
+            )
 
     # NOTE: wants_statute_text is deliberately not routed here. Choosing
     # between Newacts (IPC/BNS/CrPC/BNSS/IEA/BSA) and Legislation (everything
@@ -1585,20 +1618,40 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                      citation_agents=citation_agents,
                      source="request" if _flag is not None else "env_default")
         else:
-            # Preserve non-citation content agents (Legal_Concepts, Scenario,
-            # Maxim, Constitution, Non_legal) the LLM classifier picked. Only
-            # strip agents that would have been AUTO-ADDED as the citation
-            # appendix (Judgment, SCI/GST_Judgment, Newacts, Legislation) —
-            # those are the ones the flag is meant to suppress. The old
-            # `[Drafting|Document][:3]` filter nuked classifier-picked content
-            # agents too, silently dropping multi-intent asks bundled inside
-            # drafting requests (Break #1 in the pipeline_investigation report).
-            _kept = [t for t in tasks_planned if t not in _CITATION_APPENDIX_AGENTS]
-            _stripped = [t for t in tasks_planned if t in _CITATION_APPENDIX_AGENTS]
+            # Strip BOTH:
+            #   (1) citation-appendix agents (opt-in via cite_appendix=true);
+            #   (2) long-form content agents (Scenario, Constitution, Maxim,
+            #       Legal_Concepts) — the Drafting agent handles its own
+            #       reasoning + retrieval via `_gather_relevant_context` and
+            #       its system prompt, so a co-planned content agent burns
+            #       ~10s + ~5000 tokens producing output that the synthesis
+            #       phase now discards anyway (see the 2026-08-19 double-
+            #       draft fix in orchestrator_synthesize_node).
+            #
+            # Document IS preserved — it's how uploaded-file text reaches
+            # the pipeline when the user attached PDFs / images.
+            #
+            # 2026-08-17 (commit 3ce6f0c) removed the older
+            # `[Drafting|Document][:3]` filter to preserve "multi-intent
+            # asks bundled inside drafting requests." In practice the
+            # UserIntent extractor over-triggered `wants_scenario_analysis`
+            # / `wants_constitution` on plain drafting phrasing ("draft X
+            # incorporating detailed legal reasoning"), planning content
+            # agents that produced redundant full drafts. The safer default
+            # is: for a drafting query, the draft IS the response — extras
+            # go through cite_appendix=true or an explicit follow-up turn.
+            _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING = frozenset({
+                "Scenario", "Constitution", "Maxim", "Legal_Concepts",
+            })
+            _strip_set = _CITATION_APPENDIX_AGENTS | _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING
+            _kept = [t for t in tasks_planned if t not in _strip_set]
+            _stripped = [t for t in tasks_planned if t in _strip_set]
             tasks_planned = _kept[:4]
-            log.info("Drafting citation appendix skipped — content agents preserved",
-                     kept=tasks_planned, stripped=_stripped,
-                     source="request" if _flag is not None else "env_default")
+            log.info(
+                "Drafting: stripped citation-appendix + redundant content agents",
+                kept=tasks_planned, stripped=_stripped,
+                source="request" if _flag is not None else "env_default",
+            )
     else:
         # Bumped from [:3] to [:4] on 2026-06-30 so multi-intent enrichment
         # can fan out to BOTH SCI_Judgment AND Judgment alongside the

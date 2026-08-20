@@ -203,11 +203,53 @@ CLASSIFY_AND_PLAN_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an Indian legal
 - `agents`: 1-4 agents to invoke (see fan-out rules)
 - `reasoning`: one sentence explaining the choice
 
+## Sanity checks — apply BEFORE the numbered task rules
+
+**A. Coherence.** Does the query express a request a human could look at and
+act on? An input that contains letters but doesn't cohere into a request is
+NOT a legitimate query — route to **Non_legal**. Failure modes to catch:
+
+- Keyboard mashing: `"asdfghjkl"`, `"qwerty"`, `"xxxxxxx"`, `"aaaaaa"`.
+- A stray production verb with no coherent object: `"draft ***##"`,
+  `"write blah"`, `"prepare 12345"`, `"draft"` alone.
+- A digit-heavy string dressed with a legal-sounding token but no request:
+  `"302 ??? draft"`, `"IPC ###"`, `"section ***"`.
+- Any query where you cannot articulate a one-sentence description of what
+  the user is asking for.
+
+A separate regex layer already rejects inputs with ZERO alphabetic
+characters (`"8883241***##"`, `"@@@@@"`, `"12345"`) before you see them.
+Your job here is the HARDER case: letters present, but no coherent request.
+
+Coherence does NOT require full sentences. Abbreviated but recognisable
+queries are coherent and must NOT be routed to Non_legal:
+- `"S. 138 NI Act"` → coherent (Legislation)
+- `"Art. 21"` → coherent (Constitution)
+- `"IPC 302 vs BNS 103"` → coherent (Newacts)
+- `"Hii"`, `"namaste"` → coherent greetings (Non_legal)
+
+**B. Uncertainty tiebreaker.** When you are torn between two buckets, prefer
+the SAFER / CHEAPER bucket. Priority (safest first):
+
+> Non_legal  >  Legal_Concepts  >  Legislation / Newacts / Constitution
+> >  Judgment / SCI_Judgment  >  Scenario  >  Drafting
+
+Drafting is the most expensive pipeline in the system (per-section fan-out
++ Gemini Pro self-refine). Only pick Drafting when the user has *clearly
+and coherently* asked for a filing-ready document to be produced. If in
+doubt, do NOT pick Drafting.
+
 ## Task types — evaluate TOP-DOWN; FIRST match wins
 
 1. **Non_legal** — greetings ("hi", "hello", "namaste"), casual chat, non-legal
-   topics (weather, sports, math), or bot-identity questions ("who are you",
-   "what can you do").
+   topics (weather, sports, math), bot-identity questions ("who are you",
+   "what can you do"), OR unparseable input with no discernible legal or
+   conversational meaning (pure digit runs, symbol strings, keyboard mashing,
+   stray markdown characters like `***` / `##` / `---` with no accompanying
+   words), OR incoherent input per Sanity Check A above. Do NOT read `***`,
+   `##`, or bare numeric strings as drafting-template markers — Drafting
+   (rule 3) still requires an actual production verb AND a document-noun
+   word in a coherent request.
 2. **Document** — the user attached files AND is asking about their contents
    (summary, extraction, "what does this say", "who is the plaintiff here").
 3. **Drafting** — explicit production verb (draft / write / prepare / create /
@@ -221,6 +263,20 @@ CLASSIFY_AND_PLAN_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an Indian legal
    - Questions ABOUT documents (format, essential elements, requirements,
      "how to file", "difference between X and Y", "what is a written
      statement") → **Legal_Concepts** or **Legislation**.
+   - Production verb attached to garbage or nothing coherent: `"draft ***##"`,
+     `"write asdfgh"`, `"prepare 12345"`, `"draft"` alone → **Non_legal**.
+     The keyword "draft" is necessary but NOT sufficient — the document noun
+     must be a real, named filing-ready document referenced in a legible
+     sentence. Keyword presence without coherent context is Non_legal, not
+     Drafting.
+   - A lone document noun with no verb and no context (`"petition"`,
+     `"affidavit"`, `"bail application"`, `"legal notice"`) → **Legal_Concepts**.
+     A bare noun is almost always a question ABOUT the document type, not a
+     request to produce one. If the user actually wants a draft, they will
+     say so in the next turn.
+   - Under-specified single-word variants that look like drafting requests
+     but lack the document noun ("draft me one", "prepare something",
+     "make a doc") → **Non_legal** or ask for clarification via Legal_Concepts.
 4. **Newacts** — the query references any of the 6 codes: IPC, BNS, CrPC,
    BNSS, IEA, BSA (any spelling / any language / full-name variants like
    "Indian Penal Code", "Code of Criminal Procedure", "Bharatiya Nyaya

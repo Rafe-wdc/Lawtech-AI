@@ -8,10 +8,20 @@ prosecutor`, `next friend`) and violated the project's `no mechanical
 patterns` policy (feedback_no_mechanical_patterns).
 
 Current posture:
-  INPUT   — near passthrough. Only rejects a literally empty query with a
-            friendly "please enter something" message. No pattern list,
-            no length ceiling, no LLM injection sniffer. Trusts Gemini's
-            own safety layer and the 2M-token context window.
+  INPUT   — near passthrough. Rejects:
+              (1) a literally empty query with a friendly "please enter
+                  something" message;
+              (2) NARROW gibberish exemption: a query with zero alphabetic
+                  characters in ANY script (Latin, Devanagari, Tamil,
+                  Arabic, etc.) — e.g. "8883241***##", "@@@@@", "???",
+                  "12345", "...". This is a deliberate exemption from the
+                  no-mechanical-pattern policy because the classifier LLM
+                  otherwise misreads stray `***` / `##` as drafting-
+                  template markers and routes garbage to the (most
+                  expensive) Drafting pipeline.
+            No injection regex bank, no length ceiling, no LLM sniffer.
+            Trusts Gemini's own safety layer and the 2M-token context
+            window for everything with real words in it.
   OUTPUT  — unchanged: markdown polish, runaway-response repair, hard
             char cap (250K), disclaimer append. These are content-quality
             steps that never see the user's raw query and never fabricate
@@ -19,6 +29,8 @@ Current posture:
 """
 
 from __future__ import annotations
+
+import re
 
 from core.state import LegalAgentState
 from core.logger import get_logger
@@ -41,6 +53,15 @@ TRUNCATION_SUFFIX = (
 )
 
 
+# Unicode-aware "any alphabetic letter, any script" matcher.
+# `[^\W\d_]` in re.UNICODE mode = word-char minus digit minus underscore
+# = every Unicode letter (Latin, Devanagari, Bengali, Tamil, Telugu, Kannada,
+# Malayalam, Gujarati, Punjabi, Odia, Urdu/Arabic, CJK, etc.). If a query
+# fails this search, it contains NO letter in any script — treat as
+# unparseable input (see module docstring).
+_HAS_ALPHA_RE = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
 # --- Agent Nodes ---
 
 async def guardrail_input_node(state: LegalAgentState) -> dict:
@@ -60,6 +81,22 @@ async def guardrail_input_node(state: LegalAgentState) -> dict:
         return {
             "is_blocked": True,
             "block_reason": "Please enter a legal question or paste a document to review.",
+        }
+
+    if not _HAS_ALPHA_RE.search(query):
+        log.warning("Gibberish query rejected (no alphabetic character in any script)",
+                    query=query[:80])
+        return {
+            "is_blocked": True,
+            "block_reason": (
+                "👋 I'm **Lawttorney**, your AI legal assistant for Indian law. "
+                "I couldn't find a question in that input — it looks like only "
+                "digits or symbols. Please type your question in words "
+                "(any language). For example:\n\n"
+                "- *What is Section 302 IPC?*\n"
+                "- *Draft a bail application under Section 439 CrPC*\n"
+                "- *Explain Article 21 of the Constitution*"
+            ),
         }
 
     return {"is_blocked": False}

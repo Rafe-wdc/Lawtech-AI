@@ -62,9 +62,7 @@ jobs:
           echo " 0. Box identity + version + uptime"
           echo "=========================================================="
           hostname
-          curl -fsS https://api.lawttorney.com/pyapi/health 2>/dev/null \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(f"  version: {d.get(\"version\")}  uptime_s: {d.get(\"uptime_seconds\")}")' \
-            || echo "(health probe failed)"
+          curl -fsS https://api.lawttorney.com/pyapi/health 2>/dev/null | python3 -c "import json, sys; d = json.load(sys.stdin); print('  version:', d.get('version'), ' uptime_s:', d.get('uptime_seconds'))" || echo "(health probe failed)"
           echo
 
           echo "=========================================================="
@@ -91,7 +89,7 @@ jobs:
           BODY=$(python3 -c 'import json,sys; print(json.dumps({"prompt_query": sys.argv[1]}))' "$PROMPT")
           curl -sS -o /tmp/search_resp.json -w "HTTP %{http_code}  time_total=%{time_total}s\n" \
             --max-time 180 \
-            -X POST http://127.0.0.1:5000/pyapi/search \
+            -X POST http://127.0.0.1:5001/pyapi/search \
             -H "Content-Type: application/json" \
             -H "X-API-Key: $KEY" \
             -d "$BODY"
@@ -159,6 +157,42 @@ jobs:
             | grep -E "Gemini Flash circuit|Gemini Pro circuit" \
             | tail -20 \
             || echo "  (no circuit-breaker events — good)"
+          echo
+
+          echo "=========================================================="
+          echo " 8. FALLBACK — organic traffic evidence (last 15 min)"
+          echo "     Real user queries since deploy will have exercised"
+          echo "     the same code paths; use as positive proof if step 2"
+          echo "     failed for infrastructure reasons."
+          echo "=========================================================="
+          SINCE_ORG="15 min ago"
+          echo "--- Model IDs called in last 15 min (unique counts)"
+          echo "--- gemini-2.5-flash-lite:"
+          sudo journalctl -u "$UNIT" --since "$SINCE_ORG" --no-pager 2>/dev/null \
+            | grep -oE "gemini-2\.5-flash-lite" | wc -l | xargs echo "  count:"
+          echo "--- gemini-2.5-flash (non-lite):"
+          sudo journalctl -u "$UNIT" --since "$SINCE_ORG" --no-pager 2>/dev/null \
+            | grep -oE "gemini-2\.5-flash[^-]" | wc -l | xargs echo "  count:"
+          echo "--- gemini-2.5-pro:"
+          sudo journalctl -u "$UNIT" --since "$SINCE_ORG" --no-pager 2>/dev/null \
+            | grep -oE "gemini-2\.5-pro" | wc -l | xargs echo "  count:"
+          echo
+          echo "--- Sample SelfRefine log lines from last 15 min:"
+          sudo journalctl -u "$UNIT" --since "$SINCE_ORG" --no-pager 2>/dev/null \
+            | grep -E "SelfRefine|Critique result|Refinement done|Self-refine" \
+            | tail -20 \
+            || echo "  (none)"
+          echo
+          echo "--- overall_quality_notes references in last 15 min:"
+          HITS_ORG=$(sudo journalctl -u "$UNIT" --since "$SINCE_ORG" --no-pager 2>/dev/null \
+            | grep -c "overall_quality_notes" || true)
+          echo "  count: $HITS_ORG  (expected: 0)"
+          echo
+          echo "--- ERROR lines in last 15 min (should be minimal):"
+          sudo journalctl -u "$UNIT" --since "$SINCE_ORG" --no-pager 2>/dev/null \
+            | grep -E "\\[ERROR\\]|level=error|ERROR:|Traceback" \
+            | tail -30 \
+            || echo "  (no ERROR lines)"
           echo
 
           echo "=========================================================="

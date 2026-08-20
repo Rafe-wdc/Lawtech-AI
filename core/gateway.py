@@ -691,6 +691,14 @@ async def search(data: SearchRequest, request: Request):
     )
     config = {"configurable": {"thread_id": thread_id}}
 
+    # Langfuse tracing (optional, fail-safe) — same wiring as the streaming
+    # path in core/chat_runner.py. No-op when tracing is unavailable.
+    from core.tracing import get_langfuse_callback, trace_metadata
+    _lf_handler = get_langfuse_callback()
+    if _lf_handler is not None:
+        config["callbacks"] = [_lf_handler]
+        config["metadata"] = trace_metadata(thread_id=thread_id, endpoint="search")
+
     # Initialise the per-request token tracker. Every LLM call made by
     # any agent / orchestrator step on this asyncio task accumulates here.
     from core.token_tracker import start_request as _start_token_tracking

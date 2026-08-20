@@ -1467,7 +1467,23 @@ async def _critique(
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
         result: Critique = raw_and_parsed["parsed"]
-        record_gemini_flash_success()
+        record_gemini_flash_success()  # Flash answered (raw present); parse is separate
+        if result is None:
+            # `parsed` is None when structured-output parsing failed. With the
+            # quality-notes truncation validator in place this is no longer
+            # Q-20 (string_too_long); any remaining None means a genuinely
+            # empty/blocked response or a different schema violation. Log the
+            # REAL reason (parsing_error) instead of letting `result.passes`
+            # below raise an AttributeError that collapses into the generic
+            # "call failed" branch and hides the cause. Fail safe (pass) so the
+            # user still gets a draft.
+            perr = raw_and_parsed.get("parsing_error")
+            log.warning(
+                "Critique produced no parsed object; treating as pass",
+                parsing_error=short_err(perr) if perr else None,
+            )
+            return Critique(passes=True, confidence=0.0,
+                            overall_quality_notes="critique unparsed")
         log.info(
             "Critique result",
             passes=result.passes,

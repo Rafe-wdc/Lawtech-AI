@@ -47,7 +47,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, Literal, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from langchain_core.prompts import ChatPromptTemplate
 
 from config.intent import LegalArtifact, UserIntent, default_intent
@@ -130,13 +130,31 @@ class Critique(BaseModel):
         description="Specific issues found. Empty when passes=True with "
                     "no minor issues either.",
     )
+    # NOTE: no hard `max_length` constraint here on purpose — see Q-20 below.
+    # A `Field(max_length=...)` constraint is enforced by pydantic-core and
+    # would reject the WHOLE critique on overflow; the truncating validator
+    # cannot be bypassed and caps the value safely instead.
     overall_quality_notes: str = Field(
         "",
         description="One-paragraph free-text observation about the response "
                     "as a whole — useful for the refiner and for telemetry. "
-                    "Kept under 300 chars.",
-        max_length=400,  # 100-char slack vs the 300 target
+                    "Kept under 300 chars; hard-capped at 400 by the validator.",
     )
+
+    @field_validator("overall_quality_notes", mode="before")
+    @classmethod
+    def _truncate_quality_notes(cls, v: object) -> object:
+        # Q-20: the critic occasionally overshoots the length target. Cap it
+        # here so an over-long NOTES field can never reject the ENTIRE critique.
+        # Previously a `max_length=400` constraint made an overflow raise
+        # OutputParserException; self_refine caught it, returned
+        # passes=True/confidence=0, and the draft shipped UNREFINED — a valid
+        # 11-violation critique was discarded for an 8-character overshoot.
+        # `violations` carry the actionable content; the notes are
+        # summary/telemetry, so capping them is lossless in practice.
+        if isinstance(v, str) and len(v) > 400:
+            return v[:400]
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -1449,7 +1467,23 @@ async def _critique(
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
         result: Critique = raw_and_parsed["parsed"]
-        record_gemini_flash_success()
+        record_gemini_flash_success()  # Flash answered (raw present); parse is separate
+        if result is None:
+            # `parsed` is None when structured-output parsing failed. With the
+            # quality-notes truncation validator in place this is no longer
+            # Q-20 (string_too_long); any remaining None means a genuinely
+            # empty/blocked response or a different schema violation. Log the
+            # REAL reason (parsing_error) instead of letting `result.passes`
+            # below raise an AttributeError that collapses into the generic
+            # "call failed" branch and hides the cause. Fail safe (pass) so the
+            # user still gets a draft.
+            perr = raw_and_parsed.get("parsing_error")
+            log.warning(
+                "Critique produced no parsed object; treating as pass",
+                parsing_error=short_err(perr) if perr else None,
+            )
+            return Critique(passes=True, confidence=0.0,
+                            overall_quality_notes="critique unparsed")
         log.info(
             "Critique result",
             passes=result.passes,

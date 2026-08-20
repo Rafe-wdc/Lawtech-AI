@@ -384,6 +384,19 @@ async def run_chat_pipeline(
 
     config = {"configurable": {"thread_id": i.thread_id}}
 
+    # Langfuse tracing (optional, fail-safe). When configured, attach the
+    # callback so the whole graph run — every agent node + underlying LLM
+    # call — is captured as one trace, grouped by thread_id in the Langfuse
+    # UI. get_langfuse_callback() returns None when tracing is unavailable,
+    # so this is a no-op that never affects the request path.
+    from core.tracing import get_langfuse_callback, trace_metadata
+    _lf_handler = get_langfuse_callback()
+    if _lf_handler is not None:
+        config["callbacks"] = [_lf_handler]
+        config["metadata"] = trace_metadata(
+            thread_id=i.thread_id, endpoint=i.endpoint_name,
+        )
+
     # Initialise the per-request token tracker. Every LLM call made by
     # any agent / orchestrator step on this asyncio task (and its
     # spawned children, since asyncio propagates contextvars) will

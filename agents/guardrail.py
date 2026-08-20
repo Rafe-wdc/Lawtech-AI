@@ -22,10 +22,14 @@ Current posture:
             No injection regex bank, no length ceiling, no LLM sniffer.
             Trusts Gemini's own safety layer and the 2M-token context
             window for everything with real words in it.
-  OUTPUT  — unchanged: markdown polish, runaway-response repair, hard
-            char cap (250K), disclaimer append. These are content-quality
-            steps that never see the user's raw query and never fabricate
-            a "your prompt was blocked" message.
+  OUTPUT  — markdown polish, runaway-response repair, hard char cap
+            (250K). These are content-quality steps that never see the
+            user's raw query and never fabricate a "your prompt was
+            blocked" message. The legal disclaimer that used to be
+            appended here was removed on 2026-08-20; the persistent UI
+            disclaimer ("Lawttorney can make mistakes. Verify important
+            legal information.") is now the canonical shield, and the
+            per-response append was redundant.
 """
 
 from __future__ import annotations
@@ -36,7 +40,6 @@ from core.state import LegalAgentState
 from core.logger import get_logger
 from core.progress import progress
 from tools.inline.markdown import sanitize_markdown
-from tools.inline.disclaimer import add_disclaimer
 from core.sanitize import sanitize_output
 
 log = get_logger("Guardrail")
@@ -106,8 +109,9 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     """Output guardrail — sanitizes response before returning to user.
 
     Steps:
-    1. Sanitize broken markdown (code fences, bold, tables, bullets)
-    2. Add legal disclaimer for applicable task types
+    1. Structural runaway repair (sanitize_output)
+    2. Markdown polish (sanitize_markdown)
+    3. Hard char cap (250K) with truncation nudge
     """
     response = state.get("final_response", "")
     task = state.get("task", "Other")
@@ -149,9 +153,6 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
                     original_len=len(cleaned),
                     cap=MAX_FINAL_RESPONSE_CHARS)
         cleaned = cleaned[:keep] + TRUNCATION_SUFFIX
-
-    # Add disclaimer
-    cleaned = add_disclaimer(cleaned, task or "Other")
 
     len_diff = len(cleaned) - len(response)
     log.info("Output sanitization completed",

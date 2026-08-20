@@ -1,0 +1,167 @@
+name: Prod Verify self-refine model upgrade (read-only diagnostic)
+
+# One-off workflow_dispatch — SSHes into api.lawttorney.com (the AWS
+# deploy target) and:
+#
+#   1. Confirms uptime is <5min so we know we are on the just-deployed
+#      commit dca6b83 (refactor(self-refine): cheaper models + drop
+#      overall_quality_notes).
+#   2. Fires a real /pyapi/search query from localhost:5000 using the
+#      on-box API key (from /root/Lawtech-AI/.env) — this exercises the
+#      full agent graph including self_refine.
+#   3. Greps the resulting journalctl slice for the exact model IDs
+#      firing:
+#          - gemini-2.5-flash-lite  (critic — new)
+#          - gemini-2.5-flash        (refiner + main generation — new)
+#          - gemini-2.5-pro          (should NOT appear in self_refine
+#                                     lines — still allowed elsewhere)
+#      And for the self_refine loop's structured log lines:
+#          "Self-refine critique completed"
+#          "Critique result"
+#          "Refinement done"
+#      And for any lingering `overall_quality_notes` references, which
+#      would prove the schema drop didn't land in the running image.
+#   4. Any ERROR-level lines since the query timestamp — should be
+#      empty. Any exception referencing overall_quality_notes / a
+#      missing pro breaker function = regression.
+#
+# Read-only: no files created / modified / deleted on prod. The synthetic
+# query hits a public endpoint using an already-authorized key.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify self-refine upgrade on prod
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Fire query + grep logs
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          UNIT=lawttorney-v2.service
+          APP_DIR=/root/Lawtech-AI
+
+          echo "=========================================================="
+          echo " 0. Box identity + version + uptime"
+          echo "=========================================================="
+          hostname
+          curl -fsS https://api.lawttorney.com/pyapi/health 2>/dev/null \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(f"  version: {d.get(\"version\")}  uptime_s: {d.get(\"uptime_seconds\")}")' \
+            || echo "(health probe failed)"
+          echo
+
+          echo "=========================================================="
+          echo " 1. Grab an API key from /root/Lawtech-AI/.env"
+          echo "=========================================================="
+          KEY=$(sudo bash -c 'grep -E "^API_KEYS=" '"$APP_DIR"'/.env' | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | cut -d, -f1)
+          if [ -z "$KEY" ]; then
+            echo "  ERROR: could not extract API_KEYS from $APP_DIR/.env"
+            exit 1
+          fi
+          KEY_LEN=$(printf "%s" "$KEY" | wc -c)
+          KEY_HEAD=$(printf "%s" "$KEY" | cut -c1-4)
+          echo "  key prefix: ${KEY_HEAD}...  length: ${KEY_LEN}"
+          echo
+
+          # Timestamp the query for a tight log grep window afterwards.
+          T0=$(date -u '+%Y-%m-%d %H:%M:%S')
+          echo "=========================================================="
+          echo " 2. Fire real search query at localhost:5000 (T0=$T0 UTC)"
+          echo "     Query is short, format-explicit (BULLET_LIST) with"
+          echo "     brief depth so self_refine is guaranteed to trigger."
+          echo "=========================================================="
+          PROMPT="Explain Section 138 of the Negotiable Instruments Act in 3 short bullet points."
+          BODY=$(python3 -c 'import json,sys; print(json.dumps({"prompt_query": sys.argv[1]}))' "$PROMPT")
+          curl -sS -o /tmp/search_resp.json -w "HTTP %{http_code}  time_total=%{time_total}s\n" \
+            --max-time 180 \
+            -X POST http://127.0.0.1:5000/pyapi/search \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $KEY" \
+            -d "$BODY"
+          echo
+          echo "  Response first 400 chars:"
+          head -c 400 /tmp/search_resp.json
+          echo
+          echo
+          echo "  agents_used / tasks_planned:"
+          python3 -c 'import json; d=json.load(open("/tmp/search_resp.json")); print("   ", d.get("agents_used") or d.get("tasks_planned") or "(none)")' 2>/dev/null || echo "    (unable to parse)"
+          echo
+
+          # Small pause so buffered logs flush before grep.
+          sleep 3
+
+          echo "=========================================================="
+          echo " 3. Model IDs actually called since T0 (positive proof)"
+          echo "=========================================================="
+          echo "--- gemini-2.5-flash-lite (expect: critic + intent + routers)"
+          sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+            | grep -oE "gemini-2\.5-flash-lite" | sort | uniq -c
+          echo "--- gemini-2.5-flash (expect: refiner + main generation)"
+          sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+            | grep -oE "gemini-2\.5-flash(:generateContent|[^-])" | sort | uniq -c
+          echo "--- gemini-2.5-pro (allowed for Drafting/PDF only, NOT self_refine)"
+          sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+            | grep -oE "gemini-2\.5-pro" | sort | uniq -c
+          echo
+
+          echo "=========================================================="
+          echo " 4. Self-refine loop log lines since T0"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+            | grep -E "\[SelfRefine\]|Self-refine|Critique result|Refinement done" \
+            | tail -60 \
+            || echo "  (no SelfRefine log lines — either intent was trivial or response was short)"
+          echo
+
+          echo "=========================================================="
+          echo " 5. overall_quality_notes should be ABSENT (was dropped)"
+          echo "=========================================================="
+          HITS=$(sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+            | grep -c "overall_quality_notes" || true)
+          echo "  overall_quality_notes references since T0: $HITS  (expected: 0)"
+          if [ "$HITS" != "0" ]; then
+            echo "  --- offending lines ---"
+            sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+              | grep "overall_quality_notes" | tail -20
+          fi
+          echo
+
+          echo "=========================================================="
+          echo " 6. ERROR-level lines since T0 (should be clean)"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+            | grep -E "\\[ERROR\\]|level=error|ERROR:|Traceback" \
+            | tail -40 \
+            || echo "  (no ERROR lines since T0)"
+          echo
+
+          echo "=========================================================="
+          echo " 7. Circuit-breaker state — should NOT be OPEN post-deploy"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$T0" --no-pager 2>/dev/null \
+            | grep -E "Gemini Flash circuit|Gemini Pro circuit" \
+            | tail -20 \
+            || echo "  (no circuit-breaker events — good)"
+          echo
+
+          echo "=========================================================="
+          echo " Verification complete"
+          echo "=========================================================="
+          ENDSSH

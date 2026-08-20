@@ -6,14 +6,14 @@ per-artifact word-count floors) with a single dynamic loop:
 
     generate → critique → refine → critique → refine → ... (max N)
 
-The critic is a small Gemini Flash call that takes:
+The critic is a small Gemini Flash Lite call that takes:
     - the original user query (free text)
     - the typed UserIntent (the grounding — derived per-request by the
       orchestrator's intent extractor)
     - the response so far
 
 …and returns a structured Critique listing specific violations of the
-intent. The refiner is a Gemini Pro call that rewrites the response to
+intent. The refiner is a Gemini Flash call that rewrites the response to
 fix the violations the critic surfaced.
 
 Why this design vs. the old hardcoded gates:
@@ -26,8 +26,8 @@ Why this design vs. the old hardcoded gates:
       digit leakage and translated Act names, and the refiner rewrites
       them — without me adding a regex.
 
-Cost: 1 critique call (Flash, ~$0.0001) per iteration. Refine call only
-when violations found. Max 2 iterations.
+Cost: 1 critique call (Flash Lite, ~$0.0001) per iteration. Refine call
+only when violations found (Flash). Max 2 iterations.
 
 Skip-when-trivial: we don't call the critic when intent is missing /
 low-confidence / has no explicit directives. Saves the cost for
@@ -47,12 +47,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, Literal, Optional
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict
 from langchain_core.prompts import ChatPromptTemplate
 
 from config.intent import LegalArtifact, UserIntent, default_intent
 from config.prompts import INJECTION_GUARD_PREAMBLE, wrap_untrusted
-from core.clients import get_gemini_flash_full, get_gemini_pro
+from core.clients import get_gemini_flash_full, get_gemini_flash_lite
 from core.logger import get_logger, log_time, short_err
 from core.token_tracker import record as _record_tokens
 
@@ -62,7 +62,7 @@ log = get_logger("SelfRefine")
 # ---------------------------------------------------------------------------
 # Structured critique schema — the critic returns this. Downstream code
 # branches on `passes`, logs `violations` for telemetry, and feeds the
-# `violations` + `overall_quality_notes` into the refiner.
+# `violations` list into the refiner.
 # ---------------------------------------------------------------------------
 
 class Violation(BaseModel):
@@ -130,31 +130,6 @@ class Critique(BaseModel):
         description="Specific issues found. Empty when passes=True with "
                     "no minor issues either.",
     )
-    # NOTE: no hard `max_length` constraint here on purpose — see Q-20 below.
-    # A `Field(max_length=...)` constraint is enforced by pydantic-core and
-    # would reject the WHOLE critique on overflow; the truncating validator
-    # cannot be bypassed and caps the value safely instead.
-    overall_quality_notes: str = Field(
-        "",
-        description="One-paragraph free-text observation about the response "
-                    "as a whole — useful for the refiner and for telemetry. "
-                    "Kept under 300 chars; hard-capped at 400 by the validator.",
-    )
-
-    @field_validator("overall_quality_notes", mode="before")
-    @classmethod
-    def _truncate_quality_notes(cls, v: object) -> object:
-        # Q-20: the critic occasionally overshoots the length target. Cap it
-        # here so an over-long NOTES field can never reject the ENTIRE critique.
-        # Previously a `max_length=400` constraint made an overflow raise
-        # OutputParserException; self_refine caught it, returned
-        # passes=True/confidence=0, and the draft shipped UNREFINED — a valid
-        # 11-violation critique was discarded for an 8-character overshoot.
-        # `violations` carry the actionable content; the notes are
-        # summary/telemetry, so capping them is lossless in practice.
-        if isinstance(v, str) and len(v) > 400:
-            return v[:400]
-        return v
 
 
 # ---------------------------------------------------------------------------
@@ -1318,9 +1293,6 @@ principle without any case citation rather than emitting a placeholder.
 Violations to fix (each has a suggested_fix the auditor wrote):
 {violations_block}
 
-Auditor's overall quality note (free text, contextual):
-{quality_notes}
-
 Previous response (the draft to revise):
 {response}
 
@@ -1429,13 +1401,13 @@ async def _critique(
     )
     if not is_gemini_flash_available():
         log.warning("Gemini Flash circuit open — skipping critique",
-                    fast_fail=True)
-        return Critique(passes=True, confidence=0.0,
-                        overall_quality_notes="critique skipped (Flash circuit open)")
+                    fast_fail=True,
+                    reason="flash_circuit_open")
+        return Critique(passes=True, confidence=0.0)
 
     try:
         with log_time(log, "Self-refine critique"):
-            llm = (critic_llm or get_gemini_flash_full(
+            llm = (critic_llm or get_gemini_flash_lite(
                 temperature=0.0, max_output_tokens=4096, thinking_budget=0,
             )).with_structured_output(Critique, include_raw=True)
             intent_json = intent.model_dump_json(indent=2)
@@ -1482,8 +1454,7 @@ async def _critique(
                 "Critique produced no parsed object; treating as pass",
                 parsing_error=short_err(perr) if perr else None,
             )
-            return Critique(passes=True, confidence=0.0,
-                            overall_quality_notes="critique unparsed")
+            return Critique(passes=True, confidence=0.0)
         log.info(
             "Critique result",
             passes=result.passes,
@@ -1501,8 +1472,7 @@ async def _critique(
             error=short_err(e),
             exc_info=True,
         )
-        return Critique(passes=True, confidence=0.0,
-                        overall_quality_notes="critique failed")
+        return Critique(passes=True, confidence=0.0)
 
 
 async def _refine(
@@ -1522,20 +1492,20 @@ async def _refine(
     substitute a real retrieved citation for a hallucinated one flagged
     under `unretrieved_citation`, instead of restoring the invention.
     """
-    # Circuit breaker: skip the refiner when Gemini Pro is unhealthy.
+    # Circuit breaker: skip the refiner when Gemini Flash is unhealthy.
     # Returning the original response is the existing fallback anyway.
     from core.clients import (
-        is_gemini_pro_available, record_gemini_pro_failure,
-        record_gemini_pro_success,
+        is_gemini_flash_available, record_gemini_flash_failure,
+        record_gemini_flash_success,
     )
-    if not is_gemini_pro_available():
-        log.warning("Gemini Pro circuit open — skipping refinement",
+    if not is_gemini_flash_available():
+        log.warning("Gemini Flash circuit open — skipping refinement",
                     fast_fail=True)
         return response
 
     try:
         with log_time(log, "Self-refine refinement"):
-            llm = refiner_llm or get_gemini_pro(
+            llm = refiner_llm or get_gemini_flash_full(
                 temperature=0.3, max_output_tokens=20000, thinking_budget=2048,
             )
             intent_json = intent.model_dump_json(indent=2)
@@ -1552,7 +1522,6 @@ async def _refine(
                         "query":           wrap_untrusted(user_query),
                         "intent_json":     intent_json,
                         "violations_block": violations_block,
-                        "quality_notes":   critique.overall_quality_notes or "(none)",
                         "response":        response,
                         "retrieved_sources_whitelist": (
                             retrieved_sources_whitelist
@@ -1564,7 +1533,7 @@ async def _refine(
                 local_timeout=60,
             )
         _record_tokens("SelfRefine", "refine", result)
-        record_gemini_pro_success()
+        record_gemini_flash_success()
         text = getattr(result, "content", None)
         if text is None:
             text = str(result)
@@ -1576,7 +1545,7 @@ async def _refine(
         )
         return text
     except Exception as e:
-        record_gemini_pro_failure()
+        record_gemini_flash_failure()
         log.warning(
             "Refinement LLM call failed; returning original response",
             error=short_err(e),

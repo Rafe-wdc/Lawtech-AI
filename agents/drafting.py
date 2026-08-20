@@ -237,6 +237,18 @@ _FOLLOWUP_DIRECTIVE_MIN_PRIOR_CHARS = 500
 # through the whole follow-up chain.
 _DRAFT_INCOMPLETE_BANNER_MARKER = "**Draft incomplete**"
 
+# Marker `agents/memory.py` prepends (Move 2 deterministic rewrite) when it
+# inlines the complete prior draft into the query for a directive follow-up
+# ("convert the above text into Marathi", "shorten the above draft"). Its
+# presence proves the query ALREADY carries the source document, so hunting
+# for an additional ES/web reference template is both wasted work (measured
+# 24-37s of web synthesis per turn) and actively harmful — the picker
+# correctly rejects a translation task, the web fallback then synthesises an
+# unrelated template, and that template competes with the real prior draft
+# as a structural anchor. Kept as a prefix of the emitted sentence so a
+# reword of its tail cannot silently break the match.
+_INLINED_PRIOR_DRAFT_MARKER = "PRIOR DRAFT (the text the user wants to modify"
+
 
 def _fast_path_enabled() -> bool:
     """Env-flag gate. Off by default; ops flips DRAFTING_FOLLOWUP_FAST_PATH=1
@@ -2550,6 +2562,27 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = user_facts
             reference_source = "<uploaded:review_and_redraft>"
             reference_kind = "uploaded"
+            gathered_ctx = await _gather_relevant_context(query)
+        elif _INLINED_PRIOR_DRAFT_MARKER in query:
+            # (c) Directive follow-up whose query already carries the full
+            #     prior draft (inlined by agents/memory.py). The prior draft
+            #     IS the source document — skip the ES picker and its web
+            #     fallback entirely. Still gather relevant legal context so
+            #     statutes/precedents remain available to the generator, and
+            #     still fall through to the normal generation + self_refine
+            #     flow below (this branch does NOT set use_upload_as_ref).
+            log.info(
+                "Prior draft inlined in query — skipping reference acquisition",
+                query_chars=len(query),
+            )
+            progress(
+                "drafting",
+                "Using your previous draft as the source document",
+                step="reference",
+            )
+            reference_text = ""
+            reference_source = "<prior_turn:inlined>"
+            reference_kind = "prior_turn"
             gathered_ctx = await _gather_relevant_context(query)
         else:
             progress("drafting", "Searching templates and relevant law...",

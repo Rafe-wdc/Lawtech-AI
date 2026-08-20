@@ -1,0 +1,1085 @@
+{
+  "prod": {
+    "thread": "b26a4a88-7da6-49a4-9c2b-75a54de65aba",
+    "record": {
+      "request": {
+        "method": "POST",
+        "url": "https://api.lawttorney.com/pyapi/chat",
+        "content_type": "multipart/form-data",
+        "headers": {
+          "X-API-Key": "<redacted>",
+          "Accept": "text/event-stream"
+        },
+        "form_fields": {
+          "query": "Review this draft and suggest changes, if any.",
+          "globalThreadId": "b26a4a88-7da6-49a4-9c2b-75a54de65aba"
+        },
+        "files": [
+          {
+            "field": "files",
+            "filename": "control_draft.pdf",
+            "size_bytes": 8411,
+            "content_type": "application/pdf"
+          }
+        ]
+      },
+      "started_at": "2026-08-17T14:51:26.263178+00:00",
+      "events": [
+        {
+          "t": 0.787,
+          "type": "thread_id",
+          "data": "b26a4a88-7da6-49a4-9c2b-75a54de65aba"
+        },
+        {
+          "t": 0.787,
+          "type": "file_processing",
+          "message": "Processing uploaded files..."
+        },
+        {
+          "t": 0.787,
+          "type": "file_processing",
+          "stage": "pdf_compress_start",
+          "message": "Compressing control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.792,
+          "type": "file_processing",
+          "stage": "pdf_extract_start",
+          "message": "Extracting text from control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.806,
+          "type": "file_processing",
+          "stage": "pdf_extract_done",
+          "message": "control_draft.pdf: 4 pages",
+          "file": "control_draft.pdf",
+          "pages": 4
+        },
+        {
+          "t": 0.812,
+          "type": "file_processing",
+          "stage": "chroma_store_start",
+          "message": "Embedding control_draft.pdf into vector store...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 1.334,
+          "type": "file_processing",
+          "stage": "all_files_done",
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ],
+          "errors": []
+        },
+        {
+          "t": 1.334,
+          "type": "file_processing",
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ]
+        },
+        {
+          "t": 1.334,
+          "type": "progress",
+          "agent": "guardrail",
+          "message": "Validating query...",
+          "ts": 1786978287.8872762,
+          "step": "validate"
+        },
+        {
+          "t": 1.334,
+          "type": "status",
+          "agent": "guardrail_input",
+          "message": "Validating query..."
+        },
+        {
+          "t": 1.334,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Detecting language...",
+          "ts": 1786978287.8896415,
+          "step": "language"
+        },
+        {
+          "t": 1.334,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Detected: en",
+          "ts": 1786978287.8918211,
+          "step": "language",
+          "substep": true
+        },
+        {
+          "t": 1.334,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Loading conversation history...",
+          "ts": 1786978287.8920634,
+          "step": "history"
+        },
+        {
+          "t": 1.334,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Found 0 previous turns",
+          "ts": 1786978287.8950016,
+          "found": 0,
+          "step": "history",
+          "substep": true
+        },
+        {
+          "t": 1.334,
+          "type": "status",
+          "agent": "memory",
+          "message": "Loading context..."
+        },
+        {
+          "t": 1.334,
+          "type": "context",
+          "query_rewritten": false,
+          "effective_query": null,
+          "history_turns": 1,
+          "has_summary": false
+        },
+        {
+          "t": 1.352,
+          "type": "progress",
+          "agent": "orchestrator",
+          "message": "Understanding your question...",
+          "ts": 1786978287.898083,
+          "step": "classify"
+        },
+        {
+          "t": 3.279,
+          "type": "progress",
+          "agent": "orchestrator",
+          "message": "Identified: Document",
+          "ts": 1786978289.756113,
+          "detail": "Document",
+          "step": "classify",
+          "substep": true
+        },
+        {
+          "t": 3.279,
+          "type": "status",
+          "agent": "orchestrator_plan",
+          "message": "Planning search strategy..."
+        },
+        {
+          "t": 3.28,
+          "type": "agents_planned",
+          "agents": [
+            "Document"
+          ]
+        },
+        {
+          "t": 3.28,
+          "type": "progress",
+          "agent": "document",
+          "message": "Loading uploaded documents...",
+          "ts": 1786978289.7591262,
+          "step": "load"
+        },
+        {
+          "t": 3.28,
+          "type": "progress",
+          "agent": "document",
+          "message": "Loading 1 document collection(s)...",
+          "ts": 1786978289.7592485,
+          "found": 1,
+          "step": "search"
+        },
+        {
+          "t": 15.212,
+          "type": "progress",
+          "agent": "document",
+          "message": "Found 1 relevant passages",
+          "ts": 1786978301.8298717,
+          "found": 1,
+          "step": "search",
+          "substep": true
+        },
+        {
+          "t": 15.212,
+          "type": "progress",
+          "agent": "document",
+          "message": "Generating answer from documents...",
+          "ts": 1786978301.8298826,
+          "step": "generate"
+        },
+        {
+          "t": 15.212,
+          "type": "status",
+          "agent": "document",
+          "message": "Searching uploaded documents..."
+        },
+        {
+          "t": 15.212,
+          "type": "progress",
+          "agent": "orchestrator",
+          "message": "Merging results from 1 agents...",
+          "ts": 1786978301.8321078,
+          "found": 1,
+          "step": "synthesize"
+        },
+        {
+          "t": 15.222,
+          "type": "status",
+          "agent": "orchestrator_synthesize",
+          "message": "Injecting citations into draft..."
+        },
+        {
+          "t": 15.222,
+          "type": "progress",
+          "agent": "guardrail",
+          "message": "Finalizing response...",
+          "ts": 1786978301.834297,
+          "step": "finalize"
+        },
+        {
+          "t": 15.222,
+          "type": "status",
+          "agent": "guardrail_output",
+          "message": "Finalizing..."
+        },
+        {
+          "t": 15.284,
+          "type": "response",
+          "content": "The draft plaint is well-structured and covers the necessary legal points for a suit for partition, declaration, and injunction. However, here are some suggestions for changes to enhance clarity, completeness, and legal precision:\n\n**General Suggestions:**\n\n1.  **Consistency in Language:** Ensure consistent use of terms. For example, \"Hon'ble Court\" is used, but sometimes \"this Hon'ble Court\" and sometimes just \"Hon'ble Court.\" While minor, consistency improves professionalism.\n2.  **Placeholder Completion:** All bracketed placeholders like `[Father's Name]`, `[Plaintiff's Age]`, `[Date]`, `[Valuation of Plaintiff's 1/2 Share]` etc., must be filled with specific details before filing.\n3.  **Schedule 'A' Annexation:** The plaint repeatedly refers to \"Schedule 'A' annexed hereto.\" Ensure that a detailed Schedule 'A' describing the Suit Properties (e.g., survey numbers, area, boundaries, flat numbers, building names, precise addresses) is indeed prepared and annexed. This is crucial for identifying the properties.\n4.  **Verification Date:** The verification section has `___ day of __________, 2024`. This should be updated to the actual year of filing, which would be 2026 based on the current date provided.\n\n**Specific Paragraph-by-Paragraph Suggestions:**\n\n-   **Heading:**\n    -   \"IN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, \\_\\_\\_\\_\\_ AT \\_\\_\\_\\_\\_\"\n        -   **Suggestion:** Fill in the specific district and location. E.g., \"IN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, PUNE AT PUNE\".\n\n-   **Plaintiff and Defendant Details:**\n    -   `Rupa, daughter of Late [Father's Name], Age: [Plaintiff's Age], Occupation: [Plaintiff's Occupation], Residing at: [Plaintiff's Address], Pune.`\n    -   `[Mother's Name], wife of Late [Father's Name], Age: [Defendant's Age], Occupation: [Defendant's Occupation], Residing at: [Defendant's Address], Pune.`\n        -   **Suggestion:** Ensure full and accurate addresses for both Plaintiff and Defendant, including PIN codes, are provided. This is vital for service of summons and court records.\n\n-   **Paragraph 1:**\n    -   \"That the Plaintiff is the adopted daughter of Late [Father's Name] and the Defendant, [Mother's Name].\"\n        -   **Suggestion:** While stated, it might be beneficial to briefly mention *how* she is an adopted daughter (e.g., \"duly adopted under the provisions of the Hindu Adoptions and Maintenance Act, 1956\" or \"as per custom and usage accepted by the family\") if there's specific documentation or a formal adoption deed. This strengthens the claim of legal status. However, if the adoption is not disputed, the current wording is sufficient.\n    -   \"The said [Father's Name] passed away intestate approximately five years ago...\"\n        -   **Suggestion:** Replace \"approximately five years ago\" with the precise date of demise if known. This provides more certainty. If the exact date is not known, state \"on or about [Date of Demise]\".\n\n-   **Paragraph 2:**\n    -   \"These properties, hereinafter referred to as the \"Suit Properties\", are more particularly described in the Schedule of Properties annexed hereto and marked as Schedule 'A'.\"\n        -   **Suggestion:** This is good. Just ensure Schedule 'A' is indeed comprehensive.\n\n-   **Paragraph 4:**\n    -   \"That since the demise of her father, the Plaintiff's name has not been mutated in the relevant property records concerning the Suit Properties.\"\n        -   **Suggestion:** This is a factual statement. No change needed.\n\n-   **Paragraph 5:**\n    -   \"The Defendant is attempting to dispossess the Plaintiff and has explicitly communicated her intention to unlawfully sell, transfer, or otherwise alienate the entirety of the Suit Properties to her cousin, with the malafide intent of depriving the Plaintiff of her rightful and legitimate share.\"\n        -   **Suggestion:** This is a strong allegation. If possible, briefly mention *how* this communication occurred (e.g., \"verbally on [Date]\" or \"through a letter dated [Date]\" if applicable). This adds weight to the claim.\n\n-   **Paragraph 6:**\n    -   \"That upon learning of the Defendant's illegal intentions, the Plaintiff approached the Defendant on or about [Date] and requested an amicable partition...\"\n        -   **Suggestion:** Provide the specific date of the request for amicable partition.\n\n-   **Paragraph 7:**\n    -   \"That the cause of action for the present suit first arose on [Date], when the Defendant refused the Plaintiff's legitimate demand for partition, and the same is continuing from day to day.\"\n        -   **Suggestion:** Provide the specific date of refusal. This is critical for limitation purposes.\n\n-   **Paragraph 9:**\n    -   \"That for the purposes of court fees and jurisdiction, the suit for partition and declaration is valued at Rs. [Valuation of Plaintiff's 1/2 Share], and the requisite court fee as per the Maharashtra Court Fees Act, 1959, is paid herewith.\"\n        -   **Suggestion:** Clearly state the full valuation of the *entire* suit property for jurisdiction purposes, and then specify the valuation of the Plaintiff's share for court fees if different rules apply. For a partition suit, often the valuation is based on the market value of the share sought. Ensure the valuation is realistic and supported.\n\n-   **Paragraph 10:**\n    -   \"If the Defendant is not restrained by an order of temporary injunction... it will lead to a multiplicity of proceedings and cause irreparable loss and injury to the Plaintiff, which cannot be compensated in monetary terms.\"\n        -   **Suggestion:** This is standard and well-phrased for an injunction application.\n\n-   **Paragraph 11:**\n    -   \"The Plaintiff reiterates that she is the legally adopted daughter...\"\n        -   **Suggestion:** Repetition of facts is common in plaints (first in the general narrative, then in specific grounds). No change needed here.\n\n-   **Paragraph 13:**\n    -   \"As the adopted daughter, the Plaintiff holds the same legal status as a biological daughter and is a Class I heir under the Hindu Succession Act, 1956.\"\n        -   **Suggestion:** This is a correct statement of law.\n\n-   **Paragraph 14:**\n    -   \"The Defendant is actively attempting to dispossess the Plaintiff and has unequivocally declared her intention to sell or transfer the entirety of the Suit Properties to her cousin, thereby extinguishing the Plaintiff's legitimate share and rights.\"\n        -   **Suggestion:** Similar to Paragraph 5, if there's any specific evidence or date for this declaration, it could be briefly mentioned.\n\n-   **Paragraph 15:**\n    -   \"However, on or about [Date], the Defendant flatly refused to effect any partition and reiterated her threat to alienate the properties...\"\n        -   **Suggestion:** Provide the specific date of refusal.\n\n-   **Paragraph 16:**\n    -   \"This suit is filed seeking partition and separate possession of the Plaintiff's share in the Suit Properties, a declaration of her title to the extent of her share, and consequential reliefs of permanent and temporary injunctions.\"\n        -   **Suggestion:** This clearly outlines the reliefs sought.\n\n-   **Paragraph 17:**\n    -   \"As per the rules of distribution laid down in Section 10 of the said Act, the widow and the daughter take one share each. Therefore, the Plaintiff is legally entitled to a one-half (1/2) share in the Suit Properties.\"\n        -   **Suggestion:** This accurately states the law.\n\n-   **Paragraph 18:**\n    -   \"Following such declaration, the Plaintiff is entitled to have her share partitioned by metes and bounds and to be put in separate possession thereof.\"\n        -   **Suggestion:** This is the core relief sought.\n\n-   **Paragraph 19 & 20:**\n    -   These paragraphs effectively lay out the grounds for temporary and permanent injunctions.\n\n-   **Prayer Clause:**\n    -   **(a) Declaration:** \"Pass a decree declaring that the Plaintiff is the lawful owner of and is entitled to an equal, undivided one-half (1/2) share in the Suit Properties...\"\n        -   **Suggestion:** This is correctly phrased.\n    -   **(b) Preliminary Decree:** \"Pass a preliminary decree for partition of the Suit Properties by metes and bounds and separate the Plaintiff's one-half (1/2) share;\"\n        -   **Suggestion:** This is correct.\n    -   **(c) Final Decree:** \"Pass a final decree for partition and put the Plaintiff in separate, peaceful, and vacant possession of her one-half (1/2) share in the Suit Properties;\"\n        -   **Suggestion:** This is correct.\n    -   **(d) Temporary Injunction:** \"Pass an order of temporary injunction under Order XXXIX Rules 1 and 2 of the Code of Civil Procedure, 1908, restraining the Defendant, her agents, servants, assigns, or any person claiming through her, from selling, transferring, alienating, mortgaging, encumbering, or creating any third-party rights, title, or interest in the Suit Properties during the pendency and final disposal of this suit;\"\n        -   **Suggestion:** This is comprehensive.\n    -   **(e) Permanent Injunction:** \"Pass a decree of permanent injunction restraining the Defendant, her agents, servants, assigns, or any person claiming through her, from selling, transferring, alienating, mortgaging, encumbering, or creating any third-party rights, title, or interest in the Suit Properties in any manner whatsoever;\"\n        -   **Suggestion:** This is comprehensive.\n    -   **(f) Costs:** \"Award the costs of this suit to the Plaintiff from the Defendant;\"\n        -   **Suggestion:** Standard.\n    -   **(g) Other Reliefs:** \"Grant any other and further reliefs as this Hon'ble Court may deem fit and proper in the interest of justice and equity.\"\n        -   **Suggestion:** Standard.\n\n-   **Verification:**\n    -   \"I, Rupa, daughter of Late [Father's Name], the Plaintiff abovenamed, do hereby state on solemn affirmation that the contents of the foregoing Plaint in paragraphs 1 to 20 are true and correct to the best of my knowledge, information, and belief, and I have signed the same at Pune on this \\_\\_\\_ day of \\_\\_\\_\\_\\_\\_\\_\\_\\_\\_, 2024.\"\n        -   **Suggestion:** Update the year to \"2026\" or the actual year of signing.\n\nBy incorporating these suggestions, the plaint will be more robust, precise, and less prone to procedural queries from the court.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."
+        },
+        {
+          "t": 15.284,
+          "type": "sources",
+          "data": [
+            {
+              "source_type": "document",
+              "title": "Uploaded: control_draft.pdf",
+              "content": [
+                "--- Page 1 ---\nDRAFT FOR REVIEW\nIN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, _____ AT _____\nCivil Suit No: ____\nRupa,\ndaughter of Late [Father's Name],\nAge: [Plaintiff's Age],\nOccupation: [Plaint"
+              ],
+              "doc_link": null,
+              "file_name": "control_draft.pdf",
+              "agent_name": "Document",
+              "relevance_score": null
+            }
+          ]
+        },
+        {
+          "t": 16.362,
+          "type": "followup_suggestions",
+          "data": [
+            "What is a suit for partition?",
+            "What does 'injunction' mean legally?",
+            "How to ensure legal precision?"
+          ]
+        },
+        {
+          "t": 16.362,
+          "type": "done",
+          "agents_used": [
+            "Document"
+          ],
+          "token_usage": {
+            "input_tokens": 9690,
+            "output_tokens": 2712,
+            "total_tokens": 12402,
+            "cache_read_tokens": 6130,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 0,
+            "cost_usd": 0.007582,
+            "by_agent": {
+              "Orchestrator": {
+                "input": 7155,
+                "output": 321,
+                "total": 7476,
+                "cache_read": 6130,
+                "calls": 2,
+                "cost_usd": 0.000844
+              },
+              "Document": {
+                "input": 2535,
+                "output": 2391,
+                "total": 4926,
+                "cache_read": 0,
+                "calls": 1,
+                "cost_usd": 0.006738
+              }
+            },
+            "calls": [
+              {
+                "agent": "Orchestrator",
+                "step": "classify_and_plan",
+                "input": 1395,
+                "output": 50,
+                "total": 1445,
+                "cache_read": 749,
+                "cache_creation": 0,
+                "reasoning": 0,
+                "cost_usd": 0.00016
+              },
+              {
+                "agent": "Orchestrator",
+                "step": "extract_user_intent",
+                "input": 5760,
+                "output": 271,
+                "total": 6031,
+                "cache_read": 5381,
+                "cache_creation": 0,
+                "reasoning": 0,
+                "cost_usd": 0.000684
+              },
+              {
+                "agent": "Document",
+                "step": "qa_chromadb",
+                "input": 2535,
+                "output": 2391,
+                "total": 4926,
+                "cache_read": 0,
+                "cache_creation": 0,
+                "reasoning": 0,
+                "cost_usd": 0.006738
+              }
+            ]
+          },
+          "thread_id": "b26a4a88-7da6-49a4-9c2b-75a54de65aba",
+          "conversation_turn": 1,
+          "query_rewritten": false,
+          "effective_query": null
+        }
+      ],
+      "http_status": 200,
+      "error": null,
+      "response_headers": {
+        "Server": "nginx/1.24.0 (Ubuntu)",
+        "Date": "Mon, 17 Aug 2026 14:51:27 GMT",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+        "Connection": "keep-alive",
+        "cache-control": "no-cache"
+      },
+      "elapsed_s": 16.36,
+      "streamed_token_chars": 0,
+      "first_token_s": null
+    },
+    "summary": {
+      "statuses": [
+        {
+          "t": 1.334,
+          "message": "Validating query..."
+        },
+        {
+          "t": 1.334,
+          "message": "Loading context..."
+        },
+        {
+          "t": 3.279,
+          "message": "Planning search strategy..."
+        },
+        {
+          "t": 15.212,
+          "message": "Searching uploaded documents..."
+        },
+        {
+          "t": 15.222,
+          "message": "Injecting citations into draft..."
+        },
+        {
+          "t": 15.222,
+          "message": "Finalizing..."
+        }
+      ],
+      "agents_planned": [
+        "Document"
+      ],
+      "agents_used": [
+        "Document"
+      ],
+      "response": "The draft plaint is well-structured and covers the necessary legal points for a suit for partition, declaration, and injunction. However, here are some suggestions for changes to enhance clarity, completeness, and legal precision:\n\n**General Suggestions:**\n\n1.  **Consistency in Language:** Ensure consistent use of terms. For example, \"Hon'ble Court\" is used, but sometimes \"this Hon'ble Court\" and sometimes just \"Hon'ble Court.\" While minor, consistency improves professionalism.\n2.  **Placeholder Completion:** All bracketed placeholders like `[Father's Name]`, `[Plaintiff's Age]`, `[Date]`, `[Valuation of Plaintiff's 1/2 Share]` etc., must be filled with specific details before filing.\n3.  **Schedule 'A' Annexation:** The plaint repeatedly refers to \"Schedule 'A' annexed hereto.\" Ensure that a detailed Schedule 'A' describing the Suit Properties (e.g., survey numbers, area, boundaries, flat numbers, building names, precise addresses) is indeed prepared and annexed. This is crucial for identifying the properties.\n4.  **Verification Date:** The verification section has `___ day of __________, 2024`. This should be updated to the actual year of filing, which would be 2026 based on the current date provided.\n\n**Specific Paragraph-by-Paragraph Suggestions:**\n\n-   **Heading:**\n    -   \"IN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, \\_\\_\\_\\_\\_ AT \\_\\_\\_\\_\\_\"\n        -   **Suggestion:** Fill in the specific district and location. E.g., \"IN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, PUNE AT PUNE\".\n\n-   **Plaintiff and Defendant Details:**\n    -   `Rupa, daughter of Late [Father's Name], Age: [Plaintiff's Age], Occupation: [Plaintiff's Occupation], Residing at: [Plaintiff's Address], Pune.`\n    -   `[Mother's Name], wife of Late [Father's Name], Age: [Defendant's Age], Occupation: [Defendant's Occupation], Residing at: [Defendant's Address], Pune.`\n        -   **Suggestion:** Ensure full and accurate addresses for both Plaintiff and Defendant, including PIN codes, are provided. This is vital for service of summons and court records.\n\n-   **Paragraph 1:**\n    -   \"That the Plaintiff is the adopted daughter of Late [Father's Name] and the Defendant, [Mother's Name].\"\n        -   **Suggestion:** While stated, it might be beneficial to briefly mention *how* she is an adopted daughter (e.g., \"duly adopted under the provisions of the Hindu Adoptions and Maintenance Act, 1956\" or \"as per custom and usage accepted by the family\") if there's specific documentation or a formal adoption deed. This strengthens the claim of legal status. However, if the adoption is not disputed, the current wording is sufficient.\n    -   \"The said [Father's Name] passed away intestate approximately five years ago...\"\n        -   **Suggestion:** Replace \"approximately five years ago\" with the precise date of demise if known. This provides more certainty. If the exact date is not known, state \"on or about [Date of Demise]\".\n\n-   **Paragraph 2:**\n    -   \"These properties, hereinafter referred to as the \"Suit Properties\", are more particularly described in the Schedule of Properties annexed hereto and marked as Schedule 'A'.\"\n        -   **Suggestion:** This is good. Just ensure Schedule 'A' is indeed comprehensive.\n\n-   **Paragraph 4:**\n    -   \"That since the demise of her father, the Plaintiff's name has not been mutated in the relevant property records concerning the Suit Properties.\"\n        -   **Suggestion:** This is a factual statement. No change needed.\n\n-   **Paragraph 5:**\n    -   \"The Defendant is attempting to dispossess the Plaintiff and has explicitly communicated her intention to unlawfully sell, transfer, or otherwise alienate the entirety of the Suit Properties to her cousin, with the malafide intent of depriving the Plaintiff of her rightful and legitimate share.\"\n        -   **Suggestion:** This is a strong allegation. If possible, briefly mention *how* this communication occurred (e.g., \"verbally on [Date]\" or \"through a letter dated [Date]\" if applicable). This adds weight to the claim.\n\n-   **Paragraph 6:**\n    -   \"That upon learning of the Defendant's illegal intentions, the Plaintiff approached the Defendant on or about [Date] and requested an amicable partition...\"\n        -   **Suggestion:** Provide the specific date of the request for amicable partition.\n\n-   **Paragraph 7:**\n    -   \"That the cause of action for the present suit first arose on [Date], when the Defendant refused the Plaintiff's legitimate demand for partition, and the same is continuing from day to day.\"\n        -   **Suggestion:** Provide the specific date of refusal. This is critical for limitation purposes.\n\n-   **Paragraph 9:**\n    -   \"That for the purposes of court fees and jurisdiction, the suit for partition and declaration is valued at Rs. [Valuation of Plaintiff's 1/2 Share], and the requisite court fee as per the Maharashtra Court Fees Act, 1959, is paid herewith.\"\n        -   **Suggestion:** Clearly state the full valuation of the *entire* suit property for jurisdiction purposes, and then specify the valuation of the Plaintiff's share for court fees if different rules apply. For a partition suit, often the valuation is based on the market value of the share sought. Ensure the valuation is realistic and supported.\n\n-   **Paragraph 10:**\n    -   \"If the Defendant is not restrained by an order of temporary injunction... it will lead to a multiplicity of proceedings and cause irreparable loss and injury to the Plaintiff, which cannot be compensated in monetary terms.\"\n        -   **Suggestion:** This is standard and well-phrased for an injunction application.\n\n-   **Paragraph 11:**\n    -   \"The Plaintiff reiterates that she is the legally adopted daughter...\"\n        -   **Suggestion:** Repetition of facts is common in plaints (first in the general narrative, then in specific grounds). No change needed here.\n\n-   **Paragraph 13:**\n    -   \"As the adopted daughter, the Plaintiff holds the same legal status as a biological daughter and is a Class I heir under the Hindu Succession Act, 1956.\"\n        -   **Suggestion:** This is a correct statement of law.\n\n-   **Paragraph 14:**\n    -   \"The Defendant is actively attempting to dispossess the Plaintiff and has unequivocally declared her intention to sell or transfer the entirety of the Suit Properties to her cousin, thereby extinguishing the Plaintiff's legitimate share and rights.\"\n        -   **Suggestion:** Similar to Paragraph 5, if there's any specific evidence or date for this declaration, it could be briefly mentioned.\n\n-   **Paragraph 15:**\n    -   \"However, on or about [Date], the Defendant flatly refused to effect any partition and reiterated her threat to alienate the properties...\"\n        -   **Suggestion:** Provide the specific date of refusal.\n\n-   **Paragraph 16:**\n    -   \"This suit is filed seeking partition and separate possession of the Plaintiff's share in the Suit Properties, a declaration of her title to the extent of her share, and consequential reliefs of permanent and temporary injunctions.\"\n        -   **Suggestion:** This clearly outlines the reliefs sought.\n\n-   **Paragraph 17:**\n    -   \"As per the rules of distribution laid down in Section 10 of the said Act, the widow and the daughter take one share each. Therefore, the Plaintiff is legally entitled to a one-half (1/2) share in the Suit Properties.\"\n        -   **Suggestion:** This accurately states the law.\n\n-   **Paragraph 18:**\n    -   \"Following such declaration, the Plaintiff is entitled to have her share partitioned by metes and bounds and to be put in separate possession thereof.\"\n        -   **Suggestion:** This is the core relief sought.\n\n-   **Paragraph 19 & 20:**\n    -   These paragraphs effectively lay out the grounds for temporary and permanent injunctions.\n\n-   **Prayer Clause:**\n    -   **(a) Declaration:** \"Pass a decree declaring that the Plaintiff is the lawful owner of and is entitled to an equal, undivided one-half (1/2) share in the Suit Properties...\"\n        -   **Suggestion:** This is correctly phrased.\n    -   **(b) Preliminary Decree:** \"Pass a preliminary decree for partition of the Suit Properties by metes and bounds and separate the Plaintiff's one-half (1/2) share;\"\n        -   **Suggestion:** This is correct.\n    -   **(c) Final Decree:** \"Pass a final decree for partition and put the Plaintiff in separate, peaceful, and vacant possession of her one-half (1/2) share in the Suit Properties;\"\n        -   **Suggestion:** This is correct.\n    -   **(d) Temporary Injunction:** \"Pass an order of temporary injunction under Order XXXIX Rules 1 and 2 of the Code of Civil Procedure, 1908, restraining the Defendant, her agents, servants, assigns, or any person claiming through her, from selling, transferring, alienating, mortgaging, encumbering, or creating any third-party rights, title, or interest in the Suit Properties during the pendency and final disposal of this suit;\"\n        -   **Suggestion:** This is comprehensive.\n    -   **(e) Permanent Injunction:** \"Pass a decree of permanent injunction restraining the Defendant, her agents, servants, assigns, or any person claiming through her, from selling, transferring, alienating, mortgaging, encumbering, or creating any third-party rights, title, or interest in the Suit Properties in any manner whatsoever;\"\n        -   **Suggestion:** This is comprehensive.\n    -   **(f) Costs:** \"Award the costs of this suit to the Plaintiff from the Defendant;\"\n        -   **Suggestion:** Standard.\n    -   **(g) Other Reliefs:** \"Grant any other and further reliefs as this Hon'ble Court may deem fit and proper in the interest of justice and equity.\"\n        -   **Suggestion:** Standard.\n\n-   **Verification:**\n    -   \"I, Rupa, daughter of Late [Father's Name], the Plaintiff abovenamed, do hereby state on solemn affirmation that the contents of the foregoing Plaint in paragraphs 1 to 20 are true and correct to the best of my knowledge, information, and belief, and I have signed the same at Pune on this \\_\\_\\_ day of \\_\\_\\_\\_\\_\\_\\_\\_\\_\\_, 2024.\"\n        -   **Suggestion:** Update the year to \"2026\" or the actual year of signing.\n\nBy incorporating these suggestions, the plaint will be more robust, precise, and less prone to procedural queries from the court.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+      "sources": [
+        {
+          "source_type": "document",
+          "title": "Uploaded: control_draft.pdf",
+          "content": [
+            "--- Page 1 ---\nDRAFT FOR REVIEW\nIN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, _____ AT _____\nCivil Suit No: ____\nRupa,\ndaughter of Late [Father's Name],\nAge: [Plaintiff's Age],\nOccupation: [Plaint"
+          ],
+          "doc_link": null,
+          "file_name": "control_draft.pdf",
+          "agent_name": "Document",
+          "relevance_score": null
+        }
+      ],
+      "followups": [
+        "What is a suit for partition?",
+        "What does 'injunction' mean legally?",
+        "How to ensure legal precision?"
+      ],
+      "token_usage": {
+        "input_tokens": 9690,
+        "output_tokens": 2712,
+        "total_tokens": 12402,
+        "cache_read_tokens": 6130,
+        "cache_creation_tokens": 0,
+        "reasoning_tokens": 0,
+        "cost_usd": 0.007582,
+        "by_agent": {
+          "Orchestrator": {
+            "input": 7155,
+            "output": 321,
+            "total": 7476,
+            "cache_read": 6130,
+            "calls": 2,
+            "cost_usd": 0.000844
+          },
+          "Document": {
+            "input": 2535,
+            "output": 2391,
+            "total": 4926,
+            "cache_read": 0,
+            "calls": 1,
+            "cost_usd": 0.006738
+          }
+        },
+        "calls": [
+          {
+            "agent": "Orchestrator",
+            "step": "classify_and_plan",
+            "input": 1395,
+            "output": 50,
+            "total": 1445,
+            "cache_read": 749,
+            "cache_creation": 0,
+            "reasoning": 0,
+            "cost_usd": 0.00016
+          },
+          {
+            "agent": "Orchestrator",
+            "step": "extract_user_intent",
+            "input": 5760,
+            "output": 271,
+            "total": 6031,
+            "cache_read": 5381,
+            "cache_creation": 0,
+            "reasoning": 0,
+            "cost_usd": 0.000684
+          },
+          {
+            "agent": "Document",
+            "step": "qa_chromadb",
+            "input": 2535,
+            "output": 2391,
+            "total": 4926,
+            "cache_read": 0,
+            "cache_creation": 0,
+            "reasoning": 0,
+            "cost_usd": 0.006738
+          }
+        ]
+      },
+      "conversation_turn": 1,
+      "query_rewritten": false,
+      "effective_query": null,
+      "file_processing": [
+        {
+          "t": 0.787,
+          "message": "Processing uploaded files..."
+        },
+        {
+          "t": 0.787,
+          "stage": "pdf_compress_start",
+          "message": "Compressing control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.792,
+          "stage": "pdf_extract_start",
+          "message": "Extracting text from control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.806,
+          "stage": "pdf_extract_done",
+          "message": "control_draft.pdf: 4 pages",
+          "file": "control_draft.pdf",
+          "pages": 4
+        },
+        {
+          "t": 0.812,
+          "stage": "chroma_store_start",
+          "message": "Embedding control_draft.pdf into vector store...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 1.334,
+          "stage": "all_files_done",
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ],
+          "errors": []
+        },
+        {
+          "t": 1.334,
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ]
+        }
+      ],
+      "context": {
+        "t": 1.334,
+        "query_rewritten": false,
+        "effective_query": null,
+        "history_turns": 1,
+        "has_summary": false
+      },
+      "errors": [],
+      "drafting_progress": []
+    }
+  },
+  "local": {
+    "thread": "7d09a6c1-e75a-4163-89c7-210ebd28edf9",
+    "record": {
+      "request": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5000/pyapi/chat",
+        "content_type": "multipart/form-data",
+        "headers": {
+          "X-API-Key": "<redacted>",
+          "Accept": "text/event-stream"
+        },
+        "form_fields": {
+          "query": "Review this draft and suggest changes, if any.",
+          "globalThreadId": "7d09a6c1-e75a-4163-89c7-210ebd28edf9"
+        },
+        "files": [
+          {
+            "field": "files",
+            "filename": "control_draft.pdf",
+            "size_bytes": 8411,
+            "content_type": "application/pdf"
+          }
+        ]
+      },
+      "started_at": "2026-08-17T14:51:42.622708+00:00",
+      "events": [
+        {
+          "t": 0.013,
+          "type": "thread_id",
+          "data": "7d09a6c1-e75a-4163-89c7-210ebd28edf9"
+        },
+        {
+          "t": 0.013,
+          "type": "file_processing",
+          "message": "Processing uploaded files..."
+        },
+        {
+          "t": 0.018,
+          "type": "file_processing",
+          "stage": "pdf_compress_start",
+          "message": "Compressing control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.084,
+          "type": "file_processing",
+          "stage": "pdf_extract_start",
+          "message": "Extracting text from control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.099,
+          "type": "file_processing",
+          "stage": "pdf_extract_done",
+          "message": "control_draft.pdf: 4 pages",
+          "file": "control_draft.pdf",
+          "pages": 4
+        },
+        {
+          "t": 0.1,
+          "type": "file_processing",
+          "stage": "chroma_store_start",
+          "message": "Embedding control_draft.pdf into vector store...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.116,
+          "type": "file_processing",
+          "stage": "all_files_done",
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ],
+          "errors": []
+        },
+        {
+          "t": 0.117,
+          "type": "file_processing",
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ]
+        },
+        {
+          "t": 0.117,
+          "type": "progress",
+          "agent": "guardrail",
+          "message": "Validating query...",
+          "ts": 1786978302.7381418,
+          "step": "validate"
+        },
+        {
+          "t": 0.121,
+          "type": "status",
+          "agent": "guardrail_input",
+          "message": "Validating query..."
+        },
+        {
+          "t": 0.123,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Detecting language...",
+          "ts": 1786978302.7489998,
+          "step": "language"
+        },
+        {
+          "t": 0.123,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Detected: en",
+          "ts": 1786978302.7505097,
+          "step": "language",
+          "substep": true
+        },
+        {
+          "t": 0.123,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Loading conversation history...",
+          "ts": 1786978302.7505097,
+          "step": "history"
+        },
+        {
+          "t": 0.128,
+          "type": "progress",
+          "agent": "memory",
+          "message": "Found 0 previous turns",
+          "ts": 1786978302.7562926,
+          "found": 0,
+          "step": "history",
+          "substep": true
+        },
+        {
+          "t": 0.129,
+          "type": "status",
+          "agent": "memory",
+          "message": "Loading context..."
+        },
+        {
+          "t": 0.129,
+          "type": "context",
+          "query_rewritten": false,
+          "effective_query": null,
+          "history_turns": 1,
+          "has_summary": false
+        },
+        {
+          "t": 0.129,
+          "type": "progress",
+          "agent": "orchestrator",
+          "message": "Understanding your question...",
+          "ts": 1786978302.7562926,
+          "step": "classify"
+        },
+        {
+          "t": 2.269,
+          "type": "progress",
+          "agent": "orchestrator",
+          "message": "Identified: Document",
+          "ts": 1786978304.8968515,
+          "detail": "Document",
+          "step": "classify",
+          "substep": true
+        },
+        {
+          "t": 2.275,
+          "type": "status",
+          "agent": "orchestrator_plan",
+          "message": "Planning search strategy..."
+        },
+        {
+          "t": 2.275,
+          "type": "agents_planned",
+          "agents": [
+            "Document"
+          ]
+        },
+        {
+          "t": 2.275,
+          "type": "progress",
+          "agent": "document",
+          "message": "Loading uploaded documents...",
+          "ts": 1786978304.9044132,
+          "step": "load"
+        },
+        {
+          "t": 2.279,
+          "type": "progress",
+          "agent": "document",
+          "message": "Loading 0 document collection(s)...",
+          "ts": 1786978304.9044132,
+          "found": 0,
+          "step": "search"
+        },
+        {
+          "t": 11.845,
+          "type": "progress",
+          "agent": "document",
+          "message": "Found 1 relevant passages",
+          "ts": 1786978314.4737937,
+          "found": 1,
+          "step": "search",
+          "substep": true
+        },
+        {
+          "t": 11.845,
+          "type": "progress",
+          "agent": "document",
+          "message": "Generating answer from documents...",
+          "ts": 1786978314.4737937,
+          "step": "generate"
+        },
+        {
+          "t": 11.847,
+          "type": "status",
+          "agent": "document",
+          "message": "Searching uploaded documents..."
+        },
+        {
+          "t": 11.852,
+          "type": "progress",
+          "agent": "orchestrator",
+          "message": "Merging results from 1 agents...",
+          "ts": 1786978314.4737937,
+          "found": 1,
+          "step": "synthesize"
+        },
+        {
+          "t": 11.852,
+          "type": "status",
+          "agent": "orchestrator_synthesize",
+          "message": "Injecting citations into draft..."
+        },
+        {
+          "t": 11.852,
+          "type": "progress",
+          "agent": "guardrail",
+          "message": "Finalizing response...",
+          "ts": 1786978314.4737937,
+          "step": "finalize"
+        },
+        {
+          "t": 11.853,
+          "type": "status",
+          "agent": "guardrail_output",
+          "message": "Finalizing..."
+        },
+        {
+          "t": 11.854,
+          "type": "response",
+          "content": "Here's a review of the draft plaint with suggested changes:\n\n**Overall Assessment:**\n\nThe draft is well-structured and covers the essential elements for a suit for partition, declaration, and injunction. The legal arguments are clearly articulated, particularly regarding the Plaintiff's status as an adopted daughter and Class I heir under the Hindu Succession Act, 1956. The facts are presented logically, leading to the prayers sought.\n\n**Suggested Changes:**\n\n1.  **Placeholder Information:**\n    -   **Action:** Ensure all bracketed placeholders like `[Father's Name]`, `[Plaintiff's Age]`, `[Plaintiff's Occupation]`, `[Plaintiff's Address]`, `[Defendant's Name]`, `[Defendant's Age]`, `[Defendant's Occupation]`, `[Defendant's Address]`, `[Date]` (in paragraphs 6 and 15), and `[Valuation of Plaintiff's 1/2 Share]` are filled with accurate and specific details before filing.\n    -   **Reason:** These are critical for the plaint to be complete and actionable.\n\n2.  **Clarity and Redundancy (Paragraphs 1, 11, 13):**\n    -   **Current:** Paragraph 1 states the Plaintiff is the adopted daughter and Class I heir. Paragraph 11 reiterates the adopted daughter status and intestate death. Paragraph 13 again states the adopted daughter status and Class I heir status.\n    -   **Suggestion:** While reiteration can be for emphasis, some parts are slightly redundant. Consider combining or refining.\n        -   **Option 1 (Minor Refinement):** In paragraph 11, you could simply state: \"The Plaintiff reiterates her status as the legally adopted daughter of the late [Father's Name] and the Defendant, [Mother's Name]. As previously stated, the said [Father's Name] passed away intestate about five years prior to the filing of this suit, leaving behind the Plaintiff and the Defendant as his only surviving Class I legal heirs.\"\n        -   **Option 2 (More Concise):** If the initial paragraphs (1-3) are sufficiently strong, paragraphs 11-13 could be slightly condensed or rephrased to avoid direct repetition while still building the narrative for the \"Grounds for Relief\" section. However, given that 11-15 are essentially the \"Cause of Action\" section, some reiteration is acceptable to ensure all facts are presented for the legal arguments.\n    -   **Reason:** Improves flow and conciseness without losing legal impact.\n\n3.  **Specific Date for Cause of Action (Paragraph 7):**\n    -   **Current:** \"That the cause of action for the present suit first arose on [Date], when the Defendant refused the Plaintiff's legitimate demand for partition...\"\n    -   **Suggestion:** Ensure the date mentioned in paragraph 7 for the \"first arose\" matches the date mentioned in paragraphs 6 and 15 regarding the Defendant's refusal. Consistency is key.\n    -   **Reason:** Avoids ambiguity and strengthens the timeline of events.\n\n4.  **Court Fees Valuation (Paragraph 9):**\n    -   **Current:** \"That for the purposes of court fees and jurisdiction, the suit for partition and declaration is valued at Rs. [Valuation of Plaintiff's 1/2 Share], and the requisite court fee as per the Maharashtra Court Fees Act, 1959, is paid herewith.\"\n-   **Suggestion:** While \"paid herewith\" is standard, ensure that the actual court fee calculation is correct as per\nthe Maharashtra Court Fees Act, 1959, for a suit for partition and declaration where possession is sought. Sometimes,\nfor partition suits, the valuation for court fees can be complex, especially if the Plaintiff is deemed to be in joint\npossession. If the Plaintiff is out of possession, a higher ad valorem fee might be required. If the Plaintiff is deemed\nto be in joint possession, a fixed fee might be applicable. Re-verify this aspect.\n    -   **Reason:** Incorrect court fee payment can lead to objections from the court and delays.\n\n5.  **Description of Suit Properties (Schedule 'A'):**\n    -   **Current:** The plaint repeatedly refers to \"Schedule 'A' annexed hereto.\"\n    -   **Suggestion:** Ensure that \"Schedule 'A'\" is indeed annexed to the plaint and contains a detailed, unambiguous description of the two residential flats, including their full addresses, survey numbers/CTS numbers, area, boundaries, and any other identifying particulars.\n    -   **Reason:** A clear description of the Suit Properties is fundamental for the court to identify the subject matter of the dispute and for any decree to be executable.\n\n6.  **\"DRAFT FOR REVIEW\" Header:**\n    -   **Action:** Remove \"DRAFT FOR REVIEW\" from the top of Page 1 before filing.\n    -   **Reason:** This is an internal note and should not be part of the final legal document.\n\n7.  **Verification Clause (Date):**\n    -   **Current:** \"...signed the same at Pune on this \\_\\_\\_ day of \\_\\_\\_\\_\\_\\_\\_\\_\\_\\_, 2024.\"\n    -   **Suggestion:** Fill in the exact date of signing the verification.\n    -   **Reason:** Completeness of the document.\n\n8.  **Defendant's Name in Paragraph 1:**\n    -   **Current:** \"The Plaintiff is the adopted daughter of Late [Father's Name] and the Defendant, [Mother's Name].\"\n    -   **Suggestion:** This is correct, but just a minor check: ensure that `[Mother's Name]` is indeed the Defendant's name as listed in the title of the suit.\n    -   **Reason:** Consistency.\n\n**Summary of Key Actions Before Filing:**\n\n-   Fill in ALL bracketed placeholders with accurate information.\n-   Ensure \"Schedule 'A'\" with detailed property descriptions is physically annexed.\n-   Verify the court fee calculation as per the Maharashtra Court Fees Act, 1959, considering whether the Plaintiff is in joint possession or out of possession.\n-   Remove the \"DRAFT FOR REVIEW\" header.\n-   Ensure the date in the verification clause is filled.\n\nWith these changes, the plaint will be robust and ready for filing.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."
+        },
+        {
+          "t": 11.854,
+          "type": "sources",
+          "data": [
+            {
+              "source_type": "document",
+              "title": "Uploaded: control_draft.pdf",
+              "content": [
+                "--- Page 1 ---\nDRAFT FOR REVIEW\nIN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, _____ AT _____\nCivil Suit No: ____\nRupa,\ndaughter of Late [Father's Name],\nAge: [Plaintiff's Age],\nOccupation: [Plaint"
+              ],
+              "doc_link": null,
+              "file_name": "control_draft.pdf",
+              "agent_name": "Document",
+              "relevance_score": null
+            }
+          ]
+        },
+        {
+          "t": 13.337,
+          "type": "followup_suggestions",
+          "data": [
+            "What are Class I heirs?",
+            "What's a suit for partition?",
+            "What is a declaration/injunction?"
+          ]
+        },
+        {
+          "t": 13.434,
+          "type": "done",
+          "agents_used": [
+            "Document"
+          ],
+          "token_usage": {
+            "input_tokens": 9690,
+            "output_tokens": 1680,
+            "total_tokens": 11370,
+            "cache_read_tokens": 6130,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 0,
+            "cost_usd": 0.005002,
+            "by_agent": {
+              "Orchestrator": {
+                "input": 7155,
+                "output": 321,
+                "total": 7476,
+                "cache_read": 6130,
+                "calls": 2,
+                "cost_usd": 0.000844
+              },
+              "Document": {
+                "input": 2535,
+                "output": 1359,
+                "total": 3894,
+                "cache_read": 0,
+                "calls": 1,
+                "cost_usd": 0.004158
+              }
+            },
+            "calls": [
+              {
+                "agent": "Orchestrator",
+                "step": "classify_and_plan",
+                "input": 1395,
+                "output": 50,
+                "total": 1445,
+                "cache_read": 749,
+                "cache_creation": 0,
+                "reasoning": 0,
+                "cost_usd": 0.00016
+              },
+              {
+                "agent": "Orchestrator",
+                "step": "extract_user_intent",
+                "input": 5760,
+                "output": 271,
+                "total": 6031,
+                "cache_read": 5381,
+                "cache_creation": 0,
+                "reasoning": 0,
+                "cost_usd": 0.000684
+              },
+              {
+                "agent": "Document",
+                "step": "qa_chromadb",
+                "input": 2535,
+                "output": 1359,
+                "total": 3894,
+                "cache_read": 0,
+                "cache_creation": 0,
+                "reasoning": 0,
+                "cost_usd": 0.004158
+              }
+            ]
+          },
+          "thread_id": "7d09a6c1-e75a-4163-89c7-210ebd28edf9",
+          "conversation_turn": 1,
+          "query_rewritten": false,
+          "effective_query": null
+        }
+      ],
+      "http_status": 200,
+      "error": null,
+      "response_headers": {
+        "date": "Mon, 17 Aug 2026 14:51:41 GMT",
+        "server": "uvicorn",
+        "cache-control": "no-cache",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8",
+        "transfer-encoding": "chunked"
+      },
+      "elapsed_s": 13.43,
+      "streamed_token_chars": 0,
+      "first_token_s": null
+    },
+    "summary": {
+      "statuses": [
+        {
+          "t": 0.121,
+          "message": "Validating query..."
+        },
+        {
+          "t": 0.129,
+          "message": "Loading context..."
+        },
+        {
+          "t": 2.275,
+          "message": "Planning search strategy..."
+        },
+        {
+          "t": 11.847,
+          "message": "Searching uploaded documents..."
+        },
+        {
+          "t": 11.852,
+          "message": "Injecting citations into draft..."
+        },
+        {
+          "t": 11.853,
+          "message": "Finalizing..."
+        }
+      ],
+      "agents_planned": [
+        "Document"
+      ],
+      "agents_used": [
+        "Document"
+      ],
+      "response": "Here's a review of the draft plaint with suggested changes:\n\n**Overall Assessment:**\n\nThe draft is well-structured and covers the essential elements for a suit for partition, declaration, and injunction. The legal arguments are clearly articulated, particularly regarding the Plaintiff's status as an adopted daughter and Class I heir under the Hindu Succession Act, 1956. The facts are presented logically, leading to the prayers sought.\n\n**Suggested Changes:**\n\n1.  **Placeholder Information:**\n    -   **Action:** Ensure all bracketed placeholders like `[Father's Name]`, `[Plaintiff's Age]`, `[Plaintiff's Occupation]`, `[Plaintiff's Address]`, `[Defendant's Name]`, `[Defendant's Age]`, `[Defendant's Occupation]`, `[Defendant's Address]`, `[Date]` (in paragraphs 6 and 15), and `[Valuation of Plaintiff's 1/2 Share]` are filled with accurate and specific details before filing.\n    -   **Reason:** These are critical for the plaint to be complete and actionable.\n\n2.  **Clarity and Redundancy (Paragraphs 1, 11, 13):**\n    -   **Current:** Paragraph 1 states the Plaintiff is the adopted daughter and Class I heir. Paragraph 11 reiterates the adopted daughter status and intestate death. Paragraph 13 again states the adopted daughter status and Class I heir status.\n    -   **Suggestion:** While reiteration can be for emphasis, some parts are slightly redundant. Consider combining or refining.\n        -   **Option 1 (Minor Refinement):** In paragraph 11, you could simply state: \"The Plaintiff reiterates her status as the legally adopted daughter of the late [Father's Name] and the Defendant, [Mother's Name]. As previously stated, the said [Father's Name] passed away intestate about five years prior to the filing of this suit, leaving behind the Plaintiff and the Defendant as his only surviving Class I legal heirs.\"\n        -   **Option 2 (More Concise):** If the initial paragraphs (1-3) are sufficiently strong, paragraphs 11-13 could be slightly condensed or rephrased to avoid direct repetition while still building the narrative for the \"Grounds for Relief\" section. However, given that 11-15 are essentially the \"Cause of Action\" section, some reiteration is acceptable to ensure all facts are presented for the legal arguments.\n    -   **Reason:** Improves flow and conciseness without losing legal impact.\n\n3.  **Specific Date for Cause of Action (Paragraph 7):**\n    -   **Current:** \"That the cause of action for the present suit first arose on [Date], when the Defendant refused the Plaintiff's legitimate demand for partition...\"\n    -   **Suggestion:** Ensure the date mentioned in paragraph 7 for the \"first arose\" matches the date mentioned in paragraphs 6 and 15 regarding the Defendant's refusal. Consistency is key.\n    -   **Reason:** Avoids ambiguity and strengthens the timeline of events.\n\n4.  **Court Fees Valuation (Paragraph 9):**\n    -   **Current:** \"That for the purposes of court fees and jurisdiction, the suit for partition and declaration is valued at Rs. [Valuation of Plaintiff's 1/2 Share], and the requisite court fee as per the Maharashtra Court Fees Act, 1959, is paid herewith.\"\n-   **Suggestion:** While \"paid herewith\" is standard, ensure that the actual court fee calculation is correct as per\nthe Maharashtra Court Fees Act, 1959, for a suit for partition and declaration where possession is sought. Sometimes,\nfor partition suits, the valuation for court fees can be complex, especially if the Plaintiff is deemed to be in joint\npossession. If the Plaintiff is out of possession, a higher ad valorem fee might be required. If the Plaintiff is deemed\nto be in joint possession, a fixed fee might be applicable. Re-verify this aspect.\n    -   **Reason:** Incorrect court fee payment can lead to objections from the court and delays.\n\n5.  **Description of Suit Properties (Schedule 'A'):**\n    -   **Current:** The plaint repeatedly refers to \"Schedule 'A' annexed hereto.\"\n    -   **Suggestion:** Ensure that \"Schedule 'A'\" is indeed annexed to the plaint and contains a detailed, unambiguous description of the two residential flats, including their full addresses, survey numbers/CTS numbers, area, boundaries, and any other identifying particulars.\n    -   **Reason:** A clear description of the Suit Properties is fundamental for the court to identify the subject matter of the dispute and for any decree to be executable.\n\n6.  **\"DRAFT FOR REVIEW\" Header:**\n    -   **Action:** Remove \"DRAFT FOR REVIEW\" from the top of Page 1 before filing.\n    -   **Reason:** This is an internal note and should not be part of the final legal document.\n\n7.  **Verification Clause (Date):**\n    -   **Current:** \"...signed the same at Pune on this \\_\\_\\_ day of \\_\\_\\_\\_\\_\\_\\_\\_\\_\\_, 2024.\"\n    -   **Suggestion:** Fill in the exact date of signing the verification.\n    -   **Reason:** Completeness of the document.\n\n8.  **Defendant's Name in Paragraph 1:**\n    -   **Current:** \"The Plaintiff is the adopted daughter of Late [Father's Name] and the Defendant, [Mother's Name].\"\n    -   **Suggestion:** This is correct, but just a minor check: ensure that `[Mother's Name]` is indeed the Defendant's name as listed in the title of the suit.\n    -   **Reason:** Consistency.\n\n**Summary of Key Actions Before Filing:**\n\n-   Fill in ALL bracketed placeholders with accurate information.\n-   Ensure \"Schedule 'A'\" with detailed property descriptions is physically annexed.\n-   Verify the court fee calculation as per the Maharashtra Court Fees Act, 1959, considering whether the Plaintiff is in joint possession or out of possession.\n-   Remove the \"DRAFT FOR REVIEW\" header.\n-   Ensure the date in the verification clause is filled.\n\nWith these changes, the plaint will be robust and ready for filing.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+      "sources": [
+        {
+          "source_type": "document",
+          "title": "Uploaded: control_draft.pdf",
+          "content": [
+            "--- Page 1 ---\nDRAFT FOR REVIEW\nIN THE COURT OF THE CIVIL JUDGE, SENIOR DIVISION, _____ AT _____\nCivil Suit No: ____\nRupa,\ndaughter of Late [Father's Name],\nAge: [Plaintiff's Age],\nOccupation: [Plaint"
+          ],
+          "doc_link": null,
+          "file_name": "control_draft.pdf",
+          "agent_name": "Document",
+          "relevance_score": null
+        }
+      ],
+      "followups": [
+        "What are Class I heirs?",
+        "What's a suit for partition?",
+        "What is a declaration/injunction?"
+      ],
+      "token_usage": {
+        "input_tokens": 9690,
+        "output_tokens": 1680,
+        "total_tokens": 11370,
+        "cache_read_tokens": 6130,
+        "cache_creation_tokens": 0,
+        "reasoning_tokens": 0,
+        "cost_usd": 0.005002,
+        "by_agent": {
+          "Orchestrator": {
+            "input": 7155,
+            "output": 321,
+            "total": 7476,
+            "cache_read": 6130,
+            "calls": 2,
+            "cost_usd": 0.000844
+          },
+          "Document": {
+            "input": 2535,
+            "output": 1359,
+            "total": 3894,
+            "cache_read": 0,
+            "calls": 1,
+            "cost_usd": 0.004158
+          }
+        },
+        "calls": [
+          {
+            "agent": "Orchestrator",
+            "step": "classify_and_plan",
+            "input": 1395,
+            "output": 50,
+            "total": 1445,
+            "cache_read": 749,
+            "cache_creation": 0,
+            "reasoning": 0,
+            "cost_usd": 0.00016
+          },
+          {
+            "agent": "Orchestrator",
+            "step": "extract_user_intent",
+            "input": 5760,
+            "output": 271,
+            "total": 6031,
+            "cache_read": 5381,
+            "cache_creation": 0,
+            "reasoning": 0,
+            "cost_usd": 0.000684
+          },
+          {
+            "agent": "Document",
+            "step": "qa_chromadb",
+            "input": 2535,
+            "output": 1359,
+            "total": 3894,
+            "cache_read": 0,
+            "cache_creation": 0,
+            "reasoning": 0,
+            "cost_usd": 0.004158
+          }
+        ]
+      },
+      "conversation_turn": 1,
+      "query_rewritten": false,
+      "effective_query": null,
+      "file_processing": [
+        {
+          "t": 0.013,
+          "message": "Processing uploaded files..."
+        },
+        {
+          "t": 0.018,
+          "stage": "pdf_compress_start",
+          "message": "Compressing control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.084,
+          "stage": "pdf_extract_start",
+          "message": "Extracting text from control_draft.pdf...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.099,
+          "stage": "pdf_extract_done",
+          "message": "control_draft.pdf: 4 pages",
+          "file": "control_draft.pdf",
+          "pages": 4
+        },
+        {
+          "t": 0.1,
+          "stage": "chroma_store_start",
+          "message": "Embedding control_draft.pdf into vector store...",
+          "file": "control_draft.pdf"
+        },
+        {
+          "t": 0.116,
+          "stage": "all_files_done",
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ],
+          "errors": []
+        },
+        {
+          "t": 0.117,
+          "message": "Processed 1 pdf",
+          "files": [
+            "control_draft.pdf"
+          ]
+        }
+      ],
+      "context": {
+        "t": 0.129,
+        "query_rewritten": false,
+        "effective_query": null,
+        "history_turns": 1,
+        "has_summary": false
+      },
+      "errors": [],
+      "drafting_progress": []
+    }
+  }
+}

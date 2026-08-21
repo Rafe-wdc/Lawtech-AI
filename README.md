@@ -2,6 +2,29 @@
 
 Legal AI backend powered by FastAPI, LangGraph, LangChain, and multiple LLM providers. Provides intelligent legal assistance for Indian law: judgment Q&A, legislation lookup, scenario analysis, PDF document chat, legal drafting, and more.
 
+## ⚠️ Security notice — rotate before deploying from an old checkout
+
+The user/admin API key `ff6c3e959…f23a51` was previously hardcoded in ~33 scratch
+runners and smoke scripts committed to this repo. On **2026-08-14** every literal
+was removed and the scripts now read the key from `LAWTECH_API_KEY` (Python) or
+`$env:LAWTECH_API_KEY` (PowerShell). The old value **is still in git history**.
+
+Before deploying from any checkout dated before 2026-08-14:
+
+1. **Rotate the user + admin API keys.** Generate new values with
+   `python -c "import secrets; print(secrets.token_urlsafe(32))"` and update
+   `API_KEYS` / `ADMIN_API_KEY` in the prod server's `.env`, plus the GitHub
+   secrets `PROD_INTEGRATION_API_KEY` and `PROD_INTEGRATION_ADMIN_KEY`.
+2. **Do not restore the leaked value anywhere.** The scripts now fail loudly
+   if `LAWTECH_API_KEY` (or `SMOKE_KEY` / `PROD_API_KEY` for the older ones)
+   is unset — set them in your shell for local smokes.
+3. **Also treat `.env.production.example` as a template only.** The old
+   `.env.production` used to be un-ignored in `.gitignore`; that negation is
+   gone. Any file named `.env*` (except `*.example`) is now ignored.
+4. **OpenAI / Google / OpenSearch credentials were not committed** — they only
+   ever lived in `.env` (correctly gitignored). No rotation needed for those
+   unless you have other evidence of exposure.
+
 ## Tech Stack
 
 - **Framework**: FastAPI (Python 3.12+), uvicorn on port 5000
@@ -52,8 +75,7 @@ Legal AI backend powered by FastAPI, LangGraph, LangChain, and multiple LLM prov
 │   ├── inline/                    # Pure in-process helpers
 │   │   ├── abbreviation.py        # expand_abbreviations()
 │   │   ├── section_parser.py      # parse_section_info()
-│   │   ├── markdown.py            # sanitize_markdown()
-│   │   └── disclaimer.py          # add_disclaimer()
+│   │   └── markdown.py            # sanitize_markdown()
 │   └── shared/                    # @tool functions for agents
 │       ├── elasticsearch_tools.py
 │       ├── vectordb_tools.py

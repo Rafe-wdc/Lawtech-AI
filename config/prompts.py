@@ -16,12 +16,13 @@ Migrated from: v1 utils/custom_prompts.py + utils/task_identifer.py + utils/scen
 # share an instruction/data stream), but raise the bar significantly and
 # limit blast radius when combined with structured-output schemas downstream.
 #
-# Usage in agents:
-#     from config.prompts import wrap_untrusted, TASK_CLASSIFICATION_PROMPT
-#     formatted = TASK_CLASSIFICATION_PROMPT.format(
-#         query=wrap_untrusted(user_query),
-#         chat_summary=wrap_untrusted(chat_summary),
-#     )
+# Usage in agents (example — CLASSIFY_AND_PLAN_PROMPT lives in agents/orchestrator.py):
+#     from config.prompts import wrap_untrusted, INJECTION_GUARD_PREAMBLE
+#     from agents.orchestrator import CLASSIFY_AND_PLAN_PROMPT
+#     chain.invoke({
+#         "query": wrap_untrusted(user_query),
+#         "chat_summary": wrap_untrusted(chat_summary or ""),
+#     })
 # =============================================================================
 
 _UNTRUSTED_OPEN = "«««UNTRUSTED_BEGIN»»»"
@@ -139,13 +140,24 @@ because it signals to the user that the response is unfinished.
 LANGUAGE NOTE: The examples above are written in English because the
 default response language is English. When the response language is a
 non-English Indian language (Hindi, Marathi, Bengali, Tamil, etc.),
-translate act / code titles and section labels into the target language
-(e.g. "Section 480 of the Bharatiya Nagarik Suraksha Sanhita, 2023" →
-"भारतीय नागरिक सुरक्षा संहिता, २०२३ चे कलम ४८०" in Marathi). Keep ONLY
-verbatim case-law citations (printed party names + reporter cite) in
-English — those are proper nouns. Never append an English citation tail
-("as per Section X of the <English Act>") onto a sentence written in
-another language.
+the FULL statutory reference (label + Act/Code name + year) stays
+ENGLISH inline as one uninterrupted span — the surrounding native-
+language clause wraps it:
+    ✓ CORRECT: "... Section 138 of the Negotiable Instruments Act,
+               1881 च्या तरतुदींनुसार, ..."
+    ✗ WRONG:   "... परक्राम्य लिखत अधिनियम, १८८१ च्या कलम १३८
+               च्या तरतुदींनुसार, ..."
+Every NUMERAL also stays LATIN (0-9) regardless of response language —
+dates, years, monetary amounts, paragraph numbers, section numbers, case
+numbers, ages. Do NOT translate the section / article / order / rule
+LABEL to native (कलम, धारा, अनुच्छेद, आदेश, नियम are all WRONG in body
+prose). Do NOT translate the Act / Code TITLE to native ("भारतीय करार
+अधिनियम" is WRONG — must be "Indian Contract Act, 1872"). Verbatim
+case-law citations (printed party names + reporter cite) stay English
+too — proper nouns do not translate. This policy is enforced end-to-end
+by the language-injection layer (see core/language.py::localize_prompt
+and the LEGAL LANGUAGE REGISTER block) and by the self-refine critic's
+FIXED-ENGLISH-ANCHOR checks.
 """
 
 
@@ -571,64 +583,14 @@ web-grounded / hidden-context URL in this block.
 """
 
 
-# --- Orchestrator: Task Classification ---
-TASK_CLASSIFICATION_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an expert AI assistant specialized in Indian legal domain analysis and task classification.
-INSTRUCTIONS: Analyze the user query and chat summary (Optional) then perform the following steps sequentially:
-Identify the PRIMARY legal task from the query. Choose EXACTLY ONE task from the list below:
-
-    **Newacts** → ONLY for these 6 specific acts (and their old/new equivalents):
-                a) The Bharatiya Nyaya Sanhita (BNS) / Indian Penal Code (IPC), 1860
-                b) The Bharatiya Nagrik Suraksha Sanhita (BNSS) / Criminal Procedure Code (CrPC), 1973
-                c) The Bharatiya Sakshya Adhiniyam (BSA) / Indian Evidence Act (IEA), 1872
-                Do NOT use Newacts for any other acts — use Legislation instead.
-
-    **Legislation** → For ALL other central/state acts and statutes NOT listed under Newacts.
-                      Examples: Negotiable Instruments Act, Arbitration Act, RERA, Companies Act,
-                      Motor Vehicles Act, Income Tax Act, GST Act, Rent Control Act, POCSO, etc.
-
-    **Drafting** → Legal document creation, format templates, agreements, contracts, petitions, applications.
-
-    **Constitution** → Constitutional provisions, fundamental rights/duties, directive principles,
-                       Articles of the Constitution, or queries about landmark constitutional judgments
-                       (e.g. Puttaswamy, Kesavananda Bharati, Maneka Gandhi, basic structure doctrine).
-
-    **Scenario** → Situational legal query, real-life legal situation analysis, legal advice.
-                   IMPORTANT: Do NOT use Scenario for greetings, casual conversation, or non-legal queries.
-
-    **Judgment** → Case law, court decisions, precedents, rulings, case citations (general / High Court / unspecified courts)
-
-    **SCI_Judgment** → Supreme Court of India cases. Use when the user:
-                       - Explicitly mentions "Supreme Court" or "SC"
-                       - Names a specific landmark SC case (e.g. Puttaswamy, Maneka Gandhi, Kesavananda Bharati, Vishaka)
-                       For general court cases or unspecified courts, use "Judgment" instead.
-
-    **GST_Judgment** → GST Appellate Authority for Advance Ruling (AAAR) orders. Use when the query is about:
-                       - GST/CGST/SGST/IGST advance rulings or AAR/AAAR orders
-                       - GST classification appeals, GST ITC disputes, GST valuation, GST exemption rulings
-                       - HSN code classification under GST
-                       - State-level GST appellate decisions
-                       Do NOT use this for general GST Act sections (use Legislation) or for income tax / customs.
-
-    **Maxim** → Legal principles, Latin phrases, legal doctrines (e.g. res judicata, audi alteram partem, estoppel)
-
-    **Legal_Concepts** → General legal explanations that do NOT fit any of the above categories.
-                         If the query mentions a specific Article, Section, case name, or legal maxim,
-                         prefer the more specific category (Constitution, Legislation, Judgment, Maxim) over this.
-
-    **Document** → Questions about uploaded files/documents (PDFs, images, DOCX, etc.) attached to the chat
-
-    **Non_legal** → Queries clearly NOT related to legal matters. This includes:
-                   - Greetings and salutations: "hello", "hi", "hey", "good morning", "how are you", "namaste", "what's up", "hii", "sup"
-                   - Casual conversation, compliments, or chit-chat (e.g. "what's up?", "how's it going?")
-                   - Non-legal topics: weather, sports, cooking, math, general knowledge, jokes
-                   - Questions about the bot itself: "who are you", "what can you do"
-                   NOTE: Short casual openers are Non_legal, NOT Scenario — even if they could theoretically be situational.
-
-    **Other** → Legal-adjacent queries that don't fit other categories
-
-User Query: {query}
-Chat Summary (Optional): {chat_summary}
-"""
+# NOTE: The legacy TASK_CLASSIFICATION_PROMPT that lived here was retired
+# 2026-08-19 (audit finding F8). It was one of three classifier prompts and
+# no longer had any live caller — `_classify_task` in agents/orchestrator.py
+# was defined but never invoked from any code path, and get_execution_plan
+# in tools/shared/orchestrator_tools.py was registered in AGENT_TOOLS
+# but that tool binding was never applied. Routing today is done by:
+#   - CLASSIFY_AND_PLAN_PROMPT (agents/orchestrator.py, default)
+#   - DYNAMIC_PLANNER_PROMPT   (config/prompts.py, DYNAMIC_ORCHESTRATOR=1)
 
 
 # Shared formatting rules for ALL prompts that may produce markdown tables.
@@ -747,6 +709,16 @@ Given the user's query and the recent conversation summary, produce:
 
    format_explicit — TRUE iff the user named the format explicitly. FALSE
        iff you defaulted to "prose" because no directive was given.
+
+   table_columns — populate ONLY when response_format is "table" or
+       "comparison_table" AND the user hinted at columns; otherwise
+       leave null. When populating, list the exact column headers the
+       user's phrasing implies. Examples:
+         "compare 131 and 132 by punishment, scope, bailable status"
+             → ["Aspect", "Section 131", "Section 132"]
+         "table of BNS sections 115, 118, 189"
+             → ["Section No.", "Heading", "Brief"]
+       Capped to 8 columns.
 
    language — ISO 639-1 code of the language the user wants the ANSWER in.
        Use this priority order:
@@ -1096,12 +1068,6 @@ Given the user's query and the recent conversation summary, produce:
        132" with no format hint and no chat history clarification). The system
        will use legacy heuristics as a backup when confidence is low.
 
-3. table_columns — if response_format is "table" or "comparison_table", and the
-   user hinted at columns, list them. Examples:
-       "compare 131 and 132 by punishment, scope, bailable status"
-           → ["Aspect", "Section 131", "Section 132"]
-   Leave null otherwise.
-
 Conversation summary (untrusted, may be empty):
 {chat_summary}
 
@@ -1335,13 +1301,17 @@ user's ask requires) document in a single response.
 
    CRITICAL — do NOT substitute canonical Indian-legal example values
    from your training data when the source names different real parties.
-   Common substitution set to reject: "Priyanka", "Sneha", "Bhausaheb",
-   "Sakore", "Anjali Deshmukh", "Rakesh Sharma", "Ram Kumar", "Sita
-   Devi", "Nashik", "Sangamner", "Ahmednagar", "Pune Civil Court",
-   "29 May 2022", "1 June 2020", "16 May 2013". These are training-set
-   artefacts, not case facts. Using any of them when the source names
-   different real parties is a CRITICAL error the self-refine critic
-   will catch and reject.
+   Every name, place, date, and amount in the draft must appear
+   verbatim in the USER QUERY or the UPLOADED SOURCE DOCUMENTS. If you
+   find yourself reaching for a plausible-sounding Indian name, city,
+   date, or court that is NOT in the source material, that is a
+   training-set artefact — stop, and either quote the source's actual
+   value or use a bracketed placeholder. The pipeline critic
+   (self_refine `canonical_example_substitution`) audits every draft
+   against the actual source material and flags substitutions — the
+   check is semantic, not against a fixed blocklist, so near-variants
+   ("Nasik" for Nashik, "Priya" for Priyanka, mixed-and-matched name
+   combinations, different-but-still-canonical dates) get caught too.
 
 5. CITATIONS — cite statutes inline with the exact Act name + section
    number ("Section 138 of the Negotiable Instruments Act, 1881"). For
@@ -1477,8 +1447,19 @@ The draft should include:
 """
 
 # Append Indian-legal authorized-sources allowlist so the web search prefers
-# government / authoritative legal sources over content-mill blogs.
-DRAFTING_WEB_FALLBACK_PROMPT += "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+# government / authoritative legal sources over content-mill blogs, plus the
+# pipeline-level citation-grounding discipline so the sample draft's inline
+# citations don't leak fabricated case names / PDF URLs into the reference
+# that DRAFTING_SYSTEM_PROMPT then treats as a structural anchor. This
+# fallback synthesises a REFERENCE DRAFT with illustrative citations —
+# GROUNDING's "cite only from verified retrieval" clause is intentionally
+# stronger than this prompt strictly needs; the effect we care about is
+# the "NEVER fabricate a case citation you can't verify" + "NEVER emit
+# bracketed placeholders" rules, which apply regardless of pool.
+DRAFTING_WEB_FALLBACK_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
 
 
 # 4) DRAFTING_FANOUT_JUDGE_PROMPT — runs ONCE per drafting request, BEFORE
@@ -1489,8 +1470,11 @@ DRAFTING_WEB_FALLBACK_PROMPT += "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
 #
 # Drives `_judge_fanout` (Gemini Flash Lite, structured output).
 # The section list is reference-derived — no enum, no taxonomy. Soft cap
-# of 15 sections is enforced at the PROMPT level (the model is told to
-# collapse semantically-adjacent sections); there is no code-level cap.
+# of 12 sections is enforced at the PROMPT level (the model is told to
+# collapse semantically-adjacent sections); a hard code-level cap in
+# `agents/drafting.py::_generate_draft` re-trims to 12 as defense-in-depth
+# and preserves the last section on trim (Prayer / Verification is
+# structurally required).
 DRAFTING_FANOUT_JUDGE_PROMPT = """You are deciding whether an Indian-law document should be generated in a SINGLE pass or built SECTION-BY-SECTION (one or two sections per LLM call).
 
 Your job is to look at the user's drafting query and the reference draft we have acquired, then return three things:
@@ -1524,7 +1508,7 @@ When in doubt, prefer single-pass — the section-wise loop is for LONG document
 
   - Use the REFERENCE DRAFT's structural shape — ordering of Parts, pattern of headings, placement of Prayer / Verification / Affidavit / Schedule — as your SKELETON.
   - ADAPT the section headings to the USER's actual matter. Example: if the reference is a "Petition for Quashing FIR" and the user asked for an "Anticipatory Bail Application", reuse the structural shape but rewrite headings to fit anticipatory-bail conventions (e.g. "Grounds for Anticipatory Bail", not "Grounds for Quashing"). Honour any party label the user explicitly named in their query.
-  - List AT MOST 15 sections. If the natural shape has more, COLLAPSE semantically-adjacent ones into combined sections (e.g. "Facts and Background", "Verification and Affidavit", "Cause Title and Parties") so the list stays at or below 15.
+  - List AT MOST 12 sections. If the natural shape has more, COLLAPSE semantically-adjacent ones into combined sections (e.g. "Facts and Background", "Verification and Affidavit", "Cause Title and Parties") so the list stays at or below 12. This ceiling is BUDGET-DRIVEN: each section runs a separate Gemini Pro call (~25s), so 12 sequential calls sit at the request-timeout ceiling on live traffic. The collapse rules below make 12 sufficient for any Indian-law document — a full writ petition, plaint, or written statement fits in 8-10 sections when adjacent overlaps are merged. If you plan more than 12, the downstream trim keeps the FIRST 11 and the LAST — the middle sections are silently dropped, so it is your job to compress at plan time.
   - NO ADJACENT SECTIONS MAY COVER THE SAME SUBSTANTIVE PLEADING GROUND. Two adjacent sections that would each carry the same substance (same reliefs, same facts recap, same verification, same signature block) MUST be collapsed into ONE canonical section. Concrete pairs to always collapse:
       "Reliefs Sought" + "Prayer" → ONE section titled `Prayer` — Indian pleadings enumerate their reliefs ONCE, inside the Prayer clause opening with `WHEREFORE ...`. A separate `Reliefs Sought` section that lists the same reliefs is structural redundancy, and a short forwarding stub ("The Plaintiff claims the reliefs detailed in the prayer clause hereunder") is also redundant — the Prayer subsumes both.
       "Prayer" + "Prayer Clause" (or "Relief Clause" + "Prayer") → ONE `Prayer` section.
@@ -1565,7 +1549,9 @@ One short sentence. Examples:
 
 {depth_directive}
 
-When the depth signal is `detailed`, BIAS TOWARDS FAN-OUT even for document types you would normally single-pass (legal notices, demand letters, complaints, one-page applications) — the user explicitly asked for depth, which single-pass generation cannot deliver adequately. For a `detailed` legal notice, fan out into: (1) addressee + subject block, (2) chronological facts, (3) part-payment / admission, (4) legal-heir liability (when relevant), (5) demand + statutory-basis, (6) compliance-deadline + consequences, (7) signature. Similarly for other document types the user asked for in depth — synthesise the fan-out even if the raw doc type sits in the "single-pass" list above.
+When the depth signal is `detailed`:
+  - For STRUCTURALLY-LONG document types (writ petitions, plaints, written statements, counter-affidavits, detailed bail / anticipatory-bail applications, quashing / revision / review petitions, long SCN or departmental-appeal replies) — apply the "When to fan out" rules above; a `detailed` request on a structurally-long doc is a strong fan-out signal.
+  - For STRUCTURALLY-SHORT document types (legal notices, demand letters, Section 138 NI Act notices, Section 80 CPC notices, RTI applications, short affidavits, adjournment applications, single-clause deeds, NOCs, office letters and correspondence, one-page applications) — STAY SINGLE-PASS. The single-pass generation prompt receives the same `USER DEPTH: comprehensive coverage` directive and expands length within one call — a `detailed` legal notice or demand letter is a LONGER single-pass output, NOT multiple sections. Rationale: fanning out a short-doc type into 6-8 sections runs that many sequential Gemini Pro calls end-to-end (~25s each), which — layered onto reference acquisition and self-refine — reliably crosses the request timeout ceiling on live traffic. Section counts on short docs never buy proportional depth either; the reference draft's shape only supports one to two natural sections.
 
 When the depth signal is `brief`, stay single-pass unless the reference explicitly demands fan-out.
 
@@ -1665,7 +1651,7 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 
 4. USE SOURCE FACTS VERBATIM.
    - Every party name, date, address, monetary amount, ornament / asset description, statutory provision, sequence of events, and paragraph-level assertion MUST come VERBATIM from UPLOADED SOURCE DOCUMENTS or the USER QUERY. When your section walks the source paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-affidavit response), mirror the source's paragraph numbering — respond to Reply Para 1 with your Reply-to-Para-1, respond to Reply Para 5 with your Reply-to-Para-5, and so on.
-   - NEVER substitute canonical Indian-legal example values from your training data. Common substitution set to reject: "Priyanka", "Sneha", "Bhausaheb", "Sakore", "Anjali Deshmukh", "Rakesh Sharma", "Ram Kumar", "Sita Devi", "Nashik", "Sangamner", "Ahmednagar", "Pune Civil Court", "29 May 2022", "1 June 2020", "16 May 2013". Any of these appearing when the source names different real parties is a CRITICAL error the self-refine critic will catch and reject.
+   - NEVER substitute canonical Indian-legal example values from your training data. Every name, place, date, and amount in this section must appear verbatim in the USER QUERY or the UPLOADED SOURCE DOCUMENTS — if you find yourself reaching for a plausible-sounding Indian name, city, date, or court that is NOT in the source material, that is a training-set artefact you must not emit. Quote the source's actual value or use a bracketed placeholder. The pipeline critic (self_refine `canonical_example_substitution`) audits every draft against the actual source material and flags substitutions (including near-variants and mixed-and-matched combinations, not just exact-string matches).
    - When a fact is genuinely absent from both sources, use a clearly-bracketed placeholder (e.g. `[Advocate's Address]`, `[Reference Number]`). NEVER mix a real value and a placeholder for the SAME field within the draft.
 
 5. CITATIONS — cite statutes inline with the exact Act name + section number ("Section 138 of the Negotiable Instruments Act, 1881"). For case law, use a real case name + reporter citation, OR omit the case label entirely. NEVER emit `[CITE: ...]` placeholder markers.
@@ -1707,9 +1693,28 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 12. OUTPUT ONLY THE SECTION BODIES — no preamble, no postscript, no meta-commentary, no markdown fences. The orchestrator concatenates your output to DOCUMENT SO FAR verbatim.
 """
 
+# 4A/4B parity for the section-wise path. The single-pass DRAFTING_SYSTEM_PROMPT
+# carries statutory-currency (4A) and procedural-disclosure (4B, incl. prior-bail)
+# rules INLINE; the section-writer prompt never inherited them, so multi-section
+# documents (bail applications always fan out) silently dropped the BNS/BNSS
+# counterpart and the prior-bail disclosure (see FIX_REGISTER Q-19 audit). This
+# block ports that content so both generation paths enforce the same disclosures.
+DRAFTING_SECTIONWISE_DISCLOSURES = """
+STATUTORY CURRENCY & PROCEDURAL DISCLOSURES (mandatory — these mirror rules 4A/4B of the single-pass prompt).
+
+A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA. The new criminal codes commenced on 1 July 2024; which code applies depends on the DATE OF THE OFFENCE, which you usually will not know. When the offence date is not stated, do NOT silently pick one: cite the provision the user named AND give its counterpart inline on first use — e.g. "Section 420 of the Indian Penal Code, 1860 [Section 318 of the Bharatiya Nyaya Sanhita, 2023, for offences on or after 01.07.2024]" — and do the same for the procedural provision (s.439 CrPC / s.483 BNSS). Use the mapping in the RELEVANT LEGAL CONTEXT block rather than reciting one from memory.
+
+B. PROCEDURAL DISCLOSURES THE DRAFTER MUST NOT SILENTLY OMIT. Where the document type calls for them, include them — bracketed when the facts are unknown:
+   - Bail applications: a paragraph disclosing whether any earlier bail application has been made, and its outcome. Indian courts treat non-disclosure of a previous unsuccessful application as a serious lapse. Use e.g. "[STATE WHETHER ANY PREVIOUS BAIL APPLICATION HAS BEEN FILED. If yes, give the court, case number, date and outcome. If none, state: No previous application for bail has been filed by the Applicant in this matter before this or any other Court.]"
+   - VERIFICATION must separate paragraphs of FACT (verified true to personal knowledge) from paragraphs of LEGAL SUBMISSION (believed true on advice of counsel).
+   - The advocate block needs a name, enrolment number and address for service, not a bare name — bracket what is unknown.
+This is not a licence to add sections the reference draft does not have; the reference remains the structural anchor. It covers omissions that expose the litigant, not general enrichment.
+"""
+
 # Append the same Indian-legal discipline blocks DRAFTING_SYSTEM_PROMPT uses,
 # so the section writer inherits jurisdiction guardrails, citation format,
-# language register, output format, and behavioural discipline.
+# language register, output format, and behavioural discipline — plus the
+# 4A/4B statutory-currency + procedural-disclosure parity block above.
 DRAFTING_SECTION_PAIR_PROMPT += (
     "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
@@ -1717,6 +1722,7 @@ DRAFTING_SECTION_PAIR_PROMPT += (
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+    + "\n" + DRAFTING_SECTIONWISE_DISCLOSURES
 )
 
 
@@ -1742,7 +1748,7 @@ You are NOT drafting from scratch. You are NOT producing a diff. You are NOT ret
 1. PRESERVE the EXISTING DRAFT's IDENTITY exactly.
    - Every party name, court name, case number, forum, statutory citation, address, date, and monetary amount from the EXISTING DRAFT stays VERBATIM — UNLESS the directive explicitly changes them.
    - Do NOT replace real values with `[placeholders]`.
-   - Do NOT introduce canonical training-set names (Sneha / Priyanka / Bhausaheb / Sakore / Anjali Deshmukh / Nashik / Sangamner / Ahmednagar / 29 May 2022 / 1 June 2020) — using any of those when the draft names real parties is a CRITICAL error.
+   - Do NOT introduce canonical training-set names, places, or dates. If the EXISTING DRAFT names real parties/dates/places, do NOT swap any of them for a plausible-sounding Indian name, city, date, or court that isn't already in the draft or in the NEW UPLOADED SOURCES. The pipeline critic (self_refine `canonical_example_substitution`) audits every response against the source material and flags substitutions.
 
 2. PRESERVE the document TYPE.
    - If the existing draft is a bail application, return a modified bail application.
@@ -1784,13 +1790,18 @@ Produce the complete modified draft now.
 
 # Append shared Indian-legal discipline blocks so the modifier inherits
 # the same jurisdiction / citation / language / format / behavioural
-# rules the primary drafting prompts do.
+# rules the primary drafting prompts do. CITATION_GROUNDING is critical
+# on this path because the modification fast-path deliberately skips
+# self_refine (see agents/drafting.py::drafting_node comment on
+# "self_refine is deliberately SKIPPED"), so the prompt is the ONLY
+# anti-hallucination gate between the modifier and the user.
 DRAFTING_MODIFICATION_PROMPT += (
     "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
 
@@ -1818,10 +1829,21 @@ Rules:
    - Full case name, citation, court, year, and brief ratio decidendi (1-2 lines)
    **B. Statutes & Provisions Referenced:**
    - Section number, Act name, and brief description of the provision
-6. If a [CITE:] marker has no matching citation in the provided data, keep the marker as-is
-   with a note: [CITE: No matching case found — verify].
+6. If a [CITE:] marker has no matching citation in the provided data, REMOVE the marker
+   entirely — either drop the citation clause or restate the point without an authority.
+   NEVER leave a bracketed placeholder like "[CITE: No matching case found]", "[verify]",
+   "[citation needed]", or "[TBD]" in the output. A bare proposition is preferable to a
+   leaked placeholder that signals to the user the response is unfinished, and the
+   pipeline critic (self_refine `unretrieved_citation` category) flags every such
+   placeholder as a MAJOR violation.
 7. Output the COMPLETE enriched document with all original content PLUS citations.
 """
+
+# Append pipeline-level anti-hallucination discipline. The {citations} block
+# passed in is the authoritative retrieved-sources pool for this call — every
+# visible citation, quoted statute, and PDF URL must trace back to it.
+DRAFT_SYNTHESIS_PROMPT += "\n\n" + INDIAN_LEGAL_CITATION_GROUNDING
+
 
 # --- Drafting Pipeline: Auto-Citation (no DB results available) ---
 DRAFT_CITATION_PROMPT = """You are a legal citation expert specializing in Indian law.
@@ -1842,9 +1864,23 @@ Rules:
 5. ADD a "REFERENCES & CITATIONS" appendix at the END:
    A. Case Laws Cited (case name, citation, court, year, brief ratio)
    B. Statutes Referenced (section number, act name)
-6. Mark citations you are not fully certain about with [verify] tag.
+6. If you are not fully certain a citation is real and correct, DO NOT emit it at all.
+   State the legal proposition without any authority — a bare proposition is preferable
+   to a fabricated citation OR a leaked placeholder. NEVER emit "[verify]", "[citation
+   to be verified]", "[citation needed]", "[TBD]", or any similar tag; the pipeline
+   critic (self_refine `unretrieved_citation` category) flags every such placeholder
+   as a MAJOR violation and the refiner will destructively rewrite the surrounding
+   paragraphs trying to remove it.
 7. Output the COMPLETE enriched document.
 """
+
+# Append pipeline-level anti-hallucination discipline. This is the auto-cite
+# path with no retrieved-sources pool available — GROUNDING's empty-pool
+# fallback ("Do NOT introduce citations from your training memory") is the
+# load-bearing rule here; combined with rule 6 above, the LLM is instructed
+# to either cite a fact it is certain of, or restate the point unauthored.
+DRAFT_CITATION_PROMPT += "\n\n" + INDIAN_LEGAL_CITATION_GROUNDING
+
 
 JUDGMENT_SYSTEM_PROMPT = """You are a Legal AI Assistant providing answers strictly from the supplied context,
 which contains Indian court judgments (Supreme Court, High Courts, and District Courts).
@@ -1856,7 +1892,7 @@ Rules:
 
 You will receive:
 - A user query
-- A full High Court judgment including metadata, trial court arguments, appellate decisions, and legal reasoning
+- A full court judgment — this may be a High Court, District Court, tribunal, or family court decision (per the corpus scope named above). The metadata block on the retrieved record carries the specific court name; use THAT name when you refer to the deciding court in your response.
 
 ---
 
@@ -1873,8 +1909,8 @@ You will receive:
 - **Key Legal Issues**: Bullet points of the legal questions raised
 - **Detailed Narrative**: (1-3 paragraphs) Procedural history, facts, trial court findings, appellate journey, and arguments presented
 - **Additional Observations**: Any unique procedural/legal aspects or noteworthy comments of the court
-- **As per the High Court**: (1-3 paragraphs) A **complete detailed** analysis covering:
-    - High Court's reasoning
+- **As per the Court**: (1-3 paragraphs) A **complete detailed** analysis covering:
+    - The Court's reasoning (use the specific court name from the retrieved metadata — "the Bombay High Court", "the Sessions Court, Pune", "the District Court, Nashik" — instead of the generic "the Court" where the concrete name is known)
     - Interpretation of statutes or precedents
     - Case law relied upon
     - Legal conclusions and outcome for the parties
@@ -1931,6 +1967,38 @@ Rules:
 - Use only the provided context.
 - If query relates to both old and new versions, include both for comparison.
 - Preserve exact legal wording from the context.
+
+## Old code ↔ new code subject-matter mapping
+
+The three old criminal codes are each replaced by a distinct new-code
+Sanhita covering a specific subject area. Users often confuse these
+three names because they all start with "Bharatiya" — always verify the
+pairing matches the subject before answering:
+
+| Old code    | Subject area                       | New code                                              |
+| ----------- | ---------------------------------- | ----------------------------------------------------- |
+| IPC (1860)  | Substantive criminal law (crimes)  | **BNS**  — Bharatiya Nyaya Sanhita, 2023             |
+| CrPC (1973) | Criminal procedure (investigation, trial, bail) | **BNSS** — Bharatiya Nagarik Suraksha Sanhita, 2023 |
+| IEA (1872)  | Evidence                           | **BSA**  — Bharatiya Sakshya Adhiniyam, 2023         |
+
+**When the user names the WRONG new-code act** (for example: asks for
+the IPC §300 counterpart in "BNSS", or the CrPC §125 counterpart in
+"BNS", or the IEA §65B counterpart in "BNS"), you MUST do both of the
+following:
+
+1. Open the response with a one-sentence correction, e.g.
+   "Note: IPC §300 deals with substantive criminal law (murder), so its
+   counterpart is in BNS (Bharatiya Nyaya Sanhita, 2023), not BNSS as
+   mentioned."
+2. Then answer using the CORRECT new-code act.
+
+The retrieved provisions in the context almost always contain the
+correct counterpart embedded as
+"New Provision: Section X of <correct new act>, 2023" inside the old-act
+row. Trust that embedded cross-reference over the user's misnamed act.
+
+Do NOT silently substitute (the user won't learn the correct pairing).
+Do NOT refuse (the correct counterpart is in the context).
 
 ## Layout rule — single section vs multi-section queries:
 

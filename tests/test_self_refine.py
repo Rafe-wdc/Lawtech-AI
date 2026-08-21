@@ -50,22 +50,12 @@ class TestSchemas:
     def test_critique_defaults(self):
         c = Critique(passes=True, confidence=0.9)
         assert c.violations == []
-        assert c.overall_quality_notes == ""
 
     def test_critique_confidence_bounds(self):
         with pytest.raises(Exception):
             Critique(passes=True, confidence=1.5)
         with pytest.raises(Exception):
             Critique(passes=True, confidence=-0.1)
-
-    def test_critique_quality_notes_capped(self):
-        # Schema allows up to 400 chars (100-char slack vs the 300 target).
-        ok = Critique(passes=True, confidence=0.9,
-                      overall_quality_notes="x" * 400)
-        assert len(ok.overall_quality_notes) == 400
-        with pytest.raises(Exception):
-            Critique(passes=True, confidence=0.9,
-                     overall_quality_notes="x" * 401)
 
 
 # ---------------------------------------------------------------------------

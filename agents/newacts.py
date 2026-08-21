@@ -648,9 +648,16 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 for act_full_name in _mentioned_acts:
                     # Build a copy of metadata with this act forced in
                     # AND section_number dropped (see docstring).
+                    # hybrid_search=True: without it, `_build_newacts_query`
+                    # falls into the filter-only branch that has NO scoring
+                    # clause + sorts by `section_number.keyword` as a STRING
+                    # ("1" < "10" < "100" < "299"). Top-K then returns §§1,
+                    # 10, 100... regardless of topic. Hybrid BM25+vector puts
+                    # topic-relevant sections at the top.
                     m_copy = metadata.model_copy(update={
                         "act_name": act_full_name,
                         "section_number": None,
+                        "hybrid_search": True,
                     })
                     q = _build_newacts_query(m_copy, query)
                     try:
@@ -666,7 +673,23 @@ async def newacts_node(state: LegalAgentState) -> dict:
 
             with log_time(log, "ES search"):
                 try:
-                    if is_cross_act:
+                    # PRECEDENCE 1: user explicitly named sections + a valid
+                    # act -> exact term filter. Fast, precise, and the
+                    # corpus rows carry the "New Provision: Section X of
+                    # <correct new act>" cross-reference embedded, so the
+                    # LLM sees the counterpart even when the user named
+                    # the wrong new-code act (case B: IPC §299/§300 vs
+                    # BNSS). This bypasses the cross-act BM25 path whose
+                    # deliberate section_number strip destroys precision.
+                    if has_section and has_act:
+                        log.info("Explicit section+act query -> exact filter path",
+                                 sections=metadata.section_number,
+                                 act=metadata.act_name,
+                                 cross_act_flag_ignored=is_cross_act)
+                        hits = await asyncio.to_thread(_build_and_search)
+                    # PRECEDENCE 2: no explicit anchor, multiple acts named
+                    # -> per-act hybrid BM25+vector so ranking is meaningful.
+                    elif is_cross_act:
                         log.info("Cross-act query detected — running per-act searches",
                                  mentioned=_mentioned_acts)
                         hits = await asyncio.to_thread(_build_and_search_per_act)
@@ -780,15 +803,28 @@ async def newacts_node(state: LegalAgentState) -> dict:
                             error=str(nearby_err))
 
         # Step 4b: Append mapping extra hits (counterpart act sections)
+        # Dedup key MUST include `source` (act file path). Keying on
+        # section_number alone drops legitimate counterpart hits when the
+        # existing hits and the mapping-extra-hits share a section number
+        # across acts — e.g. BNSS §100 (search for confined) collides with
+        # BNS §100 (culpable homicide), and the useful mapping counterpart
+        # gets silently swallowed.
         if mapping_extra_hits:
-            existing_secs = {
-                h["_source"].get("section_number")
+            existing_keys = {
+                (
+                    h["_source"].get("section_number"),
+                    h["_source"].get("source"),
+                )
                 for h in hits
                 if h["_source"].get("section_number")
             }
             added = 0
             for mh in mapping_extra_hits:
-                if mh["_source"].get("section_number") not in existing_secs:
+                key = (
+                    mh["_source"].get("section_number"),
+                    mh["_source"].get("source"),
+                )
+                if key not in existing_keys:
                     hits.append(mh)
                     added += 1
             if added:
@@ -978,9 +1014,40 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 "agent_results": {"Newacts": fallback_result},
             }
         elif head_tail_apology_detected(llm_response.text) and _is_cross_act_query:
-            log.info("Apology detected but suppressing web fallback — cross-act query "
-                     "(per-act hits are in docs_text, trust corpus output)",
-                     response_preview=llm_response.text[:120])
+            # Only suppress the web fallback if the corpus actually returned
+            # the sections the user explicitly named. Otherwise the "trust
+            # cross-act corpus" heuristic hides real retrieval failures —
+            # e.g. user asks IPC 299/300 vs BNSS, per-act broad search
+            # returns unrelated BNSS boilerplate (short title, CJM, etc.),
+            # LLM correctly refuses, but suppression stops web fallback and
+            # the user sees a useless "cannot be generated" response.
+            expected_secs = set(metadata.section_number or [])
+            actual_secs = {
+                h["_source"].get("section_number")
+                for h in hits
+                if h["_source"].get("section_number")
+            }
+            if expected_secs and expected_secs.issubset(actual_secs):
+                log.info("Apology detected but requested sections present in corpus — trust it",
+                         response_preview=llm_response.text[:120],
+                         requested=sorted(expected_secs))
+            else:
+                log.warning("Apology + requested sections missing from corpus — web fallback",
+                            requested=sorted(expected_secs),
+                            actual_sample=sorted(actual_secs)[:8])
+                try:
+                    from langgraph.config import get_stream_writer
+                    writer = get_stream_writer()
+                    writer({"type": "token_reset"})
+                except RuntimeError:
+                    pass
+                from core.agent_fallback import web_search_fallback
+                fallback_result = await web_search_fallback(
+                    query, "Newacts", _system_prompt)
+                fallback_result.tokens_consumed += tokens
+                return {
+                    "agent_results": {"Newacts": fallback_result},
+                }
 
         # Determine display name for the act
         act_display = metadata.act_name or source_file

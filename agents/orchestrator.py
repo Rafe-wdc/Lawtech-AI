@@ -23,13 +23,14 @@ from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.source_registry import (
     SourceRegistry,
+    merge_source_registries,
     source_from_sci,
     source_from_hc,
     source_from_legislation,
     source_from_web,
 )
 from config.prompts import (
-    TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT, SYNTHESIS_TABLE_PROMPT,
+    INJECTION_GUARD_PREAMBLE, SYNTHESIS_PROMPT, SYNTHESIS_TABLE_PROMPT,
     USER_INTENT_EXTRACTION_PROMPT,
     wrap_untrusted,
     DRAFT_SYNTHESIS_PROMPT, DRAFT_CITATION_PROMPT,
@@ -144,9 +145,10 @@ def _classify_task_regex_fallback(query: str) -> str:
     since its agent runs a web-search-grounded explanation that gives
     the user *something* useful regardless of topic.
 
-    Kept for back-compat with the call site in `_classify_task` where
-    no intent has been extracted yet (the extractor runs in parallel
-    with classification).
+    Called from orchestrator_plan_node as the ultimate fallback when
+    _classify_task_from_intent returns None AND the merged classify+plan
+    call has failed — Legal_Concepts is the safest catch-all since its
+    agent is web-grounded and returns *something* useful on any topic.
     """
     return "Legal_Concepts"
 
@@ -186,38 +188,6 @@ def _classify_task_from_intent(intent: UserIntent | None) -> str | None:
     return "Legal_Concepts"
 
 
-def _classify_task(query: str, chat_summary: str | None = None) -> str:
-    """Classify query into a task type using GPT-4o structured output.
-
-    Falls back to keyword-based classification if the LLM call fails
-    (rate-limit, timeout, structured-output parse error, etc.).
-    """
-    try:
-        with log_time(log, "Task classification"):
-            prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-            llm = get_gemini_flash(temperature=0.1).with_structured_output(
-                IdentifyTaskSchema, include_raw=True,
-            )
-            # Wrap untrusted inputs in spotlighting delimiters — defense against
-            # prompt injection. Combined with the preamble baked into the prompt
-            # template, this is the OWASP-recommended layered defense.
-            formatted = prompt.format(
-                query=wrap_untrusted(query),
-                chat_summary=wrap_untrusted(chat_summary or ""),
-            )
-            raw_and_parsed = llm.invoke(formatted)
-        from core.token_tracker import record as _record_tokens
-        _record_tokens("Orchestrator", "classify_task", raw_and_parsed.get("raw"))
-        result = raw_and_parsed["parsed"]
-        log.info("Task classified", task=result.task, query=query[:80])
-        return result.task
-    except Exception as e:
-        fallback = _classify_task_regex_fallback(query)
-        log.warning("Task classification LLM failed, using regex fallback",
-                    error=str(e), fallback=fallback, query=query[:80])
-        return fallback
-
-
 # --- Multi-Agent Planning ---
 
 class AgentPlan(BaseModel):
@@ -228,16 +198,58 @@ class AgentPlan(BaseModel):
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
 
-CLASSIFY_AND_PLAN_PROMPT = """You are an Indian legal query router. Output:
+CLASSIFY_AND_PLAN_PROMPT = INJECTION_GUARD_PREAMBLE + """You are an Indian legal query router. Output:
 - `task`: the ONE primary task type (from the ordered list below)
 - `agents`: 1-4 agents to invoke (see fan-out rules)
 - `reasoning`: one sentence explaining the choice
 
+## Sanity checks — apply BEFORE the numbered task rules
+
+**A. Coherence.** Does the query express a request a human could look at and
+act on? An input that contains letters but doesn't cohere into a request is
+NOT a legitimate query — route to **Non_legal**. Failure modes to catch:
+
+- Keyboard mashing: `"asdfghjkl"`, `"qwerty"`, `"xxxxxxx"`, `"aaaaaa"`.
+- A stray production verb with no coherent object: `"draft ***##"`,
+  `"write blah"`, `"prepare 12345"`, `"draft"` alone.
+- A digit-heavy string dressed with a legal-sounding token but no request:
+  `"302 ??? draft"`, `"IPC ###"`, `"section ***"`.
+- Any query where you cannot articulate a one-sentence description of what
+  the user is asking for.
+
+A separate regex layer already rejects inputs with ZERO alphabetic
+characters (`"8883241***##"`, `"@@@@@"`, `"12345"`) before you see them.
+Your job here is the HARDER case: letters present, but no coherent request.
+
+Coherence does NOT require full sentences. Abbreviated but recognisable
+queries are coherent and must NOT be routed to Non_legal:
+- `"S. 138 NI Act"` → coherent (Legislation)
+- `"Art. 21"` → coherent (Constitution)
+- `"IPC 302 vs BNS 103"` → coherent (Newacts)
+- `"Hii"`, `"namaste"` → coherent greetings (Non_legal)
+
+**B. Uncertainty tiebreaker.** When you are torn between two buckets, prefer
+the SAFER / CHEAPER bucket. Priority (safest first):
+
+> Non_legal  >  Legal_Concepts  >  Legislation / Newacts / Constitution
+> >  Judgment / SCI_Judgment  >  Scenario  >  Drafting
+
+Drafting is the most expensive pipeline in the system (per-section fan-out
++ Gemini Pro self-refine). Only pick Drafting when the user has *clearly
+and coherently* asked for a filing-ready document to be produced. If in
+doubt, do NOT pick Drafting.
+
 ## Task types — evaluate TOP-DOWN; FIRST match wins
 
 1. **Non_legal** — greetings ("hi", "hello", "namaste"), casual chat, non-legal
-   topics (weather, sports, math), or bot-identity questions ("who are you",
-   "what can you do").
+   topics (weather, sports, math), bot-identity questions ("who are you",
+   "what can you do"), OR unparseable input with no discernible legal or
+   conversational meaning (pure digit runs, symbol strings, keyboard mashing,
+   stray markdown characters like `***` / `##` / `---` with no accompanying
+   words), OR incoherent input per Sanity Check A above. Do NOT read `***`,
+   `##`, or bare numeric strings as drafting-template markers — Drafting
+   (rule 3) still requires an actual production verb AND a document-noun
+   word in a coherent request.
 2. **Document** — the user attached files AND is asking about their contents
    (summary, extraction, "what does this say", "who is the plaintiff here").
 3. **Drafting** — explicit production verb (draft / write / prepare / create /
@@ -251,6 +263,20 @@ CLASSIFY_AND_PLAN_PROMPT = """You are an Indian legal query router. Output:
    - Questions ABOUT documents (format, essential elements, requirements,
      "how to file", "difference between X and Y", "what is a written
      statement") → **Legal_Concepts** or **Legislation**.
+   - Production verb attached to garbage or nothing coherent: `"draft ***##"`,
+     `"write asdfgh"`, `"prepare 12345"`, `"draft"` alone → **Non_legal**.
+     The keyword "draft" is necessary but NOT sufficient — the document noun
+     must be a real, named filing-ready document referenced in a legible
+     sentence. Keyword presence without coherent context is Non_legal, not
+     Drafting.
+   - A lone document noun with no verb and no context (`"petition"`,
+     `"affidavit"`, `"bail application"`, `"legal notice"`) → **Legal_Concepts**.
+     A bare noun is almost always a question ABOUT the document type, not a
+     request to produce one. If the user actually wants a draft, they will
+     say so in the next turn.
+   - Under-specified single-word variants that look like drafting requests
+     but lack the document noun ("draft me one", "prepare something",
+     "make a doc") → **Non_legal** or ask for clarification via Legal_Concepts.
 4. **Newacts** — the query references any of the 6 codes: IPC, BNS, CrPC,
    BNSS, IEA, BSA (any spelling / any language / full-name variants like
    "Indian Penal Code", "Code of Criminal Procedure", "Bharatiya Nyaya
@@ -312,6 +338,19 @@ CLASSIFY_AND_PLAN_PROMPT = """You are an Indian legal query router. Output:
 - Drafting + explicit "with case laws / citations / precedents" →
   add **Judgment** (also **SCI_Judgment** if SC scope named).
 
+### Multi-intent (CRITICAL)
+When the user's query bundles multiple distinct asks in one turn (e.g. draft
+a suit + explain a scenario + cite case laws + look up a specific act), include
+ALL relevant agents up to the 4-cap. Do NOT collapse to just the primary-task
+agent — the classifier's job is to honour the full request, not to pick a
+winner. Concrete examples:
+- "Draft a bail application AND cite recent SC precedents on Section 439 CrPC"
+  → [Drafting, SCI_Judgment, Newacts] (three agents, up to the cap).
+- "Explain Section 138 NI Act, give a demand notice format, and case laws"
+  → [Legislation, Drafting, Judgment, SCI_Judgment] (at the 4-cap).
+- "Give me the writ format under Article 226 and landmark judgments"
+  → [Drafting, Constitution, SCI_Judgment].
+
 ## Inputs
 User query: {query}
 Chat summary (optional, may be stale): {chat_summary}
@@ -332,9 +371,13 @@ def _classify_and_plan(query: str, chat_summary: str | None = None) -> tuple[str
             )
             prompt = ChatPromptTemplate.from_template(CLASSIFY_AND_PLAN_PROMPT)
             chain = prompt | llm
+            # Wrap untrusted inputs in spotlighting delimiters — pairs with
+            # INJECTION_GUARD_PREAMBLE prepended to the prompt above. Without
+            # the wrapping, the preamble references delimiters that never
+            # appear in the input and is empty theater. F8 backport.
             raw_and_parsed = chain.invoke({
-                "query": query,
-                "chat_summary": chat_summary or "",
+                "query": wrap_untrusted(query),
+                "chat_summary": wrap_untrusted(chat_summary or ""),
             })
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "classify_and_plan", raw_and_parsed.get("raw"))
@@ -504,7 +547,18 @@ Rules:
 4. For Legislation: pick the SINGLE most relevant act for the user's primary legal issue. Do NOT list multiple acts.
 5. For Judgment: NEVER include fictional party names from the user's scenario. Use only legal topics and case type keywords.
 6. Return valid JSON object mapping agent name to rewritten query.
-7. CRITICAL: All rewritten queries MUST be in English, regardless of the input language. If the user query is in Hindi, Tamil, or any other language, translate the intent to English for every agent query.
+7. LANGUAGE HANDLING — two-tier by backend. Do NOT blindly force English.
+
+   ENGLISH-INDEXED AGENTS (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment) — translate the SURROUNDING NARRATIVE to English for retrieval efficiency, but PRESERVE VERBATIM every noun that carries retrieval signal: party names (both transliterated Latin form AND the original non-Latin form when present), section numbers, act names, dates, monetary amounts, and any explicit COUNT / SCOPE directive ("5 judgments", "top 3 cases", "landmark rulings only", "High Court only"). The rewritten query is an English sentence that CARRIES the native / original nouns, not a translation that DROPS them.
+   Example — input "मुझे BNSS की धारा 480 पर 5 सुप्रीम कोर्ट के जजमेंट दो":
+     SCI_Judgment: "Section 480 BNSS anticipatory bail Supreme Court cases (5 landmark judgments requested)"
+     Newacts:      "Section 480 BNSS anticipatory bail"
+   Example — input "श्री कैलास जगताप v. Ram Kumar case citations":
+     Judgment:     "Kailas Jagtap (श्री कैलास जगताप) v. Ram Kumar case citations"
+
+   LANGUAGE-FLEXIBLE AGENTS (Scenario, Constitution, Maxim, Legal_Concepts, Document, Drafting) — do NOT force English translation. Pass the query through in its ORIGINAL language (Hindi stays Hindi, Marathi stays Marathi). These agents run Gemini-based reasoning or Google Search grounding that handles Indian languages natively; forcing English translation loses register nuance without gaining retrieval efficiency. You may still optimise / clarify the query, but keep the OUTPUT language identical to the INPUT language.
+
+   If the input is already in English, this rule is a no-op for both tiers.
 
 User Query: {query}
 Agents: {agents}
@@ -1017,23 +1071,56 @@ def _validate_and_enrich_plan(
     # classifier misses a required content agent AND the intent extractor
     # caught the ask, we should pull it back in. Cap at 4 total agents to
     # match the tasks_planned[:4] limit applied upstream.
-    if intent.wants_scenario_analysis and "Scenario" not in tasks_planned:
+    # When Drafting is the primary task, DO NOT enrich with Scenario /
+    # Constitution / Maxim from wants_* flags. The Drafting agent handles
+    # its own reasoning + retrieval via `_gather_relevant_context` + its
+    # system prompt. Enriching would run each content agent's LLM (~10s +
+    # ~5000 tokens) to produce output that the synthesis phase discards
+    # (see the 2026-08-19 double-draft fix in orchestrator_synthesize_node
+    # + the plan-phase strip in the cite_appendix=OFF branch). Without
+    # this guard, `_validate_and_enrich_plan` runs AFTER the strip and
+    # re-adds the very agents the strip just removed — burning tokens
+    # for no user-visible output. Callers who want a separate analysis
+    # alongside a draft should pass cite_appendix=true or issue an
+    # explicit follow-up turn.
+    _drafting_primary = "Drafting" in tasks_planned
+
+    if (intent.wants_scenario_analysis and "Scenario" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Scenario")
             log.info("Plan enriched: wants_scenario_analysis → Scenario",
                      plan=tasks_planned)
 
-    if intent.wants_constitution and "Constitution" not in tasks_planned:
+    if (intent.wants_constitution and "Constitution" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Constitution")
             log.info("Plan enriched: wants_constitution → Constitution",
                      plan=tasks_planned)
 
-    if intent.wants_maxim and "Maxim" not in tasks_planned:
+    if (intent.wants_maxim and "Maxim" not in tasks_planned
+            and not _drafting_primary):
         if len(tasks_planned) < 4:
             tasks_planned.append("Maxim")
             log.info("Plan enriched: wants_maxim → Maxim",
                      plan=tasks_planned)
+
+    if _drafting_primary:
+        _dropped_wants = []
+        if intent.wants_scenario_analysis:
+            _dropped_wants.append("scenario_analysis")
+        if intent.wants_constitution:
+            _dropped_wants.append("constitution")
+        if intent.wants_maxim:
+            _dropped_wants.append("maxim")
+        if _dropped_wants:
+            log.info(
+                "Plan enrich: content-agent wants_* NOT routed "
+                "(Drafting primary — reasoning handled by drafting agent)",
+                dropped_wants=_dropped_wants,
+                plan=tasks_planned,
+            )
 
     # NOTE: wants_statute_text is deliberately not routed here. Choosing
     # between Newacts (IPC/BNS/CrPC/BNSS/IEA/BSA) and Legislation (everything
@@ -1584,20 +1671,40 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                      citation_agents=citation_agents,
                      source="request" if _flag is not None else "env_default")
         else:
-            # Preserve non-citation content agents (Legal_Concepts, Scenario,
-            # Maxim, Constitution, Non_legal) the LLM classifier picked. Only
-            # strip agents that would have been AUTO-ADDED as the citation
-            # appendix (Judgment, SCI/GST_Judgment, Newacts, Legislation) —
-            # those are the ones the flag is meant to suppress. The old
-            # `[Drafting|Document][:3]` filter nuked classifier-picked content
-            # agents too, silently dropping multi-intent asks bundled inside
-            # drafting requests (Break #1 in the pipeline_investigation report).
-            _kept = [t for t in tasks_planned if t not in _CITATION_APPENDIX_AGENTS]
-            _stripped = [t for t in tasks_planned if t in _CITATION_APPENDIX_AGENTS]
+            # Strip BOTH:
+            #   (1) citation-appendix agents (opt-in via cite_appendix=true);
+            #   (2) long-form content agents (Scenario, Constitution, Maxim,
+            #       Legal_Concepts) — the Drafting agent handles its own
+            #       reasoning + retrieval via `_gather_relevant_context` and
+            #       its system prompt, so a co-planned content agent burns
+            #       ~10s + ~5000 tokens producing output that the synthesis
+            #       phase now discards anyway (see the 2026-08-19 double-
+            #       draft fix in orchestrator_synthesize_node).
+            #
+            # Document IS preserved — it's how uploaded-file text reaches
+            # the pipeline when the user attached PDFs / images.
+            #
+            # 2026-08-17 (commit 3ce6f0c) removed the older
+            # `[Drafting|Document][:3]` filter to preserve "multi-intent
+            # asks bundled inside drafting requests." In practice the
+            # UserIntent extractor over-triggered `wants_scenario_analysis`
+            # / `wants_constitution` on plain drafting phrasing ("draft X
+            # incorporating detailed legal reasoning"), planning content
+            # agents that produced redundant full drafts. The safer default
+            # is: for a drafting query, the draft IS the response — extras
+            # go through cite_appendix=true or an explicit follow-up turn.
+            _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING = frozenset({
+                "Scenario", "Constitution", "Maxim", "Legal_Concepts",
+            })
+            _strip_set = _CITATION_APPENDIX_AGENTS | _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING
+            _kept = [t for t in tasks_planned if t not in _strip_set]
+            _stripped = [t for t in tasks_planned if t in _strip_set]
             tasks_planned = _kept[:4]
-            log.info("Drafting citation appendix skipped — content agents preserved",
-                     kept=tasks_planned, stripped=_stripped,
-                     source="request" if _flag is not None else "env_default")
+            log.info(
+                "Drafting: stripped citation-appendix + redundant content agents",
+                kept=tasks_planned, stripped=_stripped,
+                source="request" if _flag is not None else "env_default",
+            )
     else:
         # Bumped from [:3] to [:4] on 2026-06-30 so multi-intent enrichment
         # can fan out to BOTH SCI_Judgment AND Judgment alongside the
@@ -1825,8 +1932,24 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # self_refine critic/refiner read from this registry so citations,
     # quoted statutes, and PDF URLs in the final answer are traceable to
     # what was actually retrieved — never fabricated from training memory.
-    # Merged into state via the merge_source_registries reducer.
-    source_registry = _build_source_registry(agent_results)
+    #
+    # Two inputs, merged:
+    #   1. `state["source_registry"]` — written directly by agents during
+    #      fan-out and merged by the `merge_source_registries` reducer
+    #      (core/state.py). This carries sources an agent retrieved but does
+    #      NOT report in `AgentResult.sources` — e.g. Drafting reports only
+    #      its reference template there, while the BNS sections, legislation
+    #      and judgments it pulled via `_gather_relevant_context` would
+    #      otherwise be invisible to synthesis and to the critic below.
+    #   2. `_build_source_registry(agent_results)` — derived from every
+    #      agent's reported `AgentResult.sources`.
+    #
+    # Deriving from agent_results alone was the previous behaviour; the state
+    # channel is additive, so agents that write nothing lose nothing.
+    source_registry = merge_source_registries(
+        state.get("source_registry"),
+        _build_source_registry(agent_results),
+    )
 
     log.info("Synthesize phase started",
              agents_received=list(agent_results.keys()),
@@ -1952,15 +2075,24 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "final_response": cleaned,
                 "source_metadata": _serialize_sources(result),
                 "tokens_consumed": result.tokens_consumed,
+                # Persist rather than discard — see the pass-through note below.
+                "source_registry": source_registry,
             }
 
         log.info("Single agent pass-through",
                  agent=name, content_len=len(result.content),
-                 tokens=result.tokens_consumed)
+                 tokens=result.tokens_consumed,
+                 registry_size=len(source_registry))
         return_dict = {
             "final_response": result.content,
             "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
+            # The registry was built above and, until now, thrown away on this
+            # path — the cost was paid and the result discarded. Persisting it
+            # costs nothing and is the prerequisite for running the critic on
+            # single-agent answers, which today return with no citation
+            # grounding at all.
+            "source_registry": source_registry,
         }
         return return_dict
 
@@ -1974,7 +2106,39 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     # had carefully extracted).
     if "Drafting" in valid_results:
         drafting_result = valid_results.pop("Drafting")
-        citation_results = valid_results  # Judgment, Legislation, Newacts, Document, ...
+
+        # Restrict citation_results to CITATION-SHAPED agents only. The plan
+        # phase already separates content agents (Scenario, Constitution,
+        # Maxim, Legal_Concepts) from citation agents (Judgment, SCI_Judgment,
+        # GST_Judgment, Legislation, Newacts, Document) but the previous
+        # `citation_results = valid_results` swept up EVERY non-Drafting
+        # agent — including content agents whose output is long-form legal
+        # analysis, not citation snippets. Dumping a full 10-15k-char legal
+        # analysis under `### SCENARIO CITATIONS:` inside the REFERENCES
+        # appendix produced a de-facto SECOND complete draft, which clients
+        # correctly read as "repeated draft."
+        # Client-reported bug 2026-08-19; fix confirmed against the medical-
+        # negligence and partition drafting prompts (draft_len roughly
+        # doubled → back to primary-draft-only length).
+        _CITATION_SHAPED_AGENTS = {
+            "Judgment", "SCI_Judgment", "GST_Judgment",
+            "Legislation", "Newacts", "Document",
+        }
+        _discarded_content = [
+            k for k in valid_results if k not in _CITATION_SHAPED_AGENTS
+        ]
+        citation_results = {
+            k: v for k, v in valid_results.items()
+            if k in _CITATION_SHAPED_AGENTS
+        }
+        if _discarded_content:
+            log.info(
+                "Drafting synthesis: dropped content agents from citation "
+                "appendix (long-form analysis is not citation-shaped and "
+                "dumping it doubles the draft)",
+                dropped=_discarded_content,
+                kept=list(citation_results.keys()),
+            )
 
         # When the user attached a file, the Document agent's analysis is
         # redundant with the drafting agent's content (drafting already

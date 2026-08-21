@@ -204,8 +204,7 @@ class TestSelfRefineCumulativeGuard:
         grown = "Y" * 6_600
 
         # First critique fails, second passes.
-        pass_verdict = Critique(passes=True, confidence=0.9,
-                                overall_quality_notes="ok")
+        pass_verdict = Critique(passes=True, confidence=0.9)
         fail_verdict = Critique(
             passes=False, confidence=0.9, violations=[
                 Violation(field="x", severity="major",

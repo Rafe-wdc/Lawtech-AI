@@ -6,14 +6,14 @@ per-artifact word-count floors) with a single dynamic loop:
 
     generate → critique → refine → critique → refine → ... (max N)
 
-The critic is a small Gemini Flash call that takes:
+The critic is a small Gemini Flash Lite call that takes:
     - the original user query (free text)
     - the typed UserIntent (the grounding — derived per-request by the
       orchestrator's intent extractor)
     - the response so far
 
 …and returns a structured Critique listing specific violations of the
-intent. The refiner is a Gemini Pro call that rewrites the response to
+intent. The refiner is a Gemini Flash call that rewrites the response to
 fix the violations the critic surfaced.
 
 Why this design vs. the old hardcoded gates:
@@ -26,8 +26,8 @@ Why this design vs. the old hardcoded gates:
       digit leakage and translated Act names, and the refiner rewrites
       them — without me adding a regex.
 
-Cost: 1 critique call (Flash, ~$0.0001) per iteration. Refine call only
-when violations found. Max 2 iterations.
+Cost: 1 critique call (Flash Lite, ~$0.0001) per iteration. Refine call
+only when violations found (Flash). Max 2 iterations.
 
 Skip-when-trivial: we don't call the critic when intent is missing /
 low-confidence / has no explicit directives. Saves the cost for
@@ -52,7 +52,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from config.intent import LegalArtifact, UserIntent, default_intent
 from config.prompts import INJECTION_GUARD_PREAMBLE, wrap_untrusted
-from core.clients import get_gemini_flash_full, get_gemini_pro
+from core.clients import get_gemini_flash_full, get_gemini_flash_lite
 from core.logger import get_logger, log_time, short_err
 from core.token_tracker import record as _record_tokens
 
@@ -62,7 +62,7 @@ log = get_logger("SelfRefine")
 # ---------------------------------------------------------------------------
 # Structured critique schema — the critic returns this. Downstream code
 # branches on `passes`, logs `violations` for telemetry, and feeds the
-# `violations` + `overall_quality_notes` into the refiner.
+# `violations` list into the refiner.
 # ---------------------------------------------------------------------------
 
 class Violation(BaseModel):
@@ -129,13 +129,6 @@ class Critique(BaseModel):
         default_factory=list,
         description="Specific issues found. Empty when passes=True with "
                     "no minor issues either.",
-    )
-    overall_quality_notes: str = Field(
-        "",
-        description="One-paragraph free-text observation about the response "
-                    "as a whole — useful for the refiner and for telemetry. "
-                    "Kept under 300 chars.",
-        max_length=400,  # 100-char slack vs the 300 target
     )
 
 
@@ -504,14 +497,6 @@ violations specific to Indian drafting practice:
   trailing_preposition — paragraph ends with a bare "in.", "of.",
     "by.", "to.", "under." — a citation sentence was truncated. MAJOR.
 
-  missing_procedural_section — when the draft is a civil suit / plaint
-    / writ / appeal and one or more of these mandatory blocks is
-    absent: Schedule of Properties, Valuation and Court Fee, List of
-    Documents (Order VII Rule 14 / Order XI Rule 14 CPC), Verification
-    (Order VI Rule 15 CPC), Affidavit in Support (Order XIX Rule 3 CPC),
-    or a separate Interim Application under Order XXXIX Rules 1 & 2
-    CPC when a temporary injunction is prayed for. MAJOR.
-
   duplicate_section_block — the draft contains two structurally-equivalent
     blocks that a real filing has only once. Common patterns to detect:
        (a) Two "Prayer" / "Prayer for Relief" / "PRAYER" blocks, each
@@ -610,14 +595,6 @@ violations specific to Indian drafting practice:
     / "versus" is MAJOR. Suggested_fix: replace the code-fenced
     "vs" with `**vs**` between blank lines.
 
-  fabricated_citation — a case name + citation that does not exist OR
-    that is NOT in the doctrinal stance's `key_cases` whitelist. The
-    drafting agent generates a stance JSON with vetted cases before
-    section generation; sections should cite ONLY those, or omit the
-    citation entirely. Any case appearing in the draft that is NOT in
-    `stance.key_cases` is suspect — flag MAJOR and ask the refiner
-    to either replace with a stance case or remove the citation lead-in.
-
   unverified_web_citation — [PIPELINE-LEVEL — applies to every response
     that touched web-grounded search, i.e. Scenario, Legal_Concepts, and
     any domain agent that fell back to the web layer.] Flag as MAJOR
@@ -669,8 +646,10 @@ violations specific to Indian drafting practice:
     attribution or retrieval id is still a MAJOR violation.
 
   unretrieved_citation — [PIPELINE-LEVEL — applies to scenario, multi-
-    agent, and single-agent responses; the source-registry version of
-    fabricated_citation.] Flag as MAJOR when the response cites any case
+    agent, and single-agent responses; audits every visible citation
+    against the SourceRegistry-derived allowed-citation whitelist that
+    the caller threads in as `retrieved_sources_whitelist`.] Flag as
+    MAJOR when the response cites any case
     name, quoted statutory provision, or PDF URL that is NOT present in
     the "## Retrieved Sources (allowed-citation whitelist)" block passed
     to you below. Also flag as MAJOR every bracketed placeholder like
@@ -1314,9 +1293,6 @@ principle without any case citation rather than emitting a placeholder.
 Violations to fix (each has a suggested_fix the auditor wrote):
 {violations_block}
 
-Auditor's overall quality note (free text, contextual):
-{quality_notes}
-
 Previous response (the draft to revise):
 {response}
 
@@ -1425,13 +1401,13 @@ async def _critique(
     )
     if not is_gemini_flash_available():
         log.warning("Gemini Flash circuit open — skipping critique",
-                    fast_fail=True)
-        return Critique(passes=True, confidence=0.0,
-                        overall_quality_notes="critique skipped (Flash circuit open)")
+                    fast_fail=True,
+                    reason="flash_circuit_open")
+        return Critique(passes=True, confidence=0.0)
 
     try:
         with log_time(log, "Self-refine critique"):
-            llm = (critic_llm or get_gemini_flash_full(
+            llm = (critic_llm or get_gemini_flash_lite(
                 temperature=0.0, max_output_tokens=4096, thinking_budget=0,
             )).with_structured_output(Critique, include_raw=True)
             intent_json = intent.model_dump_json(indent=2)
@@ -1463,7 +1439,22 @@ async def _critique(
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
         result: Critique = raw_and_parsed["parsed"]
-        record_gemini_flash_success()
+        record_gemini_flash_success()  # Flash answered (raw present); parse is separate
+        if result is None:
+            # `parsed` is None when structured-output parsing failed. With the
+            # quality-notes truncation validator in place this is no longer
+            # Q-20 (string_too_long); any remaining None means a genuinely
+            # empty/blocked response or a different schema violation. Log the
+            # REAL reason (parsing_error) instead of letting `result.passes`
+            # below raise an AttributeError that collapses into the generic
+            # "call failed" branch and hides the cause. Fail safe (pass) so the
+            # user still gets a draft.
+            perr = raw_and_parsed.get("parsing_error")
+            log.warning(
+                "Critique produced no parsed object; treating as pass",
+                parsing_error=short_err(perr) if perr else None,
+            )
+            return Critique(passes=True, confidence=0.0)
         log.info(
             "Critique result",
             passes=result.passes,
@@ -1481,8 +1472,7 @@ async def _critique(
             error=short_err(e),
             exc_info=True,
         )
-        return Critique(passes=True, confidence=0.0,
-                        overall_quality_notes="critique failed")
+        return Critique(passes=True, confidence=0.0)
 
 
 async def _refine(
@@ -1502,20 +1492,20 @@ async def _refine(
     substitute a real retrieved citation for a hallucinated one flagged
     under `unretrieved_citation`, instead of restoring the invention.
     """
-    # Circuit breaker: skip the refiner when Gemini Pro is unhealthy.
+    # Circuit breaker: skip the refiner when Gemini Flash is unhealthy.
     # Returning the original response is the existing fallback anyway.
     from core.clients import (
-        is_gemini_pro_available, record_gemini_pro_failure,
-        record_gemini_pro_success,
+        is_gemini_flash_available, record_gemini_flash_failure,
+        record_gemini_flash_success,
     )
-    if not is_gemini_pro_available():
-        log.warning("Gemini Pro circuit open — skipping refinement",
+    if not is_gemini_flash_available():
+        log.warning("Gemini Flash circuit open — skipping refinement",
                     fast_fail=True)
         return response
 
     try:
         with log_time(log, "Self-refine refinement"):
-            llm = refiner_llm or get_gemini_pro(
+            llm = refiner_llm or get_gemini_flash_full(
                 temperature=0.3, max_output_tokens=20000, thinking_budget=2048,
             )
             intent_json = intent.model_dump_json(indent=2)
@@ -1532,7 +1522,6 @@ async def _refine(
                         "query":           wrap_untrusted(user_query),
                         "intent_json":     intent_json,
                         "violations_block": violations_block,
-                        "quality_notes":   critique.overall_quality_notes or "(none)",
                         "response":        response,
                         "retrieved_sources_whitelist": (
                             retrieved_sources_whitelist
@@ -1544,7 +1533,7 @@ async def _refine(
                 local_timeout=60,
             )
         _record_tokens("SelfRefine", "refine", result)
-        record_gemini_pro_success()
+        record_gemini_flash_success()
         text = getattr(result, "content", None)
         if text is None:
             text = str(result)
@@ -1556,7 +1545,7 @@ async def _refine(
         )
         return text
     except Exception as e:
-        record_gemini_pro_failure()
+        record_gemini_flash_failure()
         log.warning(
             "Refinement LLM call failed; returning original response",
             error=short_err(e),
@@ -1580,6 +1569,7 @@ async def self_refine(
     refiner_llm=None,
     source_languages: tuple[str, ...] = (),
     source_registry: object = None,
+    placeholder_mode: bool = False,
 ) -> tuple[str, list[Critique]]:
     """Generate-critique-refine loop over an existing response.
 
@@ -1643,6 +1633,28 @@ async def self_refine(
             user_query, critic_intent, current, critic_llm,
             retrieved_sources_whitelist=_whitelist,
         )
+        # Q-19 fix: in placeholder mode (drafting produced a no-case-facts
+        # draft whose case-specific fields are intentionally bracketed
+        # placeholders), the `placeholder_marker` category is INVERTED — the
+        # brackets are correct output, not defects. Drop those violations
+        # before they reach the refiner, which would otherwise "fix" them by
+        # inventing case facts (the Q-19 regression). Every other category —
+        # including `unretrieved_citation`, the fabricated-citation check Q-1
+        # switched on — still applies, so this narrows the critic, it does not
+        # disable it.
+        if placeholder_mode and critique.violations:
+            _kept = [v for v in critique.violations if v.field != "placeholder_marker"]
+            _dropped = len(critique.violations) - len(_kept)
+            if _dropped:
+                log.info(
+                    "Self-refine: suppressed placeholder_marker violations "
+                    "(placeholder mode — bracketed fields are correct output)",
+                    dropped=_dropped, remaining=len(_kept), iteration=iteration,
+                )
+                critique = critique.model_copy(update={
+                    "violations": _kept,
+                    "passes": critique.passes or not _kept,
+                })
         history.append(critique)
         if critique.passes:
             log.info(

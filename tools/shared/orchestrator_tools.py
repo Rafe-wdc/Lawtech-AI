@@ -18,7 +18,7 @@ from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 
 from core.clients import get_gemini_flash
 from core.logger import get_logger
-from config.prompts import TASK_CLASSIFICATION_PROMPT, SYNTHESIS_PROMPT
+from config.prompts import SYNTHESIS_PROMPT
 
 log = get_logger("Orchestrator")
 
@@ -47,44 +47,13 @@ class ClarificationRequest(BaseModel):
 
 
 # --- Prompts ---
-
-_PLAN_PROMPT = """You are an Indian legal agent planner. Given a query and its already-classified primary task, decide which 1-4 agents should handle it.
-
-## Agents
-- Legislation: Central/state acts (except the 6 codes below)
-- Newacts: IPC, BNS, CrPC, BNSS, IEA, BSA (any spelling)
-- Judgment: HC / general court case law
-- SCI_Judgment: Supreme Court cases only
-- GST_Judgment: GST AAR / AAAR rulings
-- Constitution: Articles, fundamental rights, DPSPs
-- Maxim: Latin maxims and doctrines
-- Scenario: Situational analysis grounded in facts
-- Drafting: Standalone legal document generation
-- Legal_Concepts: Educational / procedural explanations
-- Document: Uploaded-file Q&A
-
-## Fan-out rules
-
-### HARD RULES (apply first, override everything else)
-- If task is Non_legal / Document / Legal_Concepts → agents = [task]. No fan-out.
-- Never pair Newacts + Legislation. Newacts covers both old and new codes.
-- Maximum 4 agents.
-
-### Default
-- Single agent matching the primary task.
-
-### Additive rules (only when the user's own words trigger them)
-- Asks for case laws / precedents / citations / rulings verbatim: add BOTH Judgment AND SCI_Judgment. Skip SCI if user scoped to HC only; skip Judgment if scoped to SC only or named a specific SC case.
-- Asks for statutory text alongside another primary: add Legislation (or Newacts if it's one of the 6 codes — never both).
-- Invokes a fundamental right alongside another primary: add Constitution.
-- Invokes a Latin maxim alongside another primary: add Maxim.
-- Drafting + explicit "with case laws / citations": add Judgment (+ SCI_Judgment if SC scope named).
-- "Other" primary task → route to Scenario.
-
-Query: {query}
-Primary Task: {task}
-
-Return the list of agents and one-sentence reasoning."""
+#
+# NOTE: The legacy `_PLAN_PROMPT` and `get_execution_plan` tool were
+# retired 2026-08-19 (audit finding F8). They wrapped the older
+# TASK_CLASSIFICATION_PROMPT and were never bound to any live agent —
+# the orchestrator node calls `_classify_and_plan` / `_dynamic_plan`
+# directly, not via tools. The `_CLARIFICATION_PROMPT` below is still
+# used by `request_clarification`.
 
 
 _CLARIFICATION_PROMPT = """You are a legal AI assistant. The user's query is ambiguous and needs clarification before proceeding.
@@ -98,63 +67,6 @@ Generate a clarification question and 2-4 options."""
 
 
 # --- Tool Functions ---
-
-@tool
-def get_execution_plan(query: str, chat_summary: str = "") -> dict:
-    """Classify a legal query and create an execution plan.
-
-    Analyzes the query to determine the primary task type and which
-    domain agents should handle it (single or multi-agent plan).
-
-    Args:
-        query: The user's legal query to classify and plan
-        chat_summary: Optional chat summary for context
-
-    Returns:
-        Dict with keys: task (str), agents (list), reasoning (str)
-    """
-    # Step 1: Classify task
-    try:
-        prompt = PromptTemplate.from_template(TASK_CLASSIFICATION_PROMPT)
-        llm = get_gemini_flash(temperature=0.1).with_structured_output(IdentifyTaskSchema)
-        formatted = prompt.format(query=query, chat_summary=chat_summary)
-        result = llm.invoke(formatted)
-        task = result.task
-    except Exception as e:
-        log.error(f"Classification failed: {e}")
-        task = "Scenario"
-
-    # Step 2: Handle non-legal
-    if task == "Non_legal":
-        return {
-            "task": task,
-            "agents": [],
-            "reasoning": "Query is not related to legal matters",
-        }
-
-    # Step 3: Plan agents
-    simple_mapping = {"Legal_Concepts": ["Legal_Concepts"]}
-    if task in simple_mapping:
-        return {
-            "task": task,
-            "agents": simple_mapping[task],
-            "reasoning": f"Simple task type: {task}",
-        }
-
-    try:
-        llm = get_gemini_flash(temperature=0.1).with_structured_output(AgentPlan)
-        prompt = ChatPromptTemplate.from_template(_PLAN_PROMPT)
-        chain = prompt | llm
-        plan = chain.invoke({"query": query, "task": task})
-        agents = plan.agents[:3]
-        return {
-            "task": task,
-            "agents": agents if agents else [task],
-            "reasoning": plan.reasoning,
-        }
-    except Exception as e:
-        log.error(f"Planning failed: {e}")
-        return {"task": task, "agents": [task], "reasoning": f"Fallback to single agent: {task}"}
 
 
 @tool

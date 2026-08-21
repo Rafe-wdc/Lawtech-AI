@@ -259,14 +259,13 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                      step="fallback", substep=True)
             try:
                 from core.agent_fallback import web_search_fallback
+                # RAW prompt — web_search_fallback localizes the assembled
+                # prompt itself, so localizing here too just duplicates the
+                # (long) directive block.
                 fb = await web_search_fallback(
                     query,
                     "SCI_Judgment",
-                    localize_prompt(
-                        SCI_JUDGMENT_SYSTEM_PROMPT,
-                        user_language,
-                        state.get("user_intent"),
-                    ),
+                    SCI_JUDGMENT_SYSTEM_PROMPT,
                     user_language=user_language,
                     intent=state.get("user_intent"),
                 )

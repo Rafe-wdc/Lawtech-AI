@@ -287,9 +287,14 @@ async def legislation_node(state: LegalAgentState) -> dict:
     chat_history = state.get("chat_history", [])
     intent = state.get("user_intent")
     named_acts = getattr(intent, "named_acts", None) or []
+    _user_language = state.get("user_language", "en")
+    # `_system_prompt` is localized for the direct ES-grounded generation
+    # path. The web fallback below gets the RAW prompt + `_user_language` /
+    # `intent` so IT applies the directive last (recency); pre-localizing for
+    # that path let the fallback's default English directive override it.
     _system_prompt = localize_prompt(
         LEGISLATION_SYSTEM_PROMPT,
-        state.get("user_language", "en"),
+        _user_language,
         intent,
     )
     log.info("Agent started", query=query[:100],
@@ -419,7 +424,8 @@ async def legislation_node(state: LegalAgentState) -> dict:
                 log.warning("All searches exhausted, using web fallback",
                             search_mode=search_mode)
                 fallback_result = await web_search_fallback(
-                    query, "Legislation", _system_prompt)
+                    query, "Legislation", LEGISLATION_SYSTEM_PROMPT,
+                    user_language=_user_language, intent=intent)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Legislation": fallback_result}}
 
@@ -451,7 +457,8 @@ async def legislation_node(state: LegalAgentState) -> dict:
                      step="fallback", substep=True)
             from core.agent_fallback import web_search_fallback
             fallback_result = await web_search_fallback(
-                query, "Legislation", _system_prompt)
+                query, "Legislation", LEGISLATION_SYSTEM_PROMPT,
+                user_language=_user_language, intent=intent)
             fallback_result.retry_attempted = True
             return {"agent_results": {"Legislation": fallback_result}}
 
@@ -524,7 +531,9 @@ async def legislation_node(state: LegalAgentState) -> dict:
             except RuntimeError:
                 pass
             from core.agent_fallback import web_search_fallback
-            fallback_result = await web_search_fallback(query, "Legislation", LEGISLATION_SYSTEM_PROMPT)
+            fallback_result = await web_search_fallback(
+                query, "Legislation", LEGISLATION_SYSTEM_PROMPT,
+                user_language=_user_language, intent=intent)
             fallback_result.tokens_consumed += tokens
             return {"agent_results": {"Legislation": fallback_result}}
 

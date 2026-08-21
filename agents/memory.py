@@ -551,10 +551,12 @@ async def memory_node(state: LegalAgentState) -> dict:
     gateway_lang = state.get("user_language", "")
     if gateway_lang:
         user_language = gateway_lang
+        user_language_source = "client"
         log.info("Language: using client preference", lang=user_language)
     else:
         progress("memory", "Detecting language...", step="language")
         user_language = detect_language(original_query)
+        user_language_source = "detected"
         progress("memory", f"Detected: {user_language}", substep=True, step="language")
         log.info("Language detected", lang=user_language, query=original_query[:60])
 
@@ -670,6 +672,7 @@ async def memory_node(state: LegalAgentState) -> dict:
         "chat_history": chat_history,
         "summary_text": summary_text,
         "user_language": user_language,
+        "user_language_source": user_language_source,
         # Level 1: previous-turn typed state. Consumers (intent extractor,
         # rewriter, classifier, drafting fast-path) read these as optional
         # inputs — None / "" means "no prior turn to inherit from."

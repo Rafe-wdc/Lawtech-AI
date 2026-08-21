@@ -127,9 +127,16 @@ async def _handle_legal_concepts(query: str, chat_history: list,
     from core.agent_fallback import web_search_fallback
     progress("legal_concepts", "Researching legal concept...", step="research")
     log.info("Legal concepts using web search for comprehensive response")
+    # Pass the RAW prompt plus user_language / intent — do NOT pre-localize.
+    # web_search_fallback appends its own web-grounding instruction and then
+    # localizes the ASSEMBLED prompt, so the language directive lands in the
+    # recency position (last). Pre-localizing here instead buried the Marathi
+    # directive above the grounding block while the fallback layer's default
+    # (user_language="en") appended an English-strict directive after it —
+    # every native-script query came back in English.
     result = await web_search_fallback(
-        query, "Legal_Concepts",
-        localize_prompt(LEGAL_CONCEPTS_PROMPT, user_language, user_intent),
+        query, "Legal_Concepts", LEGAL_CONCEPTS_PROMPT,
+        user_language=user_language, intent=user_intent,
     )
     progress("legal_concepts", "Generating explanation...", step="generate")
     return result
@@ -139,11 +146,14 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
                                          user_language: str = "en",
                                          user_intent=None) -> AgentResult:
     """Handle Constitution or Maxim task — ES retrieval + web enrichment + LLM generation."""
-    system_prompt = localize_prompt(
-        CONSTITUTION_SYSTEM_PROMPT if task == "Constitution" else MAXIM_SYSTEM_PROMPT,
-        user_language,
-        user_intent,
+    # `base_prompt` (un-localized) is what the web fallback receives — it
+    # localizes internally, and doing it here too would bury the directive
+    # under the fallback's grounding block. `system_prompt` (localized) is
+    # for the direct ES-grounded generation path below.
+    base_prompt = (
+        CONSTITUTION_SYSTEM_PROMPT if task == "Constitution" else MAXIM_SYSTEM_PROMPT
     )
+    system_prompt = localize_prompt(base_prompt, user_language, user_intent)
 
     # Run ES retrieval and web enrichment in parallel
     agent_label = task.lower()
@@ -159,7 +169,10 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
         progress(agent_label, "No results — searching the web...", step="fallback")
         log.warning("No documents found in ES, using web search fallback", task=task)
         from core.agent_fallback import web_search_fallback
-        result = await web_search_fallback(query, task, system_prompt)
+        result = await web_search_fallback(
+            query, task, base_prompt,
+            user_language=user_language, intent=user_intent,
+        )
         return result
 
     progress(agent_label, f"Found {len(docs)} matching results", found=len(docs), substep=True, step="search")
@@ -186,7 +199,10 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
                  f"({mismatch[:60]}) — searching the web...",
                  step="fallback", substep=True)
         from core.agent_fallback import web_search_fallback
-        result = await web_search_fallback(query, task, system_prompt)
+        result = await web_search_fallback(
+            query, task, base_prompt,
+            user_language=user_language, intent=user_intent,
+        )
         return result
 
     # Combine ES text with web context for richer input
@@ -241,7 +257,10 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
         except RuntimeError:
             pass  # not in streaming context
         from core.agent_fallback import web_search_fallback
-        result = await web_search_fallback(query, task, system_prompt)
+        result = await web_search_fallback(
+            query, task, base_prompt,
+            user_language=user_language, intent=user_intent,
+        )
         result.tokens_consumed += tokens  # include the wasted tokens
         # Stream the fallback content as tokens so frontend displays it
         try:

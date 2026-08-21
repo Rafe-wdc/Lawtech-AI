@@ -176,6 +176,11 @@ class LegalAgentState(MessagesState):
     thread_id: str | None
     unique_string: str | None
     user_language: str          # ISO 639-1 code detected from original_query, default "en"
+    user_language_source: str   # "client" (explicit preferred_language on the
+                                # request) | "detected" (langdetect + script
+                                # markers). Consumers that want to second-guess
+                                # the language MUST NOT override a client
+                                # preference — check this first.
 
     # Task routing
     task: TaskType | None

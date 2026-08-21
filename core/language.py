@@ -75,6 +75,178 @@ _ROMANIZED_HINTS: dict[str, list[str]] = {
 _ROMANIZED_MIN_HITS = 2
 
 
+# ---------------------------------------------------------------------------
+# Script-family helpers + Devanagari (Hindi / Marathi) disambiguation
+# ---------------------------------------------------------------------------
+# Hindi, Marathi and Sanskrit share the Devanagari script, and langdetect's
+# n-gram profiles for them overlap heavily because the CONTENT words in Indian
+# legal text — statute names, doctrinal terms, Sanskrit-derived nouns — are
+# nearly identical across the three. On short queries it flips a coin.
+# Measured 2026-08-21:
+#     "भारतीय न्याय संहिता कलम 105 काय सांगते?"  → langdetect says "hi"
+# even though "काय सांगते" is unambiguously Marathi. The user asks in Marathi
+# and gets Hindi back.
+#
+# The fix is to score GRAMMATICAL FUNCTION WORDS instead: copulas, question
+# words, postpositions and conjunctions are completely disjoint between Hindi
+# and Marathi (आहे/है, काय/क्या, आणि/और, मध्ये/में) even when every content
+# word in the sentence is shared. Deterministic, offline, no LLM call.
+#
+# Both sets are function words ONLY. Do NOT add legal vocabulary here — that
+# is precisely the shared material that confuses langdetect in the first place.
+
+_MARATHI_MARKERS: frozenset[str] = frozenset({
+    # copulas / negation
+    "आहे", "आहेत", "आहात", "आहेस", "नाही", "नाहीत", "नव्हता", "नव्हते",
+    "नव्हती", "असेल", "असतो", "असते", "असतात", "होईल",
+    # question words
+    "काय", "कसे", "कसा", "कशी", "कशा", "कुठे", "कुठला", "कोणता", "कोणते",
+    "कोणती", "कोणत्या", "केव्हा", "किती", "का",
+    # postpositions / connectives
+    "मध्ये", "मधील", "मधून", "बद्दल", "बाबत", "साठी", "करिता", "तसेच",
+    "आणि", "किंवा", "परंतु", "पण", "मात्र", "त्यामुळे", "यामुळे", "नुसार",
+    "म्हणजे", "म्हणून", "वरील", "येथे", "तेथे", "इथे", "तिथे",
+    # verbs / auxiliaries in imperative + potential moods (very common in
+    # "explain this to me" style queries)
+    "करावे", "करावी", "करावा", "करायचे", "करायची", "करून",
+    "शकते", "शकतो", "शकतात", "शकता", "पाहिजे", "हवे", "हवी",
+    "द्या", "सांगा", "सांगावे", "सांगते", "सांगतो", "दाखवा",
+    "केली", "केले", "केला", "केल्या", "झाली", "झाले", "झाला", "झाल्या",
+    "मिळते", "मिळाले", "मिळाली",
+    # pronominal possessives
+    "माझ्या", "माझा", "माझी", "माझे", "तुमच्या", "तुमचा", "तुमची",
+    "त्यांच्या", "त्यांचा", "यांच्या", "आमच्या", "वतीने", "प्रकरणी",
+})
+
+# Suffixes that only occur in Marathi inflection. Bare "ची"/"चा"/"चे" are
+# deliberately EXCLUDED — Hindi legal text is full of "अनुसूची" (schedule)
+# and "सूची" (list), which a bare-suffix match would score as Marathi.
+_MARATHI_SUFFIXES: tuple[str, ...] = (
+    "च्या", "ाची", "ाचा", "ाचे", "ांनी", "ातील", "ासाठी", "ामध्ये",
+    "ाबद्दल", "ण्याची", "ण्यात",
+)
+
+_HINDI_MARKERS: frozenset[str] = frozenset({
+    # copulas / negation
+    "है", "हैं", "हूँ", "हूं", "था", "थे", "थी", "नहीं", "नही",
+    "होगा", "होगी", "होंगे", "होता", "होती", "होते",
+    # question words
+    "क्या", "कैसे", "कैसा", "कैसी", "कौन", "कौनसा", "कब", "कहाँ", "कहां",
+    "कितना", "कितनी", "कितने", "क्यों",
+    # postpositions / connectives
+    "में", "के", "का", "की", "को", "से", "और", "लिए", "लिये", "पर",
+    "अगर", "यदि", "अनुसार", "बारे", "द्वारा", "तक", "साथ",
+    # verbs / auxiliaries
+    "मतलब", "बताओ", "बताइए", "बताएं", "बतायें", "करें", "कीजिए", "चाहिए",
+    "सकता", "सकती", "सकते", "गया", "गई", "गयी", "हुआ", "हुई", "हुए",
+    "रहा", "रही", "रहे", "वाला", "वाले", "वाली", "समझाओ", "समझाइए",
+    # pronominal possessives
+    "मेरे", "मेरा", "मेरी", "आपके", "आपका", "आपकी", "उनके", "उनका",
+    "उनकी", "इनके", "इसके", "इसका", "जिसमें", "जिसके",
+})
+
+_DEVANAGARI_TOKEN_RE = re.compile(r"[\u0900-\u097F]+")
+
+# Unicode block -> the SUPPORTED_LANGUAGES code that block implies. Used as a
+# floor: when langdetect returns a language we do not support (it emits "ne"
+# for Devanagari fairly often, and has no "as" profile at all), an Indic-script
+# query must never fall through to English.
+_SCRIPT_RANGES: tuple[tuple[str, str], ...] = (
+    ("deva", "\u0900-\u097F"),   # Devanagari — Hindi / Marathi / Sanskrit
+    ("beng", "\u0980-\u09FF"),   # Bengali / Assamese
+    ("guru", "\u0A00-\u0A7F"),   # Gurmukhi — Punjabi
+    ("gujr", "\u0A80-\u0AFF"),   # Gujarati
+    ("orya", "\u0B00-\u0B7F"),   # Odia
+    ("taml", "\u0B80-\u0BFF"),   # Tamil
+    ("telu", "\u0C00-\u0C7F"),   # Telugu
+    ("knda", "\u0C80-\u0CFF"),   # Kannada
+    ("mlym", "\u0D00-\u0D7F"),   # Malayalam
+    ("arab", "\u0600-\u06FF"),   # Arabic script — Urdu
+)
+
+_SCRIPT_DEFAULT_LANG: dict[str, str] = {
+    "deva": "hi",   # refined to hi/mr by _disambiguate_devanagari
+    "beng": "bn", "guru": "pa", "gujr": "gu", "orya": "or",
+    "taml": "ta", "telu": "te", "knda": "kn", "mlym": "ml", "arab": "ur",
+}
+
+# Which script each supported language is written in — lets callers ask
+# "are these two codes even distinguishable by script?" before trusting one
+# detector over another.
+_LANG_SCRIPT: dict[str, str] = {
+    "en": "latn", "hi": "deva", "mr": "deva", "sa": "deva",
+    "bn": "beng", "as": "beng", "pa": "guru", "gu": "gujr", "or": "orya",
+    "ta": "taml", "te": "telu", "kn": "knda", "ml": "mlym", "ur": "arab",
+}
+
+_SCRIPT_PATTERNS: dict[str, "re.Pattern[str]"] = {
+    name: re.compile(f"[{rng}]") for name, rng in _SCRIPT_RANGES
+}
+
+# A query has to be substantially in one script before that script overrides
+# langdetect. A dominantly-English 4.7 kB prompt with one quoted Marathi
+# paragraph stays English (that exact case is in
+# tests/multilingual_test_2026_08_17/flow_analysis.md).
+_SCRIPT_DOMINANCE_MIN = 0.30
+
+
+def script_of(lang: str) -> str:
+    """Return the script code a language is written in ('deva', 'latn', ...)."""
+    return _LANG_SCRIPT.get(lang, "latn")
+
+
+def dominant_script(text: str) -> str | None:
+    """Return the script code covering >=30% of *text*'s letters, else None."""
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return None
+    best: str | None = None
+    best_ratio = 0.0
+    total = len(letters)
+    for name, pattern in _SCRIPT_PATTERNS.items():
+        ratio = sum(1 for c in letters if pattern.match(c)) / total
+        if ratio > best_ratio:
+            best_ratio, best = ratio, name
+    return best if best_ratio >= _SCRIPT_DOMINANCE_MIN else None
+
+
+def devanagari_language(text: str) -> str | None:
+    """Score Hindi vs Marathi function words in *text*.
+
+    Returns "hi" / "mr" when the markers give a verdict, or None when the text
+    carries no discriminating function words at all (e.g. a bare "कलम 302"
+    citation). None means "no evidence" — callers keep whatever their other
+    detector said rather than guessing.
+    """
+    tokens = _DEVANAGARI_TOKEN_RE.findall(text)
+    if not tokens:
+        return None
+    mr = sum(
+        1 for t in tokens
+        if t in _MARATHI_MARKERS or t.endswith(_MARATHI_SUFFIXES)
+    )
+    hi = sum(1 for t in tokens if t in _HINDI_MARKERS)
+    if mr > hi:
+        return "mr"
+    if hi > mr:
+        return "hi"
+    return None
+
+
+def _disambiguate_devanagari(text: str, detected: str) -> str:
+    """Resolve a Devanagari query to "hi" or "mr"."""
+    verdict = devanagari_language(text)
+    if verdict:
+        if verdict != detected:
+            log.debug("Devanagari marker override", langdetect=detected,
+                      markers=verdict, snippet=text[:60])
+        return verdict
+    # No discriminating markers — keep langdetect's guess when it is at least
+    # a Devanagari language, otherwise fall back to Hindi. Never English: the
+    # text is demonstrably Devanagari.
+    return detected if detected in ("hi", "mr", "sa") else "hi"
+
+
 def _detect_romanized(text: str) -> str | None:
     """Check if a Roman-script text is likely a transliterated Indian language.
 
@@ -102,9 +274,16 @@ def detect_language(text: str) -> str:
     Strategy:
       1. If text is very short (< 10 chars) → default "en"
       2. Try langdetect on the full text
-      3. If langdetect returns "en" but text is Roman script → check
+      3. If the text is dominantly written in an Indic (or Arabic) script,
+         the SCRIPT decides the language family — langdetect only gets to
+         pick within it. Devanagari is resolved to Hindi vs Marathi by
+         function-word markers (`devanagari_language`), because langdetect
+         cannot tell them apart on short legal queries. This also stops an
+         unsupported langdetect verdict ("ne" for Devanagari, no profile at
+         all for Assamese) from collapsing a native-script query to English.
+      4. If langdetect returns "en" but text is Roman script → check
          Romanized-hint heuristic (catches Hinglish / transliterated queries)
-      4. If detected language not in SUPPORTED_LANGUAGES → fall back to "en"
+      5. If detected language not in SUPPORTED_LANGUAGES → fall back to "en"
 
     Returns ISO 639-1 code (e.g. "hi", "ta", "en").
     """
@@ -124,6 +303,23 @@ def detect_language(text: str) -> str:
     # langdetect sometimes returns "zh-cn", "pt" etc. for short Indian texts
     # Normalise: strip region suffix ("zh-cn" → "zh"), keep only known codes
     detected = detected.split("-")[0].lower()
+
+    # Script beats langdetect. A query written in an Indic script simply IS
+    # that script's language; langdetect's job is only to choose within the
+    # family, and for Devanagari it demonstrably cannot (hi/mr overlap), so
+    # function-word markers decide there. Without this, two failure modes hit
+    # real users: a Marathi query answered in Hindi, and a native-script query
+    # whose langdetect verdict is outside SUPPORTED_LANGUAGES (e.g. "ne")
+    # silently collapsing to English.
+    script = dominant_script(text)
+    if script == "deva":
+        detected = _disambiguate_devanagari(text, detected)
+    elif script is not None:
+        script_lang = _SCRIPT_DEFAULT_LANG[script]
+        if detected != script_lang:
+            log.debug("Script override", langdetect=detected,
+                      script=script, lang=script_lang, snippet=text[:60])
+        detected = script_lang
 
     if detected not in SUPPORTED_LANGUAGES:
         detected = "en"
@@ -800,7 +996,21 @@ def localize_prompt(
             f"   ✓ CORRECT: '... Section 138 of the Negotiable Instruments "
             f"Act, 1881 च्या तरतुदींनुसार, ...'\n"
             f"   ✗ WRONG:   '... परक्राम्य लिखत अधिनियम, १८८१ च्या कलम १३८ "
-            f"च्या तरतुदींनुसार, ...'\n\n"
+            f"च्या तरतुदींनुसार, ...'\n"
+            f"   Two further patterns that are equally WRONG — both keep "
+            f"some English but still break the span:\n"
+            f"   ✗ WRONG:   'भारतीय दंड संहिता (Indian Penal Code), 1860 "
+            f"की Section 302'\n"
+            f"                A native Act title with an English gloss in "
+            f"parentheses is still a translated Act title. Do NOT gloss, "
+            f"do NOT provide the English in brackets alongside a native "
+            f"rendering — emit the English name ONLY.\n"
+            f"   ✗ WRONG:   '<native Act name> की / चा Section 302'\n"
+            f"                The reference has been re-ordered into "
+            f"{lang_name} syntax with the Act name first. The span keeps "
+            f"CANONICAL ENGLISH WORD ORDER as a unit — 'Section 302 of "
+            f"the Indian Penal Code, 1860' — and a {lang_name} connector "
+            f"attaches to the OUTSIDE of that unit, never inside it.\n\n"
             "3. CASE-LAW CITATIONS — party names + reporter citation stay "
             "English: 'Kesavananda Bharati v. State of Kerala, AIR 1973 SC "
             "1461'. Surrounding clause stays in "
@@ -876,9 +1086,12 @@ def localize_prompt(
             f"reasoning, factual detail and its application to the matter, "
             f"statutory provisions, section numbers, case-law references, "
             f"explanations, arguments, consequences, and conclusions.\n"
-            f"- PRESERVE structure: headings, numbered paragraphs, and "
-            f"list hierarchy carry over unchanged. Do not collapse "
-            f"sections or drop numbering.\n"
+            f"- PRESERVE structure: the same headings, numbered "
+            f"paragraphs and list hierarchy appear, in the same order and "
+            f"the same count. Do not collapse sections or drop numbering. "
+            f"'Unchanged' refers to the STRUCTURE, not to the language of "
+            f"the label text — heading wording is translated like all "
+            f"other prose (see STRUCTURAL LABELS below).\n"
             f"- Each numbered point, ground, or averment is a DEVELOPED "
             f"paragraph — state the point, give the reasoning that "
             f"supports it, and apply it to the facts. Reducing a point to "
@@ -893,6 +1106,87 @@ def localize_prompt(
             f"LEGAL REASONING WITHOUT UNNECESSARY REPETITION."
         )
 
+        # Agent system prompts specify their output format with LITERAL
+        # English heading templates — Newacts has "### Old Provision:
+        # Section X of <Old Act Name>, <Year>" / "### New Provision: ..." /
+        # "### Key Differences"; Judgment has "### Key Legal Issues" /
+        # "### Detailed Narrative"; Document, Scenario, SCI and GST each
+        # have their own. Until this block existed nothing told the model
+        # what to do with them, so it copied them verbatim into a Marathi /
+        # Hindi answer, which then opened in English and switched language
+        # mid-response (observed 2026-08-21 on "भारतीय न्याय संहिता कलम
+        # 105 काय सांगते?"). Compliance was a coin flip: the same prompt
+        # translated the heading on one run and not the next.
+        #
+        # This lives here, not in the ten agent prompts, because it is a
+        # language-layer rule: every agent that grows a heading scaffold
+        # inherits it automatically.
+        structural_labels_policy = (
+            f"\n\nSTRUCTURAL LABELS (headings, table headers, section "
+            f"names):\n"
+            f"The output-format instructions above quote heading and label "
+            f"text in English ('### New Provision: ...', '### Old "
+            f"Provision: ...', '### Key Differences', '### Key Legal "
+            f"Issues', 'Section No. | Heading | Brief', '## PDF Links'). "
+            f"Those quotes specify STRUCTURE — which sections exist, in "
+            f"what order, at what heading level. They are NOT literal "
+            f"strings to copy.\n"
+            f"- Format acronyms inside a label stay English (PDF, URL, "
+            f"FIR, NOC); the words AROUND them are translated. '## PDF "
+            f"Links' becomes the {lang_name} phrase for 'PDF links' with "
+            f"'PDF' still in Latin letters. The URLs listed under it are "
+            f"never altered.\n"
+            f"- Translate every heading, sub-heading, table column header, "
+            f"labelled list prefix and section name into {lang_name}. A "
+            f"heading is prose like any other and follows the response "
+            f"language.\n"
+            f"- Keep the heading LEVEL and ORDER exactly as specified "
+            f"(### stays ###, the section that comes first still comes "
+            f"first).\n"
+            f"- A heading has exactly TWO parts and they follow "
+            f"DIFFERENT rules. The LABEL is translated into {lang_name}. "
+            f"The STATUTORY REFERENCE inside it is a fixed English anchor "
+            f"and is emitted as ONE UNINTERRUPTED ENGLISH SPAN in "
+            f"canonical English word order — 'Section <N> of the <Act "
+            f"Name>, <Year>' — exactly as the FIXED-ENGLISH ANCHORS rule "
+            f"above requires. Translating the label does NOT license "
+            f"translating the reference, and the reference is NOT "
+            f"re-ordered into {lang_name} syntax:\n"
+            f"    ✓ CORRECT: '### [the natural {lang_name} wording for "
+            f"\"New Provision\"]: Section 105 of the Bharatiya Nyaya "
+            f"Sanhita, 2023'\n"
+            f"    ✗ WRONG:   '### New Provision: Section 105 of the "
+            f"Bharatiya Nyaya Sanhita, 2023'\n"
+            f"                 (label left in English)\n"
+            f"    ✗ WRONG:   '### [label]: भारतीय न्याय संहिता, 2023 चा "
+            f"Section 105'\n"
+            f"                 (Act name translated AND the reference "
+            f"re-ordered into native syntax — the whole span must read "
+            f"'Section 105 of the Bharatiya Nyaya Sanhita, 2023')\n"
+            f"    ✗ WRONG:   '### [label]: भारतीय दंड संहिता, 1860 की "
+            f"धारा 304'\n"
+            f"                 (must be 'Section 304 of the Indian Penal "
+            f"Code, 1860')\n"
+            f"  The bracketed [label] above is a SLOT, and any Devanagari "
+            f"in these examples is an illustrative sample of the DEFECT — "
+            f"never copy those words into your answer. Write the label in "
+            f"idiomatic {lang_name}, using {lang_name}'s own vocabulary "
+            f"and not another Indian language's ({lang_name} is the "
+            f"response language; a Marathi word in a Hindi answer, or a "
+            f"Hindi word in a Marathi answer, is a defect even though "
+            f"both use Devanagari).\n"
+            f"- The same applies to any opening summary line the format "
+            f"asks for ('open with a one-sentence statement of what the "
+            f"section deals with'). That sentence is BODY PROSE: write it "
+            f"in {lang_name} with only the statutory reference in English. "
+            f"An answer whose first sentence is English and whose "
+            f"remainder is {lang_name} is a DEFECT — the response is in "
+            f"one language from the first word to the last.\n"
+            f"- Do NOT emit a heading twice (once in English, once in "
+            f"{lang_name}) and do NOT append the English label in "
+            f"parentheses. One heading, in {lang_name}."
+        )
+
         if _is_strict_language(intent, lang):
             out += (
                 f"\n\nLANGUAGE INSTRUCTION (STRICT): The user demanded PURE "
@@ -905,6 +1199,7 @@ def localize_prompt(
                 f"signature labels are ALSO in {lang_name}."
                 f"{fixed_english_anchors}\n"
                 f"{ceremonial_examples}"
+                f"{structural_labels_policy}"
                 f"{substantive_depth_policy}"
             )
         else:
@@ -914,6 +1209,7 @@ def localize_prompt(
                 f"Prayer/Verification/court forms of address), placeholder "
                 f"brackets, and signature labels in {lang_name}."
                 f"{fixed_english_anchors}"
+                f"{structural_labels_policy}"
                 f"{substantive_depth_policy}"
             )
 

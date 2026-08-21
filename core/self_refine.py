@@ -191,9 +191,18 @@ Examples of how intent fields translate to checks:
              "आदेश XXXIX नियम १ व २ सीपीसी"
                                         ← MAJOR. Must be:
                 "Order XXXIX Rules 1 and 2 CPC"
+             "भारतीय दंड संहिता (Indian Penal Code), 1860 की Section 302"
+                                        ← MAJOR. A native Act title with
+                an English gloss in parentheses is still a translated
+                Act title, and the reference has been re-ordered into
+                native syntax. Must be:
+                "Section 302 of the Indian Penal Code, 1860"
           The native-language connector ("च्या तरतुदींनुसार", "के तहत",
           "के अनुसार", "अंतर्गत") wraps the English statutory span; the
-          span itself stays English.
+          span itself stays English, in canonical English word order
+          ("Section <N> of the <Act Name>, <Year>"), and the connector
+          attaches OUTSIDE that unit — never between the Act name and the
+          section number.
 
       (c) TRANSLATED SECTION / ARTICLE / RULE / ORDER LABELS — the words
           "कलम", "धारा", "अनुच्छेद", "अध्याय", "नियम", "आदेश" appearing
@@ -255,6 +264,67 @@ Examples of how intent fields translate to checks:
       clauses in body prose (see the strict_language section below), but
       the FIXED-ENGLISH ANCHOR rules above apply in BOTH strict and
       non-strict mode.
+
+      UNDER-TRANSLATION (the mirror of the anchor rules — these apply in
+      BOTH strict and non-strict mode, because they are about the
+      response's own scaffolding, not about quoted legal anchors):
+
+      (g) UNTRANSLATED HEADINGS / TABLE HEADERS / SECTION LABELS — every
+          agent's output format is specified with English heading
+          templates ("### Old Provision: ...", "### New Provision: ...",
+          "### Key Differences", "### Key Legal Issues", "### Detailed
+          Narrative", "Section No. | Heading | Brief"). Those specify
+          STRUCTURE, not literal text. A heading left in English inside a
+          {{lang}} response is a MAJOR violation:
+             "### New Provision: Section 105 of the Bharatiya Nyaya
+              Sanhita, 2023"
+                                       ← MAJOR when language='mr'/'hi'.
+                The LABEL is translated, the statutory reference stays
+                English: "### नवीन तरतूद: Section 105 of the Bharatiya
+                Nyaya Sanhita, 2023"
+             "### Key Differences"      ← MAJOR. Translate the label.
+             "| Section No. | Heading | Brief |"
+                                       ← MAJOR. Translate the column
+                headers; the section NUMBERS in the cells stay Latin.
+          The reverse defect is equally MAJOR: translating the LABEL is
+          not a licence to translate the statutory reference inside the
+          heading, or to re-order it into native syntax. The reference
+          stays one uninterrupted English span in canonical English word
+          order:
+             "### नवीन तरतूद: भारतीय न्याय संहिता, 2023 चा Section 105"
+                                       ← MAJOR. Must be:
+                "### नवीन तरतूद: Section 105 of the Bharatiya Nyaya
+                 Sanhita, 2023"
+             "### पुराना प्रावधान: भारतीय दंड संहिता, 1860 की धारा 304"
+                                       ← MAJOR. Must be:
+                "### पुराना प्रावधान: Section 304 of the Indian Penal
+                 Code, 1860"
+          Do NOT flag a heading that is correctly translated but retains
+          an English statutory reference — that is the required form. Do
+          NOT flag the response for emitting BOTH forms as a fix; the
+          correct output has ONE heading, in {{lang}}.
+          Suggested_fix: "Translate the heading label '<English label>'
+          in <section> to {{lang}}, keeping the statutory reference that
+          follows it in English."
+
+      (h) ENGLISH OPENING / SUMMARY SENTENCE — a response whose first
+          sentence (or opening paragraph, or a mid-response summary line)
+          is English while the rest is in {{lang}} is a MAJOR violation.
+          This is the most common form the defect takes: the agent's
+          format instruction says "open with a one-sentence statement of
+          what the section deals with", the model writes that sentence in
+          English because the instruction was English, and only then
+          switches to {{lang}}. The response is in ONE language from the
+          first word to the last. Only the FIXED-ENGLISH ANCHORS inside
+          it stay English.
+             "Section 105 of the Bharatiya Nyaya Sanhita, 2023, addresses
+              the punishment for culpable homicide not amounting to
+              murder."
+                                       ← MAJOR when language='mr'/'hi'.
+                Only "Section 105 of the Bharatiya Nyaya Sanhita, 2023"
+                is an anchor; the predicate must be in {{lang}}.
+          Suggested_fix: "Rewrite the opening sentence in {{lang}},
+          keeping '<statutory reference>' as an English span."
 
   Devanagari-script language drift (Hindi vs Marathi vs Sanskrit)
     → Hindi, Marathi, and Sanskrit all use Devanagari, so detecting
@@ -628,7 +698,11 @@ violations specific to Indian drafting practice:
           search-grounding results. The only permitted appendix is
           `## PDF Links` populated exclusively from VERIFIED entries
           (api.sci.gov.in PDFs, official High Court PDF URLs, Lawttorney
-          S3 links) present verbatim in the whitelist below.
+          S3 links) present verbatim in the whitelist below. In a
+          non-English response that block's LABEL is legitimately
+          translated (the "PDF" acronym stays Latin) — identify the block
+          by what it contains, not by the English words, and apply the
+          same URL rules to it.
     Suggested_fix must be surgical: name the exact offending token /
     marker / URL and specify the replacement. Examples:
       - "Strip the trailing `[leg-vakilsearch.com-44320]` marker after
@@ -1326,6 +1400,13 @@ def _intent_has_directives(intent: Optional[UserIntent]) -> bool:
         return False
     return (
         intent.format_explicit
+        # A non-English TARGET is itself a directive worth auditing — the
+        # critic's whole non-English rule set (script, fixed-English
+        # anchors, untranslated headings, hi/mr drift) only applies then.
+        # This used to key off `language_explicit`, so a query typed in
+        # Devanagari — language='mr', language_explicit=False — skipped the
+        # critic entirely and nothing checked the agent actually complied.
+        or intent.language != "en"
         or intent.language_explicit
         or intent.strict_language
         or intent.response_depth != "standard"

@@ -388,10 +388,15 @@ async def newacts_node(state: LegalAgentState) -> dict:
     # Prefer agent-specific query > normalized English query > original (for multilingual support)
     query = agent_queries.get("Newacts", state.get("query", state.get("original_query", "")))
     user_context = state.get("user_context", "")
+    _user_language = state.get("user_language", "en")
+    _intent = state.get("user_intent")
+    # Localized copy for the ES-grounded generation path. The web fallbacks
+    # below receive the RAW prompt + language/intent so THEY append the
+    # directive last — see core/agent_fallback.web_search_fallback.
     _system_prompt = localize_prompt(
         NEWACTS_SYSTEM_PROMPT,
-        state.get("user_language", "en"),
-        state.get("user_intent"),
+        _user_language,
+        _intent,
     )
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
@@ -859,7 +864,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
                     progress("newacts", "Searching the web for latest information...", step="fallback")
                     log.warning("All searches exhausted, using web fallback",
                                 budget_remaining=f"{remaining:.1f}s")
-                    fallback_result = await web_search_fallback(query, "Newacts", _system_prompt)
+                    fallback_result = await web_search_fallback(
+                        query, "Newacts", NEWACTS_SYSTEM_PROMPT,
+                        user_language=_user_language, intent=_intent)
                     fallback_result.retry_attempted = True
                     return {
                         "agent_results": {"Newacts": fallback_result},
@@ -948,7 +955,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
                          step="fallback", substep=True)
                 from core.agent_fallback import web_search_fallback
                 fallback_result = await web_search_fallback(
-                    query, "Newacts", _system_prompt)
+                    query, "Newacts", NEWACTS_SYSTEM_PROMPT,
+                    user_language=_user_language, intent=_intent)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Newacts": fallback_result}}
 
@@ -1008,7 +1016,9 @@ async def newacts_node(state: LegalAgentState) -> dict:
             except RuntimeError:
                 pass
             from core.agent_fallback import web_search_fallback
-            fallback_result = await web_search_fallback(query, "Newacts", _system_prompt)
+            fallback_result = await web_search_fallback(
+                query, "Newacts", NEWACTS_SYSTEM_PROMPT,
+                user_language=_user_language, intent=_intent)
             fallback_result.tokens_consumed += tokens
             return {
                 "agent_results": {"Newacts": fallback_result},
@@ -1043,7 +1053,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
                     pass
                 from core.agent_fallback import web_search_fallback
                 fallback_result = await web_search_fallback(
-                    query, "Newacts", _system_prompt)
+                    query, "Newacts", NEWACTS_SYSTEM_PROMPT,
+                    user_language=_user_language, intent=_intent)
                 fallback_result.tokens_consumed += tokens
                 return {
                     "agent_results": {"Newacts": fallback_result},

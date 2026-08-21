@@ -357,10 +357,15 @@ async def judgment_node(state: LegalAgentState) -> dict:
     original_query = state.get("original_query", query)
     user_context = state.get("user_context", "")
     chat_history = state.get("chat_history", [])
+    _user_language = state.get("user_language", "en")
+    _intent = state.get("user_intent")
+    # Localized copy for the ES-grounded generation path. The web fallback
+    # below receives the RAW prompt + language/intent so IT appends the
+    # directive last — see core/agent_fallback.web_search_fallback.
     _system_prompt = localize_prompt(
         JUDGMENT_SYSTEM_PROMPT,
-        state.get("user_language", "en"),
-        state.get("user_intent"),
+        _user_language,
+        _intent,
     )
     log.info("Agent started", query=query[:100],
              using_agent_query="Judgment" in agent_queries)
@@ -501,7 +506,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 log.warning("All searches exhausted, using web fallback",
                             strategies_tried=strategies_tried)
                 fallback_result = await web_search_fallback(
-                    query, "Judgment", _system_prompt, original_query=original_query)
+                    query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
+                    original_query=original_query,
+                    user_language=_user_language, intent=_intent)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Judgment": fallback_result}}
 
@@ -559,7 +566,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
                      step="fallback", substep=True)
             from core.agent_fallback import web_search_fallback
             fallback_result = await web_search_fallback(
-                query, "Judgment", _system_prompt, original_query=original_query)
+                query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
+                original_query=original_query,
+                user_language=_user_language, intent=_intent)
             fallback_result.retry_attempted = True
             return {"agent_results": {"Judgment": fallback_result}}
 
@@ -605,7 +614,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
             except RuntimeError:
                 pass
             from core.agent_fallback import web_search_fallback
-            fallback_result = await web_search_fallback(query, "Judgment", _system_prompt)
+            fallback_result = await web_search_fallback(
+                query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
+                user_language=_user_language, intent=_intent)
             fallback_result.tokens_consumed += tokens
             return {"agent_results": {"Judgment": fallback_result}}
 

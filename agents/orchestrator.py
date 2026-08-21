@@ -18,7 +18,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from core.state import LegalAgentState, AgentResult, FileContextData
 from core.clients import get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm
-from core.language import localize_prompt
+from core.language import devanagari_language, localize_prompt, script_of
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.source_registry import (
@@ -884,18 +884,117 @@ def _resolve_wants_table(state: LegalAgentState) -> bool:
     return intent.wants_table
 
 
-def _resolve_explicit_non_english(state: LegalAgentState) -> bool:
-    """True iff the user explicitly asked for a non-English response language.
+def _resolve_non_english_target(state: LegalAgentState) -> bool:
+    """True iff the RESOLVED response language is anything other than English.
 
-    Used by the single-agent pass-through guard: when the user said "answer
-    in Hindi" but only one agent ran, pass-through skips the synthesis stage
-    that applies `localize_prompt(...)`. Force synthesis in that case so the
-    language directive is honoured.
+    Used by the single-agent pass-through guard: pass-through returns the
+    domain agent's text verbatim and skips the synthesis stage that applies
+    `localize_prompt(...)`. When the target language is non-English that
+    makes synthesis the last layer able to enforce the language, so we route
+    through it instead of passing through.
+
+    This deliberately keys off `_resolve_user_language` (langdetect result OR
+    an explicit intent directive) rather than `intent.language_explicit`
+    alone. A query typed in Devanagari resolves to "mr" with
+    language_explicit=False — the explicit-only predicate this replaced let
+    those requests pass through untouched, so any layer below that lost the
+    directive (e.g. a web-search fallback re-localizing to its "en" default)
+    handed the user an English answer with no backstop.
     """
-    intent: UserIntent | None = state.get("user_intent")
-    if intent is None or intent.confidence < _INTENT_CONFIDENCE_THRESHOLD:
-        return False
-    return intent.language_explicit and intent.language != "en"
+    return _resolve_user_language(state) != "en"
+
+
+async def _enforce_response_language(
+    text: str, state: LegalAgentState, source_registry=None,
+) -> str:
+    """Audit a verbatim-returned response against the target language.
+
+    Both single-agent return paths — the pass-through and the "primary-only,
+    no non-redundant supporters" fast path — emit the domain agent's text
+    UNCHANGED. There is no synthesis stage on those paths, so nothing
+    re-applies `localize_prompt` and nothing checks the agent complied.
+    For English that is fine. For a non-English target it means the last
+    layer able to catch a defect never runs, and the defects are real:
+    an English heading scaffold copied verbatim out of the agent's own
+    format spec ("### New Provision:"), an English opening sentence with
+    the rest of the answer in Marathi, a statutory reference re-ordered
+    into native syntax, or Hindi wording inside a Marathi answer.
+
+    No-ops for English targets and for empty text, so the English path pays
+    nothing. Failures are swallowed — a critic error must never cost the
+    user their answer.
+
+    OFF BY DEFAULT — enable with `MULTILINGUAL_RESPONSE_AUDIT=1`. Measured
+    2026-08-21 on this pipeline: the audit adds roughly 13s to a short
+    Newacts answer and up to ~45s to a long Legal_Concepts one (critic
+    ~1.5-15s depending on length, plus a refine pass when it finds
+    violations). It also does not always land the fix — on a Hindi Newacts
+    response the critic correctly raised 5 MAJOR violations but the
+    refiner's rewrite came back 57% shorter and self_refine's
+    destructive-shortening guard (rightly) discarded it, so the user got
+    the original text after paying the latency. The primary defence is the
+    directive in `core.language.localize_prompt`, which costs nothing and
+    fixed the reported defects on its own; this flag exists so the audit
+    can be switched on deliberately once that latency is acceptable.
+    """
+    if os.getenv("MULTILINGUAL_RESPONSE_AUDIT", "0") != "1":
+        return text
+
+    lang = _resolve_user_language(state)
+    if lang == "en" or not text or not text.strip():
+        return text
+
+    intent = state.get("user_intent")
+    try:
+        from config.intent import default_intent
+        base = intent if intent is not None else default_intent()
+        # The critic reasons from the typed intent, so hand it the language
+        # WE resolved rather than whatever the extractor guessed — the two
+        # can disagree (langdetect markers vs extractor) and the resolver is
+        # the authority. Confidence is raised on this local copy only so the
+        # critic's skip-when-trivial gate does not drop the audit; nothing
+        # else sees this object.
+        audit_intent = base.model_copy(update={
+            "language": lang,
+            "confidence": max(getattr(base, "confidence", 0.0) or 0.0, 0.9),
+        })
+    except Exception as e:
+        log.debug("Language audit: could not build audit intent", error=str(e)[:120])
+        audit_intent = intent
+
+    try:
+        from core.clients import get_gemini_flash_full
+        from core.self_refine import self_refine
+        # Full Flash for THIS critic only. The shared critic runs on Flash
+        # Lite (cost), and Lite reliably missed the language violations it
+        # was asked to catch — measured 2026-08-21: it passed
+        # "### पुरानी धारा: भारतीय दंड संहिता, 1860 की धारा 304" with zero
+        # violations even though CRITIQUE_PROMPT rules (c) and (d) name
+        # exactly that pattern as MAJOR. The judgment call is subtle (the
+        # native Act name IS the official Hindi title; the house rule is
+        # the English transliteration), and Lite does not make it inside a
+        # prompt this long. Scoped to non-English responses, so the English
+        # path pays nothing and the drafting critic keeps its cheap tier.
+        refined, critiques = await self_refine(
+            text,
+            state.get("original_query", "") or state.get("query", ""),
+            audit_intent,
+            critic_llm=get_gemini_flash_full(
+                temperature=0.0, max_output_tokens=4096, thinking_budget=0,
+            ),
+            source_registry=source_registry,
+        )
+    except Exception as e:
+        log.warning("Language audit failed; returning unrefined response",
+                    error=short_err(e), lang=lang)
+        return text
+
+    if refined and refined != text:
+        log.info("Response refined by language audit",
+                 lang=lang, pre_len=len(text), post_len=len(refined),
+                 iterations=len(critiques))
+        return refined
+    return text
 
 
 def _resolve_user_language(state: LegalAgentState) -> str:
@@ -907,18 +1006,40 @@ def _resolve_user_language(state: LegalAgentState) -> str:
          Catches the case where a Hindi-speaking user types in English script
          ("Section 131 in Hindi") — langdetect would say "en", but the intent
          extractor catches the explicit "in Hindi" directive.
-      2. `state["user_language"]` — populated by the memory agent's
-         `detect_language()` (langdetect + Romanized heuristic). The
-         default path when the query has no explicit language directive.
+      2. `state["user_intent"].language` when it disagrees with the detected
+         language but ONLY within the same script — and only where the
+         deterministic marker scorer in `core.language` found no evidence
+         either way. Two same-script codes (hi vs mr, bn vs as) are exactly
+         what langdetect cannot separate; the extractor read the whole
+         sentence, so it is the better witness when nothing else is
+         speaking. A client-supplied `preferred_language` is never
+         second-guessed, and a cross-script disagreement (say "en" vs "mr")
+         is never resolved here — that is a directive question, covered by
+         case 1.
+      3. `state["user_language"]` — populated by the memory agent's
+         `detect_language()` (langdetect + script markers + Romanized
+         heuristic). The default path.
     """
+    detected = state.get("user_language", "en")
     intent: UserIntent | None = state.get("user_intent")
-    if (
-        intent is not None
-        and intent.confidence >= _INTENT_CONFIDENCE_THRESHOLD
-        and intent.language_explicit
-    ):
+    if intent is None or intent.confidence < _INTENT_CONFIDENCE_THRESHOLD:
+        return detected
+
+    if intent.language_explicit:
         return intent.language
-    return state.get("user_language", "en")
+
+    if (
+        state.get("user_language_source") != "client"
+        and intent.language != detected
+        and script_of(intent.language) == script_of(detected)
+        and devanagari_language(state.get("original_query", "")) is None
+    ):
+        log.info("Same-script language tiebreak — trusting intent extractor",
+                 detected=detected, intent_language=intent.language,
+                 script=script_of(detected))
+        return intent.language
+
+    return detected
 
 
 def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]:
@@ -1802,20 +1923,29 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # by checking state.get("user_intent"). Stays None otherwise.
     if extracted_intent is not None:
         result["user_intent"] = extracted_intent
-        # Phase 2.3 follow-through: when the user EXPLICITLY named a target
-        # language (e.g. "Section 131 in Hindi" — typed in Latin script so
-        # langdetect says "en", but the extractor catches the directive),
-        # override state["user_language"] so EVERY downstream consumer
-        # picks up the right language: the domain agents (Legislation,
-        # Newacts, etc.) localize their own prompts via this field, the
+        # Phase 2.3 follow-through: re-resolve the response language now that
+        # the typed intent exists, and write it back to state so EVERY
+        # downstream consumer picks it up — the domain agents (Legislation,
+        # Newacts, ...) localize their own prompts from this field, the
         # synthesizer's localize_prompt reads it, and the final guardrail
-        # respects it. Without this override the user gets English back even
-        # though every layer of the pipeline had the right signal available.
-        if (
-            extracted_intent.confidence >= 0.7
-            and extracted_intent.language_explicit
-        ):
-            result["user_language"] = extracted_intent.language
+        # respects it. Without the write-back the user gets the wrong
+        # language even though every layer had the right signal available.
+        #
+        # `_resolve_user_language` owns the precedence rules: an explicit
+        # directive ("Section 131 in Hindi" — typed in Latin script, so
+        # langdetect says "en") wins outright, and a same-script
+        # disagreement (hi vs mr) is broken by the extractor only where the
+        # deterministic markers had no evidence. Everything else keeps the
+        # detected value.
+        _resolved_lang = _resolve_user_language(
+            {**state, "user_intent": extracted_intent}
+        )
+        if _resolved_lang != state.get("user_language", "en"):
+            log.info("Response language overridden by intent layer",
+                     detected=state.get("user_language", "en"),
+                     resolved=_resolved_lang,
+                     explicit=extracted_intent.language_explicit)
+            result["user_language"] = _resolved_lang
     return result
 
 
@@ -2049,11 +2179,23 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     has_unprocessed_file = (fc is not None and fc.chromadb_collections
                            and "Document" not in valid_results)
     # Phase 2: prefer structured intent (state["user_intent"]) over the legacy
-    # regex when extractor confidence is high. Also force synthesis when the
-    # user explicitly named a non-English target language — pass-through skips
-    # the localize_prompt step that the synthesis path applies.
+    # regex when extractor confidence is high. Also force synthesis whenever the
+    # resolved target language is non-English (named OR auto-detected) —
+    # pass-through skips the localize_prompt step that the synthesis path
+    # applies, so it is the last layer that can enforce the language.
     _wants_table_single = _resolve_wants_table(state)
-    _explicit_lang_override = _resolve_explicit_non_english(state)
+    # NOTE on language: routing a non-English single-agent result AWAY from
+    # pass-through does NOT get it translated — it just lands in the
+    # "primary-only" fast path below, which also returns the agent's text
+    # verbatim. Both verbatim returns are guarded by
+    # `_enforce_response_language` instead, which is where the real backstop
+    # lives. This predicate stays as it was: force synthesis only when the
+    # user EXPLICITLY named a non-English language, where the extra merge
+    # pass is justified.
+    _explicit_lang_override = (
+        _resolve_non_english_target(state)
+        and bool(getattr(state.get("user_intent"), "language_explicit", False))
+    )
     if (
         len(valid_results) == 1
         and not has_unprocessed_file
@@ -2084,7 +2226,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                  tokens=result.tokens_consumed,
                  registry_size=len(source_registry))
         return_dict = {
-            "final_response": result.content,
+            "final_response": await _enforce_response_language(
+                result.content, state, source_registry),
             "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
             # The registry was built above and, until now, thrown away on this
@@ -2302,7 +2445,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                      task=primary_task_state, primary_agent=primary_agent_name,
                      final_len=len(primary), total_tokens=total_tokens)
             return {
-                "final_response": primary,
+                "final_response": await _enforce_response_language(
+                    primary, state, source_registry),
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
             }

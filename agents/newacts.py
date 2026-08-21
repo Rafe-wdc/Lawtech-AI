@@ -960,6 +960,18 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Newacts": fallback_result}}
 
+        # Rerank retrieved hits by true query-passage relevance before building
+        # the prompt (optional, fail-safe — no-op unless RERANKER_ENABLED).
+        # GATED: skip exact-section lookups — a `term` filter already returns the
+        # exact sections requested, and reordering them would fight the user's
+        # chosen order. Rerank only topic/hybrid/cross-act queries, where many
+        # criminal-code sections share keywords and the bi-encoder can't separate
+        # "grants" from "prohibits" (the 0.73-vs-0.74 problem) — exactly what a
+        # cross-encoder fixes.
+        if not _is_exact_filter_query(metadata):
+            from core.reranker import rerank as _rerank
+            hits = _rerank(query, hits)
+
         # Step 5: Convert hits to documents
         docs_text = "\n\n".join(h["_source"]["page_content"] for h in hits)
         source_file = hits[0]["_source"].get("source", "unknown")

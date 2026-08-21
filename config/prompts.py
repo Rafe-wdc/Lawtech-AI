@@ -336,9 +336,53 @@ REGARDLESS of the source domain (authorized or unverified):
   say "no authoritative source available" (that also names the gap and
   hints at the hidden layer, which is undesirable).
 
-Only case names, statutory quotes, and PDF URLs that flow from the
-verified Lawttorney retrieval pipeline may be surfaced as citations to
-the user.
+## URL WHITELIST (the ONLY URLs allowed in the visible response)
+
+The response text is post-filtered against a strict allowlist. Only URLs
+matching one of these two host prefixes will survive the filter; every
+other URL (indiankanoon.org, barandbench.com, government portals, news
+sites, blogs, forums, aggregators — EVERY external host) is stripped:
+
+  1. `https://lawttorney.s3.<region>.amazonaws.com/...`
+     (Lawttorney S3 bucket — High Court judgment PDFs)
+  2. `https://api.sci.gov.in/...`
+     (Supreme Court PDFs — canonical)
+
+Rules that follow from the whitelist:
+- Do NOT include ANY other URL, domain, or hostname in the response.
+  Not as clickable markdown, not as bare text, not inside `See:` /
+  `Source:` / `Ref:` wrappers, not in parenthetical asides.
+- If you cite a case or statute whose PDF is not in the whitelist,
+  write only the citation prose (party names, section number, year) —
+  never append a URL to it.
+- Case names, statutory quotes, and section text may always be surfaced
+  as text. Only the URL itself is restricted.
+
+## NO SOURCES / RETRIEVED FOOTER (input-only marker never echoed)
+
+The `## Retrieved Sources` block (and any similarly-named block like
+`## Sources`, `## Citations`, `## References`, `Retrieved Sources:`,
+`Sources & Citations`, or a numbered list of ids at the end of the
+answer) is INPUT context ONLY. It is passed to you so you can ground
+citations against retrieved records. It MUST NOT appear in the visible
+response under ANY heading, footer, or trailing block.
+
+Concretely, in the response you produce:
+- Do NOT emit a heading called `## Retrieved Sources`, `## Sources`,
+  `## Citations`, `## References`, `### Sources`, `Sources & Citations`,
+  `**Sources:**`, `Retrieved Sources:`, or any equivalent label.
+- Do NOT emit the internal record ids at all. Ids look like
+  `sci-44015`, `sci_judgment-44015`, `hc-<slug>-<digits>`,
+  `leg-<slug>-<digits>`, `leg-<domain>-<digits>`, `web-<digits>`,
+  `newacts-<slug>`, `constitution-<article>`, `maxim-<slug>`,
+  `gst-<state>-<digits>`. They are grounding tokens for the pipeline,
+  not user-visible content.
+- Do NOT append a numbered / bulleted list of records at the end of
+  the response as a "sources" or "references" footer.
+- Cite naturally in prose: use the case name + reporter citation
+  (e.g. "Suraj Lamp & Industries v. State of Haryana, (2012) 1 SCC 656")
+  and section / act names — never the internal id, never the URL,
+  never a trailing block.
 """
 
 
@@ -665,6 +709,7 @@ SYNTHESIS_PROMPT += (
     "\n\n" + INDIAN_LEGAL_DUAL_LAW_MANDATE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -1159,6 +1204,7 @@ OUTPUT REQUIREMENTS — follow EXACTLY:
 # applies and reinforces the existing "NO PREAMBLE" rule.
 SYNTHESIS_TABLE_PROMPT += (
     "\n\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
 )
 
 
@@ -1404,6 +1450,7 @@ DRAFTING_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -1721,6 +1768,7 @@ DRAFTING_SECTION_PAIR_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
     + "\n" + DRAFTING_SECTIONWISE_DISCLOSURES
 )
@@ -1801,6 +1849,7 @@ DRAFTING_MODIFICATION_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -1842,7 +1891,10 @@ Rules:
 # Append pipeline-level anti-hallucination discipline. The {citations} block
 # passed in is the authoritative retrieved-sources pool for this call — every
 # visible citation, quoted statute, and PDF URL must trace back to it.
-DRAFT_SYNTHESIS_PROMPT += "\n\n" + INDIAN_LEGAL_CITATION_GROUNDING
+DRAFT_SYNTHESIS_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
 
 
 # --- Drafting Pipeline: Auto-Citation (no DB results available) ---
@@ -1879,7 +1931,10 @@ Rules:
 # fallback ("Do NOT introduce citations from your training memory") is the
 # load-bearing rule here; combined with rule 6 above, the LLM is instructed
 # to either cite a fact it is certain of, or restate the point unauthored.
-DRAFT_CITATION_PROMPT += "\n\n" + INDIAN_LEGAL_CITATION_GROUNDING
+DRAFT_CITATION_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
 
 
 JUDGMENT_SYSTEM_PROMPT = """You are a Legal AI Assistant providing answers strictly from the supplied context,
@@ -1938,6 +1993,7 @@ JUDGMENT_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_JUDGMENT_SHAPE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -1956,6 +2012,7 @@ LEGISLATION_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -2045,6 +2102,7 @@ NEWACTS_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -2071,6 +2129,7 @@ CONSTITUTION_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -2097,6 +2156,7 @@ MAXIM_SYSTEM_PROMPT += (
     "\n\n" + INDIAN_LEGAL_CITATION_FORMAT
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -2480,6 +2540,7 @@ SCI_JUDGMENT_SYSTEM_PROMPT += (
     + "\n" + INDIAN_LEGAL_JUDGMENT_SHAPE
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -2562,6 +2623,15 @@ There is NO bench / judge information — AAARs are administrative bodies, not c
 - AAAR orders are NOT Supreme Court / High Court judgments — do NOT call them "judgments" or refer to "the bench". They are administrative appellate rulings. Use words like "AAAR ruling", "order", "held".
 - 5 records have no PDF URL and 1 has no extracted text — note this gracefully if a relevant order has missing data
 """
+
+# Attach the shared URL-whitelist + no-external-links discipline so any
+# incidental external URL from web-fallback context does not appear in
+# GST agent responses.
+GST_JUDGMENT_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
+
 
 # --- Memory Agent Prompts ---
 
@@ -2826,6 +2896,7 @@ LEGAL_NOTICE_DRAFT_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 
@@ -2885,6 +2956,7 @@ COMPLAINT_DRAFT_PROMPT += (
     + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
     + "\n" + INDIAN_LEGAL_OUTPUT_FORMAT
     + "\n" + INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE
+    + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
 

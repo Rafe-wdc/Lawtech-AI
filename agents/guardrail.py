@@ -143,6 +143,18 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     # Pass 2: markdown polish (code fences, bullets, headings, etc.)
     cleaned = sanitize_markdown(cleaned)
 
+    # Pass 2b: strip external web URLs (Google Search grounding, web-fallback,
+    # any URL the LLM emitted in prose) and their labelled wrappers. Whitelist:
+    # `lawttorney.s3.*.amazonaws.com` (HC judgment PDFs) and `api.sci.gov.in`
+    # (SCI PDFs). See core.url_filter.
+    from core.url_filter import sanitize_prose as _strip_urls
+    pre_url_len = len(cleaned)
+    cleaned = _strip_urls(cleaned)
+    if len(cleaned) < pre_url_len:
+        log.info("External URLs stripped from final_response",
+                 before=pre_url_len, after=len(cleaned),
+                 removed=pre_url_len - len(cleaned))
+
     # Pass 3: hard char cap. sanitize_output handles pad-char runaway, but
     # an LLM can still emit legitimately diverse prose that runs past any
     # useful display budget. Clamp to MAX_FINAL_RESPONSE_CHARS with a

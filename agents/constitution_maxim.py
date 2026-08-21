@@ -262,11 +262,20 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
             user_language=user_language, intent=user_intent,
         )
         result.tokens_consumed += tokens  # include the wasted tokens
-        # Stream the fallback content as tokens so frontend displays it
+        # Stream the fallback content as tokens so frontend displays it.
+        # Route through the URL scrubber so external Google-Search-grounded
+        # URLs don't flash before guardrail_output_node strips them.
         try:
+            from core.url_filter import StreamingUrlFilter
             writer = get_stream_writer()
+            url_filter = StreamingUrlFilter()
             for i in range(0, len(result.content), 20):
-                writer({"type": "token", "content": result.content[i:i+20]})
+                safe = url_filter.push(result.content[i:i+20])
+                if safe:
+                    writer({"type": "token", "content": safe})
+            tail = url_filter.flush()
+            if tail:
+                writer({"type": "token", "content": tail})
         except (RuntimeError, NameError):
             pass
         return result

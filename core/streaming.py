@@ -168,7 +168,20 @@ async def _stream_with_writer(chain, inputs: dict, writer):
     column padding (the user got the table header plus a truncation
     notice and nothing else — reported for "Section 125 of CRPC"). Post-
     stream sanitize still collapses anything that slips through.
+
+    Also runs each emitted chunk through a StreamingUrlFilter that holds
+    tokens across the boundary of an in-flight URL until the URL either
+    completes (whitelist-checked and either kept or dropped) or the stream
+    closes. Prevents external web URLs from flashing in the SSE tokens
+    even though they'd get stripped from final_response by
+    guardrail_output_node afterwards. `full` still records the ORIGINAL
+    (unscrubbed) content so the AIMessage-shaped return value matches what
+    the LLM actually generated; guardrail_output_node runs on `full` and
+    re-strips at the boundary.
     """
+    from core.url_filter import StreamingUrlFilter
+    url_filter = StreamingUrlFilter()
+
     full = ""
     usage = {}
     last_ch: str | None = None  # most recent same-char run anchor
@@ -214,10 +227,17 @@ async def _stream_with_writer(chain, inputs: dict, writer):
         if out_chars:
             out_token = "".join(out_chars)
             full += out_token
-            writer({"type": "token", "content": out_token})
+            safe_out = url_filter.push(out_token)
+            if safe_out:
+                writer({"type": "token", "content": safe_out})
 
         if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
             usage = chunk.usage_metadata
+
+    # Drain the URL filter's held tail through the prose sanitiser and emit.
+    tail = url_filter.flush()
+    if tail:
+        writer({"type": "token", "content": tail})
 
     if runaway_dropped:
         log.info("Stream completed with pad-char runaway suppression",

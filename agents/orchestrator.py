@@ -1393,13 +1393,22 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             user_language=state.get("user_language", "en"),
         )
         # Stream the refined content to any active SSE writer so the UX
-        # matches a normal generation.
+        # matches a normal generation. Route through the URL scrubber so
+        # any external link in the refined text doesn't flash into the
+        # stream before guardrail_output_node strips it from final_response.
         try:
             from langgraph.config import get_stream_writer
+            from core.url_filter import StreamingUrlFilter
             writer = get_stream_writer()
+            url_filter = StreamingUrlFilter()
             _chunk = 40
             for i in range(0, len(refined), _chunk):
-                writer({"type": "token", "content": refined[i:i + _chunk]})
+                safe = url_filter.push(refined[i:i + _chunk])
+                if safe:
+                    writer({"type": "token", "content": safe})
+            tail = url_filter.flush()
+            if tail:
+                writer({"type": "token", "content": tail})
         except RuntimeError:
             pass  # batch endpoint
         log.info("Regenerate short-circuit: refined previous response",

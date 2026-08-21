@@ -277,14 +277,23 @@ async def web_search_fallback(
         # (often the priciest calls in the pipeline) were invisible.
         _record_genai_tokens(agent_name, "web_grounded", response, _primary)
 
-        # Stream the fallback content as tokens to the frontend
+        # Stream the fallback content as tokens to the frontend. Run through
+        # the URL scrubber so external Google-Search-grounded links don't
+        # flash into the SSE stream (they're also stripped from final_response
+        # by guardrail_output_node).
         try:
             from langgraph.config import get_stream_writer
+            from core.url_filter import StreamingUrlFilter
             writer = get_stream_writer()
-            # Stream in small chunks for smooth frontend rendering
+            url_filter = StreamingUrlFilter()
             chunk_size = 20
             for i in range(0, len(content), chunk_size):
-                writer({"type": "token", "content": content[i:i + chunk_size]})
+                safe = url_filter.push(content[i:i + chunk_size])
+                if safe:
+                    writer({"type": "token", "content": safe})
+            tail = url_filter.flush()
+            if tail:
+                writer({"type": "token", "content": tail})
         except RuntimeError:
             pass  # not in streaming context (batch endpoint)
 

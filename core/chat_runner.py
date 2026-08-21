@@ -272,9 +272,13 @@ async def run_chat_pipeline(
             yield _sse({"type": "response", "content": cached.response})
 
             # Emit the same `sources` event the non-cached path emits so
-            # frontend consumers see sources consistently.
-            if cached.source_metadata:
-                yield _sse({"type": "sources", "data": cached.source_metadata})
+            # frontend consumers see sources consistently. Sanitise to drop
+            # external web URLs (Scenario grounding, tier-3 web_search_fallback)
+            # while keeping HC S3 and SCI api.sci.gov.in links.
+            from core.url_filter import sanitize_source_records as _sanitize_srcs
+            _clean_cached_sources = _sanitize_srcs(cached.source_metadata)
+            if _clean_cached_sources:
+                yield _sse({"type": "sources", "data": _clean_cached_sources})
 
             # Generate follow-up suggestions on demand (cheap vs the full
             # agent pipeline we just avoided). Cached entries don't store
@@ -355,7 +359,7 @@ async def run_chat_pipeline(
                 "conversation_turn": cached_turn,
                 "query_rewritten": False,
                 "effective_query": None,
-                "source_metadata": cached.source_metadata,  # kept for backward compat
+                "source_metadata": _clean_cached_sources,  # kept for backward compat
                 "cached": True,
             })
             log.info("Cache hit", endpoint=i.endpoint_name,
@@ -601,6 +605,11 @@ async def run_chat_pipeline(
 
     if final_response:
         yield _sse({"type": "response", "content": final_response})
+
+    # Sanitise sources to drop external web URLs (Scenario grounding,
+    # tier-3 web_search_fallback). HC S3 and SCI api.sci.gov.in links kept.
+    from core.url_filter import sanitize_source_records as _sanitize_srcs
+    all_source_metadata = _sanitize_srcs(all_source_metadata)
 
     if all_source_metadata:
         yield _sse({"type": "sources", "data": all_source_metadata})

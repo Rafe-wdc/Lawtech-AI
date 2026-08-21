@@ -673,11 +673,12 @@ async def search(data: SearchRequest, request: Request):
                 log.warning("Cached followup suggestions failed",
                             error=str(e))
 
+            from core.url_filter import sanitize_source_records as _sanitize_srcs
             return SearchResponse(
                 globalThreadId=thread_id,
                 result=cached.response,
                 token_usage=cached_token_usage,
-                source=cached.source_metadata,
+                source=_sanitize_srcs(cached.source_metadata),
                 agents_used=cached.agents_used,
                 conversation_turn=_cached_turn,
                 followup_suggestions=_cached_followups,
@@ -866,6 +867,9 @@ async def search(data: SearchRequest, request: Request):
     # flips on repeat calls when the relevance gate is borderline), so
     # replaying them for the TTL would pin the wrong branch for future
     # users. See the RESPONSE_CACHE_ENABLED comment in core/settings.py.
+    from core.url_filter import sanitize_source_records as _sanitize_srcs
+    _clean_sources = _sanitize_srcs(final_state.get("source_metadata", []))
+
     if (
         _is_first_turn
         and final_response
@@ -876,7 +880,7 @@ async def search(data: SearchRequest, request: Request):
             data.prompt_query,
             CacheEntry(
                 response=final_response,
-                source_metadata=final_state.get("source_metadata", []),
+                source_metadata=_clean_sources,
                 agents_used=agents_used,
                 tokens_consumed=total_tokens,
                 token_usage=_token_tracker.to_dict(include_calls=True),
@@ -889,7 +893,7 @@ async def search(data: SearchRequest, request: Request):
         globalThreadId=thread_id,
         result=final_response,
         token_usage=_token_tracker.to_dict(include_calls=True),
-        source=final_state.get("source_metadata", []),
+        source=_clean_sources,
         agents_used=agents_used,
         effective_query=effective_query if query_rewritten else None,
         query_rewritten=query_rewritten,

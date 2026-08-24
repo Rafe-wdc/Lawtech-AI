@@ -462,6 +462,14 @@ async def legislation_node(state: LegalAgentState) -> dict:
             fallback_result.retry_attempted = True
             return {"agent_results": {"Legislation": fallback_result}}
 
+        # Rerank retrieved hits by true query-passage relevance before building
+        # the prompt (optional, fail-safe — no-op unless RERANKER_ENABLED). A
+        # cross-encoder reorders whatever the BM25 stage returned so the most
+        # on-point provision goes FIRST, surviving the char cap below and
+        # anchoring the LLM. Returns hits unchanged if reranking is off/unavailable.
+        from core.reranker import rerank as _rerank
+        hits = _rerank(query, hits)
+
         # Step 4: Convert hits to documents (cap each hit to 3000 chars, total to 30KB)
         _MAX_DOC_CHARS = 3000
         _MAX_TOTAL_CHARS = 30_000

@@ -114,6 +114,14 @@ async def scenario_node(state: LegalAgentState) -> dict:
                     ),
                     timeout=TIMEOUT_WEB_SEARCH_SEC,
                 )
+            # Record BEFORE the empty-candidate check — the request consumed
+            # real tokens even when the safety filter zeroed the candidate list.
+            # Missing this record was a live tracker gap: Scenario's usage was
+            # silently dropped, forcing `repair_zero_total` to backfill from
+            # `AgentResult.tokens_consumed` and leaving `by_agent` blank.
+            from core.token_tracker import record_genai
+            record_genai("Scenario", "web_grounded", response,
+                         MODELS["scenario_web_grounded"])
 
             # Extract response text (guard against empty candidates/parts/null text)
             if not response.candidates or not response.candidates[0].content.parts:
@@ -163,6 +171,11 @@ async def scenario_node(state: LegalAgentState) -> dict:
                             ),
                             timeout=TIMEOUT_WEB_SEARCH_SEC,
                         )
+                    # Record the rescue call too — same rationale as the primary
+                    # web-grounded record above. Different step name so the two
+                    # calls remain distinguishable in per-call cost attribution.
+                    record_genai("Scenario", "rescue_no_grounding", rescue_resp,
+                                 MODELS["scenario_web_grounded"])
                     if (rescue_resp.candidates
                             and rescue_resp.candidates[0].content.parts):
                         content = getattr(

@@ -12,7 +12,6 @@ Pattern borrowed from scenario_node() in agents/scenario.py.
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 from core.state import AgentResult, SourceMetadata
 from core.clients import get_gemini_flash, get_genai_client
@@ -21,32 +20,9 @@ from core.chat_store import chat_store
 from core.metrics import METRICS
 from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
 from core.token_tracker import record as _record_tokens
+from core.token_tracker import record_genai as _record_genai_tokens
 
 log = get_logger("AgentFallback")
-
-
-def _record_genai_tokens(agent: str, step: str, response, model: str) -> None:
-    """Adapter: feed raw google-genai response usage into token_tracker.
-
-    token_tracker.record() expects a LangChain-style AIMessage whose
-    `.usage_metadata` is a dict. Raw google-genai responses expose
-    `.usage_metadata` as a Pydantic object with `prompt_token_count` /
-    `candidates_token_count` / `total_token_count` attributes. This adapter
-    normalises the shape so per-request cost attribution captures the
-    priciest calls (Google Search grounding + Pro escalation) that were
-    previously invisible to the tracker.
-    """
-    um = getattr(response, "usage_metadata", None)
-    if um is None:
-        return
-    shim = SimpleNamespace(
-        usage_metadata={
-            "input_tokens":  getattr(um, "prompt_token_count", 0) or 0,
-            "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
-            "total_tokens":  getattr(um, "total_token_count", 0) or 0,
-        },
-    )
-    _record_tokens(agent, step, shim, model=model)
 
 
 # --- Domain-Specific Rewrite Prompts ---

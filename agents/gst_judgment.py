@@ -186,6 +186,11 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
                             timeout=60,
                         )
                     retry_messages = retry_result.get("messages", [])
+                    # Fold retry trajectory into `messages` so the token loop
+                    # below feeds BOTH ReAct calls into the tracker — see the
+                    # matching fix in sci_judgment.py for context. Prevents
+                    # silent wallet under-charging on fallback-triggered runs.
+                    messages = list(messages) + list(retry_messages)
                     answer = ""
                     tools_used = ["gst_search_by_topic (fallback)"]
                     for msg in retry_messages:

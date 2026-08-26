@@ -288,3 +288,55 @@ def record(
         um = getattr(response, "usage_metadata", None)
         return (um.get("total_tokens") or 0) if um else 0
     return tracker.record(agent, step, response, model)
+
+
+def record_genai(agent: str, step: str, response: Any, model: str = "") -> int:
+    """Feed a raw google-genai response's usage into the tracker.
+
+    LangChain wraps usage under `.usage_metadata` as a dict — `record()`
+    handles that shape natively. The native `genai.Client` exposes
+    `.usage_metadata` as a Pydantic object with `prompt_token_count` /
+    `candidates_token_count` / `total_token_count` attrs, which `record()`
+    doesn't understand. This helper normalises the shape via a shim so
+    per-request cost attribution captures Google-Search-grounded calls
+    (Scenario, web_search_fallback, get_web_context) that would otherwise
+    be invisible to `by_agent` / `by_model` / `cost_usd` rollups.
+    """
+    from types import SimpleNamespace
+    um = getattr(response, "usage_metadata", None)
+    if um is None:
+        return 0
+    shim = SimpleNamespace(
+        usage_metadata={
+            "input_tokens":  getattr(um, "prompt_token_count", 0) or 0,
+            "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
+            "total_tokens":  getattr(um, "total_token_count", 0) or 0,
+        },
+    )
+    return record(agent, step, shim, model=model)
+
+
+def repair_zero_total(usage: dict | None, fallback_total: int) -> dict:
+    """Guarantee `total_tokens > 0` on the emitted payload.
+
+    Used at every emission site (live + cache-hit) so a lost-ContextVar
+    tracker or a stored zero-tracker dict cannot propagate to clients when
+    a non-zero per-agent AgentResult sum is available. Preserves any
+    existing per-agent / per-call breakdown; only patches the aggregate
+    (and mirrors it into `output_tokens` when both input and output are
+    empty, to keep downstream sums balanced).
+    """
+    if not isinstance(usage, dict):
+        usage = {
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            "cache_read_tokens": 0, "cache_creation_tokens": 0,
+            "reasoning_tokens": 0, "cost_usd": 0.0,
+            "by_agent": {}, "calls": [],
+        }
+    total = usage.get("total_tokens") or 0
+    if total > 0 or fallback_total <= 0:
+        return usage
+    usage["total_tokens"] = fallback_total
+    if (usage.get("input_tokens") or 0) == 0 and (usage.get("output_tokens") or 0) == 0:
+        usage["output_tokens"] = fallback_total
+    return usage

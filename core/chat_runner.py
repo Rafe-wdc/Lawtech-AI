@@ -333,17 +333,26 @@ async def run_chat_pipeline(
             # token breakdown if it was stored. Older cache entries (pre
             # token_usage support) only stored the aggregate int — synthesise
             # a minimal token_usage from that for shape consistency.
-            cached_token_usage = cached.token_usage or {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": cached.tokens_consumed or 0,
-                "cache_read_tokens": 0,
-                "cache_creation_tokens": 0,
-                "reasoning_tokens": 0,
-                "cost_usd": 0.0,
-                "by_agent": {},
-                "calls": [],
-            }
+            # `repair_zero_total` covers the third case: the stored dict is
+            # populated but all-zero because the live ContextVar tracker was
+            # lost on the request that filled the cache. Falling back to the
+            # per-agent AgentResult sum (`cached.tokens_consumed`) keeps the
+            # emitted total honest instead of silently zero.
+            from core.token_tracker import repair_zero_total
+            cached_token_usage = repair_zero_total(
+                cached.token_usage or {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": cached.tokens_consumed or 0,
+                    "cache_read_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "reasoning_tokens": 0,
+                    "cost_usd": 0.0,
+                    "by_agent": {},
+                    "calls": [],
+                },
+                cached.tokens_consumed or 0,
+            )
             # Align the cached `done` event with the non-cached emission
             # (see the terminal `done` yield below). Frontend consumers
             # rely on `conversation_turn`, `query_rewritten`,
@@ -689,7 +698,10 @@ async def run_chat_pipeline(
     # with UnboundLocalError on `token_usage_dict` (see prod error.log
     # circa 2026-06-04, plus the chronic flakiness of
     # tests/integration/test_api.py::test_stream_final_event_has_result).
-    token_usage_dict = token_tracker.to_dict(include_calls=True)
+    from core.token_tracker import repair_zero_total
+    token_usage_dict = repair_zero_total(
+        token_tracker.to_dict(include_calls=True), total_tokens,
+    )
 
     # Cache first-turn responses. We SKIP caching when:
     #   - uploads / integration context were used (per-request content)
@@ -697,6 +709,10 @@ async def run_chat_pipeline(
     #     (would replay the block to every future user of the same query)
     #   - any agent fell back to web-grounded search (the response reflects
     #     a non-deterministic branch — see any_fallback_used init comment)
+    #   - the token tracker AND per-agent sum both came back zero
+    #     (would poison every future cache hit with a zero-token replay —
+    #     see the "token_usage should never be 0" invariant)
+    _emitted_total = (token_usage_dict.get("total_tokens") or 0)
     cacheable = (
         i.enable_cache
         and i.is_first_turn
@@ -705,6 +721,7 @@ async def run_chat_pipeline(
         and not integration_context_dict
         and not turn_is_blocked
         and not any_fallback_used
+        and _emitted_total > 0
     )
     if cacheable:
         response_cache.set(

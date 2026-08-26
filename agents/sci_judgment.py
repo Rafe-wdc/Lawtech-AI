@@ -178,6 +178,12 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                             timeout=60,
                         )
                     retry_messages = retry_result.get("messages", [])
+                    # Fold the retry trajectory into `messages` so the token-
+                    # summing loop below feeds BOTH ReAct calls into the
+                    # tracker. Without this, retry LLM calls were silently
+                    # dropped from `token_usage.total_tokens`, under-charging
+                    # the user's wallet on every fallback-triggered request.
+                    messages = list(messages) + list(retry_messages)
                     answer = ""
                     tools_used = ["search_by_topic (fallback)"]
                     for msg in retry_messages:

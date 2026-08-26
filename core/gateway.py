@@ -623,13 +623,21 @@ async def search(data: SearchRequest, request: Request):
             _latency_ms = int((time.perf_counter() - _req_start) * 1000)
             log.info("Cache hit, returning cached response",
                      latency_ms=_latency_ms, agents=cached.agents_used)
-            cached_token_usage = cached.token_usage or {
-                "input_tokens": 0, "output_tokens": 0,
-                "total_tokens": cached.tokens_consumed or 0,
-                "cache_read_tokens": 0, "cache_creation_tokens": 0,
-                "reasoning_tokens": 0, "cost_usd": 0.0,
-                "by_agent": {}, "calls": [],
-            }
+            # `repair_zero_total` covers the case where the stored dict is
+            # populated but all-zero (live ContextVar tracker was lost on
+            # the request that filled the cache). Falls back to the
+            # per-agent AgentResult sum so the emitted total is honest.
+            from core.token_tracker import repair_zero_total
+            cached_token_usage = repair_zero_total(
+                cached.token_usage or {
+                    "input_tokens": 0, "output_tokens": 0,
+                    "total_tokens": cached.tokens_consumed or 0,
+                    "cache_read_tokens": 0, "cache_creation_tokens": 0,
+                    "reasoning_tokens": 0, "cost_usd": 0.0,
+                    "by_agent": {}, "calls": [],
+                },
+                cached.tokens_consumed or 0,
+            )
 
             # Persist the turn even on a cache hit — otherwise Turn 2 loads
             # empty history from Postgres and the assistant "forgets" Turn 1.
@@ -730,10 +738,15 @@ async def search(data: SearchRequest, request: Request):
     if final_state.get("is_blocked"):
         log.warning("Query blocked by safety filter",
                     reason=final_state.get("block_reason", "unknown"))
+        from core.token_tracker import repair_zero_total
+        _blocked_usage = repair_zero_total(
+            _token_tracker.to_dict(include_calls=True),
+            final_state.get("tokens_consumed", 0) or 0,
+        )
         return SearchResponse(
             globalThreadId=thread_id,
             result=final_state.get("block_reason", "Query blocked by safety filter."),
-            token_usage=_token_tracker.to_dict(include_calls=True),
+            token_usage=_blocked_usage,
             source=[{"source_type": "blocked", "title": "Blocked", "content": ["Query blocked by safety filter"]}],
             agents_used=[],
         )
@@ -870,11 +883,23 @@ async def search(data: SearchRequest, request: Request):
     from core.url_filter import sanitize_source_records as _sanitize_srcs
     _clean_sources = _sanitize_srcs(final_state.get("source_metadata", []))
 
+    # Repair the emitted token_usage in one place so both the cache write
+    # and the response body share the same honest total. Fallback is the
+    # per-agent AgentResult sum (state["tokens_consumed"]) — non-zero even
+    # when the ContextVar tracker was lost mid-request. "token_usage should
+    # never be 0" invariant.
+    from core.token_tracker import repair_zero_total
+    _emitted_token_usage = repair_zero_total(
+        _token_tracker.to_dict(include_calls=True), total_tokens,
+    )
+    _emitted_total = (_emitted_token_usage.get("total_tokens") or 0)
+
     if (
         _is_first_turn
         and final_response
         and not final_state.get("is_blocked")
         and not _fallback_used
+        and _emitted_total > 0
     ):
         response_cache.set(
             data.prompt_query,
@@ -883,7 +908,7 @@ async def search(data: SearchRequest, request: Request):
                 source_metadata=_clean_sources,
                 agents_used=agents_used,
                 tokens_consumed=total_tokens,
-                token_usage=_token_tracker.to_dict(include_calls=True),
+                token_usage=_emitted_token_usage,
             ),
             language=(data.preferred_language or ""),
             cite_appendix=data.cite_appendix,
@@ -892,7 +917,7 @@ async def search(data: SearchRequest, request: Request):
     return SearchResponse(
         globalThreadId=thread_id,
         result=final_response,
-        token_usage=_token_tracker.to_dict(include_calls=True),
+        token_usage=_emitted_token_usage,
         source=_clean_sources,
         agents_used=agents_used,
         effective_query=effective_query if query_rewritten else None,

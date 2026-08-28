@@ -507,6 +507,24 @@ Examples of how intent fields translate to checks:
       `additional_instructions` field if the system attaches any
       artifact-specific guidance.
 
+  NEVER raise a violation that changes WHAT DOCUMENT the response is.
+    `legal_artifact` is a low-confidence classifier hint, NOT the user's
+    instruction. The USER QUERY is the sole authority on document type.
+    When the query names a document ("draft a regular bail application",
+    "draft a writ petition") and the response IS that document, the
+    response is CORRECT — even if `legal_artifact` says something else.
+    In that situation the classifier is wrong, not the draft: emit NO
+    violation on the `legal_artifact` field and audit the response against
+    the document type the QUERY asked for.
+    Never emit a suggested_fix of the form "generate a <X> instead" /
+    "this should be a <X>, not a <Y>" / "convert this into a <X>". Those
+    rewrite a correct draft into the wrong document. Violations on
+    `legal_artifact` are limited to structural gaps WITHIN the document
+    type the query asked for (a missing Prayer, a missing Verification,
+    too few grounds) — never a change of document type itself.
+    A fact narrative that merely MENTIONS a complaint, an FIR, or a
+    police station does not make the requested document a complaint.
+
   include_case_law=True
     → Response should reference relevant cases. (Citations need not be
       in English when strict_language=True.)

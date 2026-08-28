@@ -1432,6 +1432,18 @@ def _intent_has_directives(intent: Optional[UserIntent]) -> bool:
         or intent.include_examples
         or intent.arguments_for_party != "none"
         or intent.legal_artifact != LegalArtifact.NONE
+        # Every drafting request is worth auditing. This used to be carried
+        # implicitly by `legal_artifact != NONE`, because the extractor
+        # mislabelled most court filings (bail, writ, quashing, plaint) as
+        # 'complaint_draft'. Narrowing that classification correctly sends
+        # those to NONE, which would otherwise silently drop the critic on
+        # exactly the flows that need it most — a draft is the longest,
+        # most placeholder-prone, most language-sensitive output we emit,
+        # and the critic is what catches canonical-example substitution and
+        # script drift in it. Gate on the task instead of the artifact so
+        # coverage no longer depends on a classifier getting the doc type
+        # right.
+        or intent.task_intent == "draft"
         or bool(intent.additional_instructions.strip())
     )
 

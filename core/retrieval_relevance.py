@@ -34,12 +34,10 @@ DESIGN
 - Agent-agnostic API — pass already-extracted chunk text (str), not ES
   hit dicts, so all four agents can use the same helper without coupling
   to their varied hit formats.
-- Coarse semantic floor (BGE cosine >= 0.15) catches degenerate cases
-  (empty chunks, pure keyword spam) without burning an LLM call. The
-  threshold is intentionally permissive — the LLM judge does the real work.
-- Judge uses Gemini Flash Lite at temperature=0 with structured output.
-  ~500 tokens, ~3s warm. On error: fail-open (let the downstream apology
-  guard catch it) so an embedding-service hiccup doesn't break the agent.
+- Single-pass LLM-as-judge using Gemini Flash Lite at temperature=0 with
+  structured output. ~500 tokens, ~3s warm. On error: fail-open (let the
+  downstream apology guard catch it) so an LLM hiccup doesn't break the
+  agent.
 - Apology guard is shared too — scans head + tail of the response, so
   hedges added at the end (the common LLM pattern) don't slip through.
 """
@@ -47,13 +45,12 @@ DESIGN
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from core.clients import get_gemini_flash, get_retriever_embeddings
+from core.clients import get_gemini_flash_full
 from core.logger import get_logger, log_time
 
 log = get_logger("RetrievalGate")
@@ -61,9 +58,6 @@ log = get_logger("RetrievalGate")
 
 # --- Tunables (env-driven for runtime adjustment without code change) ---
 
-_COARSE_SEMANTIC_FLOOR = float(
-    os.environ.get("RETRIEVAL_GATE_COARSE_FLOOR", "0.15")
-)
 # Per-chunk floor and ceiling for the adaptive judge window.
 # `_RELEVANCE_CHUNK_CHARS` is kept as a name (imported by tests) but is
 # now the FLOOR, not a hard limit. See `_adaptive_chunk_window` below.
@@ -77,104 +71,185 @@ _RELEVANCE_TOTAL_CHARS_BUDGET = 12000
 # now also short-circuits the gate entirely on exact-filter queries, but
 # bumping the cap is defense in depth for Legislation / Constitution / Maxim.
 _RELEVANCE_TOP_N = 10
-_RELEVANCE_CONFIDENCE_MIN = int(
-    os.environ.get("RETRIEVAL_GATE_MIN_CONFIDENCE", "60")
-)
 _JUDGE_TIMEOUT_SEC = 15.0
 
 
-# --- Domain hints (lets the judge be more specific for each agent) ---
+# --- Domain hints (per-agent overlays on the universal decision procedure) ---
 #
-# Each entry frames what the agent is supposed to retrieve, so the judge
-# can apply the right "wrong-subject" heuristics. Generic enough to not
-# overfit to known failure modes.
+# The main judge prompt now runs the UNIVERSAL filters (jurisdiction,
+# statute, direction, temporal, forum) for every agent. Each domain hint
+# below is a consistent 3-block overlay — ACCEPT WHEN / REJECT WHEN /
+# COMMON FALSE POSITIVES — that adds agent-specific rules on top of the
+# universal ones. Keeping the shape identical across agents prevents
+# drift (the Bombay-vs-Jharkhand bug was drift: the Judgment hint had a
+# jurisdiction clause and the Legislation hint didn't).
 
 _DOMAIN_HINTS: dict[str, str] = {
     "Legislation": (
-        "These should be statutory provisions (sections/rules/orders) of "
-        "central or state legislation that govern the legal scenario the "
-        "user is asking about. Provisions from acts that merely *mention* "
-        "the same statute or share rare phrases, while governing a "
-        "different subject-matter (different domain, different parties, "
-        "or opposite legal effect such as prohibiting vs permitting), "
-        "are NOT relevant."
+        "Retrieval target: statutory provisions (sections / rules / orders) "
+        "of central or state legislation, or High Court / tribunal rules, "
+        "that govern the user's scenario.\n\n"
+        "ACCEPT WHEN\n"
+        "- Retrieved sections come from the statute the user named (or the "
+        "  statute that governs the user's scenario when the query is issue-"
+        "  based, not section-based) AND from the correct jurisdictional "
+        "  scope (central law: always in scope; state / High-Court / tribunal "
+        "  law: only from the state or forum the user named).\n"
+        "- Retrieved sections address the same LEGAL EFFECT the user asked "
+        "  about (grant vs bar, entitlement vs prohibition, procedure vs "
+        "  substantive right).\n\n"
+        "REJECT WHEN\n"
+        "- User named a specific COURT / TRIBUNAL / STATE and the hits are "
+        "  the corresponding rules of a DIFFERENT forum (Bombay HC query → "
+        "  Jharkhand HC Rules; Delhi HC query → Karnataka HC Rules; NCLT "
+        "  Mumbai query → NCLT Chennai practice directions; Maharashtra "
+        "  land-rev query → Karnataka Land Revenue Code).\n"
+        "- User named a specific ACT and hits are a DIFFERENT act that "
+        "  happens to share the section number (BNS §318 query → §318 of a "
+        "  different code).\n"
+        "- Hits discuss the same topic but in the OPPOSITE DIRECTION (query "
+        "  about granting an injunction → provision that PROHIBITS "
+        "  injunctions for an unrelated proceeding).\n\n"
+        "COMMON FALSE POSITIVES (from prod)\n"
+        "- HC Rules of a different HC surfacing because they cross-reference "
+        "  §482 CrPC / §528 BNSS.\n"
+        "- Municipalities / local-body / tax acts matched only because they "
+        "  mention \"temporary injunction\" or \"Order XXXIX\" in passing.\n"
+        "- Old-law (CrPC / IPC / IEA) provisions surfaced for a new-law "
+        "  (BNSS / BNS / BSA) query without cross-mapping — accept only if "
+        "  the hit substantively discusses the corresponding current "
+        "  provision or the transitional rule."
     ),
     "Judgment": (
-        "These should be court judgments that materially address the "
-        "legal question the user is asking about. Judgments that merely "
-        "name the same parties or share keywords but decide a completely "
-        "unrelated dispute are NOT relevant. IMPORTANT: a judgment that "
-        "applies or discusses the user's cited section IS relevant, even "
-        "if the case ALSO arose under other provisions -- e.g. a Sec 302 "
-        "IPC murder appeal that contains a substantive Sec 313 CrPC "
-        "discussion is on-topic for a 'Section 313 CrPC case law' query. "
-        "Only reject if the section is incidental boilerplate, not a "
-        "discussed issue. ALSO: if the user named a specific COURT "
-        "(e.g. 'Bombay High Court bail cases'), judgments from a "
-        "DIFFERENT court are NOT relevant even when the legal subject "
-        "matches."
+        "Retrieval target: decisions of Indian courts (typically High "
+        "Courts, sometimes tribunals) on the legal question the user is "
+        "asking about.\n\n"
+        "ACCEPT WHEN\n"
+        "- Case materially discusses the user's cited section, doctrine, "
+        "  or legal issue — even if the case ALSO arose under other "
+        "  provisions. Example: a §302 IPC murder appeal with substantive "
+        "  §313 CrPC reasoning IS on-topic for a \"§313 CrPC case law\" "
+        "  query.\n"
+        "- Case is from a court that BINDS the jurisdiction the user "
+        "  named. Supreme Court decisions always bind, so an SC judgment "
+        "  satisfies any HC-jurisdiction query.\n\n"
+        "REJECT WHEN\n"
+        "- User named a specific COURT and the case is from a DIFFERENT "
+        "  High Court or tribunal (Bombay HC query → Kerala HC case).\n"
+        "- Case shares only a party surname, judge name, or a rare keyword "
+        "  with the query but decides an unrelated dispute (BM25 / fuzzy "
+        "  matching noise).\n"
+        "- Case cites the user's section only in incidental boilerplate "
+        "  (operative-order recital, not a discussed issue).\n"
+        "- User asked about POST-amendment law and the case is a pre-"
+        "  amendment decision that is no longer good law (accept only if "
+        "  the case survives the amendment or the query is about "
+        "  legislative history).\n\n"
+        "COMMON FALSE POSITIVES\n"
+        "- ES fuzzy matching surfaces cases where a party's surname "
+        "  coincides with a query word (\"Kumar\", \"Sharma\", \"State\").\n"
+        "- Cases that mention the section number in the cause-title or "
+        "  order recital but never reason about it."
     ),
     "SCI_Judgment": (
-        "These should be Supreme Court of India judgments that "
-        "materially address the user's legal question. Judgments that "
-        "merely fuzzy-match a query term (e.g. judge surname matching "
-        "a common phrase, or party name matching a generic word) but "
-        "decide an unrelated dispute are NOT relevant. The retrieval "
-        "uses fuzzy and phrase matching together, so off-topic cases "
-        "with strong full-text term overlap can surface — reject when "
-        "the case's actual subject doesn't match the user's question."
-    ),
-    "Document": (
-        "These should be passages from the user's UPLOADED document(s) "
-        "that contain information answering the user's question. The "
-        "retrieval is MMR with k=30 and always returns 30 chunks "
-        "regardless of similarity — when the user's question is "
-        "off-topic for the uploaded file (e.g. they uploaded a "
-        "contract and asked about Section 138 NI Act), the chunks "
-        "will be unrelated and NOT relevant. Reject when the chunks "
-        "are about a different subject than the user's question. "
-        "Accept when chunks contain the answer even if the uploaded "
-        "file's overall genre is different from the question's framing."
+        "Retrieval target: Supreme Court of India decisions on the user's "
+        "legal question. SC binds all courts — jurisdiction is NEVER a "
+        "reason to reject an SC judgment for an HC-scoped query.\n\n"
+        "ACCEPT WHEN\n"
+        "- SC case materially discusses the user's cited section, "
+        "  doctrine, or issue.\n"
+        "- Case is a landmark / leading authority even if older "
+        "  (e.g. Bhajan Lal 1992 for quashing categories).\n\n"
+        "REJECT WHEN\n"
+        "- Case surfaces only because of fuzzy full-text overlap "
+        "  (multi-word party name inflates BM25; judge surname coincides "
+        "  with a query word).\n"
+        "- Case is factually unrelated and mentions the user's section "
+        "  only in incidental cross-reference.\n"
+        "- User is asking about a SPECIFIC SC judgment by name / year / "
+        "  citation, and the hit is a DIFFERENT case that shares words.\n\n"
+        "COMMON FALSE POSITIVES\n"
+        "- Multi-word party names inflating BM25 on unrelated matters.\n"
+        "- Cases about the same act but a completely different section."
     ),
     "Newacts": (
-        "These should be sections of the new criminal-law codes (BNS, "
-        "BNSS, BSA) or their old-law counterparts (IPC, CrPC, IEA) that "
-        "address the user's query. ACCEPT both kinds of retrieval:\n"
-        "  (1) Specific-section lookups — user named 'Section 138 NI Act' "
-        "    style. Retrieved chunk must match that section/act.\n"
-        "  (2) Topic / chapter / comparison lookups — user named a "
-        "    DOCTRINE or CHAPTER name (e.g. 'right of private defence', "
-        "    'general exceptions', 'culpable homicide', 'unlawful "
-        "    assembly', 'criminal conspiracy', 'abetment', 'theft and "
-        "    extortion', 'offences against property'). For these, the "
-        "    retrieved hits are EXPECTED to be a BATCH of consecutive "
-        "    sections covering that chapter (BNS Sec 34-44 for private "
-        "    defence, IPC Sec 76-106 for general exceptions, etc.). "
-        "    ACCEPT them as relevant when the chunk content addresses "
-        "    the named doctrine, EVEN IF the user didn't enumerate "
-        "    individual section numbers.\n"
-        "  (3) Cross-act comparison queries (e.g. 'compare X under BNS "
-        "    vs IPC', 'BNS equivalent of Section 379 IPC') — retrieved "
-        "    hits from EITHER act OR both are relevant. Don't reject "
-        "    just because hits come from one act when the query named "
-        "    both — the comparison can be assembled from partial "
-        "    retrieval plus the LLM's knowledge of the corresponding "
-        "    sections.\n"
-        "REJECT only when the retrieved sections genuinely address a "
-        "different subject (e.g. user asked about cheque dishonour but "
-        "retrieval returned sections on theft). Do not reject for "
-        "'user didn't name these specific sections' — that's expected "
-        "for topic/doctrine queries."
+        "Retrieval target: sections of the post-2024 codes (BNS, BNSS, "
+        "BSA) or their old-law counterparts (IPC, CrPC, IEA).\n\n"
+        "ACCEPT WHEN\n"
+        "(1) Specific-section lookup (\"§138 NI Act\", \"BNS §115\") — "
+        "    chunk must be the exact section from the exact act.\n"
+        "(2) Topic / chapter lookup (\"right of private defence\", "
+        "    \"general exceptions\", \"culpable homicide\", \"unlawful "
+        "    assembly\", \"criminal conspiracy\", \"abetment\", \"theft "
+        "    and extortion\", \"offences against property\") — hits are "
+        "    EXPECTED to be a batch of consecutive sections covering the "
+        "    chapter (BNS §34-44 for private defence, IPC §76-106 for "
+        "    general exceptions). Accept when chunks address the named "
+        "    doctrine even if the user didn't enumerate section numbers.\n"
+        "(3) Cross-act comparison (\"compare X under BNS vs IPC\", \"BNS "
+        "    equivalent of §379 IPC\") — hits from EITHER act OR both are "
+        "    relevant. Do not reject just because hits come from one act "
+        "    when the query named both.\n\n"
+        "REJECT WHEN\n"
+        "- Retrieved sections genuinely address a different subject "
+        "  (user asked about cheque dishonour but retrieval returned "
+        "  theft sections).\n"
+        "- Section-number collision across acts (user named BNS §318, "
+        "  hits are §318 of a different code).\n"
+        "- Hits are pre-amendment provisions offered as CURRENT law for a "
+        "  post-2024 query without any cross-mapping.\n\n"
+        "DO NOT REJECT FOR\n"
+        "- \"User didn't name these specific sections\" — that is EXPECTED "
+        "  for topic / doctrine queries. Accept if chunks address the "
+        "  doctrine."
     ),
     "Constitution": (
-        "These should be Articles of the Constitution of India that "
-        "materially address the user's question. Articles cited "
-        "incidentally or in an unrelated context are NOT relevant."
+        "Retrieval target: Articles of the Constitution of India that "
+        "materially address the user's question.\n\n"
+        "ACCEPT WHEN\n"
+        "- Retrieved Article(s) are the operative provisions governing the "
+        "  scenario (Art. 226 for HC writ jurisdiction, Art. 32 for SC "
+        "  writ jurisdiction, Art. 21 for procedural due process, etc.).\n\n"
+        "REJECT WHEN\n"
+        "- Article is cited only incidentally in an unrelated provision or "
+        "  case (Art. 14 boilerplate in a taxation section).\n"
+        "- User named a specific Article and the hits are a different "
+        "  Article entirely.\n\n"
+        "COMMON FALSE POSITIVES\n"
+        "- Article 14 and Article 21 surface for almost any query because "
+        "  of their broad citation. Accept only if the retrieved chunk "
+        "  actually reasons about them."
     ),
     "Maxim": (
-        "These should be legal maxims whose meaning and use directly "
-        "answer the user's question. Maxims merely sharing a Latin/"
-        "English keyword with the query are NOT relevant."
+        "Retrieval target: legal maxims whose meaning and use directly "
+        "answer the user's question.\n\n"
+        "ACCEPT WHEN\n"
+        "- Maxim's definition and typical use directly bear on the user's "
+        "  scenario.\n\n"
+        "REJECT WHEN\n"
+        "- Hit merely shares a Latin / English keyword with the query but "
+        "  is a different maxim (\"audi alteram partem\" retrieved for a "
+        "  query about \"alter ego doctrine\").\n\n"
+        "COMMON FALSE POSITIVES\n"
+        "- Fuzzy Latin-word matches surfacing unrelated maxims."
+    ),
+    "Document": (
+        "Retrieval target: passages from the user's UPLOADED document(s) "
+        "responsive to the user's question. Retrieval is MMR with k=30 "
+        "and ALWAYS returns 30 chunks regardless of similarity — the gate "
+        "MUST be strict because unrelated chunks still fill the response.\n\n"
+        "ACCEPT WHEN\n"
+        "- Chunks contain the specific information answering the "
+        "  question, even if the uploaded file's overall genre differs "
+        "  from the framing (e.g. user uploaded a contract and asked "
+        "  about a specific indemnity clause — accept if the clause is "
+        "  in the chunks).\n\n"
+        "REJECT WHEN\n"
+        "- Chunks are about a different subject than the question "
+        "  (user uploaded a lease and asked about §138 NI Act — the "
+        "  lease has nothing on cheque dishonour).\n"
+        "- Chunks are OCR-noise, boilerplate footers/headers, cover pages, "
+        "  or blank scans without substantive responsive content."
     ),
 }
 
@@ -192,56 +267,218 @@ class _RelevanceJudgment(BaseModel):
             "section number, party, or share rare phrases."
         ),
     )
-    confidence: int = Field(
-        ..., ge=0, le=100,
-        description="Confidence in the verdict, 0 to 100.",
-    )
-    matched_subject: str = Field(
-        "",
-        description=(
-            "What the retrieved documents actually govern, in 1-2 phrases "
-            "(e.g. 'tax assessment proceedings, NOT property injunctions'). "
-            "Empty when relevant=true."
-        ),
-    )
     reason: str = Field(
         "",
         description="One-sentence explanation of the verdict.",
     )
 
 
-_RELEVANCE_JUDGE_PROMPT = """You are a strict legal-retrieval relevance judge.
+_RELEVANCE_JUDGE_PROMPT = """You are a strict legal-retrieval relevance judge for an Indian legal
+research system. Your job is to block false-positive retrievals BEFORE
+they reach the answer LLM. When in doubt, REJECT — the system will run
+a web-search fallback that is strictly better than shipping wrong-
+jurisdiction, wrong-statute, or wrong-direction citations.
 
-USER QUERY:
+===============================================================
+USER QUERY
+===============================================================
 {query}
 
-RETRIEVED LEGAL DOCUMENTS (top {n_chunks} hits, source = "{source}"):
+===============================================================
+RETRIEVED DOCUMENTS   (top {n_chunks} hits, source: "{source}")
+===============================================================
 {chunks_block}
 
-DOMAIN CONTEXT (what this retrieval was supposed to produce):
+===============================================================
+AGENT-SPECIFIC RETRIEVAL EXPECTATIONS
+===============================================================
 {domain_hint}
 
-Decide: do these documents DIRECTLY answer the user's query?
+===============================================================
+DECISION PROCEDURE — apply in order
+===============================================================
 
-CRITICAL: "Directly answer" means the documents govern the same legal
-scenario the user is asking about. Documents that merely *mention* the
-same statute name, share rare phrases, name the same parties, or discuss
-the same topic in an UNRELATED context are NOT relevant — they are false
-positives from keyword-based retrieval.
+STEP 0 — HARD SOURCE-NAME GATE (fires before anything else).
 
-Examples of NON-RELEVANT retrieval to reject:
-- Query about CPC Order XXXIX injunctions for property → retrieved
-  Municipalities Act sections that *prohibit* injunctions for electoral
-  rolls. (Wrong subject, opposite direction.)
-- Query about BNS Section 318 cheating → retrieved provisions about
-  Section 318 of a different act. (Same number, different statute.)
-- Query asking how to GRANT relief → retrieved provisions that BAR relief
-  for a different proceeding. (Same domain, opposite direction.)
-- Query about a 2019 SC judgment → retrieved unrelated case from a
-  different court that happens to share a party name.
+Before reading the chunks, look at the SOURCE metadata above
+(`source: "..."`) and compare it to the user's query.
 
-Return your structured verdict. Be strict: if in doubt, mark relevant=false
-so the system can fall back to web search rather than ship wrong citations.
+If the source name identifies a SPECIFIC forum (a specific High
+Court's Rules, a specific tribunal's practice directions, a
+specific state's local act, a specific district court's manual)
+AND the user's query names a DIFFERENT specific forum, IMMEDIATELY
+return `relevant=false` with `reason` starting `[wrong_jurisdiction]`.
+Do NOT proceed to Step 1. The chunk content may look topically
+relevant because it references the correct central statute (e.g.
+§482 CrPC / §528 BNSS) — but the RULES / PRACTICE surrounding it
+are forum-bound and the user asked about a different forum.
+
+Concrete triggers for this hard gate:
+- source contains "High Court of X Rules" and user named a
+  different High Court.
+- source contains "NCLT [City]" or "NCLAT [Bench]" and user named
+  a different bench.
+- source contains a state name (e.g. "Karnataka Land Revenue",
+  "Telangana Municipalities") and user named a different state.
+- source is a district-court manual and user named a different
+  district / state.
+
+Exceptions where this gate does NOT fire:
+- Source is a CENTRAL statute (BNS, BNSS, BSA, IPC, CrPC, CPC, NI
+  Act, GST Act, IT Act, etc.) — central law binds all jurisdictions,
+  so proceed to Step 1.
+- Source is a Supreme Court judgment — SC binds all courts, proceed.
+- User's query did NOT name a specific forum — no jurisdiction
+  anchor to violate, proceed.
+
+STEP 1 — EXTRACT the user's ANCHORS from the query.
+An anchor is a constraint the retrieval must satisfy. Extract only the
+ones the user actually named; do NOT infer anchors the user did not
+name.
+
+  (a) SUBJECT-MATTER anchor — the legal issue (e.g. "quashing of
+      criminal complaint", "temporary injunction for property",
+      "anticipatory bail", "cheque dishonour").
+  (b) JURISDICTION anchor — a specific court / tribunal / state, if
+      named (e.g. "Bombay High Court", "NCLT Mumbai", "Karnataka HC",
+      "Delhi HC", "Madras HC"). If the user names one, retrieved docs
+      MUST come from that jurisdiction or from a source that BINDS it
+      (Supreme Court judgments and central statutes bind all HCs).
+  (c) STATUTE anchor — the specific act, if named (e.g. "BNS", "CrPC",
+      "IPC", "CPC", "NI Act", "GST Act", "MV Act"). Same section
+      number in a DIFFERENT act is NOT the same anchor.
+  (d) SECTION / RULE / ARTICLE anchor, if named.
+  (e) DIRECTION anchor — is the user asking about GRANT / PERMISSION /
+      ENTITLEMENT (positive) or about BAR / PROHIBITION / RESTRICTION
+      (negative)? Same-topic provisions with the OPPOSITE direction
+      are NOT relevant.
+  (f) TEMPORAL anchor — does the query reference CURRENT law (BNS /
+      BNSS / BSA, post-2024) or OLD law (IPC / CrPC / IEA), or is it
+      neutral? A repealed provision offered as if current, or vice
+      versa without a cross-map, is NOT relevant.
+  (g) FORUM anchor — civil vs criminal, original vs appellate,
+      writ vs statutory appeal, if the query makes this clear.
+
+STEP 2 — SCORE each retrieved chunk against the extracted anchors.
+
+  A chunk is NOT RELEVANT if it violates any anchor the user named:
+    - anchors any of the SUBJECT-MATTER anchors superficially but
+      binds a DIFFERENT jurisdiction (violates 1b);
+    - shares the section number but is a DIFFERENT statute (violates
+      1c);
+    - discusses the same topic in the OPPOSITE direction (violates
+      1e);
+    - is a repealed / superseded provision offered as if current with
+      no cross-map (violates 1f);
+    - is from the WRONG forum (violates 1g);
+    - merely MENTIONS the user's keywords in an unrelated context —
+      incidental cross-reference, boilerplate cite, party-name
+      coincidence, cause-title recital without reasoning.
+
+  A chunk IS RELEVANT if it directly ADDRESSES the user's ask AND
+  respects every named anchor, even if it also covers collateral
+  topics.
+
+STEP 3 — AGGREGATE across the top hits.
+
+  - If NO top hit passes Step 2, return relevant=false.
+  - If AT LEAST ONE top hit passes Step 2 and it directly answers the
+    ask, return relevant=true.
+  - Partial retrievals (right statute, only some sub-clauses match)
+    lean toward relevant=true — the generation LLM can work with them.
+  - Chapter / doctrine queries expect a BATCH of consecutive sections;
+    do not reject just because the user did not enumerate specific
+    section numbers.
+
+STEP 4 — COMPOSE the `reason` field.
+
+  When relevant=false, PREFIX the reason with one of the following
+  bracketed rejection tags so telemetry can aggregate failure modes:
+
+    [wrong_jurisdiction] — user named a court / tribunal / state and
+                           hits bind a different one.
+    [wrong_statute]      — same section number, different act.
+    [wrong_direction]    — same topic but opposite legal effect
+                           (bars vs grants, prohibits vs permits).
+    [wrong_temporal]     — repealed / pre-amendment provision offered
+                           as current, or vice versa, with no cross-map.
+    [wrong_forum]        — civil provision for a criminal query, or
+                           original-jurisdiction rule for an appellate
+                           query, etc.
+    [wrong_topic]        — keyword overlap only; hits govern an
+                           unrelated legal scenario.
+    [incidental_mention] — user's terms appear only in passing —
+                           cross-reference, boilerplate, cause-title
+                           recital, party-name coincidence.
+    [no_anchor_match]    — none of the above; hits fail to address
+                           any of the user's anchors.
+
+  When relevant=true, name the anchors the hits matched (e.g.
+  "matches BNSS §528 quashing procedure with Bombay HC writ
+  jurisdiction preserved").
+
+===============================================================
+CANONICAL REJECTION EXAMPLES (calibrated across prod incidents)
+===============================================================
+
+- Query "Bombay High Court quashing procedure" → hit is "High Court
+  of Jharkhand Rules, 2001" (mentions §482 CrPC in Rule 35). Reject
+  as [wrong_jurisdiction] — user named a specific HC and the hit is
+  a different HC's rules.
+
+- Query "CPC Order XXXIX injunction for property" → hit is a state
+  Municipalities Act that PROHIBITS injunctions for electoral-roll
+  proceedings. Reject as [wrong_direction] — opposite legal effect.
+
+- Query "BNS Section 318 cheating" → hit is "Section 318" of a
+  different act (e.g. Motor Vehicles Act, Companies Act). Reject as
+  [wrong_statute] — same number, different statute.
+
+- Query "2019 SC judgment on anticipatory bail" → hit is an
+  unrelated 2015 High Court case sharing a party name. Reject as
+  [wrong_jurisdiction] or [incidental_mention].
+
+- Query "how anticipatory bail is GRANTED" → hit is a POCSO-style
+  provision that BARS anticipatory bail. Reject as [wrong_direction].
+
+- Query "current position under BNSS on FIR quashing" → hit is only
+  the repealed CrPC §482 with no BNSS §528 discussion or transitional
+  note. Reject as [wrong_temporal].
+
+- Query "Section 138 NI Act" but hit chunk is a lease-agreement PDF
+  passage (uploaded document) with no cheque discussion. Reject as
+  [wrong_topic].
+
+- Query "Delhi HC bail cases" → hit is a Bombay HC bail judgment.
+  Reject as [wrong_jurisdiction] — but ONLY for Judgment agent.
+  Legislation from central acts is jurisdictionally in-scope. SC
+  judgments always bind and are always in-scope.
+
+===============================================================
+NON-REJECTION EXAMPLES (do NOT over-reject)
+===============================================================
+
+- Query "Section 313 CrPC case law" → SC judgment where the appeal
+  arose under §302 IPC but the reasoning substantively discusses
+  §313 CrPC. Accept — the section is a DISCUSSED issue, not
+  boilerplate.
+
+- Query "right of private defence" (topic, no sections named) →
+  hits are BNS §34-44 (or IPC §96-106) — the chapter batch for
+  private defence. Accept — chapter / doctrine queries expect batch
+  retrieval.
+
+- Query "compare cheating under BNS vs IPC" → hits are only BNS
+  §318. Accept — cross-act comparison queries do not require both
+  acts in retrieval; the LLM can supply the counterpart.
+
+===============================================================
+OUTPUT
+===============================================================
+Return your structured verdict. Follow the reason-tag convention
+above so downstream telemetry can categorize misses. Bias toward
+REJECTION when unsure — web fallback is preferable to wrong-corpus
+citations.
 """
 
 
@@ -282,65 +519,6 @@ def _build_chunks_block(chunks: list[str]) -> tuple[str, int]:
     return "\n\n".join(parts), len(parts)
 
 
-def _coarse_semantic_floor(query: str, chunks: list[str]) -> tuple[bool, float]:
-    """Cheap embedding pre-filter (sync — kept for non-async callers).
-
-    Fail-open on errors. The async path below is preferred when called
-    from an asyncio handler — it skips the executor hop entirely.
-    """
-    if not chunks:
-        return False, 0.0
-    try:
-        embeddings = get_retriever_embeddings()
-        non_empty = [(c or "")[:_RELEVANCE_CHUNK_CHARS] for c in chunks if c]
-        if not non_empty:
-            return False, 0.0
-        q_vec = embeddings.embed_query(query)
-        c_vecs = embeddings.embed_documents(non_empty[:_RELEVANCE_TOP_N])
-        # BGE embeddings are L2-normalized -> dot product == cosine similarity.
-        max_sim = max(sum(a * b for a, b in zip(q_vec, cv)) for cv in c_vecs)
-        return max_sim >= _COARSE_SEMANTIC_FLOOR, max_sim
-    except Exception as e:
-        log.warning("Coarse semantic floor errored — fail-open",
-                    error=str(e)[:200])
-        return True, 0.0
-
-
-async def _coarse_semantic_floor_async(query: str, chunks: list[str]) -> tuple[bool, float]:
-    """Async coarse embedding pre-filter — uses aembed_query/aembed_documents.
-
-    Phase 7: switching this from `asyncio.to_thread(_coarse_semantic_floor, ...)`
-    to a real async path removes the executor hop. Under 50+ concurrent users
-    the executor was saturating (per-worker thread pool ≈ 12 threads, demand
-    ≈ 50 in-flight embed calls) and the queue depth was the throughput cliff.
-
-    Gracefully falls back to the sync path when the configured embeddings
-    object doesn't implement the async methods. HuggingFaceEmbeddings (the
-    default in-process backend) inherits the ABC default which runs the sync
-    encode in a thread pool — that's the same hop the sync path would take,
-    so there's no regression in local mode. RemoteEmbeddings overrides both
-    methods with real httpx async calls when EMBEDDING_SERVICE_URL is set.
-    """
-    if not chunks:
-        return False, 0.0
-    try:
-        embeddings = get_retriever_embeddings()
-        non_empty = [(c or "")[:_RELEVANCE_CHUNK_CHARS] for c in chunks if c]
-        if not non_empty:
-            return False, 0.0
-        # RemoteEmbeddings overrides aembed_* with real httpx calls. The
-        # in-process HuggingFaceEmbeddings backend (default prod path)
-        # inherits the ABC default which thread-pools the sync encode.
-        q_vec = await embeddings.aembed_query(query)
-        c_vecs = await embeddings.aembed_documents(non_empty[:_RELEVANCE_TOP_N])
-        max_sim = max(sum(a * b for a, b in zip(q_vec, cv)) for cv in c_vecs)
-        return max_sim >= _COARSE_SEMANTIC_FLOOR, max_sim
-    except Exception as e:
-        log.warning("Async coarse semantic floor errored — fail-open",
-                    error=str(e)[:200])
-        return True, 0.0
-
-
 async def check_retrieval_relevance(
     query: str,
     chunks: list[str],
@@ -364,30 +542,17 @@ async def check_retrieval_relevance(
 
     Returns:
         (is_relevant, telemetry) where telemetry has keys:
-            coarse_sim, judge_relevant, judge_confidence, matched_subject,
-            reason. Always populated so logs are consistent.
+            judge_relevant, reason. Always populated so logs are consistent.
 
     On any internal error: fail-open (return True). The agent's apology
     guard downstream is the second line of defense — we never want to
-    block legitimate retrievals because of a transient embedding/LLM
-    outage.
+    block legitimate retrievals because of a transient LLM outage.
     """
-    telemetry: dict = {
-        "coarse_sim": 0.0, "judge_relevant": None,
-        "judge_confidence": None, "matched_subject": "", "reason": "",
-    }
+    telemetry: dict = {"judge_relevant": None, "reason": ""}
     if not chunks:
         telemetry["reason"] = "no chunks"
         return False, telemetry
 
-    # Pass 1: coarse embedding floor (cheap). Real async — no executor hop.
-    floor_ok, max_sim = await _coarse_semantic_floor_async(query, chunks)
-    telemetry["coarse_sim"] = round(max_sim, 4)
-    if not floor_ok:
-        telemetry["reason"] = f"coarse semantic floor failed ({max_sim:.3f})"
-        return False, telemetry
-
-    # Pass 2: LLM-as-judge (the real call)
     chunks_block, n_chunks = _build_chunks_block(chunks)
     if n_chunks == 0:
         telemetry["reason"] = "no non-empty chunks"
@@ -396,7 +561,7 @@ async def check_retrieval_relevance(
     domain_hint = _DOMAIN_HINTS.get(agent_name, _DOMAIN_HINTS["Legislation"])
 
     try:
-        llm = get_gemini_flash(temperature=0.0).with_structured_output(
+        llm = get_gemini_flash_full(temperature=0.0).with_structured_output(
             _RelevanceJudgment, include_raw=True,
         )
         prompt = ChatPromptTemplate.from_template(_RELEVANCE_JUDGE_PROMPT)
@@ -417,13 +582,9 @@ async def check_retrieval_relevance(
         verdict: _RelevanceJudgment = raw_and_parsed["parsed"]
 
         telemetry["judge_relevant"] = verdict.relevant
-        telemetry["judge_confidence"] = verdict.confidence
-        telemetry["matched_subject"] = verdict.matched_subject
         telemetry["reason"] = verdict.reason
 
-        if not verdict.relevant or verdict.confidence < _RELEVANCE_CONFIDENCE_MIN:
-            return False, telemetry
-        return True, telemetry
+        return verdict.relevant, telemetry
     except Exception as e:
         log.warning("Relevance judge errored — fail-open, downstream guards apply",
                     agent=agent_name, error=str(e)[:200])

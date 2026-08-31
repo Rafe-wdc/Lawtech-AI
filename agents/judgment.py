@@ -559,10 +559,9 @@ async def judgment_node(state: LegalAgentState) -> dict:
             log.warning("Retrieved judgments failed relevance gate — "
                         "falling back to web search",
                         top_match=first_title[:60], **judge_telemetry)
-            mismatch = judge_telemetry.get("matched_subject") or "different subject"
             progress("judgment",
-                     f"Retrieved cases don't match the query "
-                     f"({mismatch[:60]}) — searching the web...",
+                     "Retrieved cases don't match the query "
+                     "— searching the web...",
                      step="fallback", substep=True)
             from core.agent_fallback import web_search_fallback
             fallback_result = await web_search_fallback(

@@ -18,11 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.retrieval_relevance import (
-    check_retrieval_relevance,
-    _COARSE_SEMANTIC_FLOOR,
-    _RELEVANCE_CONFIDENCE_MIN,
-)
+from core.retrieval_relevance import check_retrieval_relevance
 
 
 QUERY = (
@@ -124,12 +120,7 @@ async def show(label: str, hits: list[dict], source: str) -> bool:
     )
     verdict = "ACCEPT" if is_relevant else "REJECT (web fallback)"
     print(f"{label}")
-    print(f"  coarse_sim       : {tel['coarse_sim']:.4f}  "
-          f"(floor {_COARSE_SEMANTIC_FLOOR})")
     print(f"  judge_relevant   : {tel['judge_relevant']}")
-    print(f"  judge_confidence : {tel['judge_confidence']}  "
-          f"(min {_RELEVANCE_CONFIDENCE_MIN})")
-    print(f"  matched_subject  : {tel['matched_subject']}")
     print(f"  reason           : {tel['reason']}")
     print(f"  verdict          : -> {verdict}\n")
     return is_relevant

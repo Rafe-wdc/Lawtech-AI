@@ -193,10 +193,9 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     if not is_relevant:
         log.warning("Retrieved docs failed relevance gate — falling back to web search",
                     task=task, rejected_source=source_name, **judge_telemetry)
-        mismatch = judge_telemetry.get("matched_subject") or "different subject"
         progress(agent_label,
-                 f"Retrieved results don't match the query "
-                 f"({mismatch[:60]}) — searching the web...",
+                 "Retrieved results don't match the query "
+                 "— searching the web...",
                  step="fallback", substep=True)
         from core.agent_fallback import web_search_fallback
         result = await web_search_fallback(

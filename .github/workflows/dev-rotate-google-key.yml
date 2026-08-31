@@ -1,0 +1,134 @@
+name: Dev — rotate GOOGLE_API_KEY (one-off)
+
+# The dev box was returning "API key not valid" from Gemini calls
+# (see run 33430610821 diagnostic). This workflow SSHs to the Vultr
+# dev box, replaces GOOGLE_API_KEY in /root/v2_multi_agent/.env with
+# the value in secrets.GOOGLE_API_KEY_ROTATE, restarts gunicorn, and
+# verifies health.
+#
+# Delete this file AND the GOOGLE_API_KEY_ROTATE secret after use.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rotate:
+    name: Rotate GOOGLE_API_KEY + restart + verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Push key, restart gunicorn, verify
+        env:
+          NEW_KEY: ${{ secrets.GOOGLE_API_KEY_ROTATE }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
+            NEW_KEY="$NEW_KEY" bash <<'ENDSSH'
+            set -e
+            APP_DIR=/root/v2_multi_agent
+            cd "$APP_DIR"
+            ENV_FILE="$APP_DIR/.env"
+
+            # Sanity: refuse to write an empty key
+            if [ -z "$NEW_KEY" ]; then
+              echo "!! NEW_KEY is empty — aborting"
+              exit 1
+            fi
+
+            echo "=== Backup .env ==="
+            cp "$ENV_FILE" "${ENV_FILE}.bak.$(date +%s)"
+
+            echo "=== Replace GOOGLE_API_KEY line (preserve any surrounding quotes) ==="
+            # Use a Python one-liner so we don't have to worry about sed's
+            # delimiter collisions with a key that might contain /, @, etc.
+            python3 - "$ENV_FILE" "$NEW_KEY" <<'PY'
+          import sys, pathlib
+          env_path = pathlib.Path(sys.argv[1])
+          new_key = sys.argv[2]
+          lines = env_path.read_text().splitlines(keepends=True)
+          out = []
+          replaced = False
+          for line in lines:
+              if line.lstrip().startswith("GOOGLE_API_KEY="):
+                  # Preserve trailing newline, drop old value
+                  out.append(f'GOOGLE_API_KEY="{new_key}"\n')
+                  replaced = True
+              else:
+                  out.append(line)
+          if not replaced:
+              out.append(f'GOOGLE_API_KEY="{new_key}"\n')
+          env_path.write_text("".join(out))
+          print(f"Replaced={replaced}")
+          PY
+
+            echo "=== Verify new key is written (redacted display) ==="
+            v=$(grep '^GOOGLE_API_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d '"')
+            echo "  new key length=${#v}, first4=${v:0:4}, last4=${v: -4}"
+
+            echo "=== Kill ALL gunicorn masters (there were 4 stray ones) ==="
+            for pid in $(pgrep -f 'gunicorn.*core.gateway:app' 2>/dev/null); do
+              echo "  killing PID $pid"
+              kill -TERM "$pid" 2>/dev/null || true
+            done
+            # Give them 10s to exit, then SIGKILL any survivors
+            sleep 10
+            for pid in $(pgrep -f 'gunicorn.*core.gateway:app' 2>/dev/null); do
+              echo "  SIGKILL survivor PID $pid"
+              kill -KILL "$pid" 2>/dev/null || true
+            done
+            sleep 2
+
+            echo "=== Start fresh gunicorn master ==="
+            nohup "$APP_DIR/venv/bin/gunicorn" -c gunicorn.conf.py core.gateway:app \
+              > /dev/null 2>&1 &
+            sleep 2
+            NEW_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "?")
+            echo "  fresh gunicorn master PID: $NEW_PID"
+
+            echo "=== Wait for stable health (3 consecutive 200/503) ==="
+            CONSECUTIVE_OK=0
+            NEEDED=3
+            for i in $(seq 1 24); do
+              sleep 5
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/pyapi/health || echo "000")
+              if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
+                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+                if [ "$CONSECUTIVE_OK" -ge "$NEEDED" ]; then
+                  echo "  Stable health at HTTP $STATUS ($NEEDED consecutive checks)"
+                  break
+                fi
+                echo "  Healthy (HTTP $STATUS), $CONSECUTIVE_OK/$NEEDED consecutive..."
+              else
+                CONSECUTIVE_OK=0
+                echo "  Waiting... attempt $i/24 (HTTP $STATUS)"
+              fi
+            done
+
+            echo "=== Confirm no more Gemini INVALID_ARGUMENT errors in fresh logs ==="
+            sleep 3
+            if grep -q "API_KEY_INVALID" logs/error.log 2>/dev/null; then
+              # Only count occurrences AFTER the fresh gunicorn start
+              tail -100 logs/error.log | grep -c "API_KEY_INVALID" || echo 0
+              echo "  (any hits above are from the tail — new key check below)"
+            fi
+
+            # New probe: hit health, look at google_key check
+            echo "=== Post-rotate health probe ==="
+            curl -s http://localhost:5001/pyapi/health | python3 -c 'import sys,json; d=json.load(sys.stdin); print("  status:", d.get("status")); print("  google_key:", d.get("checks",{}).get("google_key"))'
+
+            # Quick Gemini smoke — check if warmup succeeded for new workers
+            echo "=== Recent warmup lines (should NOT contain API_KEY_INVALID) ==="
+            tail -20 logs/error.log | grep -E "warmup|API_KEY_INVALID|Gemini" || echo "  (no relevant lines)"
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

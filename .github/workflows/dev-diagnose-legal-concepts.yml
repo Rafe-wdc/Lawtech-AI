@@ -1,0 +1,127 @@
+name: Dev — diagnose Legal_Concepts routing (one-off)
+
+# Investigates why the "quashing of criminal complaint at Bombay HC"
+# prompt classifies as Legal_Concepts (single agent, canned error)
+# on the dev box, but classifies as Judgment+Legislation+SCI_Judgment
+# with a full 33K-char response on localhost.
+#
+# Runs read-only diagnostics on the Vultr dev box via SSH:
+#   1. Verifies our new retrieval_relevance.py is on disk (STEP 0 gate + Flash Full)
+#   2. Lists gunicorn processes with age
+#   3. Prints .env variable NAMES only (values redacted)
+#   4. Tails the last 60 lines of logs/error.log
+#   5. Greps recent Relevance judge verdict log lines from logs/app.log
+#
+# Delete this file after the investigation is closed.
+# Reuses the existing SSH_PRIVATE_KEY / SERVER_HOST / SERVER_USER secrets.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    name: Diagnose classifier + relevance judge on dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Read-only diagnostics on dev box
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" bash <<'ENDSSH'
+            set +e
+            APP_DIR=/root/v2_multi_agent
+            cd "$APP_DIR" || { echo "!! APP_DIR $APP_DIR missing"; exit 1; }
+
+            echo "===================================================="
+            echo "1. NEW RELEVANCE-JUDGE CODE ON DISK?"
+            echo "===================================================="
+            if grep -q "STEP 0 . HARD SOURCE-NAME GATE" core/retrieval_relevance.py; then
+              echo "PASS: STEP 0 hard source-name gate present"
+            else
+              echo "FAIL: STEP 0 gate MISSING - old code still deployed"
+            fi
+            if grep -q "get_gemini_flash_full" core/retrieval_relevance.py; then
+              echo "PASS: Flash Full judge import present"
+            else
+              echo "FAIL: Flash Full import MISSING"
+            fi
+            if grep -q "wrong_jurisdiction" core/retrieval_relevance.py; then
+              echo "PASS: [wrong_jurisdiction] rejection tag present"
+            else
+              echo "FAIL: rejection tags MISSING"
+            fi
+            echo "File mtime:"
+            stat -c "  mtime=%y  size=%s" core/retrieval_relevance.py
+
+            echo ""
+            echo "===================================================="
+            echo "2. GUNICORN PROCESSES"
+            echo "===================================================="
+            ps -eo pid,etime,cmd | grep -E 'gunicorn.*core.gateway:app' | grep -v grep | head -5
+
+            echo ""
+            echo "===================================================="
+            echo "3. .ENV VARIABLE NAMES (values redacted)"
+            echo "===================================================="
+            if [ -f .env ]; then
+              grep -oE '^[A-Z_][A-Z0-9_]*=' .env | sed 's/=$//' | sort -u
+            else
+              echo "!! .env missing"
+            fi
+
+            echo ""
+            echo "===================================================="
+            echo "4. LAST 60 LINES OF ERROR LOG"
+            echo "===================================================="
+            if [ -f logs/error.log ]; then
+              tail -60 logs/error.log
+            else
+              echo "(no logs/error.log)"
+            fi
+
+            echo ""
+            echo "===================================================="
+            echo "5. RECENT 'Relevance judge verdict' LINES"
+            echo "===================================================="
+            for f in logs/app.log logs/access.log logs/gunicorn.log logs/*.log; do
+              if [ -f "$f" ]; then
+                hits=$(grep -c "Relevance judge verdict" "$f" 2>/dev/null || echo 0)
+                if [ "$hits" -gt "0" ]; then
+                  echo "-- $f ($hits hits) --"
+                  grep "Relevance judge verdict" "$f" | tail -10
+                fi
+              fi
+            done
+
+            echo ""
+            echo "===================================================="
+            echo "6. RECENT 'Identified:' CLASSIFIER LINES"
+            echo "===================================================="
+            for f in logs/app.log logs/gunicorn.log logs/*.log; do
+              if [ -f "$f" ]; then
+                hits=$(grep -c "Identified:" "$f" 2>/dev/null || echo 0)
+                if [ "$hits" -gt "0" ]; then
+                  echo "-- $f ($hits hits) --"
+                  grep "Identified:" "$f" | tail -20
+                fi
+              fi
+            done
+
+            echo ""
+            echo "===================================================="
+            echo "7. LIST logs/ CONTENTS"
+            echo "===================================================="
+            ls -la logs/ 2>&1 | head -20
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

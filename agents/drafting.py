@@ -612,7 +612,7 @@ async def _acquire_reference_draft(
     user_language: str = "en",
     intent=None,
     original_query: str = "",
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     """Stage 1 of the simplified drafting pipeline (v1 DraftRetriever pattern).
 
     Flow:
@@ -624,8 +624,13 @@ async def _acquire_reference_draft(
          a draft, not an essay — v1's gap)
 
     Returns:
-      (reference_text, source_attribution, source_kind)
+      (reference_text, source_attribution, source_kind, search_query)
         source_kind is 'es' (from drafting corpus) or 'web' (synthesized).
+        search_query is the ENGLISH form of the user's request — the
+        translation we already computed for the corpus lookup, or the
+        original query when the user wrote in English. Returned so the
+        fan-out judge can plan against English instead of regional script;
+        see the depth-collapse note on `_judge_fanout`.
     """
     es = get_es_client()
     index = ES_INDICES["drafting"]
@@ -683,7 +688,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:no-corpus-hit>", "web"
+        return web_text, "<web:no-corpus-hit>", "web", search_query
 
     # Use the (possibly translated) English `search_query` for the picker so
     # the LLM reasons about English file names against English intent —
@@ -702,7 +707,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:picker-rejected>", "web"
+        return web_text, "<web:picker-rejected>", "web", search_query
 
     fetch_body = {
         "size": 1,
@@ -732,7 +737,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:fetch-failed>", "web"
+        return web_text, "<web:fetch-failed>", "web", search_query
 
     reference_text = fetch_hits[0]["_source"].get("page_content", "") or ""
     display_name = os.path.basename(picked)
@@ -743,7 +748,7 @@ async def _acquire_reference_draft(
     )
     log.info("Reference draft acquired from corpus",
              source=picked, length=len(reference_text))
-    return reference_text, picked, "es"
+    return reference_text, picked, "es", search_query
 
 
 async def _acquire_reference_via_web(
@@ -1582,6 +1587,24 @@ async def _generate_section_pair(
         # party names, court, case number, etc.
         system_prompt = _REVIEW_AND_REDRAFT_MODE_OVERRIDE + "\n\n---\n\n" + system_prompt
 
+    # Per-section depth anchor for regional-language drafts.
+    #
+    # The SUBSTANTIVE DEPTH policy in core/language.py already says "same
+    # depth as English", but it lands ~96% of the way through a ~43,000-
+    # character system prompt and measurably does not move the output —
+    # regional-language sections still came back at 61% of the English word
+    # count with it in place. Restating the expectation HERE, inside the
+    # task list the model is actually executing, puts it where it cannot be
+    # missed. English is unaffected (empty string).
+    depth_anchor = ""
+    if user_language and user_language != "en":
+        depth_anchor = (
+            "\n   (DEPTH: write this section at full English depth — each "
+            "numbered paragraph is 3-5 complete sentences carrying its own "
+            "legal reasoning. Do NOT abbreviate because the output language "
+            "is not English.)"
+        )
+
     section_lines: list[str] = []
     for offset, sec in enumerate(sections_to_write):
         position = section_position_start + offset
@@ -1589,6 +1612,7 @@ async def _generate_section_pair(
             f"{offset + 1}. **{sec.heading}** — {sec.summary or '(see structure in reference)'}\n"
             f"   (Section {position} of {total_sections} in the full document; "
             f"slug: `{sec.id}`)"
+            f"{depth_anchor}"
         )
     sections_block = "\n\n".join(section_lines)
 
@@ -2119,6 +2143,7 @@ async def _generate_draft(
     gathered_context: dict[str, str] | None = None,
     review_and_redraft_mode: bool = False,
     chat_history=None,
+    english_query: str = "",
 ) -> str:
     """Thin dispatcher: judge call decides single-pass vs section-wise.
 
@@ -2178,8 +2203,22 @@ async def _generate_draft(
             "properly."
         )
 
+    # Plan against ENGLISH when the user wrote in a regional language.
+    #
+    # The judge decides how many sections the document gets. Fed a
+    # regional-script query it consistently plans FEWER sections than the
+    # same request in English — measured 6 vs 8 for an identical bail
+    # request, deterministic across runs — which is roughly a quarter of
+    # the document silently dropped (Undertakings, advocate block, parity
+    # and medical grounds collapsed into one).
+    #
+    # `english_query` is the translation `_acquire_reference_draft` already
+    # computed for the English-only corpus lookup, so this costs no extra
+    # LLM call. `user_language` is still passed through unchanged, so the
+    # judge continues to emit headings in the user's script — only the
+    # PLANNING becomes language-invariant.
     strategy = await _judge_fanout(
-        query=query,
+        query=english_query or query,
         reference_draft=reference_draft,
         user_language=user_language,
         user_intent=user_intent,
@@ -2562,6 +2601,9 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = user_facts
             reference_source = "<uploaded:review_and_redraft>"
             reference_kind = "uploaded"
+            # No corpus lookup happened on this path, so there is no English
+            # translation to plan against; the judge falls back to `query`.
+            english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         elif _INLINED_PRIOR_DRAFT_MARKER in query:
             # (c) Directive follow-up whose query already carries the full
@@ -2583,11 +2625,13 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = ""
             reference_source = "<prior_turn:inlined>"
             reference_kind = "prior_turn"
+            english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         else:
             progress("drafting", "Searching templates and relevant law...",
                      step="reference")
-            (reference_text, reference_source, reference_kind), gathered_ctx = \
+            (reference_text, reference_source, reference_kind,
+             english_query), gathered_ctx = \
                 await asyncio.gather(
                     _acquire_reference_draft(
                         query,
@@ -2626,6 +2670,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             gathered_context=gathered_ctx,
             review_and_redraft_mode=use_upload_as_ref,
             chat_history=_judge_chat_history,
+            english_query=english_query,
         )
 
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---

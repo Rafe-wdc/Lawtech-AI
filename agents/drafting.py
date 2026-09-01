@@ -1706,7 +1706,22 @@ async def _generate_section_pair(
     #      GPT-4o instead of dropping the section. Every generation path in
     #      this service is Gemini-only; this is the first path with a real
     #      second provider behind it.
-    _SECTION_PAIR_LOCAL_TIMEOUT = 120
+    #
+    # Timeout chosen from 124 measured healthy calls:
+    #   min 9.3s | median 21.8s | p90 32.2s | max 56.0s
+    # 60s sits above the observed maximum, so healthy traffic is not pushed
+    # onto the fallback. Measured end-to-end against a fully hung Gemini
+    # (5 section pairs, 300s request budget):
+    #   120s -> 477 words,  2/5 pairs recovered, draft flagged incomplete
+    #    60s -> 1168 words, 4/5 pairs recovered, draft flagged incomplete
+    #    45s -> 1240 words, 5/5 pairs recovered, draft COMPLETE
+    # 45s recovers more during an outage but would divert ~3% of healthy
+    # pairs (~15% of drafts) to GPT-4o during normal operation. Outages are
+    # rare and normal traffic is constant, so this favours the common case
+    # and lets the `draft_incomplete` flag tell the user when a section was
+    # lost. Lower it if outage-time completeness matters more than provider
+    # consistency day to day.
+    _SECTION_PAIR_LOCAL_TIMEOUT = 60
 
     def _messages(extra_instruction: str) -> list:
         final_user_block = (

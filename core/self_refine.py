@@ -507,6 +507,24 @@ Examples of how intent fields translate to checks:
       `additional_instructions` field if the system attaches any
       artifact-specific guidance.
 
+  NEVER raise a violation that changes WHAT DOCUMENT the response is.
+    `legal_artifact` is a low-confidence classifier hint, NOT the user's
+    instruction. The USER QUERY is the sole authority on document type.
+    When the query names a document ("draft a regular bail application",
+    "draft a writ petition") and the response IS that document, the
+    response is CORRECT — even if `legal_artifact` says something else.
+    In that situation the classifier is wrong, not the draft: emit NO
+    violation on the `legal_artifact` field and audit the response against
+    the document type the QUERY asked for.
+    Never emit a suggested_fix of the form "generate a <X> instead" /
+    "this should be a <X>, not a <Y>" / "convert this into a <X>". Those
+    rewrite a correct draft into the wrong document. Violations on
+    `legal_artifact` are limited to structural gaps WITHIN the document
+    type the query asked for (a missing Prayer, a missing Verification,
+    too few grounds) — never a change of document type itself.
+    A fact narrative that merely MENTIONS a complaint, an FIR, or a
+    police station does not make the requested document a complaint.
+
   include_case_law=True
     → Response should reference relevant cases. (Citations need not be
       in English when strict_language=True.)
@@ -1414,6 +1432,18 @@ def _intent_has_directives(intent: Optional[UserIntent]) -> bool:
         or intent.include_examples
         or intent.arguments_for_party != "none"
         or intent.legal_artifact != LegalArtifact.NONE
+        # Every drafting request is worth auditing. This used to be carried
+        # implicitly by `legal_artifact != NONE`, because the extractor
+        # mislabelled most court filings (bail, writ, quashing, plaint) as
+        # 'complaint_draft'. Narrowing that classification correctly sends
+        # those to NONE, which would otherwise silently drop the critic on
+        # exactly the flows that need it most — a draft is the longest,
+        # most placeholder-prone, most language-sensitive output we emit,
+        # and the critic is what catches canonical-example substitution and
+        # script drift in it. Gate on the task instead of the artifact so
+        # coverage no longer depends on a classifier getting the doc type
+        # right.
+        or intent.task_intent == "draft"
         or bool(intent.additional_instructions.strip())
     )
 

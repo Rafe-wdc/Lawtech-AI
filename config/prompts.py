@@ -938,19 +938,40 @@ Given the user's query and the recent conversation summary, produce:
                             petition under Section 24 CPC / Section 156(3)
                             CrPC application / any application addressed
                             to a Court / Magistrate / Tribunal — those are
-                            court filings; use "complaint_draft" or "none"
-                            (generic drafting) instead. When the user just
+                            court filings; use "none" (generic drafting)
+                            instead. Do NOT reach for "complaint_draft"
+                            for these — a bail application, writ petition,
+                            appeal, or revision is NOT a complaint, and
+                            mislabelling one makes the pipeline rewrite the
+                            draft into a complaint. When the user just
                             says "application" with no addressee and no
                             other context, INFER from the purpose: an "RTI
                             application" addresses a PIO; an "application
                             for income certificate" addresses a Tahsildar /
                             SDM; a "bail application" addresses a court.
 
-       "complaint_draft"    draft a complaint / petition / private complaint /
-                            consumer complaint based on attached facts.
+       "complaint_draft"    draft a COMPLAINT specifically — a private
+                            complaint to a Magistrate (Section 223 BNSS /
+                            Section 200 CrPC), a consumer complaint, a
+                            police complaint, or a complaint to a statutory
+                            commission. The document the user wants must
+                            itself BE a complaint.
                             Triggers: "draft a complaint", "file a complaint",
                             "consumer complaint", "private complaint",
-                            "petition based on these facts".
+                            "complaint to the police / Magistrate".
+                            DO NOT use this for any other pleading merely
+                            because the facts mention a complaint or an FIR.
+                            A narrative like "the complainant filed a
+                            complaint against my client, now draft X" means
+                            the artifact is X — NOT a complaint. Specifically
+                            NOT complaint_draft: bail / anticipatory bail
+                            applications, writ petitions, plaints, appeals,
+                            revisions, quashing petitions, written
+                            statements, replies, rejoinders, counter-
+                            affidavits, transfer petitions. All of those are
+                            "none" (generic drafting).
+                            The word "petition" alone does NOT trigger this —
+                            most petitions are not complaints.
 
        "witness_prep"       prepare YOUR own witness for direct examination
                             and anticipated cross. Triggers: "prepare my

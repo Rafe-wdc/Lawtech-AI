@@ -1688,16 +1688,68 @@ async def _generate_section_pair(
         thinking_budget=2048,
     )
 
-    async def _invoke_once(extra_instruction: str = "") -> object:
+    # Bound to the request deadline, then fail over to OpenAI.
+    #
+    # This call used to be an unbounded `asyncio.to_thread(llm.invoke, ...)`.
+    # `get_gemini_pro` is configured timeout=180, max_retries=2, so the SDK
+    # could spend ~540 s+ inside a single call against a 300 s request
+    # budget. Observed in production logs: one section-pair call ran for
+    # 592 s, the connection dropped, the retry was then skipped as "budget
+    # exhausted", the section was dropped, and the user received an empty
+    # draft with no error shown.
+    #
+    # Two changes:
+    #   1. `bounded_wait_for` clamps the wait to whatever is left of the
+    #      request deadline, so a hung provider can no longer blow the
+    #      envelope for everything downstream.
+    #   2. On timeout / error / open circuit we retry the SAME prompt on
+    #      GPT-4o instead of dropping the section. Every generation path in
+    #      this service is Gemini-only; this is the first path with a real
+    #      second provider behind it.
+    _SECTION_PAIR_LOCAL_TIMEOUT = 120
+
+    def _messages(extra_instruction: str) -> list:
         final_user_block = (
             user_block + "\n\n" + extra_instruction if extra_instruction
             else user_block
         )
-        return await asyncio.to_thread(
-            llm.invoke,
-            [SystemMessage(content=system_prompt),
-             HumanMessage(content=final_user_block)],
-        )
+        return [SystemMessage(content=system_prompt),
+                HumanMessage(content=final_user_block)]
+
+    async def _invoke_once(extra_instruction: str = "") -> object:
+        from core.deadline import bounded_wait_for
+        msgs = _messages(extra_instruction)
+        try:
+            return await bounded_wait_for(
+                asyncio.to_thread(llm.invoke, msgs),
+                local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
+            )
+        except Exception as primary_err:
+            from core.clients import (
+                get_openai_drafting_fallback, is_openai_fallback_configured,
+            )
+            if not is_openai_fallback_configured():
+                log.warning(
+                    "Gemini section-pair failed and no OpenAI fallback is "
+                    "configured; set OPENAI_API_KEY to enable failover",
+                    error=short_err(primary_err),
+                )
+                raise
+            log.warning(
+                "Gemini section-pair failed — failing over to OpenAI GPT-4o",
+                error=short_err(primary_err),
+                provider_from="gemini-2.5-pro", provider_to="gpt-4o",
+            )
+            fb = get_openai_drafting_fallback()
+            resp = await bounded_wait_for(
+                asyncio.to_thread(fb.invoke, msgs),
+                local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
+            )
+            log.info(
+                "OpenAI fallback produced the section pair",
+                provider="gpt-4o",
+            )
+            return resp
 
     from core.token_tracker import record as _record_tokens
 

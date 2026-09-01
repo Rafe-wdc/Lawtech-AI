@@ -230,6 +230,39 @@ def get_gpt4o(temperature: float = 0.3):
     return init_chat_model("openai:gpt-4o", temperature=temperature, max_retries=2)
 
 
+@lru_cache(maxsize=4)
+def get_openai_drafting_fallback(temperature: float = 0.0,
+                                 max_tokens: int = 12000):
+    """GPT-4o standby for the drafting section writer.
+
+    Every generation path in this service runs on Gemini. When Gemini hangs
+    or the circuit opens there is nothing behind it, so the section is
+    dropped and the user receives a short or empty draft with no error —
+    silent degradation. This gives that one path a second provider.
+
+    Deliberately tighter than `get_gpt4o()`:
+      - `max_retries=0` — the caller is already inside a request deadline
+        and has its own retry; SDK-level retries are what let the Gemini
+        call burn 592 s against a 300 s budget in the first place.
+      - `timeout=90` — a fallback that answers late is no better than no
+        fallback. Fail fast so the caller can degrade deliberately.
+    """
+    return init_chat_model(
+        "openai:gpt-4o",
+        temperature=temperature,
+        max_tokens=max_tokens,
+        max_retries=0,
+        timeout=90,
+    )
+
+
+def is_openai_fallback_configured() -> bool:
+    """True when OPENAI_API_KEY is set, so callers can skip the fallback
+    path cleanly rather than raising an auth error inside an except block.
+    """
+    return bool(os.getenv("OPENAI_API_KEY"))
+
+
 @lru_cache(maxsize=1)
 def get_gpt4o_mini(temperature: float = 0.3):
     """GPT-4o-mini — kept for backward compat, prefer Gemini models."""

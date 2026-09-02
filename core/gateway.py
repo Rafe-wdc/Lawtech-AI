@@ -1264,6 +1264,13 @@ async def chat_with_files(
                 _fp_events: asyncio.Queue = asyncio.Queue()
                 _FP_SENTINEL = object()
 
+                # Gap #8: one UUID per multipart upload request. All files
+                # in this request share the same batch_id, so memory node's
+                # _restore_file_context can group them deterministically
+                # (instead of the fragile ±10s created_at window that
+                # merged double-clicks and split slow saves).
+                _batch_id = uuid.uuid4().hex
+
                 def _fp_writer(evt: dict) -> None:
                     # Called from process_files; runs on the same event loop.
                     # put_nowait is safe because the queue is unbounded.
@@ -1274,6 +1281,7 @@ async def chat_with_files(
                         return await process_files(
                             file_tuples, thread_id, writer=_fp_writer,
                             force_ocr=bool(force_ocr),
+                            batch_id=_batch_id,
                         )
                     finally:
                         _fp_events.put_nowait(_FP_SENTINEL)

@@ -204,6 +204,15 @@ class ProcessedFile:
     # orchestrator routing hints and per-kind specialised prompts.
     file_kind: str = ""
     file_kind_confidence: float = 0.0
+    # Gap #8 (2026-09-02): UUID minted per multipart upload request in
+    # core.gateway. All files uploaded in the same request share the
+    # same batch_id. `agents.memory._restore_file_context` groups files
+    # by batch_id (deterministic) instead of by the fragile
+    # ±10-second `created_at` window, so double-clicks and slow-save
+    # edge cases no longer merge or split batches incorrectly. Empty
+    # for legacy rows (pre-migration); those fall back to the timestamp
+    # path in the restore code.
+    batch_id: str = ""
 
 
 @dataclass
@@ -2167,6 +2176,7 @@ async def process_files(
     thread_id: str,
     writer: Optional[Callable[[dict], None]] = None,
     force_ocr: bool = False,
+    batch_id: str = "",
 ) -> FileContext:
     """Process uploaded files with local storage + Gemini Files API persistence.
 
@@ -2268,6 +2278,7 @@ async def process_files(
             file_id=file_id,
             local_path=local_path,
             gemini_supported=gemini_ok,
+            batch_id=batch_id,   # Gap #8: identify all files uploaded in this request
         )
 
         prepared.append((pf, local_path, ext, mime, gemini_ok))

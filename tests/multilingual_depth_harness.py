@@ -109,6 +109,50 @@ SCRIPT_RANGES: dict[str, list[tuple[int, int]]] = {
 # Every other draft in a 19-draft sample used `##` exclusively.
 _HEADING_RE = re.compile(r"^##\s+(\S.*)$", re.M)
 _SUBHEADING_RE = re.compile(r"^#{3,4}\s+\S", re.M)
+# A whole line that is nothing but bold text — a heading in every practical
+# sense, used by drafts that emit no hash headings at all.
+_BOLD_HEADING_RE = re.compile(r"^\*\*[^*\n]{3,90}\*\*\s*$", re.M)
+
+
+def section_count(text: str) -> tuple[int, bool]:
+    """(sections, mis_levelled) — counting `##` alone is not enough.
+
+    Counting `##` only was chosen to stop a draft that nests its content from
+    inflating the score. It has the opposite failure: a draft that renders its
+    WHOLE section list one level down scores near zero while being complete.
+    Measured on a 14-language pass:
+
+        gu   ##=2  ###=7   -> harness said 2, the document has 9   (x4.5 under)
+        or   ##=1  ###=6   -> harness said 1, the document has 7   (x7   under)
+
+    Gujarati's `###` entries are કેસના તથ્યો (Facts), જામીન માટેના કારણો
+    (Grounds), પ્રાર્થના (Prayer) — sections, not subheadings. Scored as
+    shipped it looked like a catastrophic regression; it is one of the better
+    drafts in the sample.
+
+    So: `##` are the sections, EXCEPT when there are barely any `##` and
+    several `###` — then the document is mis-levelled and the `###` are the
+    real sections. The flag is returned separately because the two diagnoses
+    need different responses: mis-levelling is cosmetic, an empty document is
+    a real failure, and the old metric could not tell them apart (it scored
+    correct-Gujarati and broken-Odia identically).
+    """
+    h2 = len(_HEADING_RE.findall(text))
+    h3 = len(_SUBHEADING_RE.findall(text))
+    if h2 <= 2 and h3 >= 4:
+        return h2 + h3, True
+    if h2 == 0 and h3 == 0:
+        # Third variant: some drafts mark sections in bold with no hashes at
+        # all. Measured on Kannada — 7 bold-only lines (ಮಾನ್ಯ ಸೆಷನ್ಸ್
+        # ನ್ಯಾಯಾಲಯದ ಮುಂದೆ, ವಿರುದ್ಧ, ...) and a complete filing, scored as 0
+        # sections. Only consulted when there are no hash headings at all, so
+        # a normal draft's inline bold cannot inflate the count.
+        bold = len(_BOLD_HEADING_RE.findall(text))
+        if bold >= 4:
+            return bold, True
+    return h2, False
+
+
 _WORD_RE = re.compile(r"\S+")
 
 # Diagnostic only — see the module docstring. Validated against real Urdu and
@@ -149,7 +193,7 @@ def section_coverage(text: str, expected: int) -> float:
     """PRIMARY metric: fraction of the planned sections that materialised."""
     if expected <= 0:
         return 0.0
-    return min(len(headings(text)), expected) / expected
+    return min(section_count(text)[0], expected) / expected
 
 
 def word_count(text: str) -> int:
@@ -226,7 +270,7 @@ def score_dir(outdir: str) -> None:
         ts = by_lang[lang]
         w = median([word_count(t) for t in ts])
         p = median([paragraph_count(t) for t in ts])
-        h = median([len(headings(t)) for t in ts])
+        h = median([section_count(t)[0] for t in ts])
         ratios = [script_ratio(t, lang) for t in ts]
         off = sum(1 for r in ratios if r < 0.5)
         print(f"{lang:5} {len(ts):2} {w:11.0f} {100*w/base:5.0f}% "
@@ -248,7 +292,7 @@ def main() -> None:
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         print(f"{lang}: words={word_count(text):5} "
-              f"paras={paragraph_count(text):3} heads={len(headings(text)):2} "
+              f"paras={paragraph_count(text):3} heads={section_count(text)[0]:2}{'*' if section_count(text)[1] else ' '} "
               f"script={script_ratio(text, lang):.2f} incomplete={incomplete} "
               f"{secs:.0f}s -> {path}", flush=True)
 

@@ -195,6 +195,53 @@ def script_of(lang: str) -> str:
     return _LANG_SCRIPT.get(lang, "latn")
 
 
+# Below this share of alphabetic characters in the target script, a draft was
+# not written in the language the user asked for. Calibrated on a 14-language
+# x 3-run pass: every correct draft scored >= 0.85 and every failure scored
+# <= 0.60, so 0.85 separates them with no false positives in 42 samples.
+# Statutory citations legitimately stay in English ("Section 316(2) of the
+# Bharatiya Nyaya Sanhita, 2023"), which is why the bar is not higher.
+OFF_TARGET_SCRIPT_THRESHOLD = 0.85
+
+
+def output_script_ratio(text: str, lang: str) -> float:
+    """Share of alphabetic characters that are in `lang`'s script.
+
+    Returns 1.0 for English and for any language whose script we do not track,
+    so callers can apply one rule without special-casing. Empty text is 1.0 —
+    "no output" is a different failure, already handled elsewhere.
+    """
+    if not text or not lang or lang == "en":
+        return 1.0
+    script = _LANG_SCRIPT.get(lang)
+    if not script or script == "latn":
+        return 1.0
+    pattern = _SCRIPT_PATTERNS.get(script)
+    if pattern is None:
+        return 1.0
+    native = len(pattern.findall(text))
+    latin = sum(1 for c in text if c.isascii() and c.isalpha())
+    total = native + latin
+    if total == 0:
+        return 1.0
+    return native / total
+
+
+def is_off_target_language(text: str, lang: str) -> bool:
+    """True when a draft came back in the wrong language.
+
+    Measured failure this guards: 4 of 42 regional drafts came back wholly or
+    largely in English despite a regional request — two of them at a script
+    ratio of 0.00, i.e. not one character of the requested script.
+
+    This is checked in code rather than through the self-refine critic on
+    purpose. The critic was observed mis-parsing and defaulting to "pass" on
+    exactly these drafts, and bug 1 established that a prompt rule alone does
+    not hold. See the exception recorded under CLAUDE.md drafting invariant 2.
+    """
+    return output_script_ratio(text, lang) < OFF_TARGET_SCRIPT_THRESHOLD
+
+
 def dominant_script(text: str) -> str | None:
     """Return the script code covering >=30% of *text*'s letters, else None."""
     letters = [c for c in text if c.isalpha()]

@@ -62,7 +62,10 @@ from core.clients import (
     record_gemini_flash_success,
 )
 from core.settings import ES_INDICES
-from core.language import localize_prompt, detect_source_languages
+from core.language import (
+    localize_prompt, detect_source_languages, language_name,
+    is_off_target_language, output_script_ratio,
+)
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.self_refine import self_refine
@@ -1889,6 +1892,74 @@ async def _generate_section_pair(
     return text
 
 
+# Repair budget. A section pair costs ~25s against a 300s request ceiling, so
+# repair is capped at two pairs and only runs with real budget left — a draft
+# missing its Prayer is worth 25s, but not a gateway timeout.
+_MAX_REPAIR_SECTIONS = 4
+_REPAIR_MIN_BUDGET_S = 40
+
+# A full redraft costs about as much as the first pass (~150s measured), and
+# the request ceiling is 300s. Only retry with real budget left.
+_OFF_TARGET_RETRY_MIN_BUDGET_S = 150
+
+
+def _normalise_heading(text: str) -> str:
+    """Fold a heading for comparison: strip markdown, punctuation, case, space.
+
+    Deliberately script-agnostic — `str.lower()` is a no-op on Indic scripts,
+    and the comparison must work identically for Odia and English.
+    """
+    t = re.sub(r"[#*_`>]", " ", text or "")
+    t = re.sub(r"[\s ]+", " ", t)
+    t = t.strip(" :.-—–\t").lower()
+    return t
+
+
+def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
+    """Planned sections whose heading never made it into the draft.
+
+    A section counts as present when its normalised heading appears anywhere
+    in the draft's own headings, in either direction — the writer is allowed
+    to lengthen a heading ("Prayer" -> "Prayer for Bail") or trim a long one,
+    but not to drop the section or rename it into something unrelated.
+
+    Substring matching in both directions is deliberately permissive: the goal
+    is catching a DROPPED section, not policing wording. A false "missing"
+    triggers a wasted 25s repair call, so the bar is set to avoid that.
+    """
+    if not draft or not sections:
+        return []
+    draft_headings: list[str] = []
+    for line in draft.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # `## Heading`, and also `**Heading**` alone on a line — some drafts
+        # mark sections in bold rather than with hashes, and treating those as
+        # "no heading" would flag a complete document as entirely missing.
+        if s.startswith("#") or (s.startswith("**") and s.endswith("**") and len(s) < 120):
+            h = _normalise_heading(s)
+            if h:
+                draft_headings.append(h)
+
+    # No headings recognised at all: the writer is not marking sections in a
+    # form we can read, so we cannot tell a dropped section from a differently
+    # formatted one. Repairing here would burn ~25s per pair to append
+    # duplicates of content that may already be present. Judge nothing.
+    if not draft_headings:
+        return []
+
+    missing: list["_Section"] = []
+    for sec in sections:
+        want = _normalise_heading(sec.heading)
+        if not want:
+            continue
+        if any(want in got or got in want for got in draft_headings):
+            continue
+        missing.append(sec)
+    return missing
+
+
 async def _generate_sectionwise(
     *,
     sections: list[_Section],
@@ -2082,6 +2153,69 @@ async def _generate_sectionwise(
         i += 2
 
     draft = "\n\n".join(completed)
+
+    # --- Plan adherence -----------------------------------------------------
+    #
+    # `failed_pairs` above only catches a pair that threw or returned nothing.
+    # It does NOT catch the more damaging failure: a pair that returns fluent
+    # text while ignoring the section list it was given.
+    #
+    # Observed on Odia (3/3 runs planned correctly, the writer still deviated):
+    # the plan was cause title / facts / grounds / family / undertakings /
+    # PRAYER / VERIFICATION, and the writer emitted "An analysis regarding a
+    # regular bail application", silently dropped Prayer and Verification, and
+    # invented a "Relevant legal provisions" section into which it dumped the
+    # retrieved statutes verbatim in English. The result reads well and is not
+    # a filing — no cause title, no prayer, no verification.
+    #
+    # Section-pair rule 2 already says "USE THE EXACT HEADING TEXT GIVEN".
+    # Bug 1 established that a prompt rule alone does not hold, so this is a
+    # deterministic check with a bounded repair rather than more prompt text.
+    missing = _missing_planned_sections(draft, sections)
+    if missing:
+        log.warning(
+            "Writer deviated from the section plan",
+            missing=[s.heading[:40] for s in missing],
+            planned=total, emitted=total - len(missing),
+        )
+        # Repair in pairs, cheapest-first, and only while the request budget
+        # allows. A full regeneration would cost another ~150s against a 300s
+        # ceiling, so repair is capped rather than unbounded.
+        from core.deadline import remaining as _remaining
+        repaired: list[str] = []
+        for j in range(0, min(len(missing), _MAX_REPAIR_SECTIONS), 2):
+            if _remaining() is not None and _remaining() < _REPAIR_MIN_BUDGET_S:
+                log.warning("Skipping section repair — request budget exhausted",
+                            remaining_s=_remaining())
+                break
+            chunk = missing[j:j + 2]
+            try:
+                text = await _generate_section_pair(
+                    sections_to_write=chunk,
+                    section_position_start=total - len(missing) + j + 1,
+                    total_sections=total,
+                    query=query,
+                    user_facts=user_facts,
+                    reference_draft=reference_draft,
+                    prior_text=draft,
+                    gathered_context=gathered_context,
+                    user_intent=user_intent,
+                    user_language=user_language,
+                    review_and_redraft_mode=review_and_redraft_mode,
+                )
+                if text.strip():
+                    repaired.append(text.strip())
+                    log.info("Section repair succeeded",
+                             headings=[s.heading[:40] for s in chunk])
+            except Exception as e:
+                log.warning("Section repair failed", error=short_err(e),
+                            headings=[s.heading[:40] for s in chunk])
+        if repaired:
+            draft = draft + "\n\n" + "\n\n".join(repaired)
+            still_missing = _missing_planned_sections(draft, sections)
+            log.info("Plan adherence after repair",
+                     recovered=len(missing) - len(still_missing),
+                     still_missing=[s.heading[:40] for s in still_missing])
 
     # G-24: emit draft_incomplete SSE + prepend a banner when any pair
     # failed. The frontend already listens for draft_incomplete (see
@@ -2384,7 +2518,7 @@ async def _generate_draft(
         f"Drafting {len(strategy.sections)} sections one by one...",
         step="generate",
     )
-    return await _generate_sectionwise(
+    draft = await _generate_sectionwise(
         sections=strategy.sections,
         query=query,
         user_facts=user_facts,
@@ -2395,6 +2529,69 @@ async def _generate_draft(
         gathered_context=gathered_context,
         review_and_redraft_mode=review_and_redraft_mode,
     )
+
+    # --- Off-target language gate ------------------------------------------
+    #
+    # 4 of 42 regional drafts came back wholly or largely in English despite a
+    # regional request — two at a script ratio of 0.00, not one character of
+    # the requested script. A client who asks in Kannada and receives English
+    # is the same complaint that started this work.
+    #
+    # Deterministic, not routed through the critic: the critic was measured
+    # defaulting to "pass" on exactly these drafts. Recorded as an explicit
+    # exception under CLAUDE.md drafting invariant 2.
+    #
+    # Regeneration is budget-gated. A full redraft costs roughly as much as
+    # the first, and the request ceiling is 300s — so we retry only when the
+    # budget genuinely allows, and otherwise ship the draft with a visible
+    # banner. A banner is a bad outcome; a gateway timeout returning nothing
+    # is a worse one.
+    if user_language and user_language != "en" and is_off_target_language(draft, user_language):
+        ratio = output_script_ratio(draft, user_language)
+        from core.deadline import remaining as _remaining
+        budget = _remaining()
+        log.warning(
+            "Draft came back off-target language",
+            user_language=user_language, script_ratio=round(ratio, 2),
+            remaining_s=budget,
+        )
+        if budget is None or budget > _OFF_TARGET_RETRY_MIN_BUDGET_S:
+            progress_emit(
+                "drafting",
+                "Draft came back in the wrong language — regenerating...",
+                substep=True, step="generate",
+            )
+            retry = await _generate_sectionwise(
+                sections=strategy.sections,
+                query=query,
+                user_facts=user_facts,
+                reference_draft=reference_draft,
+                user_intent=user_intent,
+                user_language=user_language,
+                progress_emit=progress_emit,
+                gathered_context=gathered_context,
+                review_and_redraft_mode=review_and_redraft_mode,
+            )
+            retry_ratio = output_script_ratio(retry, user_language)
+            log.info("Off-target regeneration finished",
+                     before=round(ratio, 2), after=round(retry_ratio, 2),
+                     accepted=retry_ratio > ratio)
+            # Keep whichever is closer to the requested language. A retry that
+            # comes back English too is no improvement, and the first draft at
+            # least had the sections.
+            if retry.strip() and retry_ratio > ratio:
+                return retry
+            draft = retry if retry_ratio > ratio else draft
+            ratio = max(ratio, retry_ratio)
+
+        if is_off_target_language(draft, user_language):
+            lang_name = language_name(user_language)
+            draft = (
+                f"> ⚠ **This draft came back in English rather than {lang_name}.** "
+                "Please re-send your prompt to retry.\n\n"
+            ) + draft
+
+    return draft
 
 
 # ---------------------------------------------------------------------------
@@ -2835,7 +3032,36 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         original_len=len(draft),
                         refined_len=len(refined_draft),
                     )
-                    draft = refined_draft
+                    # The refiner must never change the LANGUAGE of a draft.
+                    #
+                    # Measured (Odia, req 65f6dfd1): the generator produced a
+                    # 9,740-char draft in Odia — the generation-time script
+                    # gate passed it — and self-refine then rewrote it to
+                    # 12,411 chars of English across 2 iterations. The final
+                    # output contained not one Odia character. This is the
+                    # same failure class as the doc-type flip: the critic
+                    # raises violations and the refiner "fixes" them by
+                    # producing a document the user did not ask for.
+                    #
+                    # Reverting is the right remedy rather than regenerating:
+                    # we already hold a correct draft in the requested
+                    # language, and it cost ~150s to make. The refinement's
+                    # improvements are forfeited, which is the cheaper loss.
+                    if (
+                        user_language
+                        and user_language != "en"
+                        and is_off_target_language(refined_draft, user_language)
+                        and not is_off_target_language(draft, user_language)
+                    ):
+                        log.warning(
+                            "Self-refine changed the draft language — reverting",
+                            user_language=user_language,
+                            before=round(output_script_ratio(draft, user_language), 2),
+                            after=round(output_script_ratio(refined_draft, user_language), 2),
+                            iterations=len(refine_history),
+                        )
+                    else:
+                        draft = refined_draft
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))

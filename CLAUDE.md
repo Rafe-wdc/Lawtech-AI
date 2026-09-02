@@ -213,6 +213,34 @@ judge call that decides single-pass vs per-section. Before touching
    forbidden_statute_pair, cause_title_collapsed, paragraph_numbering_break,
    prayer_relief_mismatch, canonical_example_substitution, etc.). Do NOT add
    per-rule regex/threshold checks anywhere — extend CRITIQUE_PROMPT instead.
+
+   **EXCEPTION (2026-09-02) — two failures are checked deterministically in
+   code, NOT through the critic.** Both were measured slipping past it:
+
+   - **Off-target language.** 4 of 42 regional drafts came back wholly or
+     largely in English despite a regional request, two at a script ratio of
+     0.00. `core.language.is_off_target_language` gates on script share
+     (threshold 0.85; every correct draft in the sample scored ≥0.85, every
+     failure ≤0.60). On failure `_generate_draft` regenerates ONCE, and only
+     when >150s of request budget remains — a full redraft costs about as
+     much as the first pass against a 300s ceiling — otherwise it ships the
+     draft behind a warning banner.
+   - **Section-plan adherence.** The writer can return fluent text that
+     ignores the section list it was given. Observed on Odia: the planner
+     produced a correct 8-section bail plan 3/3 runs, and the writer emitted
+     "An analysis regarding a regular bail application", dropped Prayer and
+     Verification, and invented a "Relevant Legal Provisions" section holding
+     the retrieved statutes verbatim in English.
+     `_missing_planned_sections` compares planned headings against emitted
+     ones and repairs missing sections in pairs, capped and budget-gated.
+
+   The rule above still holds for everything else. The exception exists
+   because the critic was observed mis-parsing and defaulting to `passes=True`
+   on exactly these drafts, and because bug 1 (the doc-type flip) established
+   that a prompt rule alone does not hold — Gemini 2.5 Pro violated
+   DRAFTING_SECTION_PAIR_PROMPT rule 2 ("USE THE EXACT HEADING TEXT GIVEN")
+   at a higher rate than Flash Lite. Substantive legal critique stays in
+   CRITIQUE_PROMPT; structural guarantees that must never fail live in code.
 3. **User query AND uploaded source documents flow verbatim into generation.**
    The user's drafting instruction is passed unchanged. The raw extracted
    text of every uploaded PDF/docx (`user_facts`) is passed as the

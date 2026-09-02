@@ -197,6 +197,13 @@ class ProcessedFile:
     # is inserted (save_thread_file does not write this column) so a later
     # "use it anyway" can find the file and re-run it without a re-upload.
     ocr_status: str = ""
+    # Gap #3 (2026-09-02): classified document kind — one of
+    # core.file_classifier.ALL_KINDS or "" when the classifier didn't
+    # run (extraction failure, empty text) OR "other" when the
+    # classifier ran but couldn't confidently categorise. Drives
+    # orchestrator routing hints and per-kind specialised prompts.
+    file_kind: str = ""
+    file_kind_confidence: float = 0.0
 
 
 @dataclass
@@ -227,11 +234,24 @@ class FileContext:
             for pf in self.files
             if pf.extracted_text
         ]
+        # Gap #3: per-file classifier verdicts surfaced to state so the
+        # orchestrator + Document agent can consume them without a
+        # ProcessedFile import. `kind` is "" when the classifier didn't
+        # run (extraction failed) or "other" when it couldn't decide.
+        file_kinds = [
+            {
+                "name": pf.original_name,
+                "kind": pf.file_kind or "",
+                "confidence": pf.file_kind_confidence or 0.0,
+            }
+            for pf in self.files
+        ]
         return {
             "chromadb_collections": self.chromadb_collections,
             "summary": self.summary,
             "file_names": self.file_names,
             "extracted_texts": extracted_texts,
+            "file_kinds": file_kinds,
         }
 
 
@@ -2788,6 +2808,49 @@ async def process_files(
                 and not pf.chromadb_collection and not pf.error
                 and pf.ocr_status != OCR_STATUS_UNREADABLE):
             pf.error = "No content could be extracted from this file"
+
+        # --- Gap #3: file-nature classifier ---
+        # Runs one Gemini Flash Lite call per file BEFORE the SQLite save so
+        # the file_kind is persisted alongside the rest of the metadata.
+        # Skips silently on:
+        #   * extraction failure (pf.error set) — nothing to classify
+        #   * blur-skipped image (ocr_status UNREADABLE) — content is
+        #     deferred, not available yet
+        #   * no extracted_text — Chroma-only paths (rare; the current
+        #     ingest always retains pf.extracted_text for text-based
+        #     formats via `pf.extracted_text = text` above)
+        # Fails open — any exception in the classifier leaves pf.file_kind
+        # empty, which downstream treats as "unknown, skip specialised
+        # handling".
+        if (
+            not pf.error
+            and pf.ocr_status != OCR_STATUS_UNREADABLE
+            and pf.extracted_text
+            and pf.extracted_text.strip()
+        ):
+            try:
+                from core.file_classifier import classify_file_kind
+                # Run in a thread — the classifier does a blocking LLM call
+                # (Flash Lite ~200ms). Bounded by an outer 15 s wall clock
+                # so a hung classifier can't stall the ingest pipeline.
+                _kind, _conf = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        classify_file_kind, pf.extracted_text, pf.original_name,
+                    ),
+                    timeout=15.0,
+                )
+                pf.file_kind = _kind or ""
+                pf.file_kind_confidence = float(_conf or 0.0)
+                log.info("File-kind classifier ran",
+                         file=pf.original_name,
+                         kind=pf.file_kind,
+                         confidence=round(pf.file_kind_confidence, 2))
+            except asyncio.TimeoutError:
+                log.warning("File-kind classifier timed out",
+                            file=pf.original_name, timeout_s=15.0)
+            except Exception as _fk_err:
+                log.warning("File-kind classifier errored — proceeding without kind",
+                            file=pf.original_name, error=str(_fk_err)[:200])
 
         ctx.files.append(pf)
 

@@ -47,8 +47,24 @@ _BLOCK_HEADER = "## UPLOADED SOURCE DOCUMENTS"
 # Per-file entry header used inside the block. Mirrors
 # `agents/drafting.py:2353` verbatim so the LLM sees consistent
 # formatting whether the file arrives via Drafting or a domain agent.
-def _file_header(name: str) -> str:
+# Gap #3: when the file has been classified (file_kinds carries an
+# entry for this name with a non-"other" kind), the header now
+# includes the kind so the domain agent's LLM sees typed signal
+# alongside the raw text.
+def _file_header(name: str, kind: str = "") -> str:
+    if kind and kind != "other":
+        return f"[Uploaded document — {name} — kind: {kind}]"
     return f"[Uploaded document — {name}]"
+
+
+def _lookup_kind(name: str, file_kinds: list[dict] | None) -> str:
+    """Return the classified kind for `name` or "" if not classified."""
+    if not file_kinds:
+        return ""
+    for entry in file_kinds:
+        if entry.get("name") == name:
+            return (entry.get("kind") or "").strip()
+    return ""
 
 
 def _gather_file_blocks(fc: FileContextData) -> list[str]:
@@ -66,13 +82,19 @@ def _gather_file_blocks(fc: FileContextData) -> list[str]:
     blocks: list[str] = []
     seen_names: set[str] = set()
 
+    # Gap #3: `file_kinds` may be present on FileContextData (populated at
+    # ingest by core.file_processor + restored from SQLite by
+    # agents.memory._restore_file_context). Pass to `_file_header` so
+    # classified files render as "kind: <kind>" in the block header.
+    file_kinds = getattr(fc, "file_kinds", None) or []
+
     if fc.extracted_texts:
         for entry in fc.extracted_texts:
             text = (entry.get("text") or "").strip()
             name = entry.get("name") or "attached"
             if not text:
                 continue
-            blocks.append(f"{_file_header(name)}\n{text}")
+            blocks.append(f"{_file_header(name, _lookup_kind(name, file_kinds))}\n{text}")
             seen_names.add(name)
 
     if fc.chromadb_collections:
@@ -83,7 +105,8 @@ def _gather_file_blocks(fc: FileContextData) -> list[str]:
                 full_text = ((attached or {}).get("full_text") or "").strip()
                 source_file = (attached or {}).get("source_file") or "attached"
                 if full_text and source_file not in seen_names:
-                    blocks.append(f"{_file_header(source_file)}\n{full_text}")
+                    kind = _lookup_kind(source_file, file_kinds)
+                    blocks.append(f"{_file_header(source_file, kind)}\n{full_text}")
                     seen_names.add(source_file)
             except Exception as e:
                 log.warning("get_full_attachment failed while assembling "

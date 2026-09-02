@@ -508,6 +508,12 @@ async def _restore_file_context(thread_id: str) -> dict | None:
     # content via get_full_attachment(collection_id) on demand.
     chromadb_collections: list[str] = []
     file_names: list[str] = []
+    # Gap #3 (2026-09-02): restore per-file classifier verdicts from
+    # SQLite so file-kind-aware routing survives across turns. Empty
+    # entries for files that predate the classifier (migration default
+    # is empty string) are still surfaced as `{"kind": "", ...}` so
+    # consumers can distinguish "unknown" from "not classified yet".
+    file_kinds: list[dict] = []
 
     for record in thread_files:
         if record.get("upload_error") and not record.get("local_path"):
@@ -520,6 +526,12 @@ async def _restore_file_context(thread_id: str) -> dict | None:
         if coll and coll not in chromadb_collections:
             chromadb_collections.append(coll)
 
+        file_kinds.append({
+            "name": filename,
+            "kind": record.get("file_kind", "") or "",
+            "confidence": float(record.get("file_kind_confidence") or 0.0),
+        })
+
     if not chromadb_collections:
         return None
 
@@ -527,6 +539,7 @@ async def _restore_file_context(thread_id: str) -> dict | None:
         "chromadb_collections": chromadb_collections,
         "summary": f"Restored {len(file_names)} file(s) from thread history",
         "file_names": file_names,
+        "file_kinds": file_kinds,
     }
 
 

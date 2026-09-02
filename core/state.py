@@ -287,6 +287,14 @@ class FileContextData:
     file_names: list[str] = field(default_factory=list)
     summary: str = ""
     extracted_texts: list[dict] = field(default_factory=list)
+    # Gap #3 (2026-09-02): per-file kind classifier verdicts, populated
+    # by core.file_classifier at ingest and surfaced via
+    # FileContext.to_dict(). Each entry: {"name": str, "kind": str,
+    # "confidence": float}. `kind` is one of core.file_classifier.ALL_KINDS
+    # or "" (classifier didn't run) or "other" (couldn't decide). Consumed
+    # by orchestrator plan-node file-hint + core.file_context prefix
+    # renderer + Document agent's per-kind specialised prompt picker.
+    file_kinds: list[dict] = field(default_factory=list)
 
     @property
     def has_content(self) -> bool:

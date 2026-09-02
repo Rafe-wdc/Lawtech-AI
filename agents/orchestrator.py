@@ -1567,13 +1567,29 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # still sees the attached file in its system prompt.
         classify_query = query
         if fc and fc.has_content:
+            # Gap #3: include per-file classifier verdicts in the hint so
+            # the classifier LLM has typed signal (kind=fir, kind=judgment,
+            # etc.) alongside the raw filenames. Files without a known
+            # kind render as bare "<name>".
+            _fk_list = getattr(fc, "file_kinds", None) or []
+            _fk_by_name = {e.get("name", ""): (e.get("kind") or "") for e in _fk_list}
+            _labeled = [
+                f"{n} ({_fk_by_name[n]})" if _fk_by_name.get(n) and _fk_by_name[n] not in ("", "other")
+                else n
+                for n in fc.file_names
+            ]
             file_hint = (
-                f" [Files attached: {', '.join(fc.file_names)}. Apply "
+                f" [Files attached: {', '.join(_labeled)}. Apply "
                 "rule #2's decision rule: if the answer lives INSIDE the "
                 "file, route to Document. If the answer requires external "
                 "retrieval (case law, statute text, drafting, scenario "
                 "analysis), route to the domain agent — the file is "
-                "visible to it as reference context.]"
+                "visible to it as reference context. When a file's "
+                "classified kind is shown in parentheses (e.g. 'evidence.pdf "
+                "(fir)'), use it to bias routing: fir/court_order/pleading "
+                "-> typically Newacts or Judgment for external context; "
+                "contract -> Legislation or Scenario; notice -> Legislation "
+                "or Scenario; statute -> Newacts or Legislation.]"
             )
             classify_query = query + file_hint
             log.info("File context hint added for classification", file_names=fc.file_names)

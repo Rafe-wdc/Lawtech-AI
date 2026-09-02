@@ -144,9 +144,29 @@ async def lifespan(app: FastAPI):
     # worker writes to its own gauge file, MultiProcessCollector sums them).
     METRICS["inflight_gate_capacity"].set(_MAX_INFLIGHT)
     METRICS["inflight_gate_available"].set(_MAX_INFLIGHT)
+
+    # Gap #4 (2026-09-02): spawn in-app file GC loop so uploads/ and
+    # chroma_store/ get swept every FILE_GC_INTERVAL_HOURS without
+    # depending on the prod-daily-cleanup.yml cron. Task lives for the
+    # lifetime of the app; cancelled cleanly on shutdown below.
+    from .settings import FILE_GC_ENABLED
+    _gc_task = None
+    if FILE_GC_ENABLED:
+        from .file_gc import start_gc_loop
+        _gc_task = asyncio.create_task(start_gc_loop(), name="file_gc_loop")
+        log.info("Startup: file GC loop scheduled")
+    else:
+        log.info("Startup: file GC disabled (FILE_GC_ENABLED=0)")
+
     log.info("Startup complete")
     yield
     # Shutdown
+    if _gc_task is not None:
+        _gc_task.cancel()
+        try:
+            await _gc_task
+        except (asyncio.CancelledError, Exception):
+            pass
     if _pg_pool is not None:
         log.info("Shutdown: closing PostgreSQL checkpointer pool")
         await _pg_pool.close()

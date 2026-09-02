@@ -398,8 +398,17 @@ async def newacts_node(state: LegalAgentState) -> dict:
         _user_language,
         _intent,
     )
+    # Gap #1: inject uploaded-document text so Newacts sees the user's
+    # matter (e.g. "which BNS sections apply?" with an FIR / complaint
+    # attached). Empty when no files — normal flow unchanged.
+    from core.state import FileContextData as _FileContextData
+    from core.file_context import format_file_context_prefix as _fmt_files
+    _file_prefix = _fmt_files(_FileContextData.from_state(state))
+    if _file_prefix:
+        _system_prompt = _system_prompt + "\n\n" + _file_prefix
     chat_history = state.get("chat_history", [])
     log.info("Agent started", query=query[:100],
+             has_file_context=bool(_file_prefix),
              using_agent_query="Newacts" in agent_queries)
 
     try:

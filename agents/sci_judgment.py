@@ -61,14 +61,26 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         tools = AGENT_TOOLS["sci_judgment"]
         log.debug("Building ReAct agent", tools_count=len(tools))
 
+        # Gap #1: append uploaded-document text to the ReAct agent's system
+        # prompt so SCI_Judgment sees the user's matter (upload SCI order +
+        # ask "cases citing this?" — the order text now influences retrieval
+        # tool selection). Empty when no files attached — flow unchanged.
+        from core.state import FileContextData as _FileContextData
+        from core.file_context import format_file_context_prefix as _fmt_files
+        _sci_system_prompt = localize_prompt(
+            SCI_JUDGMENT_SYSTEM_PROMPT,
+            user_language,
+            state.get("user_intent"),
+        )
+        _file_prefix = _fmt_files(_FileContextData.from_state(state))
+        if _file_prefix:
+            _sci_system_prompt = _sci_system_prompt + "\n\n" + _file_prefix
+            log.info("SCI_Judgment: uploaded file context injected",
+                     prefix_len=len(_file_prefix))
         agent = create_react_agent(
             llm,
             tools,
-            prompt=SystemMessage(content=localize_prompt(
-                SCI_JUDGMENT_SYSTEM_PROMPT,
-                user_language,
-                state.get("user_intent"),
-            )),
+            prompt=SystemMessage(content=_sci_system_prompt),
         )
 
         # Invoke the ReAct sub-agent. Bounded because a hung ReAct

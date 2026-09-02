@@ -1090,6 +1090,15 @@ async def chat_with_files(
                 detail=f"Maximum {MAX_FILES} files allowed",
             )
 
+        # Per-file size cap (in bytes) used by the pre-read + chunked-read
+        # checks below. Duplicated from validate_upload so we reject BEFORE
+        # any body allocation. validate_upload still runs after as a
+        # belt-and-suspenders re-check.
+        from core.settings import MAX_FILE_SIZE_MB as _MAX_FILE_SIZE_MB
+        from core.file_processor import ALLOWED_EXTENSIONS as _ALLOWED_EXTENSIONS
+        _size_cap_bytes = _MAX_FILE_SIZE_MB * 1024 * 1024
+        _read_chunk = 4 * 1024 * 1024   # 4 MB chunks bound peak allocation
+
         for f in files:
             if not f.filename or f.filename == "":
                 continue
@@ -1097,23 +1106,113 @@ async def chat_with_files(
             original_name = f.filename
             filename = safe_upload_name(original_name)
 
-            # Save to temp file
-            suffix = os.path.splitext(filename)[1]
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                f.file.seek(0)
-                content = await f.read()
-                tmp.write(content)
-                tmp_path = tmp.name
-                temp_paths.append(tmp_path)
-
-            err = validate_upload(filename, len(content))
-            if err:
-                log.warning("File rejected in chat", file=original_name,
-                            sanitized=filename, reason=err)
-                rejected_files.append({"name": original_name, "reason": err})
+            # Gap #2 defence 1 — cheap extension check BEFORE any body read.
+            # Rejects .exe / .zip / other non-whitelisted uploads without
+            # allocating a single byte of Python memory.
+            _ext = os.path.splitext(filename)[1].lower()
+            if _ext not in _ALLOWED_EXTENSIONS:
+                log.warning("File rejected pre-read (extension)",
+                            file=original_name, sanitized=filename, ext=_ext)
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": f"Unsupported file type: {_ext}. Allowed: "
+                              f"{', '.join(sorted(_ALLOWED_EXTENSIONS))}",
+                })
+                continue
+            if _ext == ".doc":
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": "Old .doc format is not supported. "
+                              "Please convert to .docx",
+                })
                 continue
 
-            file_tuples.append((tmp_path, filename, len(content)))
+            # Gap #2 defence 2 — Content-Length pre-check when the client
+            # supplied one (FastAPI populates UploadFile.size from the
+            # multipart Content-Length header). Rejects declared-oversized
+            # uploads without reading a single byte.
+            _declared_size = getattr(f, "size", None)
+            if _declared_size is not None and _declared_size > _size_cap_bytes:
+                _declared_mb = _declared_size / (1024 * 1024)
+                log.warning("File rejected pre-read (Content-Length)",
+                            file=original_name, sanitized=filename,
+                            declared_mb=round(_declared_mb, 1),
+                            cap_mb=_MAX_FILE_SIZE_MB)
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": f"File too large ({_declared_mb:.1f} MB). "
+                              f"Max: {_MAX_FILE_SIZE_MB} MB",
+                })
+                continue
+
+            # Gap #2 defence 3 — chunked read with early-terminate cap.
+            # Bounds peak memory to `_read_chunk` (4 MB) + already-written
+            # bytes up to `_size_cap_bytes`. Catches clients that omit or
+            # lie about Content-Length. Previous code did
+            # `content = await f.read()` (no size arg) which loaded the
+            # entire body into a single bytes object — 30 × 1 GB uploads
+            # would OOM the worker before any validation could run.
+            suffix = os.path.splitext(filename)[1]
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp_path = tmp.name
+            total_bytes = 0
+            exceeded_cap = False
+            try:
+                try:
+                    f.file.seek(0)
+                except (AttributeError, ValueError):
+                    pass  # some UploadFile impls don't support pre-read seek
+                while True:
+                    chunk = await f.read(_read_chunk)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > _size_cap_bytes:
+                        exceeded_cap = True
+                        break
+                    tmp.write(chunk)
+            finally:
+                tmp.close()
+
+            if exceeded_cap:
+                # Clean up the partial temp file, do NOT append to file_tuples.
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                log.warning("File rejected mid-read (cap exceeded)",
+                            file=original_name, sanitized=filename,
+                            partial_mb=round(total_bytes / (1024 * 1024), 1),
+                            cap_mb=_MAX_FILE_SIZE_MB)
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": f"File exceeded {_MAX_FILE_SIZE_MB} MB cap "
+                              "during upload (Content-Length may have been "
+                              "missing or inaccurate)",
+                })
+                continue
+
+            temp_paths.append(tmp_path)
+
+            # Belt-and-suspenders: validate_upload re-checks extension + size.
+            # Should always pass at this point since the pre-read checks
+            # above are strictly stronger, but keep for defence-in-depth
+            # in case validate_upload gains new checks (magic-byte sniff,
+            # per-format min-size, etc.) that don't have a pre-read
+            # equivalent yet.
+            err = validate_upload(filename, total_bytes)
+            if err:
+                log.warning("File rejected in chat (post-read validator)",
+                            file=original_name, sanitized=filename, reason=err)
+                rejected_files.append({"name": original_name, "reason": err})
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                temp_paths.remove(tmp_path)
+                continue
+
+            file_tuples.append((tmp_path, filename, total_bytes))
 
     async def event_generator():
         # Process files before invoking the pipeline (they need to be staged

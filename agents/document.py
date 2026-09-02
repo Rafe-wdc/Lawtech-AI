@@ -306,6 +306,92 @@ async def document_node(state: LegalAgentState) -> dict:
                      files=len(retrieved_docs),
                      chroma_collections=len(coll_list))
 
+        # --- Gap #5: large-attachment MMR router ---
+        #
+        # When the user uploaded a big evidence bundle (>3 files or the
+        # aggregate text exceeds LARGE_ATTACHMENT_CHAR_BUDGET), swap the
+        # lossless full-doc path for per-chunk similarity retrieval so
+        # the Gemini prompt stays within the model's usable context. The
+        # dead retrieve_attachment_context tool at
+        # tools/shared/vectordb_tools.py has been kept in the codebase
+        # for exactly this scenario and is finally wired in here.
+        #
+        # Thresholds are conservative: the 1-3 file case (the vast
+        # majority of usage) stays on the full-doc path so we lose no
+        # per-file context. Only the "20-PDF evidence bundle" tail
+        # triggers MMR, and even then the marker in the log lets
+        # operators see the switch happen.
+        LARGE_ATTACHMENT_FILE_COUNT = 3
+        LARGE_ATTACHMENT_CHAR_BUDGET = 500_000
+        _agg_chars = sum(len(d.page_content) for d in retrieved_docs)
+        _use_mmr = (
+            len(coll_list) > LARGE_ATTACHMENT_FILE_COUNT
+            or _agg_chars > LARGE_ATTACHMENT_CHAR_BUDGET
+        )
+        if _use_mmr and coll_list:
+            log.info(
+                "Large attachment bundle detected — switching to MMR path",
+                files=len(coll_list),
+                aggregate_chars=_agg_chars,
+                threshold_files=LARGE_ATTACHMENT_FILE_COUNT,
+                threshold_chars=LARGE_ATTACHMENT_CHAR_BUDGET,
+            )
+            progress("document",
+                     f"Large bundle ({len(coll_list)} files, "
+                     f"{_agg_chars // 1000}K chars) — using targeted retrieval",
+                     step="search", substep=True)
+            try:
+                from tools.shared.vectordb_tools import retrieve_attachment_context_impl
+                mmr_result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        retrieve_attachment_context_impl,
+                        query, coll_list,
+                        # Bump k so a 20-file bundle still yields ~30 top
+                        # chunks (~30K chars typical) — enough context
+                        # for a substantive answer, well under the 500K
+                        # budget the full-doc path would have blown past.
+                        8,   # per_collection_k
+                        30,  # total_k
+                    ),
+                    timeout=TIMEOUT_CHROMADB_SEC,
+                )
+                mmr_chunks = mmr_result.get("chunks", [])
+                if mmr_chunks:
+                    retrieved_docs = [
+                        Document(
+                            page_content=ch["content"],
+                            metadata={
+                                "source": ch.get("source") or "attached",
+                                "chunk_id": ch.get("chunk_id"),
+                                "score": ch.get("score"),
+                                "collection": ch.get("collection"),
+                                "retrieval_mode": "mmr_large_bundle",
+                            },
+                        )
+                        for ch in mmr_chunks
+                    ]
+                    log.info(
+                        "MMR retrieval succeeded — replaced full-doc concat",
+                        chunks=len(retrieved_docs),
+                        total_chars=sum(len(d.page_content) for d in retrieved_docs),
+                    )
+                else:
+                    log.warning(
+                        "MMR retrieval returned no chunks — keeping full-doc path "
+                        "(user query may not embed well against uploaded content)",
+                        files=len(coll_list),
+                    )
+            except asyncio.TimeoutError:
+                log.warning(
+                    "MMR retrieval timed out — falling back to full-doc concat",
+                    timeout_s=TIMEOUT_CHROMADB_SEC,
+                )
+            except Exception as _mmr_err:
+                log.warning(
+                    "MMR retrieval failed — falling back to full-doc concat",
+                    error=str(_mmr_err)[:200],
+                )
+
         # Step 2: Relevance gate removed for the full-doc path (Phase D
         # switched retrieval from MMR top-30 to get_full_attachment, which
         # returns the entire file as one Document). The old gate was

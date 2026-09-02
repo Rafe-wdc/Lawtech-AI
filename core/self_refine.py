@@ -1388,6 +1388,8 @@ Violations to fix (each has a suggested_fix the auditor wrote):
 Previous response (the draft to revise):
 {response}
 
+{language_directive}
+
 Produce the revised response now.
 """
 
@@ -1621,6 +1623,31 @@ async def _refine(
             )
             intent_json = intent.model_dump_json(indent=2)
             violations_block = _format_violations(critique.violations)
+            # WHY this exists: REFINE_PROMPT had no instruction to write in
+            # the user's language. Its ONLY language content was Rule 6,
+            # "FIXED-ENGLISH ANCHOR ENFORCEMENT" — a long, detailed passage
+            # about what must be kept in ENGLISH inside a regional draft
+            # (statutory references, case citations, Latin digits). Nothing
+            # anywhere told it to keep the rest in the target language.
+            #
+            # So a refiner handed an Odia draft read a page about producing
+            # English and inferred the target from `intent_json`'s
+            # "language": "or" field — a data field, not an instruction. It
+            # rewrote the document into English (measured: 9,740 Odia chars
+            # in, 12,411 English chars out).
+            #
+            # The generator never had this problem because it goes through
+            # localize_prompt(); the refiner never called it. Passed as a
+            # template VARIABLE rather than concatenated so any braces in the
+            # localized text are not parsed as placeholders, and positioned
+            # immediately before "Produce the revised response now" — the
+            # depth-parity work showed an instruction buried far from the
+            # task does not move the output.
+            _lang = getattr(intent, "language", "en") or "en"
+            language_directive = ""
+            if _lang != "en":
+                from core.language import localize_prompt as _localize
+                language_directive = _localize("", _lang, intent).strip()
             prompt = ChatPromptTemplate.from_template(REFINE_PROMPT)
             chain = prompt | llm
             # Bound the refiner too — same reasoning as the critic above,
@@ -1634,6 +1661,7 @@ async def _refine(
                         "intent_json":     intent_json,
                         "violations_block": violations_block,
                         "response":        response,
+                        "language_directive": language_directive,
                         "retrieved_sources_whitelist": (
                             retrieved_sources_whitelist
                             or "(none — restrict yourself to fixing non-citation "

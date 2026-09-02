@@ -300,6 +300,41 @@ Worse, the metric **cannot separate good from bad**: Gujarati and Odia both scor
 
 ---
 
+## Why regional drafts came out in English
+
+This is the most transferable finding in the whole investigation, and it is not really about Odia.
+
+**The refiner was never told to write in the user's language.**
+
+The generator goes through `localize_prompt()`, which appends a ~10,000-character strict directive:
+
+> *"LANGUAGE INSTRUCTION (STRICT): The user demanded PURE Odia for the BODY PROSE. Do NOT insert English words, phrases, or narrative clauses into the body prose — write in Odia."*
+
+`REFINE_PROMPT` never called it. Every language-related line in that prompt belongs to a single rule — **Rule 6, "FIXED-ENGLISH ANCHOR ENFORCEMENT"** — a long, detailed passage on what must be kept in **English** inside a regional draft: statutory references, case citations, Latin digits.
+
+So the refiner received:
+
+| Input | What it said about language |
+|---|---|
+| The draft | in Odia |
+| `REFINE_PROMPT` | a page on what to make **English** |
+| `intent_json` | `"language": "or"` — a **data field**, not an instruction |
+| A language directive | **none** |
+
+The only thing naming the target language was a JSON field buried in a config blob. The only thing that discussed language *at length* described producing English. Handed a list of violations to fix, the model did the thing the prompt actually described — and Rule 6 does not merely permit English, it actively instructs the model to enforce English statutory content, which is why the draft **grew** from 9,740 to 12,411 characters while turning English.
+
+### The lesson, stated generally
+
+**A pipeline stage that reads intent as DATA but never as INSTRUCTION will drift.**
+
+`intent_json` is passed to the critic and the refiner as a serialized object. Serialized state tells a model what is *true*; it does not tell it what to *do*. Every stage that produces user-facing text needs the directive form, not just the data form.
+
+This is worth auditing across the pipeline wherever `intent` is passed as JSON. The same shape caused bug 1 from the other direction: there the critic treated a `legal_artifact` data field as though it were an instruction and rewrote a correct document to match it. Data mistaken for instruction, and instruction never given as instruction, are the same class of defect.
+
+The fix threads `localize_prompt()` output into `REFINE_PROMPT` as a template variable, positioned immediately before *"Produce the revised response now"* — applying the position finding from Fault 2, where the identical text moved output 61% → 80% purely by sitting next to the task rather than far from it.
+
+---
+
 ## The Odia failure, diagnosed
 
 The one genuinely broken draft in pass 1. Two faults, one event:

@@ -127,6 +127,18 @@ UPLOAD_TTL_DAYS = int(os.getenv("UPLOAD_TTL_DAYS", "7"))
 CHROMA_TTL_DAYS = int(os.getenv("CHROMA_TTL_DAYS", "30"))
 TMP_PDF_TTL_HOURS = int(os.getenv("TMP_PDF_TTL_HOURS", "24"))
 
+# --- Spreadsheet row cap (Gap #6, 2026-09-02) ---
+# Cap on XLSX / CSV rows read into the extracted-text blob PER SHEET.
+# Historical hard-coded value was 100 which silently dropped rows past
+# that -- a critical data-integrity bug for legal spreadsheets
+# (evidence lists, cheque ledgers, GST invoices routinely 200-2000
+# rows). 5000 is realistic for legal use cases while still bounded by
+# Gemini's 1M-token context (5000 rows * ~10 columns * ~10 chars ~=
+# 500K chars, well under the limit even with agent overhead).
+# Truncation still emits a loud marker in the extracted text +
+# WARN log line, so we never silently drop data past the cap.
+XLSX_CSV_MAX_ROWS = int(os.getenv("XLSX_CSV_MAX_ROWS", "5000"))
+
 # --- Chat History (SQLite) ---
 CHAT_HISTORY_DB_PATH = os.getenv(
     "CHAT_HISTORY_DB_PATH",

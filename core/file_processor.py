@@ -2058,41 +2058,99 @@ def _extract_docx_text(file_path: str) -> str:
 
 
 def _extract_csv_text(file_path: str) -> str:
+    """Extract CSV rows up to XLSX_CSV_MAX_ROWS (Gap #6, was hard-coded 100).
+
+    On truncation, appends a loud marker row that surfaces to the LLM
+    AND emits a WARN log line so the user's operator can see it in
+    telemetry. Never silently drops data past the cap.
+    """
+    from core.settings import XLSX_CSV_MAX_ROWS
+    cap = max(1, XLSX_CSV_MAX_ROWS)
+    rows: list[list[str]] = []
+    truncated_at: int | None = None
+    total_scanned = 0
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         reader = csv.reader(f)
-        rows = []
         for i, row in enumerate(reader):
-            if i >= 100:
-                rows.append(["... (truncated)"])
+            total_scanned = i + 1
+            if i >= cap:
+                truncated_at = i
+                # Peek a few more to estimate how much was dropped, then break
+                overflow = 0
+                for _ in reader:
+                    overflow += 1
+                    if overflow > 5000:
+                        break
+                total_scanned = i + overflow
                 break
             rows.append(row)
     if not rows:
         return ""
+    if truncated_at is not None:
+        # Loud, unambiguous marker that survives into the LLM prompt.
+        rows.append([
+            f"[! TRUNCATED: showing first {cap} rows out of ~{total_scanned}+ "
+            f"detected in this file. Raise XLSX_CSV_MAX_ROWS env var to see "
+            f"more rows, or ask the user to slice / summarise the file first.]"
+        ])
+        log.warning("CSV truncated at row cap",
+                    file=file_path, cap_rows=cap, scanned_rows=total_scanned)
     header = " | ".join(rows[0])
-    sep = " | ".join(["---"] * len(rows[0]))
+    sep = " | ".join(["---"] * len(rows[0])) if rows[0] else ""
     body = "\n".join(" | ".join(r) for r in rows[1:])
-    return f"{header}\n{sep}\n{body}"
+    return f"{header}\n{sep}\n{body}" if sep else header + "\n" + body
 
 
 def _extract_xlsx_text(file_path: str) -> str:
+    """Extract every worksheet, up to XLSX_CSV_MAX_ROWS PER SHEET (Gap #6).
+
+    Per-sheet cap so one giant sheet doesn't starve the others of
+    context budget. On truncation, appends a loud marker row per
+    affected sheet + emits a WARN log line.
+    """
+    from core.settings import XLSX_CSV_MAX_ROWS
     from openpyxl import load_workbook
+    cap = max(1, XLSX_CSV_MAX_ROWS)
     wb = load_workbook(file_path, read_only=True, data_only=True)
-    sheets_text = []
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        rows = []
-        for i, row in enumerate(ws.iter_rows(values_only=True)):
-            if i >= 100:
-                rows.append(["... (truncated)"])
-                break
-            rows.append([str(c) if c is not None else "" for c in row])
-        if not rows:
-            continue
-        header = " | ".join(rows[0])
-        sep = " | ".join(["---"] * len(rows[0]))
-        body = "\n".join(" | ".join(r) for r in rows[1:])
-        sheets_text.append(f"### Sheet: {sheet_name}\n\n{header}\n{sep}\n{body}")
-    wb.close()
+    sheets_text: list[str] = []
+    try:
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows: list[list[str]] = []
+            truncated_at: int | None = None
+            total_scanned = 0
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                total_scanned = i + 1
+                if i >= cap:
+                    truncated_at = i
+                    # Estimate overflow (bounded to keep the walk cheap)
+                    overflow = 0
+                    for _ in ws.iter_rows(min_row=i + 2, values_only=True):
+                        overflow += 1
+                        if overflow > 5000:
+                            break
+                    total_scanned = i + overflow
+                    break
+                rows.append([str(c) if c is not None else "" for c in row])
+            if not rows:
+                continue
+            if truncated_at is not None:
+                rows.append([
+                    f"[! TRUNCATED: sheet '{sheet_name}' has ~{total_scanned}+ "
+                    f"rows; showing first {cap}. Raise XLSX_CSV_MAX_ROWS env "
+                    f"var to see more, or slice the sheet first.]"
+                ])
+                log.warning("XLSX sheet truncated at row cap",
+                            file=file_path, sheet=sheet_name,
+                            cap_rows=cap, scanned_rows=total_scanned)
+            header = " | ".join(rows[0])
+            sep = " | ".join(["---"] * len(rows[0])) if rows[0] else ""
+            body = "\n".join(" | ".join(r) for r in rows[1:])
+            sheet_body = (f"{header}\n{sep}\n{body}" if sep
+                          else f"{header}\n{body}")
+            sheets_text.append(f"### Sheet: {sheet_name}\n\n{sheet_body}")
+    finally:
+        wb.close()
     return "\n\n".join(sheets_text)
 
 

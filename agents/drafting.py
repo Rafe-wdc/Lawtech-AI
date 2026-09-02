@@ -1725,29 +1725,41 @@ async def _generate_section_pair(
                 local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
             )
         except Exception as primary_err:
-            from core.clients import (
-                get_openai_drafting_fallback, is_openai_fallback_configured,
-            )
-            if not is_openai_fallback_configured():
-                log.warning(
-                    "Gemini section-pair failed and no OpenAI fallback is "
-                    "configured; set OPENAI_API_KEY to enable failover",
-                    error=short_err(primary_err),
-                )
-                raise
+            # 2026-09-02: fallback switched from OpenAI GPT-4o to Gemini
+            # 2.5 Flash. The old GPT-4o fallback had a 128 K token limit,
+            # which is smaller than legal source-document uploads
+            # routinely reach (a full arbitration paperbook can push
+            # 500 K-1 M tokens even after Gap #5's MMR router). Observed
+            # in a live test 2026-09-02: primary Gemini Pro hit its 1 M
+            # cap, failover to GPT-4o hit ITS 128 K cap ~immediately,
+            # both retries failed identically -- fallback added zero
+            # value while burning latency + OpenAI cost. Gemini Flash
+            # shares the 1 M context ceiling AND is markedly cheaper
+            # than either Gemini Pro or GPT-4o, so as a second-provider
+            # substitute for Pro's tool-planning / reasoning quirks it's
+            # an unambiguous win: same reach, lower cost, no cross-
+            # provider tokenizer surprise. Anything genuinely over 1 M
+            # tokens needs Gap #5's MMR router or per-section chunking
+            # (DRAFTING_PER_SECTION_CHUNKING=1); the fallback path was
+            # never the right lever for that class of overflow.
+            from core.clients import get_gemini_flash_full
             log.warning(
-                "Gemini section-pair failed — failing over to OpenAI GPT-4o",
+                "Gemini Pro section-pair failed — failing over to Gemini Flash",
                 error=short_err(primary_err),
-                provider_from="gemini-2.5-pro", provider_to="gpt-4o",
+                provider_from="gemini-2.5-pro", provider_to="gemini-2.5-flash",
             )
-            fb = get_openai_drafting_fallback()
+            fb = get_gemini_flash_full(
+                temperature=0.0,
+                max_output_tokens=12000,
+                thinking_budget=0,
+            )
             resp = await bounded_wait_for(
                 asyncio.to_thread(fb.invoke, msgs),
                 local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
             )
             log.info(
-                "OpenAI fallback produced the section pair",
-                provider="gpt-4o",
+                "Gemini Flash fallback produced the section pair",
+                provider="gemini-2.5-flash",
             )
             return resp
 
@@ -1874,6 +1886,41 @@ async def _generate_sectionwise(
             chunks=len(all_chunks),
         )
 
+    # Per-pair char budget — headroom below Gemini's 1M-token ceiling
+    # after accounting for system prompt (~20K tokens), reference draft
+    # (~50K), prior_text (~30K), section instructions (~5K), and gen
+    # output (~12K). Live 2026-09-02: an arbitration paperbook upload
+    # at 1.88M chars pushed a section-pair call to 1.03M tokens even
+    # after routing (router picked 99.2% of chunks) or fell back to raw
+    # source (Verification section legitimately needed no source docs
+    # but raw fallback still overflowed). This cap protects both paths.
+    # Latin ~4 chars/token -> 2.4M chars = ~600K tokens.
+    # Dense Indic scripts ~2.5 chars/token -> 1.6M chars = ~640K tokens.
+    _PAIR_USER_FACTS_BUDGET_LATIN = 2_400_000
+    _PAIR_USER_FACTS_BUDGET_INDIC = 1_600_000
+    # Same script detection as `_generate_draft`'s whole-request preflight.
+    _INDIC_RANGES = (
+        ("devanagari", "ऀ", "ॿ"),
+        ("bengali",    "ঀ", "৿"),
+        ("gurmukhi",   "਀", "੿"),
+        ("gujarati",   "઀", "૿"),
+        ("oriya",      "଀", "୿"),
+        ("tamil",      "஀", "௿"),
+        ("telugu",     "ఀ", "౿"),
+        ("kannada",    "ಀ", "೿"),
+        ("malayalam",  "ഀ", "ൿ"),
+    )
+    _detected_script = "latin"
+    _pair_budget = _PAIR_USER_FACTS_BUDGET_LATIN
+    if user_facts:
+        _sample = user_facts[:20_000]
+        _sample_len = max(len(_sample), 1)
+        for _name, _lo, _hi in _INDIC_RANGES:
+            if sum(1 for c in _sample if _lo <= c <= _hi) / _sample_len > 0.3:
+                _detected_script = _name
+                _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
+                break
+
     i = 0
     while i < total:
         pair = sections[i:i + 2]
@@ -1933,10 +1980,47 @@ async def _generate_sectionwise(
                     ),
                 )
             else:
+                # 2026-09-02: router picked 0 chunks -> this section
+                # legitimately doesn't need source-document content
+                # (typical for Verification / signature / cause-title
+                # sections). Send EMPTY user_facts instead of falling
+                # back to raw source. The old raw-fallback overflowed
+                # the 1M-token ceiling on very large uploads and caused
+                # legitimate 0-pick sections to fail with a
+                # context_length error. Respecting the router's decision
+                # here means these sections generate cleanly from the
+                # system prompt + reference draft + prior_text alone.
+                pair_user_facts = ""
                 log.info(
-                    "Per-section chunking: no chunks picked — using raw source",
+                    "Per-section chunking: no chunks picked — sending empty "
+                    "user_facts (section doesn't need source docs)",
                     pair_start=position_start,
+                    section_headings=[s.heading[:60] for s in pair],
                 )
+
+        # 2026-09-02: post-router / raw-fallback safety cap. Even after
+        # routing (or with raw fallback when chunking is disabled), the
+        # blob may still exceed our safe per-pair budget on very large
+        # uploads. Truncate with a marker so the section produces output
+        # rather than failing on 1M-token overflow. Trade-off: partial-
+        # verbatim source vs a fully-failed section — the fully-failed
+        # section is unambiguously worse for the user.
+        if len(pair_user_facts) > _pair_budget:
+            _orig_chars = len(pair_user_facts)
+            pair_user_facts = (
+                pair_user_facts[:_pair_budget]
+                + f"\n\n[…source material truncated to fit model context: "
+                + f"showing first {_pair_budget:,} of {_orig_chars:,} chars. "
+                + f"Split the upload into smaller PDFs for full-verbatim access.]"
+            )
+            log.warning(
+                "Per-pair user_facts exceeded budget — truncated with marker",
+                pair_start=position_start,
+                original_chars=_orig_chars,
+                truncated_chars=len(pair_user_facts),
+                budget=_pair_budget,
+                script=_detected_script,
+            )
 
         # One retry per pair (Buglist Phase 2). The first attempt uses
         # the Gemini SDK's default timeout; the retry uses the SAME

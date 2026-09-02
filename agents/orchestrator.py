@@ -250,8 +250,38 @@ doubt, do NOT pick Drafting.
    `##`, or bare numeric strings as drafting-template markers — Drafting
    (rule 3) still requires an actual production verb AND a document-noun
    word in a coherent request.
-2. **Document** — the user attached files AND is asking about their contents
-   (summary, extraction, "what does this say", "who is the plaintiff here").
+2. **Document** — the user attached files AND the ANSWER LIVES INSIDE the
+   file (the query is answerable by reading / summarising / extracting
+   from the uploaded content ALONE, with no external retrieval needed).
+   Triggers:
+   - "what does this say", "summarise this", "give me the gist"
+   - "who is the plaintiff / accused / complainant in this document"
+   - "what sections are mentioned in this FIR"  (sections listed on the file)
+   - "extract the party names / dates / amounts from this"
+   - "translate this document"
+   - "which court is this from"
+   NOT Document even when files are attached — route to the appropriate
+   domain agent instead (per Gap #1 the domain agent will still see the
+   file text as reference context in its system prompt):
+   - "give me relevant case laws" / "cite similar judgments" → **Judgment**
+     (case-law lookup — answer lives in the ES judgment index, not the file)
+   - "explain Section 117 BNS" / "what does Section 138 say" → **Newacts**
+     or **Legislation** (statute text lookup — answer lives in the statute
+     database, not the file)
+   - "draft a bail application" / "write a reply notice" → **Drafting**
+     (production of a new document; file is source material, not answer)
+   - "what remedies do I have" / "arguments for the accused" → **Scenario**
+     (situational analysis — file is fact-context, answer requires
+     external legal reasoning)
+   - "does this violate the basic structure" / "which Article applies"
+     → **Constitution** (Constitutional analysis)
+   - "which BNS sections would apply to these facts" → **Newacts**
+     (section-picking based on file facts — answer requires knowledge of
+     the BNS index, not just the file)
+   Decision rule: ask "if I could ONLY read the file and nothing else, could
+   I answer this?" YES → Document. NO → route to the domain agent that owns
+   the external knowledge needed, and trust that the file will be visible
+   to that agent as reference context.
 3. **Drafting** — explicit production verb (draft / write / prepare / create /
    generate / compose / draw up / redraft / "give me a" / "I need a") PLUS a
    filing-ready document noun (plaint, petition, written statement, bail
@@ -1523,10 +1553,28 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             normalized_query = None  # will be set by parallel normalization
 
         # --- Change 2: Parallelize normalization + classify-plan ---
-        # Build classify query with file hint
+        # Build classify query with file hint.
+        #
+        # Historical assertion "This query is about the uploaded document(s)"
+        # over-collapsed routing to Document-only whenever files were
+        # attached — even when the query was a pure domain question
+        # (2026-09-02: "give me case law on chain snatching" with an FIR
+        # attached routed to Document, which then refused because the FIR
+        # obviously didn't contain SC/HC case law). Neutralise the hint:
+        # tell the classifier the FILES EXIST but let the query's actual
+        # intent drive routing. Gap #1 ships the file-content-into-every-
+        # agent wiring, so a domain agent that runs alongside Document
+        # still sees the attached file in its system prompt.
         classify_query = query
         if fc and fc.has_content:
-            file_hint = f" [User has uploaded files: {', '.join(fc.file_names)}. This query is about the uploaded document(s).]"
+            file_hint = (
+                f" [Files attached: {', '.join(fc.file_names)}. Apply "
+                "rule #2's decision rule: if the answer lives INSIDE the "
+                "file, route to Document. If the answer requires external "
+                "retrieval (case law, statute text, drafting, scenario "
+                "analysis), route to the domain agent — the file is "
+                "visible to it as reference context.]"
+            )
             classify_query = query + file_hint
             log.info("File context hint added for classification", file_names=fc.file_names)
 

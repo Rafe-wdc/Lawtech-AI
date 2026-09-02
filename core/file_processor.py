@@ -2293,6 +2293,49 @@ async def process_files(
     for pf, local_path, ext, mime, gemini_ok in prepared:
         # --- PDF-specific handling ---
         if ext == ".pdf":
+            # --- Gap #7 (2026-09-02): early encrypted-PDF detection ---
+            # PyMuPDF flags password-protected PDFs via `doc.is_encrypted`.
+            # We can't decrypt without the password (and accepting
+            # passwords over the chat channel is a policy question we're
+            # not tackling here). Detect early -> emit a clean, friendly
+            # rejection SSE event and skip the entire compression /
+            # extraction / OCR / Chroma-embed pipeline. Without this
+            # early check the pipeline runs `_extract_pdf_text_per_page`
+            # which raises ValueError deep in the try/except at the
+            # bottom of this branch, surfacing an awkward "PDF processing
+            # failed: PDF is encrypted/password-protected" error string
+            # instead of a UX-friendly next-step.
+            _is_encrypted = False
+            try:
+                import fitz as _fitz_check
+                _probe = _fitz_check.open(local_path)
+                _is_encrypted = bool(_probe.is_encrypted)
+                _probe.close()
+            except Exception as _enc_err:
+                # If we can't even open the file to check, downstream
+                # extraction will fail cleanly with its own error — no
+                # need to duplicate that path.
+                log.debug("PDF encryption pre-check failed",
+                          file=pf.original_name, error=str(_enc_err)[:120])
+            if _is_encrypted:
+                _msg = (
+                    "This PDF is password-protected. Please unlock it "
+                    "(remove the password in your PDF viewer or export as "
+                    "an unlocked copy) and re-upload."
+                )
+                pf.error = _msg
+                emit({
+                    "type": "file_processing",
+                    "stage": "pdf_encrypted_rejected",
+                    "message": f"{pf.original_name}: {_msg}",
+                    "file": pf.original_name,
+                    "rejected": [{"name": pf.original_name, "reason": _msg}],
+                })
+                log.warning("Rejected encrypted PDF — no further processing",
+                            file=pf.original_name)
+                ctx.files.append(pf)
+                continue
+
             # --- Step 3.0: Optional PDF compression (V1 port) ---
             # PikePDF lossless re-streaming reduces file size for downstream
             # fitz extraction and Vision OCR rendering. Ghostscript /ebook

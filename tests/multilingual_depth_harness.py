@@ -103,7 +103,12 @@ SCRIPT_RANGES: dict[str, list[tuple[int, int]]] = {
     "en": [(0x0041, 0x005A), (0x0061, 0x007A)],
 }
 
-_HEADING_RE = re.compile(r"^#{1,4}\s+(\S.*)$", re.M)
+# Sections are `##`. Deeper levels are SUB-headings inside a section and must
+# not be counted as sections — one Hindi draft emitted 1 `##` plus 11 `###`,
+# which a `^#{1,4}` pattern scored as "12 sections" when the document had one.
+# Every other draft in a 19-draft sample used `##` exclusively.
+_HEADING_RE = re.compile(r"^##\s+(\S.*)$", re.M)
+_SUBHEADING_RE = re.compile(r"^#{3,4}\s+\S", re.M)
 _WORD_RE = re.compile(r"\S+")
 
 # Diagnostic only — see the module docstring. Validated against real Urdu and
@@ -129,7 +134,15 @@ def script_ratio(text: str, lang: str) -> float:
 
 
 def headings(text: str) -> list[str]:
+    """Section headings only (`##`). See _HEADING_RE for why depth matters."""
     return [m.strip() for m in _HEADING_RE.findall(text)]
+
+
+def subheadings(text: str) -> int:
+    """`###`/`####` inside sections. Reported separately so a draft that
+    nests its content cannot inflate the section count.
+    """
+    return len(_SUBHEADING_RE.findall(text))
 
 
 def section_coverage(text: str, expected: int) -> float:

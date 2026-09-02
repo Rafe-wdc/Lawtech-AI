@@ -1493,9 +1493,34 @@ async def _judge_fanout(
                 "Apply the default fan-out rules above."
             )
 
+        # Planner model: Gemini 2.5 Flash (full) with a thinking budget,
+        # upgraded from flash-lite.
+        #
+        # This is a deliberate TRADE, measured on hi/gu/ta/te + en, 3 runs
+        # each, reference held constant per language:
+        #
+        #   PAYS FOR ITSELF — heading script correctness
+        #     Gujarati headings, flash-lite : script match 0.00, 3/3
+        #                                     (emitted Devanagari, i.e. Hindi)
+        #     Gujarati headings, flash full : script match 1.00, 3/3
+        #     A Gujarati draft whose section headings are in Hindi is the
+        #     "not appropriate" half of the client complaint, and flash-lite
+        #     got it wrong every single time.
+        #
+        #   COSTS — planned section count drops
+        #     en  7,7,7 -> 4,4,4      hi  7,7,7 -> 6,6,6
+        #     gu  8,8,8 -> 6,6,7      ta  5,5,5 -> 5,5,5
+        #                             te  6,6,6 -> 6,6,7
+        #
+        # The section-count drop is real and must be watched: this is ONE
+        # call per request, so cost is not the issue, but a shorter plan
+        # means a shorter document. If drafts regress in length, revisit
+        # this before touching the writer — the writer honours whatever plan
+        # it is given (instrumentation shows planned == emitted).
         llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
+            "google_genai:gemini-2.5-flash",
             temperature=0.0,
+            thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)
@@ -2292,6 +2317,33 @@ async def _generate_draft(
         chat_history=chat_history,
     )
 
+    # Diagnostic: splits the regional-language section deficit into its three
+    # possible causes. Some languages deliver 4-6 sections where English
+    # reliably delivers 9, and the fix differs per cause:
+    #   english_query_is_ascii False -> translation failed for this language
+    #   is_ascii True but planned low -> the judge is biased even in English
+    #   planned high but emitted low  -> sections dropped during writing
+    # Pair this with the `draft_done` line at the end of drafting_node.
+    _plan_q = english_query or query
+    # The judge mirrors the REFERENCE TEMPLATE's structure, and each language
+    # retrieves a different template (translation wording differs, so ES
+    # returns different documents). Log the template's own section count so a
+    # low plan can be attributed to the template rather than the language or
+    # the model. `ref_*` counts several conventions because corpus templates
+    # are CSV-derived and do not use markdown headings.
+    _ref = reference_draft or ""
+    log.info(
+        "draft_plan",
+        user_language=user_language,
+        english_query_head=_plan_q[:60],
+        english_query_is_ascii=_plan_q.isascii(),
+        planned_sections=len(strategy.sections),
+        ref_chars=len(_ref),
+        ref_numbered=len(re.findall(r"^\s*\d{1,2}[\.\)]\s+\S", _ref, re.M)),
+        ref_allcaps_lines=len(re.findall(r"^[A-Z][A-Z \-:/,\.]{6,}$", _ref, re.M)),
+        planned_headings=[s.heading[:24] for s in strategy.sections],
+    )
+
     # Hard code-level cap: prompt says "at most 15" but the LLM sometimes
     # emits more, and 15 sequential Pro calls × ~25s ≈ 375s — over the
     # 300s gunicorn timeout. Bug #9 in the prod inventory. Trim to 12
@@ -2822,6 +2874,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 agent_name="Drafting",
                 template_type="web-synthesized",
             )]
+
+        # Pairs with the `draft_plan` line above. `emitted_h2` counts SECTION
+        # headings only (`##`); `###` is a sub-heading inside a section and
+        # inflated an earlier version of this measurement.
+        log.info(
+            "draft_done",
+            user_language=user_language,
+            emitted_h2=len(re.findall(r"^##\s+\S", draft, re.M)),
+            emitted_h3=len(re.findall(r"^###\s+\S", draft, re.M)),
+            draft_words=len(draft.split()),
+        )
 
         log.info(
             "Agent completed -- simplified pipeline",

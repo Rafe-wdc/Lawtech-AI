@@ -416,6 +416,27 @@ def validate_draft(
             f"Removed {len(empty_para_hits)} empty numbered paragraph(s)."
         )
 
+    # Fabricated citation provenance. Mechanical and unambiguous — a `DB ID`
+    # is an internal row identifier, a placeholder marker is unresolved work,
+    # and a filing cites the reporter or the court rather than a blog. None
+    # has a legitimate place in a document that goes before a judge, so this
+    # belongs with the other mechanical repairs rather than in CRITIQUE_PROMPT
+    # (invariant 4: bug-fixes here, substantive critique there).
+    #
+    # Measured need: a draft asking for supporting case law produced 7 case
+    # citations, 0 of them present in anything the pipeline retrieved, 2
+    # carrying invented "DB ID" identifiers and a judgment dated in the
+    # future. Whether a given case is REAL still needs the retrieved-source
+    # whitelist and is tracked separately — this only removes provenance that
+    # was manufactured to make a citation look verified.
+    from core.fabricated_provenance import strip_fabricated_provenance
+    cleaned, provenance_warnings = strip_fabricated_provenance(cleaned)
+    if provenance_warnings:
+        warnings.extend(provenance_warnings)
+        log.warning("Validator stripped fabricated citation provenance",
+                    findings=len(provenance_warnings),
+                    sample=provenance_warnings[0][:140])
+
     if warnings:
         log.warning("Validator surfaced issues",
                     count=len(warnings),
@@ -796,6 +817,111 @@ async def _acquire_reference_via_web(
 # real grounding instead of begging the model not to hallucinate.
 # ---------------------------------------------------------------------------
 
+class _ContextBlocks(dict):
+    """Prompt blocks, carrying the SourceRegistry built from the same hits.
+
+    A dict subclass rather than a tuple return so every existing caller and
+    test that treats this as a plain `dict[str, str]` keeps working; consumers
+    that want the registry read `getattr(ctx, "registry", None)`.
+    """
+    registry = None
+
+
+def _registry_from_hits(newacts_t, legis_t, judg_t):
+    """Build a SourceRegistry from the raw ES hits behind the context blocks.
+
+    Only statutes and High Court judgments are lifted. The SCI tool returns a
+    pre-formatted string rather than structured hits, so there is nothing
+    reliable to key on — better an incomplete whitelist than one padded with
+    guessed citations, since the critic treats the whitelist as the set of
+    things the draft is ALLOWED to cite.
+    """
+    try:
+        from core.source_registry import RetrievedSource, SourceRegistry
+    except Exception:
+        return None
+    registry = SourceRegistry()
+
+    def _act_from_source(src: str) -> str:
+        """Recover an Act name from the corpus filename.
+
+        These indices carry no act_name field — the Act is only in the path,
+        e.g. ".../The Bharatiya Nyaya Sanhita,2023.csv". A whitelist of raw
+        paths would be worse than no whitelist: the critic treats it as the
+        set of citations the draft is ALLOWED to use, so every properly
+        formatted citation would be flagged as unretrieved.
+        """
+        if not src:
+            return ""
+        name = os.path.basename(src).rsplit(".", 1)[0]
+        name = re.sub(r"^\d{6,}_", "", name)          # judgment date prefixes
+        name = re.sub(r"_\d+$", "", name)             # trailing doc ids
+        name = re.sub(r",(?=\d)", ", ", name)         # "Sanhita,2023" -> "Sanhita, 2023"
+        return name.replace("_", " ").strip()
+
+    def _lift_statute(result, source_type: str, agent: str, prefix: str) -> None:
+        """Statutes enter the whitelist at ACT level, never section level.
+
+        The `section_number` on a hit is whichever CHUNK matched — in practice
+        "Section 1" or "Section 10" — not the section the draft is about. A
+        whitelist naming those exact sections would be actively harmful: the
+        critic flags any "quoted statutory provision" not present, so a draft
+        correctly citing Section 316(2) BNS (the section the USER named) would
+        be reported as a hallucination, and the refiner would then strip or
+        replace the user's own statute. That is precisely the doc-type-flip
+        failure — a wrong signal the refiner faithfully acts on.
+
+        Act-level is the honest claim: we retrieved this Act, not this
+        section. It preserves the valuable half of the check — a fabricated
+        CASE has no entry at all — without inventing precision we do not have.
+        """
+        for h in (result or {}).get("hits", [])[:8]:
+            act = _act_from_source(h.get("source") or "")
+            if not act:
+                continue
+            registry.add(RetrievedSource(
+                id=f"{prefix}-{abs(hash(act)) % 1000000}",
+                agent=agent, type=source_type,
+                canonical_citation=act, title=act,
+                snippet=(h.get("content") or "")[:200],
+            ))
+
+    def _lift_judgments(result) -> None:
+        """Judgment hits carry parties and court as top-level fields."""
+        for h in (result or {}).get("hits", [])[:8]:
+            pet = h.get("petitioner_names") or ""
+            res = h.get("respondent_names") or ""
+            if isinstance(pet, list):
+                pet = ", ".join(str(x) for x in pet)
+            if isinstance(res, list):
+                res = ", ".join(str(x) for x in res)
+            court = h.get("court_name") or ""
+            if pet and res:
+                citation = f"{pet} v. {res}"
+            else:
+                citation = _act_from_source(h.get("source") or "")
+            if not citation:
+                continue
+            if court:
+                citation = f"{citation} ({court})"
+            registry.add(RetrievedSource(
+                id=f"hc-{abs(hash(citation)) % 1000000}",
+                agent="Judgment", type="judgment",
+                canonical_citation=citation, title=citation,
+                snippet=(h.get("content") or "")[:200],
+            ))
+
+    try:
+        _lift_statute(newacts_t, "newacts", "Newacts", "na")
+        _lift_statute(legis_t, "legislation", "Legislation", "leg")
+        _lift_judgments(judg_t)
+    except Exception as e:
+        log.warning("Source registry build failed; critic will skip "
+                    "unretrieved_citation for this request", error=short_err(e))
+        return None
+    return registry
+
+
 async def _gather_relevant_context(query: str) -> dict[str, str]:
     """Run the domain retrievers in parallel; return labelled blocks.
 
@@ -858,7 +984,22 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
             return ""
         return f"## RELEVANT SUPREME COURT JUDGMENTS\n{text[:max_chars]}\n"
 
-    blocks: dict[str, str] = {}
+    # Build a SourceRegistry from the SAME hits, before they are flattened
+    # into prompt strings.
+    #
+    # Why this exists: self_refine's `unretrieved_citation` category — the
+    # rule that catches fabricated case citations — is skipped whenever the
+    # caller passes no source_registry. Drafting never passed one, so that
+    # check has never run on a single drafting request. For a legal drafting
+    # product a hallucinated authority in a filed document is the most costly
+    # defect the system can produce, and it was the one category guaranteed
+    # not to fire.
+    #
+    # The records were always here; `_gather_relevant_context` retrieved them
+    # and threw the structure away, keeping only the formatted text. Same
+    # shape as the discarded English translation: the data existed, nothing
+    # carried it to the stage that needed it.
+    blocks = _ContextBlocks()
     n = _format_es_hits(newacts_t, "RELEVANT BNS / BNSS / BSA SECTIONS")
     if n: blocks["newacts"] = n
     l = _format_es_hits(legis_t, "RELEVANT LEGISLATION SECTIONS")
@@ -867,6 +1008,9 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
     if j: blocks["judgments"] = j
     s = _format_sci(sci_t)
     if s: blocks["sci"] = s
+    blocks.registry = _registry_from_hits(newacts_t, legis_t, judg_t)
+    log.info("Drafting source registry built",
+             records=len(blocks.registry) if blocks.registry else 0)
 
     log.info("Context gather completed",
              blocks=list(blocks.keys()),
@@ -2699,6 +2843,23 @@ async def drafting_node(state: LegalAgentState) -> dict:
         progress("drafting", "Cleaning up draft...", step="cleanup")
         draft, draft_warnings = validate_draft(draft)
 
+        # A citation the pipeline cannot vouch for has to be visible IN the
+        # document, not only in response metadata the UI may never render.
+        # The advocate is the last check before filing; a judgment dated in
+        # the future is one they must see. Stripped signals (DB IDs,
+        # placeholder markers) need no banner — removing them is the whole
+        # fix — but a suspect authority that REMAINS in the text does.
+        _unverifiable = [w for w in draft_warnings
+                         if w.startswith("UNVERIFIABLE CITATION")]
+        if _unverifiable:
+            draft = (
+                "> ⚠ **Verify the case law before filing.** "
+                + _unverifiable[0].replace("UNVERIFIABLE CITATION: ", "")
+                + "\n\n"
+            ) + draft
+            log.warning("Draft carries an unverifiable citation",
+                        detail=_unverifiable[0][:160])
+
         # --- 7. self_refine — the scope critic + audit pass against UserIntent ---
         #
         # Skipped in review-and-redraft mode. The critic is calibrated against
@@ -2725,11 +2886,20 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     step="self_refine",
                 )
                 source_langs = detect_source_languages(user_facts)
+                # Thread the retrieved sources through. Without this the
+                # critic's `unretrieved_citation` category — the one that
+                # catches fabricated case citations — is skipped outright,
+                # because self_refine substitutes "(none — the caller passed
+                # no source registry; skip ... for this call)". Drafting has
+                # never passed one, so hallucinated authorities in generated
+                # filings have never been checked.
+                _registry = getattr(gathered_ctx, "registry", None)
                 refined_draft, refine_history = await self_refine(
                     draft,
                     user_query=query,
                     intent=intent_obj,
                     source_languages=source_langs,
+                    source_registry=_registry,
                 )
                 if refined_draft != draft:
                     log.info(

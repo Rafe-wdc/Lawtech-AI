@@ -1,0 +1,227 @@
+{
+  "run_label": "local_afterfix",
+  "elapsed_s": 187.86,
+  "ttfb_ms": 864,
+  "http_ok": true,
+  "raw_events_written": 46,
+  "thread_id": "780b8b6d-434c-4c64-9680-c66e1f2de934",
+  "answer_len": 8978,
+  "answer_words": 1368,
+  "answer_case_citations_count_regex": 2,
+  "answer_case_citations_sample": [
+    "State of U.P. v. Naresh",
+    "State of Punjab v. Saurabh Bakshi"
+  ],
+  "structure_signals": {
+    "found_errors_section": false,
+    "found_redraft_section": false,
+    "found_case_laws_section": false,
+    "found_prayer": true,
+    "found_shows_bnss_290": true,
+    "found_shows_bnss_293": true,
+    "found_mv_act_185": true,
+    "found_alister_anthony": false
+  },
+  "offtopic_signals": {
+    "order_vii_rule_11_count": 0,
+    "indian_evangelical_count": 0,
+    "sri_bala_count": 0,
+    "dindigul_count": 0,
+    "specific_performance_count": 0,
+    "limitation_count": 0,
+    "income_tax_count": 0,
+    "cinema_count": 0,
+    "sci_citations_header_present": false,
+    "agreement_name_placeholder_present": false,
+    "money_recovery_plaint_shape_present": false
+  },
+  "agents_planned": [
+    "Drafting",
+    "Document"
+  ],
+  "event_type_counts": {
+    "thread_id": 1,
+    "file_processing": 4,
+    "progress": 28,
+    "status": 7,
+    "context": 1,
+    "agents_planned": 1,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "progress_step_count": 28,
+  "unique_progress_steps": [
+    "classify",
+    "cleanup",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "load",
+    "plan",
+    "reference",
+    "search",
+    "section:1",
+    "section:10",
+    "section:2",
+    "section:3",
+    "section:4",
+    "section:5",
+    "section:6",
+    "section:7",
+    "section:8",
+    "section:9",
+    "synthesize",
+    "validate"
+  ],
+  "file_processing_summary": [
+    {
+      "message": "Processing uploaded files...",
+      "files": null,
+      "stage": null,
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...",
+      "files": null,
+      "stage": "docx_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": "all_files_done",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": null,
+      "rejected": null
+    }
+  ],
+  "errors": [],
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ],
+  "compared_to_baseline": {
+    "found_shows_bnss_290": "improved",
+    "found_shows_bnss_293": "improved",
+    "found_mv_act_185": "improved",
+    "found_alister_anthony": "unchanged",
+    "found_prayer": "improved",
+    "sci_citations_header_present": "improved",
+    "order_vii_rule_11_count": "unchanged",
+    "indian_evangelical_count": "unchanged",
+    "specific_performance_count": "unchanged",
+    "income_tax_count": "unchanged",
+    "cinema_count": "unchanged",
+    "agreement_name_placeholder_present": "changed",
+    "money_recovery_plaint_shape_present": "changed"
+  },
+  "baseline_agents_planned": [
+    "Drafting",
+    "Document",
+    "SCI_Judgment"
+  ],
+  "baseline_answer_len": 11431
+}
+
+=== ANSWER (first 4000 chars) ===
+## BEFORE THE HON’BLE COURT OF JUDICIAL MAGISTRATE FIRST CLASS AT NAGPUR
+
+(MOTOR VEHICLES COURT NO. 4)
+
+## M.V. SUMMONS/CASE NO. 233 OF 2026
+
+P.S.: Traffic Chamber, Cotton Market, Nagpur
+
+State of Maharashtra
+.....Prosecution
+
+**vs**
+
+Sharad Narendra Meshram
+.....Accused/Applicant
+
+## PROSECUTION: STATE OF MAHARASHTRA VERSUS ACCUSED/APPLICANT: SHARAD NARENDRA MESHRAM
+
+## APPLICATION FOR PLEA BARGAINING UNDER SECTION 290 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023, READ WITH SECTIONS 184 & 185 OF THE MOTOR VEHICLES ACT, 1988
+
+THE APPLICANT ABOVENAMED MOST RESPECTFULLY SUBMITS AS UNDER:
+
+1. That the Applicant has been charged with offences under Sections 184 and 185 of the Motor Vehicles Act, 1988. The Applicant is appearing before this Hon'ble Court on 21/03/2026 in compliance with the summons received.
+
+2. That the present application is being filed under the provisions of Section 290 of the Bharatiya Nagarik Suraksha Sanhita, 2023 ("BNSS"), seeking a disposal of the case by way of plea bargaining.
+
+3. That the Applicant is eligible to file this application as per Section 289 of the BNSS, as the alleged offences are not punishable with death, life imprisonment, or imprisonment for a term exceeding seven years. Furthermore, the Applicant has not previously been convicted of the same offences.
+
+4. That the Applicant, having fully understood the nature of the charges and the extent of the punishment provided by law, voluntarily pleads guilty to the said charges without any force, coercion, or undue influence.
+
+5. That the Applicant seeks the indulgence and leniency of this Hon'ble Court on the following, amongst other, grounds:
+
+a. **First-Time Offender:** The Applicant is a first-time offender with no criminal antecedents or prior traffic violations. This is a substantial mitigating factor warranting a lenient view.
+
+b. **Remorse and Judicial Economy:** By pleading guilty at the earliest opportunity, the Applicant has demonstrated genuine remorse and has contributed to the efficient administration of justice by saving the precious time and resources of this Hon'ble Court. The Hon'ble Supreme Court in *State of U.P. v. Naresh, (2011) 4 SCC 324*, has recognized that the object of plea bargaining is to provide a speedy and efficacious remedy.
+
+c. **Absence of Aggravating Circumstances:** It is submitted that the incident did not result in any accident, injury to any person, or damage to any property. The vehicle was intercepted during a routine check by the traffic police.
+
+d. **Doctrine of Proportionality:** It is a settled principle of criminal jurisprudence that the punishment imposed must be proportionate to the gravity of the offence. Given the absence of any aggravating circumstances, it is submitted that the imposition of a maximum penalty would be disproportionate and unduly harsh.
+
+e. **Socio-Economic Hardship:** The Applicant is a working professional and the sole breadwinner for his family. The imposition of a sentence of imprisonment or a lengthy disqualification of his driving license would result in the loss of his livelihood, causing immense and irreparable hardship to him and his dependent family members.
+
+6. It is humbly submitted that while the Hon'ble Supreme Court in *State of Punjab v. Saurabh Bakshi, (2015) 5 SCC 182*,
+has cautioned against showing undue sympathy in sentencing for offences under Section 185 of the Motor Vehicles Act,
+1988, the said judgment was rendered in the context of a full-fledged contested trial. The present application, however,
+is moved under the special legislative framework of Chapter XXIII of the BNSS, which encourages a "mutually satisfactory
+disposition". Section 293(c) of the BNSS expressly empowers the Court to sentence the accused to one-fourth of the
+punishment provided for the offence. This statutory provision for a reduced sentence is a cornerstone of the plea
+bargaining scheme, intended to benefit first-time offenders who demonstrate remorse by admitting guilt. The Appl
+
+=== ANSWER TAIL (last 2000 chars) ===
+ Applicant confirms that this plea is not the result of any force, threat, promise, or coercion from any person.
+
+11. The Applicant further confirms that he has not been previously convicted by any court for the same offences, thereby satisfying the essential criteria for invoking the provisions of plea bargaining under Section 289 of the Bharatiya Nagarik Suraksha Sanhita, 2023.
+
+## PRAYER
+
+In light of the aforementioned facts, circumstances, and legal grounds, it is most humbly and respectfully prayed that this Hon'ble Court may be graciously pleased to:
+
+(a) Allow the present application for plea bargaining filed under Section 290 of the Bharatiya Nagarik Suraksha Sanhita, 2023;
+
+(b) Accept the voluntary plea of guilt tendered by the Applicant and proceed to dispose of the case by arriving at a mutually satisfactory disposition as contemplated under Chapter XXIII of the said Sanhita;
+
+(c) Exercise the discretion vested under Section 293(c) of the Bharatiya Nagarik Suraksha Sanhita, 2023, and in view of the mitigating circumstances, impose a sentence of one-fourth of the punishment provided for the offences, by levying the minimum fine prescribed under Sections 184 and 185 of the Motor Vehicles Act, 1988;
+
+(d) Take a lenient view and refrain from imposing any sentence of imprisonment or ordering the disqualification of the Applicant's driving license, considering the Applicant's clean antecedents and the absence of any aggravating circumstances; and
+
+(e) Pass any such other and further orders as this Hon'ble Court may deem fit and proper in the interest of justice.
+
+## APPLICANT AND ADVOCATE DETAILS
+
+Place: Nagpur
+Date: 23/03/2026
+
+APPLICANT
+(SHARAD NARENDRA MESHRAM)
+
+THROUGH:
+
+(Adv. ANIL RAMDASJI BANSOD)
+COUNSEL FOR THE ACCUSED/APPLICANT
+
+
+---
+**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.

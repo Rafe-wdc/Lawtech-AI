@@ -1,0 +1,109 @@
+{
+  "elapsed_s": 119.25,
+  "ttfb_ms": 763,
+  "http_ok": true,
+  "raw_events_written": 466,
+  "thread_id": "4c793445-2298-464a-8021-06c7f70ed0e9",
+  "answer_len": 18132,
+  "answer_words": 2801,
+  "answer_case_citations_count_regex": 8,
+  "answer_case_citations_sample": [
+    "Punjab v. Prem Sagar",
+    "Indian Evangelical Lutheran Church Trust Association v. Sri Bala",
+    "Saleem Bhai v. State of Maharashtra",
+    "T. Arivandandam v. T.V. Satyapal"
+  ],
+  "structure_signals": {
+    "found_errors_section": false,
+    "found_redraft_section": false,
+    "found_case_laws_section": false,
+    "found_prayer": true,
+    "found_shows_bnss_290": true,
+    "found_shows_bnss_293": false,
+    "found_mv_act_185": false,
+    "found_alister_anthony": false
+  },
+  "agents_planned": [
+    "Drafting",
+    "Document",
+    "SCI_Judgment"
+  ],
+  "event_type_counts": {
+    "thread_id": 1,
+    "file_processing": 4,
+    "progress": 32,
+    "status": 8,
+    "context": 1,
+    "agents_planned": 1,
+    "token": 415,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "progress_step_count": 32,
+  "unique_progress_steps": [
+    "classify",
+    "cleanup",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "load",
+    "plan",
+    "prepare",
+    "react",
+    "reference",
+    "results",
+    "search",
+    "section:1",
+    "section:2",
+    "section:3",
+    "section:4",
+    "section:5",
+    "section:6",
+    "self_refine",
+    "synthesize",
+    "validate"
+  ],
+  "file_processing_summary": [
+    {
+      "message": "Processing uploaded files...",
+      "files": null,
+      "stage": null,
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...",
+      "files": null,
+      "stage": "docx_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": "all_files_done",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": null,
+      "rejected": null
+    }
+  ],
+  "errors": [],
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ]
+}

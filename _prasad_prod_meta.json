@@ -1,0 +1,133 @@
+{
+  "elapsed_s": 321.26,
+  "ttfb_ms": 2200,
+  "http_ok": true,
+  "raw_events_written": 51,
+  "answer_len": 0,
+  "answer_devanagari_pct": 0.0,
+  "agents_planned": [
+    "Drafting",
+    "Document",
+    "SCI_Judgment"
+  ],
+  "event_type_counts": {
+    "thread_id": 1,
+    "file_processing": 11,
+    "progress": 30,
+    "status": 5,
+    "context": 1,
+    "agents_planned": 1,
+    "error": 1,
+    "done": 1
+  },
+  "progress_step_count": 30,
+  "unique_progress_steps": [
+    "classify",
+    "cleanup",
+    "generate",
+    "history",
+    "load",
+    "plan",
+    "prepare",
+    "react",
+    "reference",
+    "results",
+    "search",
+    "section:1",
+    "section:2",
+    "section:3",
+    "section:4",
+    "section:5",
+    "section:6",
+    "section:7",
+    "section:8",
+    "self_refine",
+    "validate"
+  ],
+  "file_processing_summary": [
+    {
+      "message": "Processing uploaded files...",
+      "files": null,
+      "stage": null,
+      "rejected": null
+    },
+    {
+      "message": "Compressing prasad.pdf...",
+      "files": null,
+      "stage": "pdf_compress_start",
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from prasad.pdf...",
+      "files": null,
+      "stage": "pdf_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "prasad.pdf: 253 pages",
+      "files": null,
+      "stage": "pdf_extract_done",
+      "rejected": null
+    },
+    {
+      "message": "Embedding prasad.pdf into vector store...",
+      "files": null,
+      "stage": "chroma_store_start",
+      "rejected": null
+    },
+    {
+      "message": "Compressing prasad_comm_258.pdf...",
+      "files": null,
+      "stage": "pdf_compress_start",
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from prasad_comm_258.pdf...",
+      "files": null,
+      "stage": "pdf_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "prasad_comm_258.pdf: 314 pages",
+      "files": null,
+      "stage": "pdf_extract_done",
+      "rejected": null
+    },
+    {
+      "message": "Embedding prasad_comm_258.pdf into vector store...",
+      "files": null,
+      "stage": "chroma_store_start",
+      "rejected": null
+    },
+    {
+      "message": "Processed 2 pdfs",
+      "files": [
+        "prasad.pdf",
+        "prasad_comm_258.pdf"
+      ],
+      "stage": "all_files_done",
+      "rejected": null
+    },
+    {
+      "message": "Processed 2 pdfs",
+      "files": [
+        "prasad.pdf",
+        "prasad_comm_258.pdf"
+      ],
+      "stage": null,
+      "rejected": null
+    }
+  ],
+  "errors": [
+    "{\"type\": \"error\", \"data\": \"Request timed out. Please try a simpler query.\"}"
+  ],
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ]
+}

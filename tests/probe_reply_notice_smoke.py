@@ -28,7 +28,7 @@ from pathlib import Path
 
 import requests
 
-BASE_URL = "http://127.0.0.1:5000"
+BASE_URL = os.environ.get("PROBE_BASE_URL", "http://127.0.0.1:5000")
 PDF_PATH = Path(r"D:\agentic_proj\Lawtech-AI\test_pdfs\Adobe Scan 16 Jul 2026 (1).pdf")
 PROMPT = "Prepare reply notice based on attached pdf"
 HEALTH_TIMEOUT_S = 180
@@ -36,7 +36,16 @@ RESPONSE_TIMEOUT_S = 900
 
 
 def _load_api_key() -> str:
-    """Pick the first key from .env's API_KEYS (comma-separated)."""
+    """Pick the API key.
+
+    Order of precedence:
+      1. PROBE_API_KEY env var — set this to override for prod smokes
+         (`$env:PROBE_API_KEY = "<prod key>"` before running).
+      2. First key from local .env's API_KEYS (dev default).
+    """
+    override = os.environ.get("PROBE_API_KEY", "").strip()
+    if override:
+        return override
     env_path = Path(__file__).resolve().parent.parent / ".env"
     if not env_path.exists():
         return ""

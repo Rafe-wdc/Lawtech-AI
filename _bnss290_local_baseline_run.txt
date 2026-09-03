@@ -1,0 +1,185 @@
+{
+  "run_label": "local_baseline",
+  "elapsed_s": 196.21,
+  "ttfb_ms": 1014,
+  "http_ok": true,
+  "raw_events_written": 374,
+  "thread_id": "350ae7fc-936a-4d20-bf3e-f440207cd41f",
+  "answer_len": 11431,
+  "answer_words": 1720,
+  "answer_case_citations_count_regex": 4,
+  "answer_case_citations_sample": [
+    "Grasim Industries Ltd. v. Aggarwal Steel",
+    "Central Inland Water Transport Corpn. Ltd. v. Brojo Nath Ganguly",
+    "Union of India v. A.L. Rallia Ram",
+    "Champsey Bhara and Company v. Jivraj Balloo Spinning and Weaving Company Ltd"
+  ],
+  "structure_signals": {
+    "found_errors_section": false,
+    "found_redraft_section": false,
+    "found_case_laws_section": false,
+    "found_prayer": false,
+    "found_shows_bnss_290": false,
+    "found_shows_bnss_293": false,
+    "found_mv_act_185": false,
+    "found_alister_anthony": false
+  },
+  "offtopic_signals": {
+    "order_vii_rule_11_count": 0,
+    "indian_evangelical_count": 0,
+    "sri_bala_count": 0,
+    "dindigul_count": 0,
+    "specific_performance_count": 0,
+    "limitation_count": 2,
+    "income_tax_count": 0,
+    "cinema_count": 0,
+    "sci_citations_header_present": true
+  },
+  "agents_planned": [
+    "Drafting",
+    "Document",
+    "SCI_Judgment"
+  ],
+  "event_type_counts": {
+    "thread_id": 1,
+    "file_processing": 4,
+    "progress": 31,
+    "status": 8,
+    "context": 1,
+    "agents_planned": 1,
+    "token": 324,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "progress_step_count": 31,
+  "unique_progress_steps": [
+    "classify",
+    "cleanup",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "load",
+    "plan",
+    "prepare",
+    "react",
+    "reference",
+    "results",
+    "search",
+    "section:1",
+    "section:2",
+    "section:3",
+    "section:4",
+    "section:5",
+    "self_refine",
+    "synthesize",
+    "validate"
+  ],
+  "file_processing_summary": [
+    {
+      "message": "Processing uploaded files...",
+      "files": null,
+      "stage": null,
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...",
+      "files": null,
+      "stage": "docx_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": "all_files_done",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": null,
+      "rejected": null
+    }
+  ],
+  "errors": [],
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ]
+}
+
+=== ANSWER (first 4000 chars) ===
+**CONTRACT ANALYSIS OF [AGREEMENT NAME]**
+
+**1. Identification of the Agreement**
+- **Type of Agreement**: [e.g., Master Services Agreement, Software Licensing Agreement, Lease Deed]
+- **Date of Execution**: [Date]
+- **Effective Date**: [Date]
+
+**2. Parties to the Agreement**
+- **Party A**: [Full Legal Name], a company incorporated under the Companies Act, [Year], with its registered office at [Address] (hereinafter referred to as "[Defined Term]").
+- **Party B**: [Full Legal Name], with its principal place of business at [Address] (hereinafter referred to as "[Defined Term]").
+
+**3. Key Commercial Terms**
+- **Scope of Work/Services**: [Brief description of the services, goods, or obligations].
+- **Term**: The Agreement is valid for a period of [Number] years, commencing from the Effective Date, unless terminated earlier.
+- **Consideration/Payment**: [Payment structure, e.g., fixed fee of INR [Amount], milestone-based payments, revenue share model]. Payment is due within [Number] days of invoice receipt.
+- **Renewal**: [e.g., Automatic renewal for successive one-year periods unless notice of non-renewal is given, or no renewal clause].
+
+**4. Critical Clauses (issue-by-issue)**
+- **Indemnity (Clause [Number])**:
+- **Analysis**: Party A provides a broad indemnity to Party B for breaches, third-party claims, and intellectual property infringement. The scope is [reciprocal/one-sided]. The procedure for claims is [defined/undefined].
+- **Principle**: The Supreme Court in *Grasim Industries Ltd. v. Aggarwal Steel, (2010) 1 SCC 83* has clarified that an indemnity holder must act reasonably and is not entitled to claim indemnity for losses arising from their own negligence unless the contract expressly provides for it.
+- **Limitation of Liability (Clause [Number])**:
+- **Analysis**: Liability for both parties is capped at [e.g., the total fees paid in the preceding 12 months]. Exclusions for consequential, indirect, and punitive damages are present. Carve-outs for breach of confidentiality, IPR infringement, and indemnity obligations are [present/absent].
+- **Principle**: While parties are free to limit liability, such clauses must be reasonable and not unconscionable. The Supreme Court in *Central Inland Water Transport Corpn. Ltd. v. Brojo Nath Ganguly, (1986) 3 SCC 156*, held that courts can strike down unconscionable terms in a contract where parties have unequal bargaining power.
+- **Termination (Clause [Number])**:
+- **Analysis**: The clause provides for termination for cause (material breach) with a [Number]-day cure period, and termination for convenience with [Number] days' notice. Consequences of termination, such as data return and final payment, are [clearly defined/vague].
+- **Governing Law and Jurisdiction (Clause [Number])**:
+- **Analysis**: The Agreement is governed by the laws of India. The clause confers [exclusive/non-exclusive] jurisdiction upon the courts at [City, State]. The dispute resolution mechanism is [litigation/arbitration].
+- **Confidentiality (Clause [Number])**:
+- **Analysis**: The definition of "Confidential Information" is [broad/narrow]. The obligation of confidentiality survives the termination of the Agreement for a period of [Number] years. Standard exceptions for legally mandated disclosures are included.
+
+**5. Risk Flags (HIGH/MEDIUM/LOW)**
+- **HIGH: Uncapped Indemnity**: The indemnity obligation is not capped, creating unlimited potential liability for our client.
+- **HIGH: One-Sided Clauses**: The indemnity and liability clauses appear to be heavily skewed in favour of [Party A/Party B], exposing our client to disproportionate risk.
+- **MEDIUM: Ambiguous Scope of Work**: The definition of services lacks specificity, which could lead to future disputes regarding deliverables and scope creep.
+- **MEDIUM: No Termination for Convenience**: The absence of a "termination for convenience" clause for our client results in a lack of flexibility and a difficult exit strategy.
+
+**6. Compliance Hooks**
+-
+
+=== ANSWER TAIL (last 2000 chars) ===
+ing the award was inconsistent and should be set aside. Separately, workers contended their claims were not
+fully protected, citing an erroneous estimation of gratuity.
+
+### Court Observations
+The Supreme Court clarified the settled law regarding interference with arbitration awards. Relying on precedents like
+*Union of India v. A.L. Rallia Ram, [1964] 3 S.C.R. 164* and *Champsey Bhara and Company v. Jivraj Balloo Spinning and
+Weaving Company Ltd., [1932] L.R. 50 I.A. 324*, the Court reiterated that civil courts cannot exercise appellate powers
+over an arbitrator's decision. An award can only be set aside if there is an "error of law on the face of it," meaning a
+legal proposition that is the basis of the award and is erroneous, found within the award itself or a document
+incorporated into it. Mistakes of fact, even if true, do not amount to an error apparent on the face of the record. The
+Court found no erroneous legal proposition in the award or annexed documents.
+
+### Judgment & Direction
+The Supreme Court dismissed the objections to the award, finding no error of law apparent on the face of the record. The Court held that the alleged mistakes were, at best, errors of fact, which are not justiciable in an application before the court. The award was made a rule of the Court, and judgment was passed in terms of the award, with interest on the judgment at 9%.
+
+**PDF Links:**
+- *ASHARAFI DEVI (D) THR. LRS. VS STATE OF U.P. THROUGH COLLECTOR/DISTRICT MAGISTRATE, 01-02-2019* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2009/4192/4192_2009_Judgement_01-Feb-2019.pdf))
+- *COIMBATORE DISTRICT PODU THOZILLAR SAMGAMREPRESENTED BY ITS VS BALA SUBRAMANIA FOUNDRY AND ORS., 11-08-1987* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/8648.pdf))
+
+
+---
+**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.

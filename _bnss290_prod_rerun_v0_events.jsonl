@@ -1,0 +1,331 @@
+{"type": "thread_id", "data": "4e2fc279-e60f-445c-a813-0db9224e83de"}
+{"type": "file_processing", "message": "Processing uploaded files..."}
+{"type": "file_processing", "stage": "docx_extract_start", "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...", "file": "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"}
+{"type": "file_processing", "stage": "all_files_done", "message": "Processed 1 docx", "files": ["APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"], "errors": []}
+{"type": "file_processing", "message": "Processed 1 docx", "files": ["APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"]}
+{"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1785055388.2089305, "step": "validate"}
+{"type": "status", "agent": "guardrail_input", "message": "Validating query..."}
+{"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1785055388.2112799, "step": "language"}
+{"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1785055388.2144032, "step": "language", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1785055388.2147615, "step": "history"}
+{"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1785055388.2185812, "found": 0, "step": "history", "substep": true}
+{"type": "status", "agent": "memory", "message": "Loading context..."}
+{"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}
+{"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1785055388.221406, "step": "classify"}
+{"type": "progress", "agent": "orchestrator", "message": "Identified: Drafting, SCI_Judgment, Judgment, Document", "ts": 1785055390.290132, "detail": "Drafting", "step": "classify", "substep": true}
+{"type": "progress", "agent": "orchestrator", "message": "Preparing search queries for 3 agents...", "ts": 1785055390.2904801, "found": 3, "step": "plan"}
+{"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}
+{"type": "agents_planned", "agents": ["Drafting", "Document", "SCI_Judgment"]}
+{"type": "progress", "agent": "drafting", "message": "Searching templates and relevant law...", "ts": 1785055391.7829015, "step": "reference"}
+{"type": "progress", "agent": "document", "message": "Loading uploaded documents...", "ts": 1785055391.7830892, "step": "load"}
+{"type": "progress", "agent": "document", "message": "Loading 1 document collection(s)...", "ts": 1785055391.7832258, "found": 1, "step": "search"}
+{"type": "progress", "agent": "sci_judgment", "message": "Preparing Supreme Court search...", "ts": 1785055391.7835014, "step": "prepare"}
+{"type": "progress", "agent": "sci_judgment", "message": "Running multi-step research (ReAct agent)...", "ts": 1785055391.8062413, "step": "react"}
+{"type": "progress", "agent": "drafting", "message": "Found 100 candidate templates", "ts": 1785055391.83943, "found": 100, "step": "reference", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "No close template in corpus, searching the web...", "ts": 1785055393.3066602, "step": "reference", "substep": true}
+{"type": "progress", "agent": "sci_judgment", "message": "Completed 5 search steps", "ts": 1785055407.6105735, "found": 5, "step": "react", "substep": true}
+{"type": "progress", "agent": "sci_judgment", "message": "Found 5 Supreme Court judgments", "ts": 1785055407.6111798, "found": 5, "step": "results"}
+{"type": "progress", "agent": "sci_judgment", "message": "Generating response...", "ts": 1785055407.6111872, "step": "generate"}
+{"type": "status", "agent": "sci_judgment", "message": "Searching Supreme Court judgments..."}
+{"type": "token", "content": "IN THE COURT OF THE "}
+{"type": "token", "content": "[DESIGNATION OF JUDG"}
+{"type": "token", "content": "E], [CITY/DISTRICT]\n"}
+{"type": "token", "content": "\nOriginal Suit No. ["}
+{"type": "token", "content": "NUMBER] of [YEAR]\n\nI"}
+{"type": "token", "content": "N THE MATTER OF:\n\n[N"}
+{"type": "token", "content": "AME OF PLAINTIFF/APP"}
+{"type": "token", "content": "LICANT]\nS/o/D/o [Fat"}
+{"type": "token", "content": "her's/Husband's Name"}
+{"type": "token", "content": "]\nR/o [Address]\n    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "        ... PLAINTIF"}
+{"type": "token", "content": "F/APPLICANT\n\nVERSUS\n"}
+{"type": "token", "content": "\n[NAME OF DEFENDANT/"}
+{"type": "token", "content": "RESPONDENT]\nS/o/D/o "}
+{"type": "token", "content": "[Father's/Husband's "}
+{"type": "token", "content": "Name]\nR/o [Address]\n"}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "            ... DEFE"}
+{"type": "token", "content": "NDANT/RESPONDENT\n\nAP"}
+{"type": "token", "content": "PLICATION UNDER SECT"}
+{"type": "token", "content": "ION 151 OF THE CODE "}
+{"type": "token", "content": "OF CIVIL PROCEDURE, "}
+{"type": "token", "content": "1908\n\nMOST RESPECTFU"}
+{"type": "token", "content": "LLY SHOWETH:\n\n1.  Th"}
+{"type": "token", "content": "at the Applicant is "}
+{"type": "token", "content": "the Plaintiff in the"}
+{"type": "token", "content": " above-mentioned Ori"}
+{"type": "token", "content": "ginal Suit No. [NUMB"}
+{"type": "token", "content": "ER] of [YEAR], which"}
+{"type": "token", "content": " is presently pendin"}
+{"type": "token", "content": "g adjudication befor"}
+{"type": "token", "content": "e this Hon'ble Court"}
+{"type": "token", "content": ". The said suit is f"}
+{"type": "token", "content": "ixed for [Next Date "}
+{"type": "token", "content": "of Hearing, e.g., Pl"}
+{"type": "token", "content": "aintiff's Evidence/A"}
+{"type": "token", "content": "rguments] on [Date]."}
+{"type": "token", "content": "\n\n2.  That the prese"}
+{"type": "token", "content": "nt suit has been fil"}
+{"type": "token", "content": "ed by the Applicant "}
+{"type": "token", "content": "seeking [Briefly sta"}
+{"type": "token", "content": "te the main relief s"}
+{"type": "token", "content": "ought in the suit, e"}
+{"type": "token", "content": ".g., specific perfor"}
+{"type": "token", "content": "mance of an agreemen"}
+{"type": "token", "content": "t to sell dated [Dat"}
+{"type": "token", "content": "e]/declaration of ti"}
+{"type": "token", "content": "tle and permanent in"}
+{"type": "token", "content": "junction]. The Defen"}
+{"type": "token", "content": "dant has duly appear"}
+{"type": "token", "content": "ed and filed their W"}
+{"type": "token", "content": "ritten Statement, an"}
+{"type": "token", "content": "d issues have been f"}
+{"type": "token", "content": "ramed by this Hon'bl"}
+{"type": "token", "content": "e Court on [Date].\n\n"}
+{"type": "token", "content": "3.  That during the "}
+{"type": "token", "content": "pendency of the pres"}
+{"type": "token", "content": "ent suit, certain cr"}
+{"type": "token", "content": "ucial documents, nam"}
+{"type": "token", "content": "ely [List documents,"}
+{"type": "token", "content": " e.g., a Sale Deed d"}
+{"type": "token", "content": "ated [Date], a Bank "}
+{"type": "token", "content": "Statement for the pe"}
+{"type": "token", "content": "riod [Start Date] to"}
+{"type": "token", "content": " [End Date], and cor"}
+{"type": "token", "content": "respondence dated [D"}
+{"type": "token", "content": "ate]], have come to "}
+{"type": "token", "content": "the knowledge and po"}
+{"type": "token", "content": "ssession of the Appl"}
+{"type": "token", "content": "icant. These documen"}
+{"type": "token", "content": "ts were not availabl"}
+{"type": "token", "content": "e with the Applicant"}
+{"type": "token", "content": " at the time of fili"}
+{"type": "token", "content": "ng the suit or the r"}
+{"type": "token", "content": "eplication, despite "}
+{"type": "token", "content": "exercising due dilig"}
+{"type": "token", "content": "ence.\n\n4.  That the "}
+{"type": "token", "content": "aforementioned docum"}
+{"type": "token", "content": "ents are highly rele"}
+{"type": "token", "content": "vant and material fo"}
+{"type": "token", "content": "r the fair and compl"}
+{"type": "token", "content": "ete adjudication of "}
+{"type": "token", "content": "the issues involved "}
+{"type": "token", "content": "in the present suit."}
+{"type": "token", "content": " Their production is"}
+{"type": "token", "content": " essential to establ"}
+{"type": "token", "content": "ish the true facts a"}
+{"type": "token", "content": "nd to enable this Ho"}
+{"type": "token", "content": "n'ble Court to arriv"}
+{"type": "token", "content": "e at a just decision"}
+{"type": "token", "content": ". Non-production of "}
+{"type": "token", "content": "these documents woul"}
+{"type": "token", "content": "d cause grave prejud"}
+{"type": "token", "content": "ice to the Applicant"}
+{"type": "token", "content": " and would lead to a"}
+{"type": "token", "content": "n incomplete appreci"}
+{"type": "token", "content": "ation of the evidenc"}
+{"type": "token", "content": "e on record.\n\n5.  Th"}
+{"type": "token", "content": "at this Hon'ble Cour"}
+{"type": "token", "content": "t has inherent power"}
+{"type": "token", "content": "s under Section 151 "}
+{"type": "token", "content": "of the Code of Civil"}
+{"type": "token", "content": " Procedure, 1908, to"}
+{"type": "token", "content": " make such orders as"}
+{"type": "token", "content": " may be necessary fo"}
+{"type": "token", "content": "r the ends of justic"}
+{"type": "token", "content": "e or to prevent abus"}
+{"type": "token", "content": "e of the process of "}
+{"type": "token", "content": "the Court. The Hon'b"}
+{"type": "token", "content": "le Supreme Court of "}
+{"type": "token", "content": "India has consistent"}
+{"type": "token", "content": "ly held that the inh"}
+{"type": "token", "content": "erent powers of the "}
+{"type": "token", "content": "court are complement"}
+{"type": "token", "content": "ary to the powers sp"}
+{"type": "token", "content": "ecifically conferred"}
+{"type": "token", "content": " and are intended to"}
+{"type": "token", "content": " achieve the ends of"}
+{"type": "token", "content": " justice. In *Manoha"}
+{"type": "token", "content": "r Lal Chopra v. Rai "}
+{"type": "token", "content": "Bahadur Rao Raja Set"}
+{"type": "token", "content": "h Hiralal*, AIR 1962"}
+{"type": "token", "content": " SC 527, it was held"}
+{"type": "token", "content": " that the inherent p"}
+{"type": "token", "content": "owers are not in any"}
+{"type": "token", "content": " way controlled by t"}
+{"type": "token", "content": "he provisions of the"}
+{"type": "token", "content": " Code, as specifical"}
+{"type": "token", "content": "ly stated in Section"}
+{"type": "token", "content": " 151 itself, but tho"}
+{"type": "token", "content": "se powers are not to"}
+{"type": "token", "content": " be exercised when t"}
+{"type": "token", "content": "heir exercise may be"}
+{"type": "token", "content": " in conflict with wh"}
+{"type": "token", "content": "at has been expressl"}
+{"type": "token", "content": "y provided in the Co"}
+{"type": "token", "content": "de or against the in"}
+{"type": "token", "content": "tentions of the legi"}
+{"type": "token", "content": "slature. Further, in"}
+{"type": "token", "content": " *K.K. Velusamy v. N"}
+{"type": "token", "content": ". Palanisamy*, (2011"}
+{"type": "token", "content": ") 11 SCC 275, the Su"}
+{"type": "token", "content": "preme Court reiterat"}
+{"type": "token", "content": "ed that Section 151 "}
+{"type": "token", "content": "of the Code of Civil"}
+{"type": "token", "content": " Procedure, 1908, sa"}
+{"type": "token", "content": "ves the inherent pow"}
+{"type": "token", "content": "er of the court to m"}
+{"type": "token", "content": "ake such orders as m"}
+{"type": "token", "content": "ay be necessary for "}
+{"type": "token", "content": "the ends of justice "}
+{"type": "token", "content": "or to prevent abuse "}
+{"type": "token", "content": "of the process of th"}
+{"type": "token", "content": "e court, and this po"}
+{"type": "token", "content": "wer can be exercised"}
+{"type": "token", "content": " to cover situations"}
+{"type": "token", "content": " not specifically pr"}
+{"type": "token", "content": "ovided for in the Co"}
+{"type": "token", "content": "de. The power under "}
+{"type": "token", "content": "Section 151 must be "}
+{"type": "token", "content": "used with circumspec"}
+{"type": "token", "content": "tion and care, only "}
+{"type": "token", "content": "where it is absolute"}
+{"type": "token", "content": "ly necessary, when t"}
+{"type": "token", "content": "here is no provision"}
+{"type": "token", "content": " in the Code governi"}
+{"type": "token", "content": "ng the matter, and w"}
+{"type": "token", "content": "hen the bona fides o"}
+{"type": "token", "content": "f the applicant cann"}
+{"type": "token", "content": "ot be doubted.\n\n6.  "}
+{"type": "token", "content": "That the present app"}
+{"type": "token", "content": "lication is being fi"}
+{"type": "token", "content": "led bonafide and in "}
+{"type": "token", "content": "the interest of just"}
+{"type": "token", "content": "ice. No similar appl"}
+{"type": "token", "content": "ication has been fil"}
+{"type": "token", "content": "ed by the Applicant "}
+{"type": "token", "content": "seeking the same rel"}
+{"type": "token", "content": "ief.\n\nPRAYER\n\nIt is,"}
+{"type": "token", "content": " therefore, most res"}
+{"type": "token", "content": "pectfully prayed tha"}
+{"type": "token", "content": "t this Hon'ble Court"}
+{"type": "token", "content": " may be pleased to:\n"}
+{"type": "token", "content": "\na)  Allow the Appli"}
+{"type": "token", "content": "cant to place on rec"}
+{"type": "token", "content": "ord the documents me"}
+{"type": "token", "content": "ntioned in paragraph"}
+{"type": "token", "content": " 3 above.\nb)  Pass a"}
+{"type": "token", "content": "ny other order or di"}
+{"type": "token", "content": "rection that this Ho"}
+{"type": "token", "content": "n'ble Court may deem"}
+{"type": "token", "content": " fit and proper in t"}
+{"type": "token", "content": "he facts and circums"}
+{"type": "token", "content": "tances of the presen"}
+{"type": "token", "content": "t case, in the inter"}
+{"type": "token", "content": "est of justice.\n\nAND"}
+{"type": "token", "content": " FOR THIS ACT OF KIN"}
+{"type": "token", "content": "DNESS, THE APPLICANT"}
+{"type": "token", "content": " AS IN DUTY BOUND SH"}
+{"type": "token", "content": "ALL EVER PRAY.\n\nPlac"}
+{"type": "token", "content": "e: [City]\nDate: [Dat"}
+{"type": "token", "content": "e]\n\n                "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                (Sig"}
+{"type": "token", "content": "nature of Applicant)"}
+{"type": "token", "content": "\n                   "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "             [NAME O"}
+{"type": "token", "content": "F APPLICANT]\n\n      "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "      (Signature of "}
+{"type": "token", "content": "Advocate)\n          "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "  [NAME OF ADVOCATE]"}
+{"type": "token", "content": "\n                   "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "             Advocat"}
+{"type": "token", "content": "e for the Applicant\n"}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "            [Enrollm"}
+{"type": "token", "content": "ent Number]\n        "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "    [Contact Details"}
+{"type": "token", "content": "]\n\nVERIFICATION\n\nI, "}
+{"type": "token", "content": "[Name of Applicant],"}
+{"type": "token", "content": " S/o/D/o [Father's/H"}
+{"type": "token", "content": "usband's Name], aged"}
+{"type": "token", "content": " about [Age] years, "}
+{"type": "token", "content": "R/o [Address], do he"}
+{"type": "token", "content": "reby solemnly affirm"}
+{"type": "token", "content": " and declare as unde"}
+{"type": "token", "content": "r:\n\n1.  That I am th"}
+{"type": "token", "content": "e Applicant in the a"}
+{"type": "token", "content": "bove-mentioned appli"}
+{"type": "token", "content": "cation and am well c"}
+{"type": "token", "content": "onversant with the f"}
+{"type": "token", "content": "acts and circumstanc"}
+{"type": "token", "content": "es of the case.\n2.  "}
+{"type": "token", "content": "That the contents of"}
+{"type": "token", "content": " paragraphs 1 to 6 o"}
+{"type": "token", "content": "f the application ar"}
+{"type": "token", "content": "e true and correct t"}
+{"type": "token", "content": "o my knowledge and b"}
+{"type": "token", "content": "elief, and no part o"}
+{"type": "token", "content": "f it is false and no"}
+{"type": "token", "content": "thing material has b"}
+{"type": "token", "content": "een concealed theref"}
+{"type": "token", "content": "rom.\n3.  That the pr"}
+{"type": "token", "content": "ayer clause is based"}
+{"type": "token", "content": " on legal advice, wh"}
+{"type": "token", "content": "ich I believe to be "}
+{"type": "token", "content": "true.\n\nVerified at ["}
+{"type": "token", "content": "City] on this [Day] "}
+{"type": "token", "content": "day of [Month], [Yea"}
+{"type": "token", "content": "r].\n\n               "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                 (Si"}
+{"type": "token", "content": "gnature of Applicant"}
+{"type": "token", "content": ")\n                  "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "                    "}
+{"type": "token", "content": "              [NAME "}
+{"type": "token", "content": "OF APPLICANT]"}
+{"type": "progress", "agent": "drafting", "message": "Gathered legal context: newacts, legislation, judgments", "ts": 1785055420.6122944, "found": 3, "step": "reference", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting 6 sections one by one...", "ts": 1785055422.9274652, "step": "generate"}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 1 of 6: IN THE COURT OF THE [DESIGNATION OF JUDGE], [CITY/DISTRICT]", "ts": 1785055422.9274805, "step": "section:1", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 2 of 6: IN THE MATTER OF:", "ts": 1785055422.9274845, "step": "section:2", "substep": true}
+{"type": "progress", "agent": "document", "message": "Found 1 relevant passages", "ts": 1785055426.4274952, "found": 1, "step": "search", "substep": true}
+{"type": "progress", "agent": "document", "message": "Generating answer from documents...", "ts": 1785055426.4275067, "step": "generate"}
+{"type": "status", "agent": "document", "message": "Searching uploaded documents..."}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 3 of 6: APPLICATION UNDER SECTION 151 OF THE CODE OF CIVIL PROCEDURE, 1908", "ts": 1785055434.3283246, "step": "section:3", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 4 of 6: MOST RESPECTFULLY SHOWETH:", "ts": 1785055434.328338, "step": "section:4", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 5 of 6: PRAYER", "ts": 1785055471.49243, "step": "section:5", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 6 of 6: VERIFICATION", "ts": 1785055471.4924426, "step": "section:6", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Cleaning up draft...", "ts": 1785055495.2567484, "step": "cleanup"}
+{"type": "progress", "agent": "drafting", "message": "Auditing draft against your directives...", "ts": 1785055495.256874, "step": "self_refine"}
+{"type": "status", "agent": "drafting", "message": "Generating legal draft..."}
+{"type": "progress", "agent": "orchestrator", "message": "Merging results from 3 agents...", "ts": 1785055500.1713576, "found": 3, "step": "synthesize"}
+{"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}
+{"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1785055500.1741312, "step": "finalize"}
+{"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}
+{"type": "response", "content": "## IN THE COURT OF THE JUDICIAL MAGISTRATE FIRST CLASS, NAGPUR\n(MOTOR VEHICLES COURT NO. 4)\n\nM.V. Summons Case No. 233 of 2026\n\nP.S.: Traffic Chamber, Cotton Market, Nagpur\n\n## IN THE MATTER OF:\n\nSTATE OF MAHARASHTRA\n.....PROSECUTION\n\n**vs**\n\nSHARAD NARENDRA MESHRAM\n.....ACCUSED/APPLICANT\n\n## APPLICATION UNDER SECTION 151 OF THE CODE OF CIVIL PROCEDURE, 1908\n\n## MOST RESPECTFULLY SHOWETH:\n\n1. That the Applicant is the Accused in the present M.V. Summons Case No. 233 of 2026, having been charged with offenses under Sections 184 and 185 of the Motor Vehicles Act, 1988. The Applicant appears before this Hon'ble Court in response to the summons served upon him.\n\n2. That the Applicant, having understood the nature of the charges against him, intends to voluntarily plead guilty and seeks a summary disposal of the case under the beneficial provisions of the Bharatiya Nagarik Suraksha Sanhita, 2023 (hereinafter \"BNSS\").\n\n3. That while specific provisions for summary disposal exist under Chapter XXIII of the BNSS, the Applicant also invokes the inherent jurisdiction of this Hon'ble Court to pass such orders as may be necessary to secure the ends of justice. It is submitted that the power to prevent a disproportionate sentence and to do complete justice is inherent in every court.\n\n4. That the Applicant is a first-time offender and has no prior criminal antecedents or previous convictions for any traffic violation. This is a significant mitigating factor, which is also recognized by the legislature in the graded penalty structure under Section 185 of the Motor Vehicles Act, 1988.\n\n5. That the present case is devoid of any aggravating circumstances. The vehicle was intercepted during a routine check, and the incident did not result in any accident, collision, or injury to any person or property. While the offense under Section 185 of the said Act is one of strict liability, the absence of any resultant harm is a crucial factor for consideration during sentencing.\n\n6. That it is a settled principle of criminal jurisprudence that the punishment imposed must be proportionate to the gravity of the offense. The Hon'ble Supreme Court of India, in cases such as *State of M.P. v. Bablu*, (2014) 9 SCC 281, has held that while driving under the influence of alcohol is a serious offense, the court must consider both aggravating and mitigating circumstances to arrive at a just and proportionate sentence.\n\n7. That the Applicant is the sole breadwinner for his family. A harsh sentence involving imprisonment or a prolonged disqualification of his driving license would lead to the loss of his livelihood, causing immense and irreparable hardship to his dependent family members.\n\n8. That this application is made bona fide. The Applicant expresses sincere remorse for his conduct and undertakes to adhere strictly to all traffic laws in the future. By pleading guilty at the first instance, the Applicant is also saving the valuable time and resources of this Hon'ble Court.\n\n## PRAYER\n\nIt is, therefore, most respectfully prayed that this Hon'ble Court may be pleased to:\n\na) Accept the voluntary plea of guilt tendered by the Applicant for the offenses charged under Sections 184 and 185 of the Motor Vehicles Act, 1988;\n\nb) Take into consideration the mitigating circumstances detailed in the present application, particularly that the Applicant is a first-time offender with no prior antecedents and that the incident did not result in any accident, injury, or damage to person or property;\n\nc) Exercise the discretion vested in this Hon'ble Court, in the spirit of the reformative provisions of the Bharatiya Nagarik Suraksha Sanhita, 2023, and impose the minimum fine prescribed for a first offense under Section 185 of the Motor Vehicles Act, 1988;\n\nd) Waive the sentence of imprisonment and refrain from passing any order for the disqualification of the Applicant's driving license, in the interest of justice and to avoid undue hardship; and\n\ne) Pass any other order or direction that this Hon'ble Court may deem fit and proper in the facts and circumstances of the case.\n\nAND FOR THIS ACT OF KINDNESS, THE APPLICANT AS IN DUTY BOUND SHALL EVER PRAY.\n\nPlace: Nagpur\nDate: 23/03/2026\n\n(Signature of Applicant)\n**SHARAD NARENDRA MESHRAM**\nApplicant\n\nTHROUGH:\n\n(Signature of Advocate)\n**Adv. ANIL RAMDASJI BANSOD**\nCounsel for the Applicant\n\n## VERIFICATION\n\nI, Sharad Narendra Meshram, son of Narendra Meshram, aged about [Age] years, resident of [Address], the Applicant above-named, do hereby solemnly affirm and declare as under:\n\n1. That I am the Applicant in the above-mentioned application and am well conversant with the facts and circumstances of the case.\n2. That the contents of paragraphs 1 to 8 of the application are true and correct to my personal knowledge and belief, and no part of it is false and nothing material has been concealed therefrom.\n3. That the prayer clause is based on legal advice received, which I believe to be true.\n\nVerified at Nagpur on this 23rd day of March, 2026.\n\n(Signature of Applicant)\n**DEPONENT**\n\n---\n\n## REFERENCES & CITATIONS\n\n\n### SCI_JUDGMENT CITATIONS:\nThe Supreme Court has addressed legal errors in applications, particularly concerning constitutional questions and significant rulings, in several cases. Here are some landmark judgments:\n\n### *The State of Telangana v. Mohd. Abdul Qasim (Died) Per Lrs.*, C.A. No.-005001-005001 - 2024 (DB ID: 43542)\n\nThis recent judgment from April 18, 2024, emphasizes the strict grounds for review applications in both civil and\ncriminal proceedings. The Court held that a review application in a civil proceeding is entertained only on grounds\nmentioned in Order 47 Rule 1 of the Code of Civil Procedure, and in a criminal proceeding, on the ground of an error\napparent on the face of the record. The Court found that the impugned judgment in this case was \"ridden with both\nfactual and legal errors\" and did not stand legal scrutiny. The case involved an instrumentality of the State taking\ndifferent stands regarding forest land, which ultimately led to an order being passed in favor of the respondents,\nsetting aside concurrent judgments of two lower courts. The Supreme Court allowed the appeal, highlighting the\nimportance of adhering to established legal procedures and the consequences of factual and legal errors in judicial\npronouncements.\n\n### *Indian and Eastern Newspaper Society New Delhi v. Commissioner of Income Tax, New Delhi*, 31-08-1979 (DB ID: 6780)\n\nThis case dealt with the interpretation of \"information\" under Section 147(b) of the Income Tax Act, 1961, for reopening\nassessments. The Supreme Court held that the opinion of the internal audit organization of the Income Tax Department on\na point of law cannot be regarded as \"information\" within the meaning of Section 147(b). The Court clarified that\n\"information\" refers to facts, factual material, or knowledge about the true and correct state of the law, including\nrelevant judicial decisions. However, the opinion of an audit party, which performs administrative or executive\nfunctions, does not constitute a declaration of law binding on the Income Tax Officer. The Court emphasized that the\nIncome Tax Officer must independently determine the effect and consequence of the law and form a reasonable belief that\nincome has escaped assessment based on information from a formal source (legislative or judicial authority). An error\ndiscovered by the Income Tax Officer on reconsideration of the same material, without new information, does not grant\nthe power to reopen the assessment.\n\n### *M. C. Chockalingam & Ors. v. V. Manickavasagam & Ors.*, 31-10-1973 (DB ID: 5158)\n\nThis judgment addressed the concept of \"lawful possession\" in the context of the Madras Cinemas (Regulations) Act, 1955,\nand the High Court's power to interfere under Article 226 of the Constitution. The Supreme Court held that \"lawful\npossession\" is not merely \"litigious possession\" or juridical possession protected by law against wrongful\ndispossession. It must have a foundation in a legal right to possess the property. In this case, a tenant continuing in\npossession after the expiry of a lease, without statutory protection, was not considered to be in \"lawful possession\"\nagainst the wishes of the landlord. The Court also reiterated that the High Court should not interfere with an order\nunder Article 226 of the Constitution unless there is a manifest error of law. The Division Bench of the High Court was\nfound to be incorrect in its interpretation of Rule 13 of the Madras Cinemas (Regulations) Rules, 1957.\n\nI think this information will help you more to understand the case:\n\n### Key Legal Issues\n\n-   **THE STATE OF TELANGANA VS MOHD. ABDUL QASIM (DIED) PER LRS.**\n    -   Grounds for review applications in civil and criminal proceedings.\n    -   Rectification of factual and legal errors in judgments.\n    -   Jurisdiction of review courts.\n    -   Role of state instrumentalities in legal proceedings.\n-   **INDIAN AND EASTERN NEWSPAPER SOCIETY NEW DELHI VS COMMISSIONER OF INCOME TAX, NEW DELHI**\n    -   Interpretation of \"information\" under Section 147(b) of the Income Tax Act, 1961.\n    -   Distinction between administrative opinions and declarations of law.\n    -   Conditions for reopening income tax assessments.\n-   **M. C. CHOCKALINGAM & ORS. VS V. MANICKAVASAGAM & ORS.**\n    -   Meaning of \"lawful possession\" in the context of licensing regulations.\n    -   Distinction between lawful possession and juridical possession.\n    -   Scope of interference by the High Court under Article 226 of the Constitution in cases of alleged manifest error of law.\n    -   Applicability of licensing rules to renewal of licenses.\n\n### Detailed Narrative\n\n-   **THE STATE OF TELANGANA VS MOHD. ABDUL QASIM (DIED) PER LRS.**\nThe case originated from a well-merited judgment passed by the High Court of Judicature at Hyderabad, which confirmed a\ntrial court's decision. This judgment was subsequently reviewed by the High Court, acting like an appellate court, based\non materials that emerged after its filing. The review was initiated at the instance of a defendant in whose favor a\ndecree had been granted. The State of Telangana, an instrumentality of the State, initially took varying positions\nregarding the suit property, which was found to be forest land. This inconsistent stance facilitated the impugned review\norder, which set aside the concurrent judgments of the lower courts. The matter reached the Supreme Court as an appeal\nagainst this review order.\n-   **INDIAN AND EASTERN NEWSPAPER SOCIETY NEW DELHI VS COMMISSIONER OF INCOME TAX, NEW DELHI**\nThe assessee, Indian and Eastern Newspaper Society, a professional association, owned a building with a conference hall\nand rooms let out on rent. The income from this source was consistently assessed as business income for several\nassessment years. Subsequently, the internal audit organization of the Income Tax Department opined that this income\nshould have been assessed as \"income from property\" instead of business income. Treating this audit report as\n\"information,\" the Income Tax Officer reopened the assessment under Section 147(b) of the Income Tax Act, 1961. The\nAppellate Assistant Commissioner reversed this order, but the Appellate Tribunal held that the Income Tax Officer had\njurisdiction. The question of whether the audit party's view constituted \"information\" for reopening the assessment was\nreferred to the Supreme Court.\n-   **M. C. CHOCKALINGAM & ORS. VS V. MANICKAVASAGAM & ORS.**\nThe appellants, lessors of a cinema theatre, leased the property to the first respondent for three years. Upon the\nlease's expiry, the appellants sought possession, while the first respondent applied for renewal of the cinema license.\nThe licensing authority renewed the respondent's license and rejected the appellants' application. The Board of Revenue,\non appeal, set aside the licensing authority's order, finding the respondent not in lawful possession. The respondent\nthen filed a writ petition under Article 226 of the Constitution. A single judge of the High Court affirmed the Board's\nfinding, but a Division Bench, relying on a previous Supreme Court decision, held that the respondent's possession after\nlease expiry was lawful possession under Rule 13 of the Madras Cinemas (Regulations) Rules, 1957, and allowed the\nappeal. The appellants then appealed to the Supreme Court.\n\n### Court Observations\n\n-   **THE STATE OF TELANGANA VS MOHD. ABDUL QASIM (DIED) PER LRS.**\nThe Supreme Court emphasized that a review court's jurisdiction is limited and it cannot act as an appellate court. It\nreiterated that review applications in civil proceedings are governed by Order 47 Rule 1 of the Code of Civil Procedure,\nand in criminal proceedings, by the ground of an error apparent on the face of the record. The Court found that the High\nCourt's review judgment was flawed with both factual and legal errors, leading to the setting aside of concurrent\nfindings of lower courts. The Court also critically noted the inconsistent stands taken by the State instrumentality,\nwhich contributed to the erroneous review order.\n-   **INDIAN AND EASTERN NEWSPAPER SOCIETY NEW DELHI VS COMMISSIONER OF INCOME TAX, NEW DELHI**\nThe Supreme Court meticulously analyzed the term \"information\" in Section 147(b) of the Income Tax Act, 1961. It\nclarified that \"information\" must be derived from an external source and pertain to facts or the true and correct state\nof the law, including judicial decisions. The Court distinguished between a declaration of law by a competent authority\n(legislative or judicial) and an opinion of an administrative body like an internal audit party. It held that the audit\nparty's function is administrative, not judicial, and its opinion on a point of law does not constitute \"information\"\nfor reopening assessments. The Court stressed that the Income Tax Officer must independently form a belief that income\nhas escaped assessment based on legally recognized information.\n-   **M. C. CHOCKALINGAM & ORS. VS V. MANICKAVASAGAM & ORS.**\nThe Supreme Court clarified that \"lawful possession\" under Rule 13 of the Madras Cinemas (Regulations) Rules, 1957,\nrequires a legal right to possess the property, not merely juridical possession (possession protected against wrongful\ndispossession). A tenant continuing in possession after the lease expiry, without statutory protection, does not have\nlawful possession against the landlord's wishes. The Court also held that Rule 13 applies to both the grant and renewal\nof licenses. Furthermore, the Court reiterated that the High Court's power under Article 226 to interfere with orders is\nlimited to cases of manifest error of law, and in this instance, the Division Bench had erred in its interpretation of\nRule 13.\n\n### Judgment & Direction\n\n-   **THE STATE OF TELANGANA VS MOHD. ABDUL QASIM (DIED) PER LRS.**\n    The Supreme Court allowed the appeal, setting aside the impugned judgment of the High Court which had been passed in review. This effectively restored the concurrent judgments of the trial court and the first appellate court.\n-   **INDIAN AND EASTERN NEWSPAPER SOCIETY NEW DELHI VS COMMISSIONER OF INCOME TAX, NEW DELHI**\n    The Supreme Court allowed the appeal, holding that the Income Tax Officer was not legally justified in reopening the assessment under Section 147(b) based on the view expressed by the Internal Audit party.\n-   **M. C. CHOCKALINGAM & ORS. VS V. MANICKAVASAGAM & ORS.**\n    The Supreme Court allowed the appeal, setting aside the judgment of the Division Bench of the Madras High Court. The Court held that the respondents' possession after the expiry of the lease was not lawful possession within the meaning of Rule 13, and the High Court's interference under Article 226 was unwarranted due to the absence of a manifest error of law in the Board of Revenue's order.\n\n**PDF Links:**\n-   *THE STATE OF TELANGANA VS MOHD. ABDUL QASIM (DIED) PER LRS.*: [Judgment PDF](https://api.sci.gov.in/supremecourt/2021/11619/11619_2021_14_1501_52266_Judgement_18-Apr-2024.pdf)\n-   *INDIAN AND EASTERN NEWSPAPER SOCIETY NEW DELHI VS COMMISSIONER OF INCOME TAX, NEW DELHI*: [Judgment PDF](https://api.sci.gov.in/jonew/judis/4745.pdf)\n-   *M. C. CHOCKALINGAM & ORS. VS V. MANICKAVASAGAM & ORS.*: [Judgment PDF](https://api.sci.gov.in/jonew/judis/6431.pdf)\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."}
+{"type": "sources", "data": [{"source_type": "drafting", "title": "Reference draft (web-synthesised: <web:picker-rejected>)", "content": ["IN THE COURT OF THE [DESIGNATION OF JUDGE], [CITY/DISTRICT]\n\nOriginal Suit No. [NUMBER] of [YEAR]\n\nIN THE MATTER OF:\n\n[NAME OF PLAINTIFF/APPLICANT]\nS/o/D/o [Father's/Husband's Name]\nR/o [Address]\n                                                                        ... PLAINTIFF/APPLICANT\n\nVERSUS\n"], "doc_link": null, "file_name": "<web:picker-rejected>", "agent_name": "Drafting", "relevance_score": null, "template_type": "web-synthesized"}, {"source_type": "sci_judgment", "title": "THE STATE OF TELANGANA VS MOHD. ABDUL QASIM (DIED) PER LRS.", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2021/11619/11619_2021_14_1501_52266_Judgement_18-Apr-2024.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-005001-005001 - 2024", "judgment_date": "18-04-2024", "bench": "HON'BLE MR. JUSTICE M.M. SUNDRESH HON'BLE MR. JUSTICE S.V.N. BHATTI", "judgment_by": "HON'BLE MR. JUSTICE M.M. SUNDRESH", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2021/11619/11619_2021_14_1501_52266_Judgement_18-Apr-2024.pdf"}], "parties": "THE STATE OF TELANGANA VS MOHD. ABDUL QASIM (DIED) PER LRS.", "db_id": "43542"}, {"source_type": "sci_judgment", "title": "INDIAN AND EASTERN NEWSPAPER SOCIETY NEW DELHI VS COMMISSIONER OF INCOME TAX, NEW DELHI", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/4745.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "- 0", "judgment_date": "31-08-1979", "bench": "PATHAKR.S.", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/4745.pdf"}], "parties": "INDIAN AND EASTERN NEWSPAPER SOCIETY NEW DELHI VS COMMISSIONER OF INCOME TAX, NEW DELHI", "db_id": "6780"}, {"source_type": "sci_judgment", "title": "M.   C. CHOCKALINGAM & ORS. VS V.   MANICKAVASAGAM & ORS.", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/6431.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "- 0", "judgment_date": "31-10-1973", "bench": "N/A", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/6431.pdf"}], "parties": "M.   C. CHOCKALINGAM & ORS. VS V.   MANICKAVASAGAM & ORS.", "db_id": "5158"}, {"source_type": "sci_judgment", "title": "FOOD CORPN. OF INDIA VS KAMDHENU CATTLE FEED INDUSTRIES", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/12297.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-004731-004731 - 1992", "judgment_date": "11-11-1992", "bench": "N/A", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/12297.pdf"}], "parties": "FOOD CORPN. OF INDIA VS KAMDHENU CATTLE FEED INDUSTRIES", "db_id": "10574"}, {"source_type": "sci_judgment", "title": "K. PRABHAKAR HEGDE VS BANK OF BARODA", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2022/6827/6827_2022_7_1503_63379_Judgement_19-Aug-2025.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-006599-006599 - 2025", "judgment_date": "19-08-2025", "bench": "HON'BLE MR. JUSTICE DIPANKAR DATTA HON'BLE MR. JUSTICE AUGUSTINE GEORGE MASIH", "judgment_by": "HON'BLE MR. JUSTICE DIPANKAR DATTA", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2022/6827/6827_2022_7_1503_63379_Judgement_19-Aug-2025.pdf"}], "parties": "K. PRABHAKAR HEGDE VS BANK OF BARODA", "db_id": "45168"}]}
+{"type": "followup_suggestions", "data": ["What is Section 151 CPC?", "What are common MV summons errors?", "How to cite landmark SC cases?"]}
+{"type": "done", "agents_used": ["Drafting", "Document", "SCI_Judgment"], "token_usage": {"input_tokens": 110089, "output_tokens": 18017, "total_tokens": 128106, "cache_read_tokens": 42369, "cache_creation_tokens": 0, "reasoning_tokens": 10366, "cost_usd": 0.311682, "by_agent": {"Orchestrator": {"input": 7767, "output": 470, "total": 8237, "cache_read": 5274, "calls": 3, "cost_usd": 0.000965}, "Drafting": {"input": 40337, "output": 9353, "total": 49690, "cache_read": 16331, "calls": 5, "cost_usd": 0.209453}, "SCI_Judgment": {"input": 45968, "output": 2717, "total": 48685, "cache_read": 7830, "calls": 4, "cost_usd": 0.020584}, "Document": {"input": 1009, "output": 4618, "total": 5627, "cache_read": 0, "calls": 1, "cost_usd": 0.074031}, "SelfRefine": {"input": 15008, "output": 859, "total": 15867, "cache_read": 12934, "calls": 1, "cost_usd": 0.00665}}, "calls": [{"agent": "Orchestrator", "step": "classify_and_plan", "input": 1429, "output": 72, "total": 1501, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000172}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5525, "output": 297, "total": 5822, "cache_read": 5274, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000671}, {"agent": "Orchestrator", "step": "rewrite_per_agent_queries", "input": 813, "output": 101, "total": 914, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000122}, {"agent": "Drafting", "step": "pick_reference", "input": 3637, "output": 61, "total": 3698, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000388}, {"agent": "SCI_Judgment", "step": "react_msg_1", "input": 7787, "output": 37, "total": 7824, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.002429}, {"agent": "SCI_Judgment", "step": "react_msg_3", "input": 7845, "output": 36, "total": 7881, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.002443}, {"agent": "SCI_Judgment", "step": "react_msg_5", "input": 9308, "output": 67, "total": 9375, "cache_read": 7830, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.00296}, {"agent": "SCI_Judgment", "step": "react_msg_9", "input": 21028, "output": 2577, "total": 23605, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.012751}, {"agent": "Drafting", "step": "fanout_judge", "input": 2657, "output": 390, "total": 3047, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000422}, {"agent": "Document", "step": "qa_chromadb", "input": 1009, "output": 4618, "total": 5627, "cache_read": 0, "cache_creation": 0, "reasoning": 2659, "cost_usd": 0.074031}, {"agent": "Drafting", "step": "generate_section_pair", "input": 11089, "output": 1268, "total": 12357, "cache_read": 0, "cache_creation": 0, "reasoning": 1167, "cost_usd": 0.038211}, {"agent": "Drafting", "step": "generate_section_pair", "input": 11197, "output": 4654, "total": 15851, "cache_read": 8165, "cache_creation": 0, "reasoning": 4069, "cost_usd": 0.101226}, {"agent": "Drafting", "step": "generate_section_pair", "input": 11757, "output": 2980, "total": 14737, "cache_read": 8166, "cache_creation": 0, "reasoning": 2471, "cost_usd": 0.069206}, {"agent": "SelfRefine", "step": "critique", "input": 15008, "output": 859, "total": 15867, "cache_read": 12934, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.00665}]}, "thread_id": "4e2fc279-e60f-445c-a813-0db9224e83de", "conversation_turn": 1, "query_rewritten": false, "effective_query": null}

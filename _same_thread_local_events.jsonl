@@ -1,0 +1,711 @@
+{"turn": 1, "event": {"type": "thread_id", "data": "f794cb1f-60a8-438f-8cb4-80225b5e238e"}}
+{"turn": 1, "event": {"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1784749273.0666826, "step": "validate"}}
+{"turn": 1, "event": {"type": "status", "agent": "guardrail_input", "message": "Validating query..."}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1784749273.073142, "step": "language"}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1784749274.7766793, "step": "language", "substep": true}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1784749274.778009, "step": "history"}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1784749274.7907681, "found": 0, "step": "history", "substep": true}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Rewriting follow-up query...", "ts": 1784749274.7970679, "step": "rewrite"}}
+{"turn": 1, "event": {"type": "status", "agent": "memory", "message": "Loading context..."}}
+{"turn": 1, "event": {"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}}
+{"turn": 1, "event": {"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1784749274.804436, "step": "classify"}}
+{"turn": 1, "event": {"type": "progress", "agent": "orchestrator", "message": "Identified: Legal_Concepts", "ts": 1784749278.4894993, "detail": "Legal_Concepts", "step": "classify", "substep": true}}
+{"turn": 1, "event": {"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}}
+{"turn": 1, "event": {"type": "agents_planned", "agents": ["Legal_Concepts"]}}
+{"turn": 1, "event": {"type": "progress", "agent": "legal_concepts", "message": "Researching legal concept...", "ts": 1784749278.5000339, "step": "research"}}
+{"turn": 1, "event": {"type": "token", "content": "Dealing with a crimi"}}
+{"turn": 1, "event": {"type": "token", "content": "nal case in India in"}}
+{"turn": 1, "event": {"type": "token", "content": "volves navigating a "}}
+{"turn": 1, "event": {"type": "token", "content": "structured legal pro"}}
+{"turn": 1, "event": {"type": "token", "content": "cess primarily gover"}}
+{"turn": 1, "event": {"type": "token", "content": "ned by the Code of C"}}
+{"turn": 1, "event": {"type": "token", "content": "riminal Procedure, 1"}}
+{"turn": 1, "event": {"type": "token", "content": "973 (CrPC), and the "}}
+{"turn": 1, "event": {"type": "token", "content": "Bharatiya Nagarik Su"}}
+{"turn": 1, "event": {"type": "token", "content": "raksha Sanhita, 2023"}}
+{"turn": 1, "event": {"type": "token", "content": " (BNSS), which is re"}}
+{"turn": 1, "event": {"type": "token", "content": "placing the CrPC. Th"}}
+{"turn": 1, "event": {"type": "token", "content": "e Indian Penal Code,"}}
+{"turn": 1, "event": {"type": "token", "content": " 1860 (IPC), defines"}}
+{"turn": 1, "event": {"type": "token", "content": " substantive crimina"}}
+{"turn": 1, "event": {"type": "token", "content": "l offenses.\n\nThe pro"}}
+{"turn": 1, "event": {"type": "token", "content": "cess can be broadly "}}
+{"turn": 1, "event": {"type": "token", "content": "divided into several"}}
+{"turn": 1, "event": {"type": "token", "content": " stages:\n\n### I. Pre"}}
+{"turn": 1, "event": {"type": "token", "content": "-Trial Stage\n\n1.  **"}}
+{"turn": 1, "event": {"type": "token", "content": "First Information Re"}}
+{"turn": 1, "event": {"type": "token", "content": "port (FIR)**\n    *  "}}
+{"turn": 1, "event": {"type": "token", "content": " An FIR is a written"}}
+{"turn": 1, "event": {"type": "token", "content": " document prepared b"}}
+{"turn": 1, "event": {"type": "token", "content": "y the police upon re"}}
+{"turn": 1, "event": {"type": "token", "content": "ceiving information "}}
+{"turn": 1, "event": {"type": "token", "content": "about the commission"}}
+{"turn": 1, "event": {"type": "token", "content": " of a cognizable off"}}
+{"turn": 1, "event": {"type": "token", "content": "ence.\n    *   A cogn"}}
+{"turn": 1, "event": {"type": "token", "content": "izable offence is a "}}
+{"turn": 1, "event": {"type": "token", "content": "serious crime where "}}
+{"turn": 1, "event": {"type": "token", "content": "the police can arres"}}
+{"turn": 1, "event": {"type": "token", "content": "t without a warrant "}}
+{"turn": 1, "event": {"type": "token", "content": "and initiate an inve"}}
+{"turn": 1, "event": {"type": "token", "content": "stigation without a "}}
+{"turn": 1, "event": {"type": "token", "content": "Magistrate's permiss"}}
+{"turn": 1, "event": {"type": "token", "content": "ion (e.g., murder, r"}}
+{"turn": 1, "event": {"type": "token", "content": "obbery, kidnapping)."}}
+{"turn": 1, "event": {"type": "token", "content": "\n    *   Any person "}}
+{"turn": 1, "event": {"type": "token", "content": "with knowledge of th"}}
+{"turn": 1, "event": {"type": "token", "content": "e incident, includin"}}
+{"turn": 1, "event": {"type": "token", "content": "g the victim or a wi"}}
+{"turn": 1, "event": {"type": "token", "content": "tness, can file an F"}}
+{"turn": 1, "event": {"type": "token", "content": "IR at the police sta"}}
+{"turn": 1, "event": {"type": "token", "content": "tion having jurisdic"}}
+{"turn": 1, "event": {"type": "token", "content": "tion over the area w"}}
+{"turn": 1, "event": {"type": "token", "content": "here the offence occ"}}
+{"turn": 1, "event": {"type": "token", "content": "urred.\n    *   The i"}}
+{"turn": 1, "event": {"type": "token", "content": "nformation can be gi"}}
+{"turn": 1, "event": {"type": "token", "content": "ven orally or in wri"}}
+{"turn": 1, "event": {"type": "token", "content": "ting. If given orall"}}
+{"turn": 1, "event": {"type": "token", "content": "y, the police office"}}
+{"turn": 1, "event": {"type": "token", "content": "r must write it down"}}
+{"turn": 1, "event": {"type": "token", "content": ", read it to the inf"}}
+{"turn": 1, "event": {"type": "token", "content": "ormant, and obtain t"}}
+{"turn": 1, "event": {"type": "token", "content": "heir signature.\n    "}}
+{"turn": 1, "event": {"type": "token", "content": "*   The complainant "}}
+{"turn": 1, "event": {"type": "token", "content": "has a right to recei"}}
+{"turn": 1, "event": {"type": "token", "content": "ve a free copy of th"}}
+{"turn": 1, "event": {"type": "token", "content": "e FIR.\n    *   If th"}}
+{"turn": 1, "event": {"type": "token", "content": "e police refuse to r"}}
+{"turn": 1, "event": {"type": "token", "content": "egister an FIR, the "}}
+{"turn": 1, "event": {"type": "token", "content": "aggrieved person can"}}
+{"turn": 1, "event": {"type": "token", "content": " approach the Superi"}}
+{"turn": 1, "event": {"type": "token", "content": "ntendent of Police u"}}
+{"turn": 1, "event": {"type": "token", "content": "nder Section 154(3) "}}
+{"turn": 1, "event": {"type": "token", "content": "of the CrPC or the J"}}
+{"turn": 1, "event": {"type": "token", "content": "udicial Magistrate u"}}
+{"turn": 1, "event": {"type": "token", "content": "nder Section 156(3) "}}
+{"turn": 1, "event": {"type": "token", "content": "of the CrPC to direc"}}
+{"turn": 1, "event": {"type": "token", "content": "t the police to regi"}}
+{"turn": 1, "event": {"type": "token", "content": "ster an FIR.\n    *  "}}
+{"turn": 1, "event": {"type": "token", "content": " For non-cognizable "}}
+{"turn": 1, "event": {"type": "token", "content": "offences, the police"}}
+{"turn": 1, "event": {"type": "token", "content": " must record the com"}}
+{"turn": 1, "event": {"type": "token", "content": "plaint in a separate"}}
+{"turn": 1, "event": {"type": "token", "content": " register and refer "}}
+{"turn": 1, "event": {"type": "token", "content": "the informant to the"}}
+{"turn": 1, "event": {"type": "token", "content": " Magistrate, as they"}}
+{"turn": 1, "event": {"type": "token", "content": " cannot investigate "}}
+{"turn": 1, "event": {"type": "token", "content": "without a Magistrate"}}
+{"turn": 1, "event": {"type": "token", "content": "'s order.\n\n2.  **Inv"}}
+{"turn": 1, "event": {"type": "token", "content": "estigation**\n    *  "}}
+{"turn": 1, "event": {"type": "token", "content": " Investigation is th"}}
+{"turn": 1, "event": {"type": "token", "content": "e process carried ou"}}
+{"turn": 1, "event": {"type": "token", "content": "t by a police office"}}
+{"turn": 1, "event": {"type": "token", "content": "r to collect evidenc"}}
+{"turn": 1, "event": {"type": "token", "content": "e, identify the offe"}}
+{"turn": 1, "event": {"type": "token", "content": "nder, and present th"}}
+{"turn": 1, "event": {"type": "token", "content": "em before the court "}}
+{"turn": 1, "event": {"type": "token", "content": "for trial.\n    *   I"}}
+{"turn": 1, "event": {"type": "token", "content": "t begins after the F"}}
+{"turn": 1, "event": {"type": "token", "content": "IR is registered in "}}
+{"turn": 1, "event": {"type": "token", "content": "cognizable cases.\n  "}}
+{"turn": 1, "event": {"type": "token", "content": "  *   Key steps incl"}}
+{"turn": 1, "event": {"type": "token", "content": "ude:\n        *   Vis"}}
+{"turn": 1, "event": {"type": "token", "content": "iting the crime scen"}}
+{"turn": 1, "event": {"type": "token", "content": "e and collecting phy"}}
+{"turn": 1, "event": {"type": "token", "content": "sical evidence.\n    "}}
+{"turn": 1, "event": {"type": "token", "content": "    *   Examining wi"}}
+{"turn": 1, "event": {"type": "token", "content": "tnesses and recordin"}}
+{"turn": 1, "event": {"type": "token", "content": "g their statements u"}}
+{"turn": 1, "event": {"type": "token", "content": "nder Section 161 of "}}
+{"turn": 1, "event": {"type": "token", "content": "the CrPC.\n        * "}}
+{"turn": 1, "event": {"type": "token", "content": "  Searching and seiz"}}
+{"turn": 1, "event": {"type": "token", "content": "ing relevant documen"}}
+{"turn": 1, "event": {"type": "token", "content": "ts or objects.\n     "}}
+{"turn": 1, "event": {"type": "token", "content": "   *   Arresting sus"}}
+{"turn": 1, "event": {"type": "token", "content": "pects if there is su"}}
+{"turn": 1, "event": {"type": "token", "content": "fficient evidence.\n "}}
+{"turn": 1, "event": {"type": "token", "content": "       *   Conductin"}}
+{"turn": 1, "event": {"type": "token", "content": "g forensic examinati"}}
+{"turn": 1, "event": {"type": "token", "content": "ons.\n        *   Int"}}
+{"turn": 1, "event": {"type": "token", "content": "errogating the accus"}}
+{"turn": 1, "event": {"type": "token", "content": "ed to elicit informa"}}
+{"turn": 1, "event": {"type": "token", "content": "tion, though force o"}}
+{"turn": 1, "event": {"type": "token", "content": "r coercion is prohib"}}
+{"turn": 1, "event": {"type": "token", "content": "ited.\n    *   The po"}}
+{"turn": 1, "event": {"type": "token", "content": "lice must send a pre"}}
+{"turn": 1, "event": {"type": "token", "content": "liminary report to t"}}
+{"turn": 1, "event": {"type": "token", "content": "he Magistrate under "}}
+{"turn": 1, "event": {"type": "token", "content": "Section 157 of the C"}}
+{"turn": 1, "event": {"type": "token", "content": "rPC to inform them t"}}
+{"turn": 1, "event": {"type": "token", "content": "hat an investigation"}}
+{"turn": 1, "event": {"type": "token", "content": " has commenced.\n    "}}
+{"turn": 1, "event": {"type": "token", "content": "*   Upon completion "}}
+{"turn": 1, "event": {"type": "token", "content": "of the investigation"}}
+{"turn": 1, "event": {"type": "token", "content": ", the police file a "}}
+{"turn": 1, "event": {"type": "token", "content": "charge sheet (also k"}}
+{"turn": 1, "event": {"type": "token", "content": "nown as a police rep"}}
+{"turn": 1, "event": {"type": "token", "content": "ort or challan) unde"}}
+{"turn": 1, "event": {"type": "token", "content": "r Section 173 of the"}}
+{"turn": 1, "event": {"type": "token", "content": " CrPC if sufficient "}}
+{"turn": 1, "event": {"type": "token", "content": "evidence is found. I"}}
+{"turn": 1, "event": {"type": "token", "content": "f no evidence is fou"}}
+{"turn": 1, "event": {"type": "token", "content": "nd, a closure report"}}
+{"turn": 1, "event": {"type": "token", "content": " is submitted.\n\n3.  "}}
+{"turn": 1, "event": {"type": "token", "content": "**Arrest**\n    *   A"}}
+{"turn": 1, "event": {"type": "token", "content": "rrest involves takin"}}
+{"turn": 1, "event": {"type": "token", "content": "g a person into cust"}}
+{"turn": 1, "event": {"type": "token", "content": "ody because they are"}}
+{"turn": 1, "event": {"type": "token", "content": " accused of committi"}}
+{"turn": 1, "event": {"type": "token", "content": "ng a crime.\n    *   "}}
+{"turn": 1, "event": {"type": "token", "content": "Section 46 of the Cr"}}
+{"turn": 1, "event": {"type": "token", "content": "PC outlines the proc"}}
+{"turn": 1, "event": {"type": "token", "content": "edure for arrest, re"}}
+{"turn": 1, "event": {"type": "token", "content": "quiring physical tou"}}
+{"turn": 1, "event": {"type": "token", "content": "ch or restraint unle"}}
+{"turn": 1, "event": {"type": "token", "content": "ss the person submit"}}
+{"turn": 1, "event": {"type": "token", "content": "s to custody.\n    * "}}
+{"turn": 1, "event": {"type": "token", "content": "  An arrest can be m"}}
+{"turn": 1, "event": {"type": "token", "content": "ade with or without "}}
+{"turn": 1, "event": {"type": "token", "content": "a warrant, depending"}}
+{"turn": 1, "event": {"type": "token", "content": " on the circumstance"}}
+{"turn": 1, "event": {"type": "token", "content": "s and the nature of "}}
+{"turn": 1, "event": {"type": "token", "content": "the offence.\n    *  "}}
+{"turn": 1, "event": {"type": "token", "content": " Rights of an arrest"}}
+{"turn": 1, "event": {"type": "token", "content": "ed person include:\n "}}
+{"turn": 1, "event": {"type": "token", "content": "       *   Being inf"}}
+{"turn": 1, "event": {"type": "token", "content": "ormed of the grounds"}}
+{"turn": 1, "event": {"type": "token", "content": " for arrest.\n       "}}
+{"turn": 1, "event": {"type": "token", "content": " *   The right to no"}}
+{"turn": 1, "event": {"type": "token", "content": "tify a family member"}}
+{"turn": 1, "event": {"type": "token", "content": ".\n        *   Being "}}
+{"turn": 1, "event": {"type": "token", "content": "produced before a Ma"}}
+{"turn": 1, "event": {"type": "token", "content": "gistrate within 24 h"}}
+{"turn": 1, "event": {"type": "token", "content": "ours of arrest, excl"}}
+{"turn": 1, "event": {"type": "token", "content": "uding travel time, a"}}
+{"turn": 1, "event": {"type": "token", "content": "s mandated by Sectio"}}
+{"turn": 1, "event": {"type": "token", "content": "n 57 of the CrPC.\n\n4"}}
+{"turn": 1, "event": {"type": "token", "content": ".  **Bail**\n    *   "}}
+{"turn": 1, "event": {"type": "token", "content": "Bail is the temporar"}}
+{"turn": 1, "event": {"type": "token", "content": "y release of an accu"}}
+{"turn": 1, "event": {"type": "token", "content": "sed person awaiting "}}
+{"turn": 1, "event": {"type": "token", "content": "trial, often on the "}}
+{"turn": 1, "event": {"type": "token", "content": "condition of lodging"}}
+{"turn": 1, "event": {"type": "token", "content": " a sum of money or p"}}
+{"turn": 1, "event": {"type": "token", "content": "roviding sureties to"}}
+{"turn": 1, "event": {"type": "token", "content": " guarantee their app"}}
+{"turn": 1, "event": {"type": "token", "content": "earance in court.\n  "}}
+{"turn": 1, "event": {"type": "token", "content": "  *   The primary le"}}
+{"turn": 1, "event": {"type": "token", "content": "gislation governing "}}
+{"turn": 1, "event": {"type": "token", "content": "bail is the Code of "}}
+{"turn": 1, "event": {"type": "token", "content": "Criminal Procedure, "}}
+{"turn": 1, "event": {"type": "token", "content": "1973.\n    *   Types "}}
+{"turn": 1, "event": {"type": "token", "content": "of bail:\n        *  "}}
+{"turn": 1, "event": {"type": "token", "content": " **Regular Bail:** G"}}
+{"turn": 1, "event": {"type": "token", "content": "ranted after arrest "}}
+{"turn": 1, "event": {"type": "token", "content": "for a cognizable off"}}
+{"turn": 1, "event": {"type": "token", "content": "ence under Sections "}}
+{"turn": 1, "event": {"type": "token", "content": "437 and 439 of the C"}}
+{"turn": 1, "event": {"type": "token", "content": "rPC.\n        *   **A"}}
+{"turn": 1, "event": {"type": "token", "content": "nticipatory Bail:** "}}
+{"turn": 1, "event": {"type": "token", "content": "Granted under Sectio"}}
+{"turn": 1, "event": {"type": "token", "content": "n 438 of the CrPC (n"}}
+{"turn": 1, "event": {"type": "token", "content": "ow Section 482 of th"}}
+{"turn": 1, "event": {"type": "token", "content": "e BNSS) to a person "}}
+{"turn": 1, "event": {"type": "token", "content": "who apprehends arres"}}
+{"turn": 1, "event": {"type": "token", "content": "t for a non-bailable"}}
+{"turn": 1, "event": {"type": "token", "content": " offence.\n        * "}}
+{"turn": 1, "event": {"type": "token", "content": "  **Interim Bail:** "}}
+{"turn": 1, "event": {"type": "token", "content": "Temporary bail grant"}}
+{"turn": 1, "event": {"type": "token", "content": "ed before the final "}}
+{"turn": 1, "event": {"type": "token", "content": "decision on regular "}}
+{"turn": 1, "event": {"type": "token", "content": "or anticipatory bail"}}
+{"turn": 1, "event": {"type": "token", "content": ".\n        *   **Defa"}}
+{"turn": 1, "event": {"type": "token", "content": "ult Bail (Statutory "}}
+{"turn": 1, "event": {"type": "token", "content": "Bail):** A right ava"}}
+{"turn": 1, "event": {"type": "token", "content": "ilable under Section"}}
+{"turn": 1, "event": {"type": "token", "content": " 167(2) of the CrPC "}}
+{"turn": 1, "event": {"type": "token", "content": "if the investigation"}}
+{"turn": 1, "event": {"type": "token", "content": " is not completed wi"}}
+{"turn": 1, "event": {"type": "token", "content": "thin a prescribed ti"}}
+{"turn": 1, "event": {"type": "token", "content": "me limit (e.g., 60 o"}}
+{"turn": 1, "event": {"type": "token", "content": "r 90 days, depending"}}
+{"turn": 1, "event": {"type": "token", "content": " on the offence).\n  "}}
+{"turn": 1, "event": {"type": "token", "content": "  *   In bailable of"}}
+{"turn": 1, "event": {"type": "token", "content": "fences, the accused "}}
+{"turn": 1, "event": {"type": "token", "content": "has a statutory righ"}}
+{"turn": 1, "event": {"type": "token", "content": "t to bail under Sect"}}
+{"turn": 1, "event": {"type": "token", "content": "ion 436 of the CrPC."}}
+{"turn": 1, "event": {"type": "token", "content": " For non-bailable of"}}
+{"turn": 1, "event": {"type": "token", "content": "fences, granting bai"}}
+{"turn": 1, "event": {"type": "token", "content": "l is at the court's "}}
+{"turn": 1, "event": {"type": "token", "content": "discretion.\n    *   "}}
+{"turn": 1, "event": {"type": "token", "content": "The principle \"bail "}}
+{"turn": 1, "event": {"type": "token", "content": "is the rule, jail is"}}
+{"turn": 1, "event": {"type": "token", "content": " the exception\" has "}}
+{"turn": 1, "event": {"type": "token", "content": "gained judicial reco"}}
+{"turn": 1, "event": {"type": "token", "content": "gnition.\n\n### II. Tr"}}
+{"turn": 1, "event": {"type": "token", "content": "ial Stage\n\n1.  **Cog"}}
+{"turn": 1, "event": {"type": "token", "content": "nizance by Magistrat"}}
+{"turn": 1, "event": {"type": "token", "content": "e and Committal**\n  "}}
+{"turn": 1, "event": {"type": "token", "content": "  *   After the char"}}
+{"turn": 1, "event": {"type": "token", "content": "ge sheet is filed, t"}}
+{"turn": 1, "event": {"type": "token", "content": "he Magistrate takes "}}
+{"turn": 1, "event": {"type": "token", "content": "\"cognizance\" of the "}}
+{"turn": 1, "event": {"type": "token", "content": "offence, meaning the"}}
+{"turn": 1, "event": {"type": "token", "content": "y officially take no"}}
+{"turn": 1, "event": {"type": "token", "content": "tice of the alleged "}}
+{"turn": 1, "event": {"type": "token", "content": "crime.\n    *   If th"}}
+{"turn": 1, "event": {"type": "token", "content": "e offence is exclusi"}}
+{"turn": 1, "event": {"type": "token", "content": "vely triable by a Co"}}
+{"turn": 1, "event": {"type": "token", "content": "urt of Session, the "}}
+{"turn": 1, "event": {"type": "token", "content": "Magistrate commits t"}}
+{"turn": 1, "event": {"type": "token", "content": "he case to the Sessi"}}
+{"turn": 1, "event": {"type": "token", "content": "ons Court.\n\n2.  **Fr"}}
+{"turn": 1, "event": {"type": "token", "content": "aming of Charges**\n "}}
+{"turn": 1, "event": {"type": "token", "content": "   *   This is a cru"}}
+{"turn": 1, "event": {"type": "token", "content": "cial stage where the"}}
+{"turn": 1, "event": {"type": "token", "content": " court formally accu"}}
+{"turn": 1, "event": {"type": "token", "content": "ses the individual o"}}
+{"turn": 1, "event": {"type": "token", "content": "f a specific offence"}}
+{"turn": 1, "event": {"type": "token", "content": " based on the eviden"}}
+{"turn": 1, "event": {"type": "token", "content": "ce presented by the "}}
+{"turn": 1, "event": {"type": "token", "content": "prosecution.\n    *  "}}
+{"turn": 1, "event": {"type": "token", "content": " The judge frames th"}}
+{"turn": 1, "event": {"type": "token", "content": "e charge after exami"}}
+{"turn": 1, "event": {"type": "token", "content": "ning the police repo"}}
+{"turn": 1, "event": {"type": "token", "content": "rt and other documen"}}
+{"turn": 1, "event": {"type": "token", "content": "ts and hearing argum"}}
+{"turn": 1, "event": {"type": "token", "content": "ents.\n    *   The ch"}}
+{"turn": 1, "event": {"type": "token", "content": "arges are read and e"}}
+{"turn": 1, "event": {"type": "token", "content": "xplained to the accu"}}
+{"turn": 1, "event": {"type": "token", "content": "sed, who is then ask"}}
+{"turn": 1, "event": {"type": "token", "content": "ed whether they plea"}}
+{"turn": 1, "event": {"type": "token", "content": "d guilty or claim to"}}
+{"turn": 1, "event": {"type": "token", "content": " be tried.\n    *   T"}}
+{"turn": 1, "event": {"type": "token", "content": "he purpose is to pro"}}
+{"turn": 1, "event": {"type": "token", "content": "vide clear, unambigu"}}
+{"turn": 1, "event": {"type": "token", "content": "ous notice to the ac"}}
+{"turn": 1, "event": {"type": "token", "content": "cused to enable them"}}
+{"turn": 1, "event": {"type": "token", "content": " to prepare their de"}}
+{"turn": 1, "event": {"type": "token", "content": "fence.\n    *   Under"}}
+{"turn": 1, "event": {"type": "token", "content": " the BNSS, a 60-day "}}
+{"turn": 1, "event": {"type": "token", "content": "timeline has been in"}}
+{"turn": 1, "event": {"type": "token", "content": "troduced for framing"}}
+{"turn": 1, "event": {"type": "token", "content": " charges from the da"}}
+{"turn": 1, "event": {"type": "token", "content": "te of the first hear"}}
+{"turn": 1, "event": {"type": "token", "content": "ing.\n\n3.  **Prosecut"}}
+{"turn": 1, "event": {"type": "token", "content": "ion Evidence**\n    *"}}
+{"turn": 1, "event": {"type": "token", "content": "   If the accused pl"}}
+{"turn": 1, "event": {"type": "token", "content": "eads not guilty, the"}}
+{"turn": 1, "event": {"type": "token", "content": " trial commences.\n  "}}
+{"turn": 1, "event": {"type": "token", "content": "  *   The prosecutio"}}
+{"turn": 1, "event": {"type": "token", "content": "n presents its evide"}}
+{"turn": 1, "event": {"type": "token", "content": "nce to prove the gui"}}
+{"turn": 1, "event": {"type": "token", "content": "lt of the accused.\n "}}
+{"turn": 1, "event": {"type": "token", "content": "   *   This involves"}}
+{"turn": 1, "event": {"type": "token", "content": " examining prosecuti"}}
+{"turn": 1, "event": {"type": "token", "content": "on witnesses (examin"}}
+{"turn": 1, "event": {"type": "token", "content": "ation-in-chief) and "}}
+{"turn": 1, "event": {"type": "token", "content": "their cross-examinat"}}
+{"turn": 1, "event": {"type": "token", "content": "ion by the defence.\n"}}
+{"turn": 1, "event": {"type": "token", "content": "\n4.  **Statement of "}}
+{"turn": 1, "event": {"type": "token", "content": "the Accused**\n    * "}}
+{"turn": 1, "event": {"type": "token", "content": "  After the prosecut"}}
+{"turn": 1, "event": {"type": "token", "content": "ion evidence, the ac"}}
+{"turn": 1, "event": {"type": "token", "content": "cused is given an op"}}
+{"turn": 1, "event": {"type": "token", "content": "portunity to explain"}}
+{"turn": 1, "event": {"type": "token", "content": " the circumstances a"}}
+{"turn": 1, "event": {"type": "token", "content": "ppearing against the"}}
+{"turn": 1, "event": {"type": "token", "content": "m in the evidence, t"}}
+{"turn": 1, "event": {"type": "token", "content": "ypically under Secti"}}
+{"turn": 1, "event": {"type": "token", "content": "on 313 of the CrPC.\n"}}
+{"turn": 1, "event": {"type": "token", "content": "\n5.  **Defence Evide"}}
+{"turn": 1, "event": {"type": "token", "content": "nce**\n    *   The ac"}}
+{"turn": 1, "event": {"type": "token", "content": "cused then has the r"}}
+{"turn": 1, "event": {"type": "token", "content": "ight to present thei"}}
+{"turn": 1, "event": {"type": "token", "content": "r defence, including"}}
+{"turn": 1, "event": {"type": "token", "content": " producing witnesses"}}
+{"turn": 1, "event": {"type": "token", "content": " and evidence.\n\n6.  "}}
+{"turn": 1, "event": {"type": "token", "content": "**Final Arguments**\n"}}
+{"turn": 1, "event": {"type": "token", "content": "    *   Both the pro"}}
+{"turn": 1, "event": {"type": "token", "content": "secution and the def"}}
+{"turn": 1, "event": {"type": "token", "content": "ence present their f"}}
+{"turn": 1, "event": {"type": "token", "content": "inal arguments summa"}}
+{"turn": 1, "event": {"type": "token", "content": "rizing their case an"}}
+{"turn": 1, "event": {"type": "token", "content": "d legal positions.\n\n"}}
+{"turn": 1, "event": {"type": "token", "content": "7.  **Judgment**\n   "}}
+{"turn": 1, "event": {"type": "token", "content": " *   The court deliv"}}
+{"turn": 1, "event": {"type": "token", "content": "ers its final verdic"}}
+{"turn": 1, "event": {"type": "token", "content": "t, determining wheth"}}
+{"turn": 1, "event": {"type": "token", "content": "er the accused is gu"}}
+{"turn": 1, "event": {"type": "token", "content": "ilty or innocent.\n  "}}
+{"turn": 1, "event": {"type": "token", "content": "  *   If convicted, "}}
+{"turn": 1, "event": {"type": "token", "content": "the judgment specifi"}}
+{"turn": 1, "event": {"type": "token", "content": "es the offence, the "}}
+{"turn": 1, "event": {"type": "token", "content": "relevant section of "}}
+{"turn": 1, "event": {"type": "token", "content": "the law, and the pun"}}
+{"turn": 1, "event": {"type": "token", "content": "ishment imposed.\n   "}}
+{"turn": 1, "event": {"type": "token", "content": " *   If acquitted, t"}}
+{"turn": 1, "event": {"type": "token", "content": "he judgment directs "}}
+{"turn": 1, "event": {"type": "token", "content": "that the accused be "}}
+{"turn": 1, "event": {"type": "token", "content": "set at liberty.\n    "}}
+{"turn": 1, "event": {"type": "token", "content": "*   Judgments must b"}}
+{"turn": 1, "event": {"type": "token", "content": "e delivered in open "}}
+{"turn": 1, "event": {"type": "token", "content": "court and must conta"}}
+{"turn": 1, "event": {"type": "token", "content": "in the points for de"}}
+{"turn": 1, "event": {"type": "token", "content": "termination and reas"}}
+{"turn": 1, "event": {"type": "token", "content": "ons for the decision"}}
+{"turn": 1, "event": {"type": "token", "content": ", as per Sections 35"}}
+{"turn": 1, "event": {"type": "token", "content": "3 and 354 of the CrP"}}
+{"turn": 1, "event": {"type": "token", "content": "C.\n\n### III. Post-Tr"}}
+{"turn": 1, "event": {"type": "token", "content": "ial Stage\n\n1.  **Sen"}}
+{"turn": 1, "event": {"type": "token", "content": "tencing**\n    *   If"}}
+{"turn": 1, "event": {"type": "token", "content": " the accused is conv"}}
+{"turn": 1, "event": {"type": "token", "content": "icted, the court pro"}}
+{"turn": 1, "event": {"type": "token", "content": "ceeds to hear argume"}}
+{"turn": 1, "event": {"type": "token", "content": "nts on the sentence "}}
+{"turn": 1, "event": {"type": "token", "content": "before pronouncing i"}}
+{"turn": 1, "event": {"type": "token", "content": "t.\n    *   The sente"}}
+{"turn": 1, "event": {"type": "token", "content": "nce may include impr"}}
+{"turn": 1, "event": {"type": "token", "content": "isonment, a fine, or"}}
+{"turn": 1, "event": {"type": "token", "content": " both.\n\n2.  **Appeal"}}
+{"turn": 1, "event": {"type": "token", "content": " and Revision**\n    "}}
+{"turn": 1, "event": {"type": "token", "content": "*   A convicted pers"}}
+{"turn": 1, "event": {"type": "token", "content": "on has a legal right"}}
+{"turn": 1, "event": {"type": "token", "content": " to challenge a lowe"}}
+{"turn": 1, "event": {"type": "token", "content": "r court's judgment b"}}
+{"turn": 1, "event": {"type": "token", "content": "efore a higher judic"}}
+{"turn": 1, "event": {"type": "token", "content": "ial authority throug"}}
+{"turn": 1, "event": {"type": "token", "content": "h an appeal.\n    *  "}}
+{"turn": 1, "event": {"type": "token", "content": " Appeals are governe"}}
+{"turn": 1, "event": {"type": "token", "content": "d by the BNSS (forme"}}
+{"turn": 1, "event": {"type": "token", "content": "rly CrPC) and other "}}
+{"turn": 1, "event": {"type": "token", "content": "relevant laws.\n    *"}}
+{"turn": 1, "event": {"type": "token", "content": "   The High Court ha"}}
+{"turn": 1, "event": {"type": "token", "content": "s appellate jurisdic"}}
+{"turn": 1, "event": {"type": "token", "content": "tion over lower cour"}}
+{"turn": 1, "event": {"type": "token", "content": "t verdicts and can r"}}
+{"turn": 1, "event": {"type": "token", "content": "eview, modify, or ov"}}
+{"turn": 1, "event": {"type": "token", "content": "erturn a judgment.\n "}}
+{"turn": 1, "event": {"type": "token", "content": "   *   Appeals can b"}}
+{"turn": 1, "event": {"type": "token", "content": "e filed by the accus"}}
+{"turn": 1, "event": {"type": "token", "content": "ed against convictio"}}
+{"turn": 1, "event": {"type": "token", "content": "n, or by the state a"}}
+{"turn": 1, "event": {"type": "token", "content": "gainst acquittal or "}}
+{"turn": 1, "event": {"type": "token", "content": "an inadequate senten"}}
+{"turn": 1, "event": {"type": "token", "content": "ce.\n    *   There ar"}}
+{"turn": 1, "event": {"type": "token", "content": "e prescribed time li"}}
+{"turn": 1, "event": {"type": "token", "content": "mits for filing appe"}}
+{"turn": 1, "event": {"type": "token", "content": "als (e.g., 30 to 90 "}}
+{"turn": 1, "event": {"type": "token", "content": "days, depending on t"}}
+{"turn": 1, "event": {"type": "token", "content": "he court and type of"}}
+{"turn": 1, "event": {"type": "token", "content": " appeal).\n    *   Ap"}}
+{"turn": 1, "event": {"type": "token", "content": "peals can also be ma"}}
+{"turn": 1, "event": {"type": "token", "content": "de to the Supreme Co"}}
+{"turn": 1, "event": {"type": "token", "content": "urt from judgments o"}}
+{"turn": 1, "event": {"type": "token", "content": "f a High Court in cr"}}
+{"turn": 1, "event": {"type": "token", "content": "iminal proceedings u"}}
+{"turn": 1, "event": {"type": "token", "content": "nder Article 134 of "}}
+{"turn": 1, "event": {"type": "token", "content": "the Constitution of "}}
+{"turn": 1, "event": {"type": "token", "content": "India.\n    *   Revis"}}
+{"turn": 1, "event": {"type": "token", "content": "ion is another remed"}}
+{"turn": 1, "event": {"type": "token", "content": "y available when an "}}
+{"turn": 1, "event": {"type": "token", "content": "appeal is not provid"}}
+{"turn": 1, "event": {"type": "token", "content": "ed by law."}}
+{"turn": 1, "event": {"type": "progress", "agent": "legal_concepts", "message": "Generating explanation...", "ts": 1784749294.3662643, "step": "generate"}}
+{"turn": 1, "event": {"type": "status", "agent": "legal_concepts", "message": "Explaining legal concepts..."}}
+{"turn": 1, "event": {"type": "progress", "agent": "orchestrator", "message": "Merging results from 1 agents...", "ts": 1784749294.4745224, "found": 1, "step": "synthesize"}}
+{"turn": 1, "event": {"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}}
+{"turn": 1, "event": {"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1784749294.4771025, "step": "finalize"}}
+{"turn": 1, "event": {"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}}
+{"turn": 1, "event": {"type": "response", "content": "Dealing with a criminal case in India involves navigating a structured legal process primarily governed by the Code of Criminal Procedure, 1973 (CrPC), and the Bharatiya Nagarik Suraksha Sanhita, 2023 (BNSS), which is replacing the CrPC. The Indian Penal Code, 1860 (IPC), defines substantive criminal offenses.\n\nThe process can be broadly divided into several stages:\n\n### I. Pre-Trial Stage\n\n1.  **First Information Report (FIR)**\n    -   An FIR is a written document prepared by the police upon receiving information about the commission of a cognizable offence.\n    -   A cognizable offence is a serious crime where the police can arrest without a warrant and initiate an investigation without a Magistrate's permission (e.g., murder, robbery, kidnapping).\n    -   Any person with knowledge of the incident, including the victim or a witness, can file an FIR at the police station having jurisdiction over the area where the offence occurred.\n    -   The information can be given orally or in writing. If given orally, the police officer must write it down, read it to the informant, and obtain their signature.\n    -   The complainant has a right to receive a free copy of the FIR.\n    -   If the police refuse to register an FIR, the aggrieved person can approach the Superintendent of Police under Section 154(3) of the CrPC or the Judicial Magistrate under Section 156(3) of the CrPC to direct the police to register an FIR.\n    -   For non-cognizable offences, the police must record the complaint in a separate register and refer the informant to the Magistrate, as they cannot investigate without a Magistrate's order.\n\n2.  **Investigation**\n    -   Investigation is the process carried out by a police officer to collect evidence, identify the offender, and present them before the court for trial.\n    -   It begins after the FIR is registered in cognizable cases.\n    -   Key steps include:\n        -   Visiting the crime scene and collecting physical evidence.\n        -   Examining witnesses and recording their statements under Section 161 of the CrPC.\n        -   Searching and seizing relevant documents or objects.\n        -   Arresting suspects if there is sufficient evidence.\n        -   Conducting forensic examinations.\n        -   Interrogating the accused to elicit information, though force or coercion is prohibited.\n    -   The police must send a preliminary report to the Magistrate under Section 157 of the CrPC to inform them that an investigation has commenced.\n    -   Upon completion of the investigation, the police file a charge sheet (also known as a police report or challan) under Section 173 of the CrPC if sufficient evidence is found. If no evidence is found, a closure report is submitted.\n\n3.  **Arrest**\n    -   Arrest involves taking a person into custody because they are accused of committing a crime.\n    -   Section 46 of the CrPC outlines the procedure for arrest, requiring physical touch or restraint unless the person submits to custody.\n    -   An arrest can be made with or without a warrant, depending on the circumstances and the nature of the offence.\n    -   Rights of an arrested person include:\n        -   Being informed of the grounds for arrest.\n        -   The right to notify a family member.\n        -   Being produced before a Magistrate within 24 hours of arrest, excluding travel time, as mandated by Section 57 of the CrPC.\n\n4.  **Bail**\n    -   Bail is the temporary release of an accused person awaiting trial, often on the condition of lodging a sum of money or providing sureties to guarantee their appearance in court.\n    -   The primary legislation governing bail is the Code of Criminal Procedure, 1973.\n    -   Types of bail:\n        -   **Regular Bail:** Granted after arrest for a cognizable offence under Sections 437 and 439 of the CrPC.\n        -   **Anticipatory Bail:** Granted under Section 438 of the CrPC (now Section 482 of the BNSS) to a person who apprehends arrest for a non-bailable offence.\n        -   **Interim Bail:** Temporary bail granted before the final decision on regular or anticipatory bail.\n        -   **Default Bail (Statutory Bail):** A right available under Section 167(2) of the CrPC if the investigation is not completed within a prescribed time limit (e.g., 60 or 90 days, depending on the offence).\n    -   In bailable offences, the accused has a statutory right to bail under Section 436 of the CrPC. For non-bailable offences, granting bail is at the court's discretion.\n    -   The principle \"bail is the rule, jail is the exception\" has gained judicial recognition.\n\n### II. Trial Stage\n\n1.  **Cognizance by Magistrate and Committal**\n    -   After the charge sheet is filed, the Magistrate takes \"cognizance\" of the offence, meaning they officially take notice of the alleged crime.\n    -   If the offence is exclusively triable by a Court of Session, the Magistrate commits the case to the Sessions Court.\n\n2.  **Framing of Charges**\n    -   This is a crucial stage where the court formally accuses the individual of a specific offence based on the evidence presented by the prosecution.\n    -   The judge frames the charge after examining the police report and other documents and hearing arguments.\n    -   The charges are read and explained to the accused, who is then asked whether they plead guilty or claim to be tried.\n    -   The purpose is to provide clear, unambiguous notice to the accused to enable them to prepare their defence.\n    -   Under the BNSS, a 60-day timeline has been introduced for framing charges from the date of the first hearing.\n\n3.  **Prosecution Evidence**\n    -   If the accused pleads not guilty, the trial commences.\n    -   The prosecution presents its evidence to prove the guilt of the accused.\n    -   This involves examining prosecution witnesses (examination-in-chief) and their cross-examination by the defence.\n\n4.  **Statement of the Accused**\n    -   After the prosecution evidence, the accused is given an opportunity to explain the circumstances appearing against them in the evidence, typically under Section 313 of the CrPC.\n\n5.  **Defence Evidence**\n    -   The accused then has the right to present their defence, including producing witnesses and evidence.\n\n6.  **Final Arguments**\n    -   Both the prosecution and the defence present their final arguments summarizing their case and legal positions.\n\n7.  **Judgment**\n    -   The court delivers its final verdict, determining whether the accused is guilty or innocent.\n    -   If convicted, the judgment specifies the offence, the relevant section of the law, and the punishment imposed.\n    -   If acquitted, the judgment directs that the accused be set at liberty.\n    -   Judgments must be delivered in open court and must contain the points for determination and reasons for the decision, as per Sections 353 and 354 of the CrPC.\n\n### III. Post-Trial Stage\n\n1.  **Sentencing**\n    -   If the accused is convicted, the court proceeds to hear arguments on the sentence before pronouncing it.\n    -   The sentence may include imprisonment, a fine, or both.\n\n2.  **Appeal and Revision**\n    -   A convicted person has a legal right to challenge a lower court's judgment before a higher judicial authority through an appeal.\n    -   Appeals are governed by the BNSS (formerly CrPC) and other relevant laws.\n    -   The High Court has appellate jurisdiction over lower court verdicts and can review, modify, or overturn a judgment.\n    -   Appeals can be filed by the accused against conviction, or by the state against acquittal or an inadequate sentence.\n    -   There are prescribed time limits for filing appeals (e.g., 30 to 90 days, depending on the court and type of appeal).\n    -   Appeals can also be made to the Supreme Court from judgments of a High Court in criminal proceedings under Article 134 of the Constitution of India.\n    -   Revision is another remedy available when an appeal is not provided by law.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."}}
+{"turn": 1, "event": {"type": "sources", "data": [{"source_type": "legal_concepts", "title": "sheokandlegal.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHIyhrn16vQn8m5mivmmAqqchxJgZw8_sIlWIXibp0rTMZ9K1pm9tQw5wVzGRpsqkF2p0e2Fybh5yXCgzUjgu-5yZGrJeiXW5jaaknkkwOjlxRc5AO_q4ju6CsLQ9fp0USWFumtOqmpbC-ZVVwyL9g89pCa_yibqqtYP7Og", "web_title": "sheokandlegal.com"}, {"source_type": "legal_concepts", "title": "alec.co.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEe3ZQQ71k0TQ6m08p3Jx3A_yeuUjq929bjEfXpCrmFO9aGUH8vB9SqXyShnVgm0BScoRnSl2wj1TuNB-9GB0_QpQ2FlvHLy3XkwTNMCRl-b_JcW9O51-x3ggUlhCNwajmFH8v6sCPcuwu8dUq9qTn6o8lVxaCvvvGAuWlG-Iev_AzXsSHksz_X1NQQi9MLIyABAG4FvIBEukbOmlGEqw==", "web_title": "alec.co.in"}, {"source_type": "legal_concepts", "title": "wikipedia.org", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEBAM5NOV4vxwluJRi1Oe1EdmqgUeK8Lz8tYHqcLXi9MP0G4VBR6NP0CsgE2BAOLInPa-RbCDZUshTGD9gybJYAchvhSYYEx0sKvTVChBKMt0RHRS1PztlZ4xuNVoFtyhfTt3M_vMbEhHUBDTWMYWk1arPTN2jOp8tDZg==", "web_title": "wikipedia.org"}, {"source_type": "legal_concepts", "title": "lexspeak.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQELMql2Dtu11JaxX_r3Ep9mu28TsXcw0ZYGoCLx4Q_Casu11-DiK8-05FhsFV2sbC6t21XgFmDnoRTspjzAZf11ygc1XU86ZaV362pFMU-L86eDLw4CU4KVC1TV5GLrH01GEtKI_3uOFxR2Ec1809zhJEgG1auNRQCn22gbtAbjVTaQiGT49Etb9NO671rW9m5WuA==", "web_title": "lexspeak.in"}, {"source_type": "legal_concepts", "title": "golegalconsultancy.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHUdbWQ_OAJIIWAGRgqcCwkC8MS2DCby5W_TtClbHiHSTvWPsnm-0tJBoOtU-eBgsFUoSlafuncYUITJeF4PEu3pqypg_40T4cOTXK9pSuBqfBwD5S5oUzxW9ue8Cok6lWEo9Ca0nWtCJvOzcFpbPOzVUuV4SZYAdVsn4CBtJkgoSo5yU6q9T9pyWhon1wSH5ECjQ==", "web_title": "golegalconsultancy.com"}, {"source_type": "legal_concepts", "title": "delhilawacademy.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFtE_TroEOuR2QF_j5rknAEArD0vm7fe7zYbjNN0MBYrDxL-6fXbvi5A79HdRu8NHgRzCghU8iOs3NEkpO95WFPb7-1ayHSeVC-ZJbE7fxr_aSPlY8YeVriVG5qjNo6xB0PHGlHWfyu7O4l2lI0", "web_title": "delhilawacademy.com"}, {"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGmHq3MlSUbYigy3Z3CQ22o9DnNRmb4AQqD46zhPnL8XF4QK7OVbduKz8bjS9ga1YxjcXdrA2AYKDe6UYdLzVaj86BTaOuC7Uwz9VVTxEW3y1Pmf-opDHwvADPd0slEpGCPokhI3q9VTJOtqubJBdhRWkByHuXicyQhLeVVVOObgyNpd5T8O1iU9u4I-fmCxBVS-wUa5JW3DOtCnA==", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "humanrightsinitiative.org", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHWr5Teunn4TrvFhSrjszXORdOvmHTyL8q4rpTEt49jUGzabhQ0kuIzc6QzxAAu2aGBGzU0sbr7dr0_qvS53YoAYBQ6rEj38EifBkrAtgiugVZxX4l1Q7pa_1vnrOGyFJP9q5wCV0hVFl3WDglhdeqTvmicJwDsRw3D1iXWU9paPuVXhMYgufndjPru9mJV2BrlPNA=", "web_title": "humanrightsinitiative.org"}, {"source_type": "legal_concepts", "title": "youtube.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFawHilbkAtSgiyZ-FKFEO8wL6wUyjSAyrVlYXAhGIqZ2KpfMZyeO78m_xqPxI06KrqgeoiTHwMsfLb5MS0Eu6abPpqV8OilplsKrqTrULAfeC-d9k81Yy9ut5fuTZwoY-PRT_PtQ==", "web_title": "youtube.com"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGZpoBE4WKHfQPOepZ1Ozj-29H4SGns3Bl-huoppYEI33CE7Ox13XmeDtgqrRNWlZm8IAWA5_4mcw54vNoc9YCA99RzlwUB5MGqvOJfBmqjoReswXa7q-P03ESWZ55rhhTmJPP56zcTLJT8jsU9shvCdFhFIUiFzuU916DmBUE7STU=", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "drishtijudiciary.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHtGqdKriTi2JCSoRogVUYXeW5OveOy1yweeSV8P7ceXYzisBSuAM03-51JcZtBsxIpAUKDDOs-2z4g47Cg9AybRbwSNPmjfwPqCa663LnDaHc3tI6AJnYgiEo-Dp8kbYGdjltDgqTtINeh9jKYXejAdgIExJQy60w5iKvEaGIrPiEMy_11XwXBukSbXOe-Urx7WQw8lXqDXTUW0vOuIw41iOp3V3caIpcXVDy-TxHOP5DWBulj4nRpkmecXvzSPrMdNLRcvf5IDCXKJe7-9g==", "web_title": "drishtijudiciary.com"}, {"source_type": "legal_concepts", "title": "vkeel.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQErrZYYpvID_al_o3PJHe_tIWWIVsFqk-sVQXb7I7pAnHbhaqOFLCIaCzale_XP0YvSVKPJBe2i0lEf3jObxiZrJekArssH8IYzJ1d9kIUfk6ZshH4iCfPVLRUf9YKSsHS3JcqJ_sRyP7t5rHAYwTVJtlayAqsUqZ6sILxjlHlx-iPq66yxokPoEn0ZgLpoItIaTMsc_ALKpHqTX2g=", "web_title": "vkeel.com"}, {"source_type": "legal_concepts", "title": "qlerk.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHPV8zMrB-wOEbNH0g9AuxfrSVV2YZT__aYqeSErMzdZCc-4zprI-7CZvdGf0Rd5QFp_P7qy9Y65t7lrTFZ6U3QXsMlfcMBmt1e1jMy2_LnVe8Fzs11MrIIpgfhqvvTa75crYOXvN3BHOSgMEjJnt2XPFNAsPDM-A==", "web_title": "qlerk.in"}, {"source_type": "legal_concepts", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEiZwbTub14IztpmDD3jvzCbZ5WZhZgt4PKuvc3mDzHpleGnoGesCS5CXjhxSqAg8_VwsrpyOApCHhE40eNOZ6WsLB5PnwfjHvbtGXpAP96LISweFGERT2Ke4JHMkeF1HuZ-K9BC2yIHTTR0Gt5VRcchVmtY87PDt_GwnNpDokue1duOX2hhmIGXfGn5UNqH0iVZnccIqoC", "web_title": "ipleaders.in"}, {"source_type": "legal_concepts", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFohlNZv8bgv1SkCzDHetsrOoSNTccecEgrVApcW2MEvyPKpaXSCLaddM5jgbhxuE2Lxi9VxEPIXXUQZdkYD--LSKMldtM2C5wTBZteEsWHLqtyT8k6QTls_3LjF_qvdkFSBRcL2lquJd-IkoWSoQonOExVL5AAoLrGWw==", "web_title": "ipleaders.in"}, {"source_type": "legal_concepts", "title": "iledu.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE7-vI5e9kpNxEgiVeCV1V95uTnTy_n_QfW2mH1cjOLiD8ImgmYYEYMJN9OlcPICsX4nPGe0ePQRGNz5lZzX1-rX4PXW9hC33k3rrAjG9riSG_Gm059KU8ZhtaW0LSlKiB5zg6xdcHFPVFa4cLcQywe4O9UIl99", "web_title": "iledu.in"}, {"source_type": "legal_concepts", "title": "claww.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGV5we6Jm_spUJNT1vGY0HFeQ_lB6VTwcP-TnW2eZAtgTvY6g04KuwHbzb5ZLuESLAvF2C2hIL20Kemr3JzXeypK87fdHg4HKXidxpLWxJ6tye0mDIO7KeutnsulGSu-qdCjtBwDBjB6jTj7NTQmA3N1sIYWIY=", "web_title": "claww.in"}, {"source_type": "legal_concepts", "title": "defactojudiciary.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGb6bMzRXvmy-HTuu2UCKzSSqmtu9rYNUDQtK1JMxPCv5C3ul5NDqg8cPU1Vr1KQJvZCpbk-BJPqUzHdJhCDRtKeDVd00Z97imnLYmeoN93gZtmKTgwd2CdtNdzgdKmJj1J2RGJ6U5qxZLNfpnH5gm0kDk4-vjBOjm3", "web_title": "defactojudiciary.in"}, {"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH9QqJzCvxyaoVw43T0HovX6eimz6iy_VZuC787KksUN8KBPv1z4drHxMugb0bZ6rJP5Pq57yLMVHcDTrrSJ_GRnBLMcJNBAydypM6F7SV_ZAnaJoMbcOC__o_yCbTbnNyif4oSqcBuxdPBNOcPUj9OnaeAIS4VjzkUz2gDB8_EwEV0EaWgRpp3WGjx5FWqz5gvZWI3waRZGF6W1Sk8rnQ=", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "qualegalindia.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHAr5cxW38bOJZpx5eM0pp1rv65JOQDPWf9MKM_iaJoegq8myzeUYH0DudbQMHngQubQ_mJwzIumENi1h43RDIk3Zw8lYXakugQrRMdTsYGlx60knFgTvenIE3B71Ozt_4Dr-UL4N6IucW9BwU2UGkZMok=", "web_title": "qualegalindia.com"}, {"source_type": "legal_concepts", "title": "claww.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE5EKi4LnRW3N4Sm6kOMDLTY0Q9TWhrPzkb2utgrRZuiTHClM9BW5K2laibtie-EkbGmFHUSoC3_Rxo3lZrHq1mrPOsfClJjxbF4Zf8tFk21WwDEv9m3uc0dB9RZXKWVkF7Na3AeQOF0g==", "web_title": "claww.in"}, {"source_type": "legal_concepts", "title": "sterlingpartners.law", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHy03xFXW2hlioRVSPHSr_T-K1V6wdzKxBgF7_snIStzk0Ap-kGUcrXt0jPFGKS1sK_6sfxzFCZcGJI3N-a967nWgYZrlQH5zOjVybx3si64a5oVLGM02vut_M7YTztxG7_ZEYGyJtvi2ppQ3A0GhI=", "web_title": "sterlingpartners.law"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF_hbopfBi2BBnXxF9KB3rGmXdS9E-ci5maGV2xTq22C5U3s-gLI8WK4Uuw0sjR2v3AzjA3EMVi1WsAFq13DwbHk3H3_PgnfDQZvwNq7VsGJwRJrn2EyyjBBsabqnWCaX0hGQSwkuln15L5c_xWHIiOqw==", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "drishtijudiciary.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGlpEcxe34Sjwsb5eL95zRzY8C8-0Y7wdKxjW1xE3gEjgmH0tV3K_2OjUQEauxYXyvlnaSDOnn8yZW5HM5mrEus4mV0rTegMu9YRru5oHf9Me498FwrrvSM4-_Og8JMONwaATy3g4zLz_devFT7O6qumOqOIZRvdQ1qYtciOgYey_iVRtDaVMWJuxf243fOZA==", "web_title": "drishtijudiciary.com"}, {"source_type": "legal_concepts", "title": "vidhikarya.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGNNmGjRzQgqqLLLb3bCfGvMziFwzq2xKlpqvdpyhf4BCyOFhF7XoHTAq6Uf8cms-KbEYC5BNx28Fg1wfHyRRypc1WcnMBewuAh32wDKlVJIWeIHxb8wXV_XdRyTtfzvnCI61lHBVRK7ZS8awoLunaBRzGzaj6n7fktEFFUmLNRWjqGhHtdHDT-f8AXpW6CMaXVKkKA4BQyl0UqWepBRi8lQCetR2pQcA==", "web_title": "vidhikarya.com"}, {"source_type": "legal_concepts", "title": "toprankers.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGgzjcPacOhPtNC3pC3GgeaJMIwlVclSzYjv8PJkOpLPo5tKHFuNpj4lYNXTYOSh5To2O4fr9bHOojRN6Xua6ZPbzzHzYVT2MuknCk1beA67tVVgo4vAKcmHCkbFSir9mhTuCqceaFJIW8gV3JqHiGgQ1-nPus3620sFa-imw==", "web_title": "toprankers.com"}, {"source_type": "legal_concepts", "title": "ilms.academy", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGvARiB4qlIHv2XdYaLlREpsBt92g8X8pz6dk2SBNWs6q4MCTL-fK0Kb5P2CtjHrkJJPcWHcajdyIc08U8Va6KG8xuG3So8mCKsJ9dhRq_LBRLjc9ZfAGe6tNY8Iqv0Z-BZwm5sh0CsryiZYZPkiqCiub6L3mhfY3ipk1l5P2CU7UUP92gJUWY0vpJXS6MfUCAYAyerxg==", "web_title": "ilms.academy"}, {"source_type": "legal_concepts", "title": "lawbhoomi.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFPdbF6CyFQpiXlsPzG5YnFPnPBCnl0KbG5Ctmkxmo8Cd6U9SFWvcOQN5LpA6jr7hKdsLboYwOMvXA_baxIhzahutkLQ_8OQrJxqcLmSQXoMwLN4D3EYC5K3ZrOD-WUE56M8P1mjHzk4iFufTtow==", "web_title": "lawbhoomi.com"}, {"source_type": "legal_concepts", "title": "kamalandcoadvocates.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGjS2paITgBqCOkF9QZ2qCDiuyDKdHw8zIXFl6OV56AdUnqgj94gNNHOSuuyj_kunwQo1pA_Qw-mBGfcJgzTEgap-skXLvHy1VspKeWRBWd5a8cqcO396kjNIS5rQcjnSaUjXy3-xGc-DDiWLyDTkc9DN-s8JJmC_mUS3go0WEZR3jwTA==", "web_title": "kamalandcoadvocates.com"}, {"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE0XZv8LG1N8CDnmbAdZ3WSWmvaP8_J84nkOtL9lNIAgUiYQ3J3l2NiqWPJrrauoBwmMc1rpISDGD2sp-r5Wq4bBtfM2g288G7BKtNGlKOd_GAFC24PVEsWOPZ8lFcOhkFC8LJH-SnB-hLDBPjLND5wVQvX_h2QlXZ1ruma7yju-nhm19yMJ04lbyW7DR3ogolmadnqSpwWXqg=", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFJ4pcpF3MYx-UPYOp9R6_MvXuFTq5M2knXAvS9XKXojjJjxY_yMqb8mfM0QnKT-Hjve7s5A0pHicBDT5dP6DVxhKyTAIwML1O_VBjD8ZEEySsg3TsXZpC1_DlGbUqiZmmz1xhK8L_XoyCFcqFxONKm2AyLAmfpFOQ_jS149g2iUFaBhC70h4pCW8A=", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFffjAwBrWEdrvcYOe06ajsBztsN48CHnkMTohbUaYpkDWdW_R88TQuMs1oXOBZgVv_eOF9CXOi9hYln1cuBgNYqNSpnfwHWgZWRyE5TBTX3RpAcKXnedlVZ0lBzLpQr26XdLGdDXQ_HyjdKBRX3ehVJ8SS_90pIBbii0ilMYYVK5hsb0Tqjmo6eGYvZgp9TCRk7BZ9H472XfjoiNhqe7fqJ9zpFZLe-fU=", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHt7WFqJm-6HHFF0JWJh5XVgMVVSfmOMusIXmMAZVyrZm0-_jtJ02a88ssTOUK6iUj2zdH3ikvMEs6z-3BongV7aorqkq4QSp9atO6MxG6GmnRq8BCx5zLtX32y0qMd3Li5JKUcWfQ7kTw9Xzy5DLyKBA45M9baDKQE5o2bP5743raiq40Q8O5jUVRGbK_uz_Mh", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "legalassist.co.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEhRdSDi6ENV3rr4QrVMpOlwj1oG-6IwYkCPa_VJWa0htQgek5S5DZ54QBUmlMTXJxhRfy4ptopaJUAVbmC829CxOK8tuCwIb0qGZy7y8-lIRW3-AJ3sIAwGBMulMiPAZIrb6Pcr_UAYZOGv0-sksZbF_jHeQTagg1Xv1BIxmAhN6xeIX-YygSCZHCcJv_RanAd8FLjzTw28BEP2V7QtZwrtot6Sw==", "web_title": "legalassist.co.in"}, {"source_type": "legal_concepts", "title": "quora.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEo-XewHdnRQcP-atT2Jv6vDpQPH4WFnIwzyIDZPBMTZ4si2K-iSkrRfrdxJPSf2R0zazV5Cu6LGYEOP_wWBBTxtM1pMGYvUza_wCtRzGyCuRqXRo-7G7un5EHTtCYQL1WcMmke3vXJI61LoOOjgqdm6ebO9jgDx84_0bLzV1A3keGFs0m2l8VpXAVLjUamOhpghji-If1Jncbbade3-1uUwfHGotSB45XYyL7kfktEDQ==", "web_title": "quora.com"}, {"source_type": "legal_concepts", "title": "constitutionofindia.net", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFUQF_J1QeA0X1Q-Q7LFzI8OcD4LsDp7nYBlyIM-AaFvQc9cR_g0zewMRhglDRxtoDR0mJKhm4tjuOtfsnY1qh811IqepKboB54qMSZnsCR7I9eAPNwnCGubbPK8thyPErgvGje6DJjr-SLVo2OpIXKxFeHtZta0lbMw1DIcRsCvQNGZwOWc47UIlHnKYDOxtNy6USPRSamAmJuVQdp3SEymBHF-GURpQ3B9wQFzEV9ozEP2sKl0hr34g==", "web_title": "constitutionofindia.net"}]}}
+{"turn": 1, "event": {"type": "followup_suggestions", "data": ["What are my rights if arrested?", "How can I get legal representation?", "What happens after an FIR is filed?"]}}
+{"turn": 1, "event": {"type": "done", "agents_used": ["Legal_Concepts"], "token_usage": {"input_tokens": 6871, "output_tokens": 316, "total_tokens": 7187, "cache_read_tokens": 0, "cache_creation_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.000813, "by_agent": {"Orchestrator": {"input": 6871, "output": 316, "total": 7187, "cache_read": 0, "calls": 2, "cost_usd": 0.000813}}, "calls": [{"agent": "Orchestrator", "step": "classify_and_plan", "input": 1371, "output": 55, "total": 1426, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000159}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5500, "output": 261, "total": 5761, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000654}]}, "thread_id": "f794cb1f-60a8-438f-8cb4-80225b5e238e", "conversation_turn": 1, "query_rewritten": false, "effective_query": null}}
+{"turn": 2, "event": {"type": "thread_id", "data": "f794cb1f-60a8-438f-8cb4-80225b5e238e"}}
+{"turn": 2, "event": {"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1784749297.0127418, "step": "validate"}}
+{"turn": 2, "event": {"type": "status", "agent": "guardrail_input", "message": "Validating query..."}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1784749297.017636, "step": "language"}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1784749297.0202425, "step": "language", "substep": true}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1784749297.0205424, "step": "history"}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Found 1 previous turns", "ts": 1784749297.0260828, "found": 1, "step": "history", "substep": true}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Rewriting follow-up query...", "ts": 1784749297.030595, "step": "rewrite"}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Expanded: When should an individual hire a lawyer in the context of de", "ts": 1784749298.0336459, "detail": "When should an individual hire a lawyer in the context of dealing with a crimina", "step": "rewrite", "substep": true}}
+{"turn": 2, "event": {"type": "status", "agent": "memory", "message": "Loading context..."}}
+{"turn": 2, "event": {"type": "context", "query_rewritten": true, "effective_query": "When should an individual hire a lawyer in the context of dealing with a criminal case in India, considering the stages of the pre-trial process including the filing of a First Information Report (FIR) and the rights of a complainant?", "history_turns": 1, "has_summary": false}}
+{"turn": 2, "event": {"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1784749298.0387642, "step": "classify"}}
+{"turn": 2, "event": {"type": "progress", "agent": "orchestrator", "message": "Identified: Legal_Concepts", "ts": 1784749299.9922628, "detail": "Legal_Concepts", "step": "classify", "substep": true}}
+{"turn": 2, "event": {"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}}
+{"turn": 2, "event": {"type": "agents_planned", "agents": ["Legal_Concepts"]}}
+{"turn": 2, "event": {"type": "progress", "agent": "legal_concepts", "message": "Researching legal concept...", "ts": 1784749299.9987187, "step": "research"}}
+{"turn": 2, "event": {"type": "token", "content": "An individual should"}}
+{"turn": 2, "event": {"type": "token", "content": " consider hiring a l"}}
+{"turn": 2, "event": {"type": "token", "content": "awyer at the earlies"}}
+{"turn": 2, "event": {"type": "token", "content": "t possible stage in "}}
+{"turn": 2, "event": {"type": "token", "content": "a criminal case in I"}}
+{"turn": 2, "event": {"type": "token", "content": "ndia, ideally even b"}}
+{"turn": 2, "event": {"type": "token", "content": "efore or immediately"}}
+{"turn": 2, "event": {"type": "token", "content": " after the filing of"}}
+{"turn": 2, "event": {"type": "token", "content": " a First Information"}}
+{"turn": 2, "event": {"type": "token", "content": " Report (FIR). Early"}}
+{"turn": 2, "event": {"type": "token", "content": " legal intervention "}}
+{"turn": 2, "event": {"type": "token", "content": "can significantly in"}}
+{"turn": 2, "event": {"type": "token", "content": "fluence the initial "}}
+{"turn": 2, "event": {"type": "token", "content": "police investigation"}}
+{"turn": 2, "event": {"type": "token", "content": " and help protect on"}}
+{"turn": 2, "event": {"type": "token", "content": "e's rights.\n\n### Sta"}}
+{"turn": 2, "event": {"type": "token", "content": "ges of the Pre-Trial"}}
+{"turn": 2, "event": {"type": "token", "content": " Process and Legal R"}}
+{"turn": 2, "event": {"type": "token", "content": "epresentation\n\nThe p"}}
+{"turn": 2, "event": {"type": "token", "content": "re-trial process in "}}
+{"turn": 2, "event": {"type": "token", "content": "India involves sever"}}
+{"turn": 2, "event": {"type": "token", "content": "al critical stages w"}}
+{"turn": 2, "event": {"type": "token", "content": "here legal counsel i"}}
+{"turn": 2, "event": {"type": "token", "content": "s invaluable:\n\n*   *"}}
+{"turn": 2, "event": {"type": "token", "content": "*Filing of a First I"}}
+{"turn": 2, "event": {"type": "token", "content": "nformation Report (F"}}
+{"turn": 2, "event": {"type": "token", "content": "IR):**\n    *   An FI"}}
+{"turn": 2, "event": {"type": "token", "content": "R is the initial doc"}}
+{"turn": 2, "event": {"type": "token", "content": "ument that sets the "}}
+{"turn": 2, "event": {"type": "token", "content": "criminal law in moti"}}
+{"turn": 2, "event": {"type": "token", "content": "on for a cognizable "}}
+{"turn": 2, "event": {"type": "token", "content": "offence, allowing th"}}
+{"turn": 2, "event": {"type": "token", "content": "e police to investig"}}
+{"turn": 2, "event": {"type": "token", "content": "ate and arrest witho"}}
+{"turn": 2, "event": {"type": "token", "content": "ut a warrant.\n    * "}}
+{"turn": 2, "event": {"type": "token", "content": "  If an FIR is being"}}
+{"turn": 2, "event": {"type": "token", "content": " filed against an in"}}
+{"turn": 2, "event": {"type": "token", "content": "dividual, immediate "}}
+{"turn": 2, "event": {"type": "token", "content": "legal advice is cruc"}}
+{"turn": 2, "event": {"type": "token", "content": "ial to understand th"}}
+{"turn": 2, "event": {"type": "token", "content": "e charges, protect r"}}
+{"turn": 2, "event": {"type": "token", "content": "ights, prevent self-"}}
+{"turn": 2, "event": {"type": "token", "content": "incrimination, and a"}}
+{"turn": 2, "event": {"type": "token", "content": "ssist with immediate"}}
+{"turn": 2, "event": {"type": "token", "content": " bail applications.\n"}}
+{"turn": 2, "event": {"type": "token", "content": "    *   A lawyer can"}}
+{"turn": 2, "event": {"type": "token", "content": " review and analyze "}}
+{"turn": 2, "event": {"type": "token", "content": "the FIR and advise o"}}
+{"turn": 2, "event": {"type": "token", "content": "n statements and evi"}}
+{"turn": 2, "event": {"type": "token", "content": "dence submission.\n  "}}
+{"turn": 2, "event": {"type": "token", "content": "  *   If an individu"}}
+{"turn": 2, "event": {"type": "token", "content": "al is filing an FIR,"}}
+{"turn": 2, "event": {"type": "token", "content": " a lawyer can ensure"}}
+{"turn": 2, "event": {"type": "token", "content": " it accurately portr"}}
+{"turn": 2, "event": {"type": "token", "content": "ays the details of t"}}
+{"turn": 2, "event": {"type": "token", "content": "he incident and can "}}
+{"turn": 2, "event": {"type": "token", "content": "guide through the pr"}}
+{"turn": 2, "event": {"type": "token", "content": "ocess, especially if"}}
+{"turn": 2, "event": {"type": "token", "content": " the police initiall"}}
+{"turn": 2, "event": {"type": "token", "content": "y refuse to register"}}
+{"turn": 2, "event": {"type": "token", "content": " it.\n*   **Police In"}}
+{"turn": 2, "event": {"type": "token", "content": "vestigation:**\n    *"}}
+{"turn": 2, "event": {"type": "token", "content": "   After the FIR, th"}}
+{"turn": 2, "event": {"type": "token", "content": "e police conduct an "}}
+{"turn": 2, "event": {"type": "token", "content": "investigation, which"}}
+{"turn": 2, "event": {"type": "token", "content": " includes recording "}}
+{"turn": 2, "event": {"type": "token", "content": "witness statements, "}}
+{"turn": 2, "event": {"type": "token", "content": "collecting evidence,"}}
+{"turn": 2, "event": {"type": "token", "content": " and potentially arr"}}
+{"turn": 2, "event": {"type": "token", "content": "esting the accused.\n"}}
+{"turn": 2, "event": {"type": "token", "content": "    *   During this "}}
+{"turn": 2, "event": {"type": "token", "content": "stage, the accused h"}}
+{"turn": 2, "event": {"type": "token", "content": "as the right to lega"}}
+{"turn": 2, "event": {"type": "token", "content": "l representation and"}}
+{"turn": 2, "event": {"type": "token", "content": " protection against "}}
+{"turn": 2, "event": {"type": "token", "content": "unlawful arrest.\n   "}}
+{"turn": 2, "event": {"type": "token", "content": " *   A lawyer can ac"}}
+{"turn": 2, "event": {"type": "token", "content": "company the individu"}}
+{"turn": 2, "event": {"type": "token", "content": "al during questionin"}}
+{"turn": 2, "event": {"type": "token", "content": "g by the police, adv"}}
+{"turn": 2, "event": {"type": "token", "content": "ise on rights, and e"}}
+{"turn": 2, "event": {"type": "token", "content": "nsure compliance wit"}}
+{"turn": 2, "event": {"type": "token", "content": "h legal procedures.\n"}}
+{"turn": 2, "event": {"type": "token", "content": "*   **Arrest and Cus"}}
+{"turn": 2, "event": {"type": "token", "content": "tody:**\n    *   If a"}}
+{"turn": 2, "event": {"type": "token", "content": "rrested, the accused"}}
+{"turn": 2, "event": {"type": "token", "content": " must be produced be"}}
+{"turn": 2, "event": {"type": "token", "content": "fore a Magistrate wi"}}
+{"turn": 2, "event": {"type": "token", "content": "thin 24 hours.\n    *"}}
+{"turn": 2, "event": {"type": "token", "content": "   Legal representat"}}
+{"turn": 2, "event": {"type": "token", "content": "ion is essential for"}}
+{"turn": 2, "event": {"type": "token", "content": " applying for antici"}}
+{"turn": 2, "event": {"type": "token", "content": "patory bail (if appl"}}
+{"turn": 2, "event": {"type": "token", "content": "icable) or regular b"}}
+{"turn": 2, "event": {"type": "token", "content": "ail.\n    *   The rig"}}
+{"turn": 2, "event": {"type": "token", "content": "ht to legal represen"}}
+{"turn": 2, "event": {"type": "token", "content": "tation for indigent "}}
+{"turn": 2, "event": {"type": "token", "content": "prisoners is a compo"}}
+{"turn": 2, "event": {"type": "token", "content": "nent of the right to"}}
+{"turn": 2, "event": {"type": "token", "content": " personal liberty, a"}}
+{"turn": 2, "event": {"type": "token", "content": "s held in *M.H. Hosk"}}
+{"turn": 2, "event": {"type": "token", "content": "ot v. State of Mahar"}}
+{"turn": 2, "event": {"type": "token", "content": "ashtra, AIR 1978 SC "}}
+{"turn": 2, "event": {"type": "token", "content": "1548*.\n*   **Filing "}}
+{"turn": 2, "event": {"type": "token", "content": "of Charge Sheet or C"}}
+{"turn": 2, "event": {"type": "token", "content": "losure Report:**\n   "}}
+{"turn": 2, "event": {"type": "token", "content": " *   Upon completion"}}
+{"turn": 2, "event": {"type": "token", "content": " of the investigatio"}}
+{"turn": 2, "event": {"type": "token", "content": "n, the police submit"}}
+{"turn": 2, "event": {"type": "token", "content": " a charge sheet (if "}}
+{"turn": 2, "event": {"type": "token", "content": "sufficient evidence "}}
+{"turn": 2, "event": {"type": "token", "content": "is found) or a closu"}}
+{"turn": 2, "event": {"type": "token", "content": "re report (if not) t"}}
+{"turn": 2, "event": {"type": "token", "content": "o the Magistrate.\n  "}}
+{"turn": 2, "event": {"type": "token", "content": "  *   The accused ha"}}
+{"turn": 2, "event": {"type": "token", "content": "s the right to legal"}}
+{"turn": 2, "event": {"type": "token", "content": " representation at t"}}
+{"turn": 2, "event": {"type": "token", "content": "his stage to review "}}
+{"turn": 2, "event": {"type": "token", "content": "the charge sheet and"}}
+{"turn": 2, "event": {"type": "token", "content": " prepare for the nex"}}
+{"turn": 2, "event": {"type": "token", "content": "t steps.\n*   **Cogni"}}
+{"turn": 2, "event": {"type": "token", "content": "zance by Magistrate "}}
+{"turn": 2, "event": {"type": "token", "content": "and Framing of Charg"}}
+{"turn": 2, "event": {"type": "token", "content": "es:**\n    *   The Ma"}}
+{"turn": 2, "event": {"type": "token", "content": "gistrate reviews the"}}
+{"turn": 2, "event": {"type": "token", "content": " charge sheet and ev"}}
+{"turn": 2, "event": {"type": "token", "content": "idence. If there is "}}
+{"turn": 2, "event": {"type": "token", "content": "sufficient ground, c"}}
+{"turn": 2, "event": {"type": "token", "content": "harges are framed.\n "}}
+{"turn": 2, "event": {"type": "token", "content": "   *   The accused i"}}
+{"turn": 2, "event": {"type": "token", "content": "s informed of the ch"}}
+{"turn": 2, "event": {"type": "token", "content": "arges and has the op"}}
+{"turn": 2, "event": {"type": "token", "content": "portunity to respond"}}
+{"turn": 2, "event": {"type": "token", "content": " and seek legal repr"}}
+{"turn": 2, "event": {"type": "token", "content": "esentation for their"}}
+{"turn": 2, "event": {"type": "token", "content": " defense.\n\n### Right"}}
+{"turn": 2, "event": {"type": "token", "content": "s of a Complainant\n\n"}}
+{"turn": 2, "event": {"type": "token", "content": "The complainant, as "}}
+{"turn": 2, "event": {"type": "token", "content": "the person reporting"}}
+{"turn": 2, "event": {"type": "token", "content": " an offence, has sev"}}
+{"turn": 2, "event": {"type": "token", "content": "eral crucial rights "}}
+{"turn": 2, "event": {"type": "token", "content": "throughout the crimi"}}
+{"turn": 2, "event": {"type": "token", "content": "nal justice process:"}}
+{"turn": 2, "event": {"type": "token", "content": "\n\n*   **Right to Lod"}}
+{"turn": 2, "event": {"type": "token", "content": "ge FIR:** The compla"}}
+{"turn": 2, "event": {"type": "token", "content": "inant has the right "}}
+{"turn": 2, "event": {"type": "token", "content": "to report a cognizab"}}
+{"turn": 2, "event": {"type": "token", "content": "le offence to the po"}}
+{"turn": 2, "event": {"type": "token", "content": "lice, which must be "}}
+{"turn": 2, "event": {"type": "token", "content": "reduced to writing a"}}
+{"turn": 2, "event": {"type": "token", "content": "nd signed by the inf"}}
+{"turn": 2, "event": {"type": "token", "content": "ormant.\n*   **Right "}}
+{"turn": 2, "event": {"type": "token", "content": "to Receive FIR Copy:"}}
+{"turn": 2, "event": {"type": "token", "content": "** The informant is "}}
+{"turn": 2, "event": {"type": "token", "content": "entitled to receive "}}
+{"turn": 2, "event": {"type": "token", "content": "a free copy of the F"}}
+{"turn": 2, "event": {"type": "token", "content": "IR as soon as it is "}}
+{"turn": 2, "event": {"type": "token", "content": "filed, as per Sectio"}}
+{"turn": 2, "event": {"type": "token", "content": "n 154(2) of the Code"}}
+{"turn": 2, "event": {"type": "token", "content": " of Criminal Procedu"}}
+{"turn": 2, "event": {"type": "token", "content": "re, 1973 (CrPC).\n*  "}}
+{"turn": 2, "event": {"type": "token", "content": " **Right to Approach"}}
+{"turn": 2, "event": {"type": "token", "content": " Higher Authorities:"}}
+{"turn": 2, "event": {"type": "token", "content": "** If the police ref"}}
+{"turn": 2, "event": {"type": "token", "content": "use to register an F"}}
+{"turn": 2, "event": {"type": "token", "content": "IR for a cognizable "}}
+{"turn": 2, "event": {"type": "token", "content": "offence, the complai"}}
+{"turn": 2, "event": {"type": "token", "content": "nant can send the su"}}
+{"turn": 2, "event": {"type": "token", "content": "bstance of the infor"}}
+{"turn": 2, "event": {"type": "token", "content": "mation in writing to"}}
+{"turn": 2, "event": {"type": "token", "content": " the concerned Super"}}
+{"turn": 2, "event": {"type": "token", "content": "intendent of Police "}}
+{"turn": 2, "event": {"type": "token", "content": "under Section 154(3)"}}
+{"turn": 2, "event": {"type": "token", "content": " of the CrPC.\n*   **"}}
+{"turn": 2, "event": {"type": "token", "content": "Right to Approach Ma"}}
+{"turn": 2, "event": {"type": "token", "content": "gistrate:** If highe"}}
+{"turn": 2, "event": {"type": "token", "content": "r police authorities"}}
+{"turn": 2, "event": {"type": "token", "content": " also fail to act, t"}}
+{"turn": 2, "event": {"type": "token", "content": "he complainant can m"}}
+{"turn": 2, "event": {"type": "token", "content": "ake an application t"}}
+{"turn": 2, "event": {"type": "token", "content": "o a Magistrate empow"}}
+{"turn": 2, "event": {"type": "token", "content": "ered to take cogniza"}}
+{"turn": 2, "event": {"type": "token", "content": "nce of the matter un"}}
+{"turn": 2, "event": {"type": "token", "content": "der Section 156(3) o"}}
+{"turn": 2, "event": {"type": "token", "content": "f the CrPC or file a"}}
+{"turn": 2, "event": {"type": "token", "content": " complaint under Sec"}}
+{"turn": 2, "event": {"type": "token", "content": "tion 200 of the CrPC"}}
+{"turn": 2, "event": {"type": "token", "content": ".\n*   **Right to Inf"}}
+{"turn": 2, "event": {"type": "token", "content": "ormation on Investig"}}
+{"turn": 2, "event": {"type": "token", "content": "ation Progress:** Th"}}
+{"turn": 2, "event": {"type": "token", "content": "e complainant can re"}}
+{"turn": 2, "event": {"type": "token", "content": "quest updates on the"}}
+{"turn": 2, "event": {"type": "token", "content": " progress of the inv"}}
+{"turn": 2, "event": {"type": "token", "content": "estigation. They are"}}
+{"turn": 2, "event": {"type": "token", "content": " also entitled to be"}}
+{"turn": 2, "event": {"type": "token", "content": " informed if the pol"}}
+{"turn": 2, "event": {"type": "token", "content": "ice decide not to in"}}
+{"turn": 2, "event": {"type": "token", "content": "vestigate due to ins"}}
+{"turn": 2, "event": {"type": "token", "content": "ufficient grounds, a"}}
+{"turn": 2, "event": {"type": "token", "content": "s per Section 157(2)"}}
+{"turn": 2, "event": {"type": "token", "content": " of the CrPC.\n*   **"}}
+{"turn": 2, "event": {"type": "token", "content": "Right to Receive Pol"}}
+{"turn": 2, "event": {"type": "token", "content": "ice Report:** Upon c"}}
+{"turn": 2, "event": {"type": "token", "content": "ompletion of the inv"}}
+{"turn": 2, "event": {"type": "token", "content": "estigation, the info"}}
+{"turn": 2, "event": {"type": "token", "content": "rmant must be advise"}}
+{"turn": 2, "event": {"type": "token", "content": "d of the actions tak"}}
+{"turn": 2, "event": {"type": "token", "content": "en, including receiv"}}
+{"turn": 2, "event": {"type": "token", "content": "ing a copy of the re"}}
+{"turn": 2, "event": {"type": "token", "content": "port submitted under"}}
+{"turn": 2, "event": {"type": "token", "content": " Section 173(2)(i) o"}}
+{"turn": 2, "event": {"type": "token", "content": "f the CrPC.\n*   **Ri"}}
+{"turn": 2, "event": {"type": "token", "content": "ght to File Protest "}}
+{"turn": 2, "event": {"type": "token", "content": "Petition:** If a clo"}}
+{"turn": 2, "event": {"type": "token", "content": "sure report is filed"}}
+{"turn": 2, "event": {"type": "token", "content": ", the informant is e"}}
+{"turn": 2, "event": {"type": "token", "content": "ntitled to file a pr"}}
+{"turn": 2, "event": {"type": "token", "content": "otest petition.\n*   "}}
+{"turn": 2, "event": {"type": "token", "content": "**Right to be Heard:"}}
+{"turn": 2, "event": {"type": "token", "content": "** Under the Bharati"}}
+{"turn": 2, "event": {"type": "token", "content": "ya Nagarik Suraksha "}}
+{"turn": 2, "event": {"type": "token", "content": "Sanhita, 2023 (BNSS)"}}
+{"turn": 2, "event": {"type": "token", "content": ", a victim has the r"}}
+{"turn": 2, "event": {"type": "token", "content": "ight to be heard bef"}}
+{"turn": 2, "event": {"type": "token", "content": "ore a court permits "}}
+{"turn": 2, "event": {"type": "token", "content": "the withdrawal of a "}}
+{"turn": 2, "event": {"type": "token", "content": "criminal prosecution"}}
+{"turn": 2, "event": {"type": "token", "content": " under Section 360. "}}
+{"turn": 2, "event": {"type": "token", "content": "Victims also have th"}}
+{"turn": 2, "event": {"type": "token", "content": "e right to appeal ag"}}
+{"turn": 2, "event": {"type": "token", "content": "ainst an acquittal, "}}
+{"turn": 2, "event": {"type": "token", "content": "an inadequate senten"}}
+{"turn": 2, "event": {"type": "token", "content": "ce, or insufficient "}}
+{"turn": 2, "event": {"type": "token", "content": "compensation under S"}}
+{"turn": 2, "event": {"type": "token", "content": "ection 413 of the BN"}}
+{"turn": 2, "event": {"type": "token", "content": "SS.\n*   **Right to F"}}
+{"turn": 2, "event": {"type": "token", "content": "air Treatment:** A v"}}
+{"turn": 2, "event": {"type": "token", "content": "ictim shall be treat"}}
+{"turn": 2, "event": {"type": "token", "content": "ed with fairness, re"}}
+{"turn": 2, "event": {"type": "token", "content": "spect, and dignity, "}}
+{"turn": 2, "event": {"type": "token", "content": "with due regard to a"}}
+{"turn": 2, "event": {"type": "token", "content": "ny special needs ari"}}
+{"turn": 2, "event": {"type": "token", "content": "sing from age, gende"}}
+{"turn": 2, "event": {"type": "token", "content": "r, educational disad"}}
+{"turn": 2, "event": {"type": "token", "content": "vantage, or poverty,"}}
+{"turn": 2, "event": {"type": "token", "content": " as per Section 15A("}}
+{"turn": 2, "event": {"type": "token", "content": "2) of the CrPC.\n*   "}}
+{"turn": 2, "event": {"type": "token", "content": "**Right to Notice of"}}
+{"turn": 2, "event": {"type": "token", "content": " Proceedings:** A vi"}}
+{"turn": 2, "event": {"type": "token", "content": "ctim or their depend"}}
+{"turn": 2, "event": {"type": "token", "content": "ent has the right to"}}
+{"turn": 2, "event": {"type": "token", "content": " reasonable, accurat"}}
+{"turn": 2, "event": {"type": "token", "content": "e, and timely notice"}}
+{"turn": 2, "event": {"type": "token", "content": " of any court procee"}}
+{"turn": 2, "event": {"type": "token", "content": "ding.\n\nHiring a lawy"}}
+{"turn": 2, "event": {"type": "token", "content": "er ensures that the "}}
+{"turn": 2, "event": {"type": "token", "content": "complainant's rights"}}
+{"turn": 2, "event": {"type": "token", "content": " are effectively exe"}}
+{"turn": 2, "event": {"type": "token", "content": "rcised and their int"}}
+{"turn": 2, "event": {"type": "token", "content": "erests are represent"}}
+{"turn": 2, "event": {"type": "token", "content": "ed throughout the co"}}
+{"turn": 2, "event": {"type": "token", "content": "mplex legal process."}}
+{"turn": 2, "event": {"type": "progress", "agent": "legal_concepts", "message": "Generating explanation...", "ts": 1784749311.1270075, "step": "generate"}}
+{"turn": 2, "event": {"type": "status", "agent": "legal_concepts", "message": "Explaining legal concepts..."}}
+{"turn": 2, "event": {"type": "progress", "agent": "orchestrator", "message": "Merging results from 1 agents...", "ts": 1784749311.2031133, "found": 1, "step": "synthesize"}}
+{"turn": 2, "event": {"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}}
+{"turn": 2, "event": {"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1784749311.204885, "step": "finalize"}}
+{"turn": 2, "event": {"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}}
+{"turn": 2, "event": {"type": "response", "content": "An individual should consider hiring a lawyer at the earliest possible stage in a criminal case in India, ideally even before or immediately after the filing of a First Information Report (FIR). Early legal intervention can significantly influence the initial police investigation and help protect one's rights.\n\n### Stages of the Pre-Trial Process and Legal Representation\n\nThe pre-trial process in India involves several critical stages where legal counsel is invaluable:\n\n-   **Filing of a First Information Report (FIR):**\n    -   An FIR is the initial document that sets the criminal law in motion for a cognizable offence, allowing the police to investigate and arrest without a warrant.\n    -   If an FIR is being filed against an individual, immediate legal advice is crucial to understand the charges, protect rights, prevent self-incrimination, and assist with immediate bail applications.\n    -   A lawyer can review and analyze the FIR and advise on statements and evidence submission.\n    -   If an individual is filing an FIR, a lawyer can ensure it accurately portrays the details of the incident and can guide through the process, especially if the police initially refuse to register it.\n-   **Police Investigation:**\n    -   After the FIR, the police conduct an investigation, which includes recording witness statements, collecting evidence, and potentially arresting the accused.\n    -   During this stage, the accused has the right to legal representation and protection against unlawful arrest.\n    -   A lawyer can accompany the individual during questioning by the police, advise on rights, and ensure compliance with legal procedures.\n-   **Arrest and Custody:**\n    -   If arrested, the accused must be produced before a Magistrate within 24 hours.\n    -   Legal representation is essential for applying for anticipatory bail (if applicable) or regular bail.\n    -   The right to legal representation for indigent prisoners is a component of the right to personal liberty, as held in *M.H. Hoskot v. State of Maharashtra, AIR 1978 SC 1548*.\n-   **Filing of Charge Sheet or Closure Report:**\n    -   Upon completion of the investigation, the police submit a charge sheet (if sufficient evidence is found) or a closure report (if not) to the Magistrate.\n    -   The accused has the right to legal representation at this stage to review the charge sheet and prepare for the next steps.\n-   **Cognizance by Magistrate and Framing of Charges:**\n    -   The Magistrate reviews the charge sheet and evidence. If there is sufficient ground, charges are framed.\n    -   The accused is informed of the charges and has the opportunity to respond and seek legal representation for their defense.\n\n### Rights of a Complainant\n\nThe complainant, as the person reporting an offence, has several crucial rights throughout the criminal justice process:\n\n-   **Right to Lodge FIR:** The complainant has the right to report a cognizable offence to the police, which must be reduced to writing and signed by the informant.\n-   **Right to Receive FIR Copy:** The informant is entitled to receive a free copy of the FIR as soon as it is filed, as per Section 154(2) of the Code of Criminal Procedure, 1973 (CrPC).\n-   **Right to Approach Higher Authorities:** If the police refuse to register an FIR for a cognizable offence, the complainant can send the substance of the information in writing to the concerned Superintendent of Police under Section 154(3) of the CrPC.\n-   **Right to Approach Magistrate:** If higher police authorities also fail to act, the complainant can make an application to a Magistrate empowered to take cognizance of the matter under Section 156(3) of the CrPC or file a complaint under Section 200 of the CrPC.\n-   **Right to Information on Investigation Progress:** The complainant can request updates on the progress of the investigation. They are also entitled to be informed if the police decide not to investigate due to insufficient grounds, as per Section 157(2) of the CrPC.\n-   **Right to Receive Police Report:** Upon completion of the investigation, the informant must be advised of the actions taken, including receiving a copy of the report submitted under Section 173(2)(i) of the CrPC.\n-   **Right to File Protest Petition:** If a closure report is filed, the informant is entitled to file a protest petition.\n-   **Right to be Heard:** Under the Bharatiya Nagarik Suraksha Sanhita, 2023 (BNSS), a victim has the right to be heard before a court permits the withdrawal of a criminal prosecution under Section 360. Victims also have the right to appeal against an acquittal, an inadequate sentence, or insufficient compensation under Section 413 of the BNSS.\n-   **Right to Fair Treatment:** A victim shall be treated with fairness, respect, and dignity, with due regard to any special needs arising from age, gender, educational disadvantage, or poverty, as per Section 15A(2) of the CrPC.\n-   **Right to Notice of Proceedings:** A victim or their dependent has the right to reasonable, accurate, and timely notice of any court proceeding.\n\nHiring a lawyer ensures that the complainant's rights are effectively exercised and their interests are represented throughout the complex legal process.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."}}
+{"turn": 2, "event": {"type": "sources", "data": [{"source_type": "legal_concepts", "title": "thekanoonadvisors.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFfrTu05nf_sRd2WVXlRJPZYEBHYi7JRxTng0Y5LK6MInYJ-z7PWA2xlntw1TUKtoLGjvzGLpdpJ_zw7GKCD2-2PnmSOzfqPkiVNdZiqpvNIzkq9-J5Xo0-r8Guu1FLqCDZoExK2D1w0MOM9o_68c_SO4bjjisDLpL_tvaXJtwZa9F8VsnetNjkYgMJ1q-Cr-YpAOXAckaFIxGkyl03tZ2kfG18-Ktf_ZpI", "web_title": "thekanoonadvisors.com"}, {"source_type": "legal_concepts", "title": "qlerk.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHJCGerQMMk-DrF7wAgj47GGTuvqt8PfvXyNM2ZcbF07D-iy4F8k7lXNInDDyEDuHd02qF3uIMW1-P9ZWIJg8y5Mfe4KyRKRCcttyXeeyT6A0F8ytkhqkXHK0BWW9ErUQ_xYgrju56BbETEnBDw1KikG87fTNWcZ_Q=", "web_title": "qlerk.in"}, {"source_type": "legal_concepts", "title": "advocategaurichate.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHU4tu0biotopzUPfXBYtrxCj_qV1B13xpdMhRwBAECMXWv6M31hPTFtpwUjwuhnzfUFg7ZVIqO0-kyW30rfvHITdvT6D5y0BJT9LmLokfh6xutHpyC7mMsZOvQnIXPqVBy95ULkUb_8a2Jr-sxj-QZA9WPggGv4q6DrOx4jcdr3d5kYr88ofcz_9ygBSZbQTvcNAhq5_UZXIPrII_h1y7jbB47up1EY3L9", "web_title": "advocategaurichate.com"}, {"source_type": "legal_concepts", "title": "sacharlawfirm.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFcOrrhU_tKmkAHJ1lc1yZut9mTZQTdm_uDWt1pcchfZ8UFN6Neht1cDwU_tNSVLPsdZwAzXlfb9vEN66fXATshpph0U9RuSAouyNhSbjVNKkRiVwa7PqaU-22cAL4lx848Qi--6I_elV51ZQ1iPiAtZIebQ6CQ", "web_title": "sacharlawfirm.in"}, {"source_type": "legal_concepts", "title": "kplawandlegalassociates.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHMb76eTtSv8v3Bkvy0y45d-_e7U_k25YM-NQP00ZDpYqXIe60hYcXwnNVD6TFMzk5sIBQWzKc-KLlRGTrJqu_SnXYUj_T1jsAEv8h0fKUmTFJiBvBBfOyXc_k79G2CgIk9ZVxIfE5hxeKiJOYy6sn9NtJ0zkSJXjm4N8eWj-U1AybIfscob-l4u31Voh8O23pC1lcP0NG3HN46menMz5kz8sPW85Vn4WphWaucfoTLG2Vr5A==", "web_title": "kplawandlegalassociates.com"}, {"source_type": "legal_concepts", "title": "csjmu.ac.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHiBjU-umRqFHwNohstFT6VMpNwYcHM8rLEvAwH63cRglP9nKdMHGnGuuh2fWHPqEbXimRFbnP8pEl4bbNvmBiej8gO6viFK8i2HqzMrkjMOvqwx9enODpXAJKMwIFaSIZhWqJUOXJAXbjCeA53N9MdpQojfA9J3i4l6bvPBwrGQpcGh9vFqVrwwcsiX6a8jRSQ", "web_title": "csjmu.ac.in"}, {"source_type": "legal_concepts", "title": "quora.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFdPdNcQQd9Lp_QEj1kmBNrzD524KqSeEESQgIRqqD2KLGR3gzMUr7ZUouItJC-oqWcfVRYoixf-0ah4mOrHbLml0KhEM9KqX_1-uuKzcJvdCMIKQx3oR6OAMKyGFb41PyBtMDXJDeW3uYrZQ8t06TZ8OdSWdoYTOCaGnrdVgh6WyC9PIdyhlrGbWZXqfwDGVrAO9C7lW9AEDezgWbnLL3I8xHrqOhMV4yduCc=", "web_title": "quora.com"}, {"source_type": "legal_concepts", "title": "lexspeak.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEcs3Rk4i8ZglAJE6KgVpe4dPCeAzlo9JBWt8-orK7XObtrYcTubQkhsPa0dBYdDDw3R9SVbkGJhD_kul4zPNRgHI5X6cA1KDJIDtus45Wgd3CFIJWLdNWAsYvMk74zOciyuUCX5y2PQtvEgPmT6lzfU19X9n40NZC76ri_IWVxc3Gb3XagYYyLVZUG8HZOZEga2S8=", "web_title": "lexspeak.in"}, {"source_type": "legal_concepts", "title": "mcrhrdi.gov.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFz9k02bht9GP9c3QE79m1sQlrgbqBWM8Dz28_h8pqmfOvi5bCKCVnZYSLcCa2Fki_AWZGzqYXMeOrcXeJ4HQlmlWuAF3AWRvdjfdE3q7J1LIa4XW6hN1YFEdBKrMERxFDmKyOCxYCYydOIJw1aUM3Eg_kQymx9PnTI2qQXCv4NsEOySt8=", "web_title": "mcrhrdi.gov.in"}, {"source_type": "legal_concepts", "title": "vidhikarya.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHbA5-UaKYAAQ7gRCSKGN7xl7-Lr1WBnUqMh7SKOgPe0npbjn0HW1Z5fKUVMiAsifAap-oF3-wTmVC_ZX7HPI-jlnLQ17raPgcQjinw2cl3sk0s6cw-mh4l-3qddAlmP8dnxczwIx_tdE1AavsGKHC7LfIfvMkr6n3t_JUqAyH-WfafzJZqWmhE3B6bZKo_fDAbph-vAhhb8c6UucQqrUz-7X2WzQkIT2U=", "web_title": "vidhikarya.com"}, {"source_type": "legal_concepts", "title": "ourlegalpartners.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHyJGac4YRFzVFrS_6PbULTXmMdSK4717NOfzprsUvFDm_Acw84aq8-h1R-FBHmRihk8BRMpFz8W2Brt0qlVNz_dLuHlvHnqiZ1lSGmx5MhxXCokVKNS8nruxE392yljrMDbbScDkthtzDA1Lv7MPYDGKZMcheslHr01AT32fjW", "web_title": "ourlegalpartners.com"}, {"source_type": "legal_concepts", "title": "defactolaw.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHxh0imwdO5dmgzG1ijGu4ZgiEbNN28t0R9hXoJZ6BJcbowFPSQpnhIsL2B98j6fp8LGYk6TsugveNmHi8nlbVUHDxknV4s99ktyp6d-5gHJTuVGybmHQVq-ACjmPeVtfQ7ul6yxcZ3OvMc8LvVBguapRUN5hiGd_6A5VWOLMNfslvv8lIAjPR_fJYi", "web_title": "defactolaw.in"}, {"source_type": "legal_concepts", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE-WKKUbieaJK4qSS9AZM_4p43ON0AE_ApvrlgKMToapr14tQJj4C3f3GxOE6FL9F0FY9ddRGAxbuiHqpQaiLYmZpnDVJl-3FzuZi8BIkHdfL7kovpx3WWcrKT1otxkRjyBqQiU1NV2W3lD5ZGO99PbleReMLDNZjOEOQmvgd0JlgdGgiU=", "web_title": "ipleaders.in"}, {"source_type": "legal_concepts", "title": "supremetoday.ai", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGKFuLeW91P-W1G1mKuZpTjaoB47b61sXDWJqEMy-sHuvpzK25cz3YpNts-b3OKzpTpjLZsVeX7czZmNcQV6lSOIz6U_qzUH-ibeg_GHlyB-fXL3Zs9xw9iNruo0X5gJRuD54kR40qTj61l1YThv9OUJRucOr3-hFmeL_ubA3pilwna8vDRiBYsswnJ3zlQ0ECf7qHKNPD5-R6PdRVRfOP61A==", "web_title": "supremetoday.ai"}, {"source_type": "legal_concepts", "title": "ielrc.org", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEyWhZcHWvVPrKXTFKmjl2l6O9Z2ABWejE99r75XkH_NTPtGSPI3Zwwdg4uGdKS3mQNV9PO_-NQtKm0jj-CRi1NkZup9_sZTZEz3lv96Roz5NasHXee9jqW560M4ZZ1HIlqZw==", "web_title": "ielrc.org"}, {"source_type": "legal_concepts", "title": "indiacode.nic.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGHbCNcxS1E8Av7aE3OMUeW9VN95gShejz1TVBsK2AvLHdLFhQIVZFWnfl4AoAGAEM6CCOlkjQdG4IraGMM54DQpwY6Om3JPGJWZ5-XtSdH4lvmDuUQrs-c8S7jsDwM5b-uLWdYnQIqgt3H-ZRnR1gxL6Cgq7YVc2abnUI98y-zUtIbpnlQ61TnlufWuZ3ioxl19cC2femBGvfH", "web_title": "indiacode.nic.in"}, {"source_type": "legal_concepts", "title": "thehansindia.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFQdbMyiOon002pmfCZyDWI4yJ9NuOD633s8MW6AwJphZDvO2H8Zt21mab52zRbjSvvUBFZlkTgCn86NIWfA4KsXq6Q3VL0HmiQ_RM4UyoMnbGuIAUIah0MXfPpygjBbfTmGTVrQAVOnSDm4JKPBNMXQJdVpVO09PpgqEEKyQXKh-coX7ptoP-LQsX6_K2wXqJW3XFZXgigUh6N001gNvDIVfhTwz2ErL44EauIBR87", "web_title": "thehansindia.com"}, {"source_type": "legal_concepts", "title": "indiacode.nic.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFZWiTs9KVijudjKGtS597N_m-7yzVyDw3DkSliZuQmxcqwaoHpekNB4VoxCN9UNY0hsAAYxTD6GOOWFpbDXJsQUKKrigU1U7STeAwiEEkgsCc86iT69NAo99DCswOtoLh7OnJpkvE60nRAz5e_zicIPaKe0l69KAONi0y-8O7HbmtDKQFfW3X6z9DaPcqoP53q_VxJz5kzKIyq", "web_title": "indiacode.nic.in"}]}}
+{"turn": 2, "event": {"type": "followup_suggestions", "data": ["What if FIR is already filed?", "Can I get a lawyer post-arrest?", "What are lawyer costs in India?"]}}
+{"turn": 2, "event": {"type": "done", "agents_used": ["Legal_Concepts"], "token_usage": {"input_tokens": 8407, "output_tokens": 382, "total_tokens": 8789, "cache_read_tokens": 5262, "cache_creation_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.000994, "by_agent": {"Memory": {"input": 1499, "output": 46, "total": 1545, "cache_read": 0, "calls": 1, "cost_usd": 0.000168}, "Orchestrator": {"input": 6908, "output": 336, "total": 7244, "cache_read": 5262, "calls": 2, "cost_usd": 0.000825}}, "calls": [{"agent": "Memory", "step": "rewrite_query", "input": 1499, "output": 46, "total": 1545, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000168}, {"agent": "Orchestrator", "step": "classify_and_plan", "input": 1409, "output": 76, "total": 1485, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000171}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5499, "output": 260, "total": 5759, "cache_read": 5262, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000654}]}, "thread_id": "f794cb1f-60a8-438f-8cb4-80225b5e238e", "conversation_turn": 2, "query_rewritten": true, "effective_query": "When should an individual hire a lawyer in the context of dealing with a criminal case in India, considering the stages of the pre-trial process including the filing of a First Information Report (FIR) and the rights of a complainant?"}}

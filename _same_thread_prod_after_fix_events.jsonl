@@ -1,0 +1,863 @@
+{"turn": 1, "event": {"type": "thread_id", "data": "d823a766-0fdb-4866-81eb-d855e3950fd0"}}
+{"turn": 1, "event": {"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1784749827.905939, "step": "validate"}}
+{"turn": 1, "event": {"type": "status", "agent": "guardrail_input", "message": "Validating query..."}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1784749827.9088748, "step": "language"}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1784749828.5389698, "step": "language", "substep": true}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1784749828.5401008, "step": "history"}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1784749828.5532224, "found": 0, "step": "history", "substep": true}}
+{"turn": 1, "event": {"type": "progress", "agent": "memory", "message": "Rewriting follow-up query...", "ts": 1784749828.5560215, "step": "rewrite"}}
+{"turn": 1, "event": {"type": "status", "agent": "memory", "message": "Loading context..."}}
+{"turn": 1, "event": {"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}}
+{"turn": 1, "event": {"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1784749828.5580494, "step": "classify"}}
+{"turn": 1, "event": {"type": "progress", "agent": "orchestrator", "message": "Identified: Legal_Concepts", "ts": 1784749830.3374078, "detail": "Legal_Concepts", "step": "classify", "substep": true}}
+{"turn": 1, "event": {"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}}
+{"turn": 1, "event": {"type": "agents_planned", "agents": ["Legal_Concepts"]}}
+{"turn": 1, "event": {"type": "progress", "agent": "legal_concepts", "message": "Researching legal concept...", "ts": 1784749830.3433993, "step": "research"}}
+{"turn": 1, "event": {"type": "token", "content": "Dealing with a crimi"}}
+{"turn": 1, "event": {"type": "token", "content": "nal case in India in"}}
+{"turn": 1, "event": {"type": "token", "content": "volves a structured "}}
+{"turn": 1, "event": {"type": "token", "content": "legal process govern"}}
+{"turn": 1, "event": {"type": "token", "content": "ed primarily by the "}}
+{"turn": 1, "event": {"type": "token", "content": "Bharatiya Nagarik Su"}}
+{"turn": 1, "event": {"type": "token", "content": "raksha Sanhita (BNSS"}}
+{"turn": 1, "event": {"type": "token", "content": "), 2023, which repla"}}
+{"turn": 1, "event": {"type": "token", "content": "ced the Code of Crim"}}
+{"turn": 1, "event": {"type": "token", "content": "inal Procedure, 1973"}}
+{"turn": 1, "event": {"type": "token", "content": ", and the Bharatiya "}}
+{"turn": 1, "event": {"type": "token", "content": "Nyaya Sanhita (BNS),"}}
+{"turn": 1, "event": {"type": "token", "content": " 2023, which replace"}}
+{"turn": 1, "event": {"type": "token", "content": "d the Indian Penal C"}}
+{"turn": 1, "event": {"type": "token", "content": "ode, 1860. The Bhara"}}
+{"turn": 1, "event": {"type": "token", "content": "tiya Sakshya Adhiniy"}}
+{"turn": 1, "event": {"type": "token", "content": "am (BSA), 2023, repl"}}
+{"turn": 1, "event": {"type": "token", "content": "aced the Indian Evid"}}
+{"turn": 1, "event": {"type": "token", "content": "ence Act, 1872. Thes"}}
+{"turn": 1, "event": {"type": "token", "content": "e new laws came into"}}
+{"turn": 1, "event": {"type": "token", "content": " effect on July 1, 2"}}
+{"turn": 1, "event": {"type": "token", "content": "024.\n\nThe process ge"}}
+{"turn": 1, "event": {"type": "token", "content": "nerally unfolds thro"}}
+{"turn": 1, "event": {"type": "token", "content": "ugh several stages:\n"}}
+{"turn": 1, "event": {"type": "token", "content": "\n### 1. Registration"}}
+{"turn": 1, "event": {"type": "token", "content": " of First Informatio"}}
+{"turn": 1, "event": {"type": "token", "content": "n Report (FIR)\n\n*   "}}
+{"turn": 1, "event": {"type": "token", "content": "**Initiation:** The "}}
+{"turn": 1, "event": {"type": "token", "content": "criminal justice pro"}}
+{"turn": 1, "event": {"type": "token", "content": "cess typically begin"}}
+{"turn": 1, "event": {"type": "token", "content": "s with the registrat"}}
+{"turn": 1, "event": {"type": "token", "content": "ion of a First Infor"}}
+{"turn": 1, "event": {"type": "token", "content": "mation Report (FIR) "}}
+{"turn": 1, "event": {"type": "token", "content": "under Section 173 of"}}
+{"turn": 1, "event": {"type": "token", "content": " the Bharatiya Nagar"}}
+{"turn": 1, "event": {"type": "token", "content": "ik Suraksha Sanhita,"}}
+{"turn": 1, "event": {"type": "token", "content": " 2023 (BNSS). An FIR"}}
+{"turn": 1, "event": {"type": "token", "content": " is the police recor"}}
+{"turn": 1, "event": {"type": "token", "content": "d of the initial inf"}}
+{"turn": 1, "event": {"type": "token", "content": "ormation received ab"}}
+{"turn": 1, "event": {"type": "token", "content": "out a cognizable off"}}
+{"turn": 1, "event": {"type": "token", "content": "ence. A cognizable o"}}
+{"turn": 1, "event": {"type": "token", "content": "ffence is one where "}}
+{"turn": 1, "event": {"type": "token", "content": "the police can arres"}}
+{"turn": 1, "event": {"type": "token", "content": "t and initiate an in"}}
+{"turn": 1, "event": {"type": "token", "content": "vestigation without "}}
+{"turn": 1, "event": {"type": "token", "content": "a warrant.\n*   **Mod"}}
+{"turn": 1, "event": {"type": "token", "content": "e of Filing:** Infor"}}
+{"turn": 1, "event": {"type": "token", "content": "mation relating to a"}}
+{"turn": 1, "event": {"type": "token", "content": " cognizable offence "}}
+{"turn": 1, "event": {"type": "token", "content": "can be given orally "}}
+{"turn": 1, "event": {"type": "token", "content": "or by electronic com"}}
+{"turn": 1, "event": {"type": "token", "content": "munication. If given"}}
+{"turn": 1, "event": {"type": "token", "content": " orally, it must be "}}
+{"turn": 1, "event": {"type": "token", "content": "reduced to writing a"}}
+{"turn": 1, "event": {"type": "token", "content": "nd read to the infor"}}
+{"turn": 1, "event": {"type": "token", "content": "mant, who then signs"}}
+{"turn": 1, "event": {"type": "token", "content": " it. BNSS mandates t"}}
+{"turn": 1, "event": {"type": "token", "content": "hat FIRs must be reg"}}
+{"turn": 1, "event": {"type": "token", "content": "istered online, ensu"}}
+{"turn": 1, "event": {"type": "token", "content": "ring transparency an"}}
+{"turn": 1, "event": {"type": "token", "content": "d reducing delays. V"}}
+{"turn": 1, "event": {"type": "token", "content": "ictims can file comp"}}
+{"turn": 1, "event": {"type": "token", "content": "laints electronicall"}}
+{"turn": 1, "event": {"type": "token", "content": "y.\n*   **Zero FIR:**"}}
+{"turn": 1, "event": {"type": "token", "content": " The BNSS explicitly"}}
+{"turn": 1, "event": {"type": "token", "content": " recognizes the conc"}}
+{"turn": 1, "event": {"type": "token", "content": "ept of a \"Zero FIR,\""}}
+{"turn": 1, "event": {"type": "token", "content": " allowing a complain"}}
+{"turn": 1, "event": {"type": "token", "content": "t to be registered a"}}
+{"turn": 1, "event": {"type": "token", "content": "t any police station"}}
+{"turn": 1, "event": {"type": "token", "content": ", irrespective of te"}}
+{"turn": 1, "event": {"type": "token", "content": "rritorial jurisdicti"}}
+{"turn": 1, "event": {"type": "token", "content": "on. This FIR is then"}}
+{"turn": 1, "event": {"type": "token", "content": " transferred to the "}}
+{"turn": 1, "event": {"type": "token", "content": "appropriate police s"}}
+{"turn": 1, "event": {"type": "token", "content": "tation.\n*   **Mandat"}}
+{"turn": 1, "event": {"type": "token", "content": "ory Registration:** "}}
+{"turn": 1, "event": {"type": "token", "content": "Police are duty-boun"}}
+{"turn": 1, "event": {"type": "token", "content": "d to register an FIR"}}
+{"turn": 1, "event": {"type": "token", "content": " if the information "}}
+{"turn": 1, "event": {"type": "token", "content": "discloses the commis"}}
+{"turn": 1, "event": {"type": "token", "content": "sion of a cognizable"}}
+{"turn": 1, "event": {"type": "token", "content": " offence. Refusal to"}}
+{"turn": 1, "event": {"type": "token", "content": " register an FIR can"}}
+{"turn": 1, "event": {"type": "token", "content": " lead to disciplinar"}}
+{"turn": 1, "event": {"type": "token", "content": "y action against the"}}
+{"turn": 1, "event": {"type": "token", "content": " officer.\n\n### 2. In"}}
+{"turn": 1, "event": {"type": "token", "content": "vestigation by Polic"}}
+{"turn": 1, "event": {"type": "token", "content": "e\n\n*   **Commencemen"}}
+{"turn": 1, "event": {"type": "token", "content": "t:** Once an FIR is "}}
+{"turn": 1, "event": {"type": "token", "content": "lodged, the police c"}}
+{"turn": 1, "event": {"type": "token", "content": "ommence their invest"}}
+{"turn": 1, "event": {"type": "token", "content": "igation under BNSS. "}}
+{"turn": 1, "event": {"type": "token", "content": "The investigation in"}}
+{"turn": 1, "event": {"type": "token", "content": "volves collecting fa"}}
+{"turn": 1, "event": {"type": "token", "content": "cts, evidence, and m"}}
+{"turn": 1, "event": {"type": "token", "content": "aterials related to "}}
+{"turn": 1, "event": {"type": "token", "content": "the offence to ascer"}}
+{"turn": 1, "event": {"type": "token", "content": "tain if an offence h"}}
+{"turn": 1, "event": {"type": "token", "content": "as been committed an"}}
+{"turn": 1, "event": {"type": "token", "content": "d who is responsible"}}
+{"turn": 1, "event": {"type": "token", "content": ".\n*   **Process:** T"}}
+{"turn": 1, "event": {"type": "token", "content": "his includes visitin"}}
+{"turn": 1, "event": {"type": "token", "content": "g the crime scene, c"}}
+{"turn": 1, "event": {"type": "token", "content": "ollecting evidence, "}}
+{"turn": 1, "event": {"type": "token", "content": "examining witnesses,"}}
+{"turn": 1, "event": {"type": "token", "content": " conducting searches"}}
+{"turn": 1, "event": {"type": "token", "content": " and seizures, and a"}}
+{"turn": 1, "event": {"type": "token", "content": "rresting the accused"}}
+{"turn": 1, "event": {"type": "token", "content": " if necessary. BNSS "}}
+{"turn": 1, "event": {"type": "token", "content": "allows video recordi"}}
+{"turn": 1, "event": {"type": "token", "content": "ng of statements to "}}
+{"turn": 1, "event": {"type": "token", "content": "prevent coercion.\n* "}}
+{"turn": 1, "event": {"type": "token", "content": "  **Timelines:** BNS"}}
+{"turn": 1, "event": {"type": "token", "content": "S imposes stricter t"}}
+{"turn": 1, "event": {"type": "token", "content": "imelines for investi"}}
+{"turn": 1, "event": {"type": "token", "content": "gation. It must be c"}}
+{"turn": 1, "event": {"type": "token", "content": "ompleted within 60 d"}}
+{"turn": 1, "event": {"type": "token", "content": "ays for offences pun"}}
+{"turn": 1, "event": {"type": "token", "content": "ishable with up to 1"}}
+{"turn": 1, "event": {"type": "token", "content": "0 years of imprisonm"}}
+{"turn": 1, "event": {"type": "token", "content": "ent and within 90 da"}}
+{"turn": 1, "event": {"type": "token", "content": "ys for offences puni"}}
+{"turn": 1, "event": {"type": "token", "content": "shable with death or"}}
+{"turn": 1, "event": {"type": "token", "content": " life imprisonment. "}}
+{"turn": 1, "event": {"type": "token", "content": "Victims have the rig"}}
+{"turn": 1, "event": {"type": "token", "content": "ht to receive update"}}
+{"turn": 1, "event": {"type": "token", "content": "s on the investigati"}}
+{"turn": 1, "event": {"type": "token", "content": "on.\n*   **Forensic E"}}
+{"turn": 1, "event": {"type": "token", "content": "vidence:** For offen"}}
+{"turn": 1, "event": {"type": "token", "content": "ces punishable with "}}
+{"turn": 1, "event": {"type": "token", "content": "seven years of impri"}}
+{"turn": 1, "event": {"type": "token", "content": "sonment or more, for"}}
+{"turn": 1, "event": {"type": "token", "content": "ensic evidence colle"}}
+{"turn": 1, "event": {"type": "token", "content": "ction by a forensic "}}
+{"turn": 1, "event": {"type": "token", "content": "team at the crime sc"}}
+{"turn": 1, "event": {"type": "token", "content": "ene is mandatory, an"}}
+{"turn": 1, "event": {"type": "token", "content": "d the process must b"}}
+{"turn": 1, "event": {"type": "token", "content": "e recorded.\n\n### 3. "}}
+{"turn": 1, "event": {"type": "token", "content": "Arrest and Custody\n\n"}}
+{"turn": 1, "event": {"type": "token", "content": "*   **Arrest:** If t"}}
+{"turn": 1, "event": {"type": "token", "content": "he investigation rev"}}
+{"turn": 1, "event": {"type": "token", "content": "eals sufficient evid"}}
+{"turn": 1, "event": {"type": "token", "content": "ence, the police may"}}
+{"turn": 1, "event": {"type": "token", "content": " arrest the accused."}}
+{"turn": 1, "event": {"type": "token", "content": "\n*   **Custody:** Th"}}
+{"turn": 1, "event": {"type": "token", "content": "e Constitution and B"}}
+{"turn": 1, "event": {"type": "token", "content": "NSS prohibit detenti"}}
+{"turn": 1, "event": {"type": "token", "content": "on in police custody"}}
+{"turn": 1, "event": {"type": "token", "content": " beyond 24 hours wit"}}
+{"turn": 1, "event": {"type": "token", "content": "hout a Magistrate's "}}
+{"turn": 1, "event": {"type": "token", "content": "order. The Magistrat"}}
+{"turn": 1, "event": {"type": "token", "content": "e can extend police "}}
+{"turn": 1, "event": {"type": "token", "content": "custody up to 15 day"}}
+{"turn": 1, "event": {"type": "token", "content": "s, which can be auth"}}
+{"turn": 1, "event": {"type": "token", "content": "orised in parts duri"}}
+{"turn": 1, "event": {"type": "token", "content": "ng the initial 40 or"}}
+{"turn": 1, "event": {"type": "token", "content": " 60 days of the tota"}}
+{"turn": 1, "event": {"type": "token", "content": "l 60 or 90 days of j"}}
+{"turn": 1, "event": {"type": "token", "content": "udicial custody. Ove"}}
+{"turn": 1, "event": {"type": "token", "content": "rall detention canno"}}
+{"turn": 1, "event": {"type": "token", "content": "t exceed 60 or 90 da"}}
+{"turn": 1, "event": {"type": "token", "content": "ys, depending on the"}}
+{"turn": 1, "event": {"type": "token", "content": " offence.\n\n### 4. Ba"}}
+{"turn": 1, "event": {"type": "token", "content": "il\n\n*   **Definition"}}
+{"turn": 1, "event": {"type": "token", "content": ":** Bail, as defined"}}
+{"turn": 1, "event": {"type": "token", "content": " under Section 2(1)("}}
+{"turn": 1, "event": {"type": "token", "content": "b) of BNSS, is the r"}}
+{"turn": 1, "event": {"type": "token", "content": "elease of a person a"}}
+{"turn": 1, "event": {"type": "token", "content": "ccused or suspected "}}
+{"turn": 1, "event": {"type": "token", "content": "of an offence from l"}}
+{"turn": 1, "event": {"type": "token", "content": "egal custody upon ce"}}
+{"turn": 1, "event": {"type": "token", "content": "rtain conditions, us"}}
+{"turn": 1, "event": {"type": "token", "content": "ually involving a bo"}}
+{"turn": 1, "event": {"type": "token", "content": "nd or bail bond.\n*  "}}
+{"turn": 1, "event": {"type": "token", "content": " **Types of Bail:**\n"}}
+{"turn": 1, "event": {"type": "token", "content": "    *   **Bailable O"}}
+{"turn": 1, "event": {"type": "token", "content": "ffences:** For baila"}}
+{"turn": 1, "event": {"type": "token", "content": "ble offences, bail i"}}
+{"turn": 1, "event": {"type": "token", "content": "s a matter of right "}}
+{"turn": 1, "event": {"type": "token", "content": "upon furnishing a ba"}}
+{"turn": 1, "event": {"type": "token", "content": "il bond or personal "}}
+{"turn": 1, "event": {"type": "token", "content": "bond. Section 478 of"}}
+{"turn": 1, "event": {"type": "token", "content": " BNSS deals with bai"}}
+{"turn": 1, "event": {"type": "token", "content": "l in bailable offenc"}}
+{"turn": 1, "event": {"type": "token", "content": "es.\n    *   **Non-Ba"}}
+{"turn": 1, "event": {"type": "token", "content": "ilable Offences:** F"}}
+{"turn": 1, "event": {"type": "token", "content": "or non-bailable offe"}}
+{"turn": 1, "event": {"type": "token", "content": "nces, bail is at the"}}
+{"turn": 1, "event": {"type": "token", "content": " discretion of the c"}}
+{"turn": 1, "event": {"type": "token", "content": "ourt, considering fa"}}
+{"turn": 1, "event": {"type": "token", "content": "ctors like the natur"}}
+{"turn": 1, "event": {"type": "token", "content": "e and gravity of the"}}
+{"turn": 1, "event": {"type": "token", "content": " offence, the eviden"}}
+{"turn": 1, "event": {"type": "token", "content": "ce, and the likeliho"}}
+{"turn": 1, "event": {"type": "token", "content": "od of the accused ab"}}
+{"turn": 1, "event": {"type": "token", "content": "sconding.\n    *   **"}}
+{"turn": 1, "event": {"type": "token", "content": "Anticipatory Bail:**"}}
+{"turn": 1, "event": {"type": "token", "content": " Section 482 of BNSS"}}
+{"turn": 1, "event": {"type": "token", "content": " allows a person app"}}
+{"turn": 1, "event": {"type": "token", "content": "rehending arrest for"}}
+{"turn": 1, "event": {"type": "token", "content": " a non-bailable offe"}}
+{"turn": 1, "event": {"type": "token", "content": "nce to apply to the "}}
+{"turn": 1, "event": {"type": "token", "content": "High Court or Sessio"}}
+{"turn": 1, "event": {"type": "token", "content": "ns Court for directi"}}
+{"turn": 1, "event": {"type": "token", "content": "ons for release on b"}}
+{"turn": 1, "event": {"type": "token", "content": "ail in the event of "}}
+{"turn": 1, "event": {"type": "token", "content": "arrest.\n*   **Undert"}}
+{"turn": 1, "event": {"type": "token", "content": "rial Prisoners:** Se"}}
+{"turn": 1, "event": {"type": "token", "content": "ction 479 of BNSS pr"}}
+{"turn": 1, "event": {"type": "token", "content": "ovides for bail to u"}}
+{"turn": 1, "event": {"type": "token", "content": "ndertrial prisoners."}}
+{"turn": 1, "event": {"type": "token", "content": " A person not accuse"}}
+{"turn": 1, "event": {"type": "token", "content": "d of an offence puni"}}
+{"turn": 1, "event": {"type": "token", "content": "shable with death or"}}
+{"turn": 1, "event": {"type": "token", "content": " life imprisonment m"}}
+{"turn": 1, "event": {"type": "token", "content": "ust be released on b"}}
+{"turn": 1, "event": {"type": "token", "content": "ail if detained for "}}
+{"turn": 1, "event": {"type": "token", "content": "half the maximum pun"}}
+{"turn": 1, "event": {"type": "token", "content": "ishment, or one-thir"}}
+{"turn": 1, "event": {"type": "token", "content": "d if a first-time of"}}
+{"turn": 1, "event": {"type": "token", "content": "fender. However, thi"}}
+{"turn": 1, "event": {"type": "token", "content": "s provision does not"}}
+{"turn": 1, "event": {"type": "token", "content": " apply if the undert"}}
+{"turn": 1, "event": {"type": "token", "content": "rial is facing multi"}}
+{"turn": 1, "event": {"type": "token", "content": "ple charges.\n*   **I"}}
+{"turn": 1, "event": {"type": "token", "content": "ndigent Persons:** B"}}
+{"turn": 1, "event": {"type": "token", "content": "NSS allows indigent "}}
+{"turn": 1, "event": {"type": "token", "content": "individuals accused "}}
+{"turn": 1, "event": {"type": "token", "content": "of bailable offences"}}
+{"turn": 1, "event": {"type": "token", "content": " to be released on a"}}
+{"turn": 1, "event": {"type": "token", "content": " bail bond without s"}}
+{"turn": 1, "event": {"type": "token", "content": "urety if they cannot"}}
+{"turn": 1, "event": {"type": "token", "content": " provide bail within"}}
+{"turn": 1, "event": {"type": "token", "content": " a week.\n\n### 5. Fil"}}
+{"turn": 1, "event": {"type": "token", "content": "ing of Charge Sheet/"}}
+{"turn": 1, "event": {"type": "token", "content": "Final Report\n\n*   **"}}
+{"turn": 1, "event": {"type": "token", "content": "Submission:** After "}}
+{"turn": 1, "event": {"type": "token", "content": "completing the inves"}}
+{"turn": 1, "event": {"type": "token", "content": "tigation, the police"}}
+{"turn": 1, "event": {"type": "token", "content": " submit a \"police re"}}
+{"turn": 1, "event": {"type": "token", "content": "port\" to the Magistr"}}
+{"turn": 1, "event": {"type": "token", "content": "ate, which can be a "}}
+{"turn": 1, "event": {"type": "token", "content": "charge sheet or a cl"}}
+{"turn": 1, "event": {"type": "token", "content": "osure report. A char"}}
+{"turn": 1, "event": {"type": "token", "content": "ge sheet is defined "}}
+{"turn": 1, "event": {"type": "token", "content": "under Section 193 of"}}
+{"turn": 1, "event": {"type": "token", "content": " BNSS as the final r"}}
+{"turn": 1, "event": {"type": "token", "content": "eport prepared by a "}}
+{"turn": 1, "event": {"type": "token", "content": "police officer.\n*   "}}
+{"turn": 1, "event": {"type": "token", "content": "**Contents:** The ch"}}
+{"turn": 1, "event": {"type": "token", "content": "arge sheet includes "}}
+{"turn": 1, "event": {"type": "token", "content": "collected evidence, "}}
+{"turn": 1, "event": {"type": "token", "content": "witness statements, "}}
+{"turn": 1, "event": {"type": "token", "content": "the accused's crimin"}}
+{"turn": 1, "event": {"type": "token", "content": "al history (if any),"}}
+{"turn": 1, "event": {"type": "token", "content": " and other documenta"}}
+{"turn": 1, "event": {"type": "token", "content": "ry evidence.\n*   **T"}}
+{"turn": 1, "event": {"type": "token", "content": "imelines:** BNSS imp"}}
+{"turn": 1, "event": {"type": "token", "content": "oses stricter timeli"}}
+{"turn": 1, "event": {"type": "token", "content": "nes for charge sheet"}}
+{"turn": 1, "event": {"type": "token", "content": " submission. For ser"}}
+{"turn": 1, "event": {"type": "token", "content": "ious offences punish"}}
+{"turn": 1, "event": {"type": "token", "content": "able with life impri"}}
+{"turn": 1, "event": {"type": "token", "content": "sonment or death, th"}}
+{"turn": 1, "event": {"type": "token", "content": "e charge sheet must "}}
+{"turn": 1, "event": {"type": "token", "content": "be filed within 90 d"}}
+{"turn": 1, "event": {"type": "token", "content": "ays. For offences pu"}}
+{"turn": 1, "event": {"type": "token", "content": "nishable with up to "}}
+{"turn": 1, "event": {"type": "token", "content": "10 years, the timeli"}}
+{"turn": 1, "event": {"type": "token", "content": "ne is 60 days.\n\n### "}}
+{"turn": 1, "event": {"type": "token", "content": "6. Cognizance by Mag"}}
+{"turn": 1, "event": {"type": "token", "content": "istrate and Committa"}}
+{"turn": 1, "event": {"type": "token", "content": "l\n\n*   **Cognizance:"}}
+{"turn": 1, "event": {"type": "token", "content": "** Upon receiving th"}}
+{"turn": 1, "event": {"type": "token", "content": "e charge sheet, the "}}
+{"turn": 1, "event": {"type": "token", "content": "Magistrate takes cog"}}
+{"turn": 1, "event": {"type": "token", "content": "nizance of the offen"}}
+{"turn": 1, "event": {"type": "token", "content": "ce.\n*   **Committal:"}}
+{"turn": 1, "event": {"type": "token", "content": "** For grave offence"}}
+{"turn": 1, "event": {"type": "token", "content": "s exclusively triabl"}}
+{"turn": 1, "event": {"type": "token", "content": "e by a Court of Sess"}}
+{"turn": 1, "event": {"type": "token", "content": "ions (e.g., murder, "}}
+{"turn": 1, "event": {"type": "token", "content": "rape, dacoity, offen"}}
+{"turn": 1, "event": {"type": "token", "content": "ces punishable with "}}
+{"turn": 1, "event": {"type": "token", "content": "death, life imprison"}}
+{"turn": 1, "event": {"type": "token", "content": "ment, or imprisonmen"}}
+{"turn": 1, "event": {"type": "token", "content": "t exceeding seven ye"}}
+{"turn": 1, "event": {"type": "token", "content": "ars), the Magistrate"}}
+{"turn": 1, "event": {"type": "token", "content": " commits the case to"}}
+{"turn": 1, "event": {"type": "token", "content": " the Sessions Court."}}
+{"turn": 1, "event": {"type": "token", "content": " BNSS prescribes a 9"}}
+{"turn": 1, "event": {"type": "token", "content": "0-day period for com"}}
+{"turn": 1, "event": {"type": "token", "content": "mitments to Sessions"}}
+{"turn": 1, "event": {"type": "token", "content": " Courts.\n\n### 7. Fra"}}
+{"turn": 1, "event": {"type": "token", "content": "ming of Charges\n\n*  "}}
+{"turn": 1, "event": {"type": "token", "content": " **Court's Role:** T"}}
+{"turn": 1, "event": {"type": "token", "content": "he court examines th"}}
+{"turn": 1, "event": {"type": "token", "content": "e evidence and decid"}}
+{"turn": 1, "event": {"type": "token", "content": "es which charges to "}}
+{"turn": 1, "event": {"type": "token", "content": "formally bring again"}}
+{"turn": 1, "event": {"type": "token", "content": "st the accused.\n*   "}}
+{"turn": 1, "event": {"type": "token", "content": "**Procedure:** Secti"}}
+{"turn": 1, "event": {"type": "token", "content": "on 251 of BNSS deals"}}
+{"turn": 1, "event": {"type": "token", "content": " with the framing of"}}
+{"turn": 1, "event": {"type": "token", "content": " charges. The charge"}}
+{"turn": 1, "event": {"type": "token", "content": " must be precise, st"}}
+{"turn": 1, "event": {"type": "token", "content": "ating the specific o"}}
+{"turn": 1, "event": {"type": "token", "content": "ffence and its parti"}}
+{"turn": 1, "event": {"type": "token", "content": "culars (time, place,"}}
+{"turn": 1, "event": {"type": "token", "content": " person).\n*   **Time"}}
+{"turn": 1, "event": {"type": "token", "content": "lines:** Charges sho"}}
+{"turn": 1, "event": {"type": "token", "content": "uld be framed within"}}
+{"turn": 1, "event": {"type": "token", "content": " 60 days of the firs"}}
+{"turn": 1, "event": {"type": "token", "content": "t hearing on such ch"}}
+{"turn": 1, "event": {"type": "token", "content": "arges.\n*   **Dischar"}}
+{"turn": 1, "event": {"type": "token", "content": "ge:** If the court f"}}
+{"turn": 1, "event": {"type": "token", "content": "inds insufficient gr"}}
+{"turn": 1, "event": {"type": "token", "content": "ounds to proceed aft"}}
+{"turn": 1, "event": {"type": "token", "content": "er examining the evi"}}
+{"turn": 1, "event": {"type": "token", "content": "dence and hearing ar"}}
+{"turn": 1, "event": {"type": "token", "content": "guments, the accused"}}
+{"turn": 1, "event": {"type": "token", "content": " may be discharged u"}}
+{"turn": 1, "event": {"type": "token", "content": "nder Section 250 of "}}
+{"turn": 1, "event": {"type": "token", "content": "BNSS before charges "}}
+{"turn": 1, "event": {"type": "token", "content": "are framed.\n\n### 8. "}}
+{"turn": 1, "event": {"type": "token", "content": "Trial Process\n\n*   *"}}
+{"turn": 1, "event": {"type": "token", "content": "*Types of Trials:** "}}
+{"turn": 1, "event": {"type": "token", "content": "BNSS outlines proced"}}
+{"turn": 1, "event": {"type": "token", "content": "ures for different t"}}
+{"turn": 1, "event": {"type": "token", "content": "ypes of trials:\n    "}}
+{"turn": 1, "event": {"type": "token", "content": "*   **Summons Trial:"}}
+{"turn": 1, "event": {"type": "token", "content": "** For petty crimes,"}}
+{"turn": 1, "event": {"type": "token", "content": " with no formal char"}}
+{"turn": 1, "event": {"type": "token", "content": "ge framing required."}}
+{"turn": 1, "event": {"type": "token", "content": "\n    *   **Warrant T"}}
+{"turn": 1, "event": {"type": "token", "content": "rial:** For offences"}}
+{"turn": 1, "event": {"type": "token", "content": " punishable with mor"}}
+{"turn": 1, "event": {"type": "token", "content": "e than 2 years of im"}}
+{"turn": 1, "event": {"type": "token", "content": "prisonment, involvin"}}
+{"turn": 1, "event": {"type": "token", "content": "g strict evidence an"}}
+{"turn": 1, "event": {"type": "token", "content": "d witness examinatio"}}
+{"turn": 1, "event": {"type": "token", "content": "n.\n    *   **Session"}}
+{"turn": 1, "event": {"type": "token", "content": "s Trial:** Handled b"}}
+{"turn": 1, "event": {"type": "token", "content": "y the Sessions Court"}}
+{"turn": 1, "event": {"type": "token", "content": " for grave offences,"}}
+{"turn": 1, "event": {"type": "token", "content": " involving detailed "}}
+{"turn": 1, "event": {"type": "token", "content": "witness and cross-ex"}}
+{"turn": 1, "event": {"type": "token", "content": "amination. The prose"}}
+{"turn": 1, "event": {"type": "token", "content": "cution is conducted "}}
+{"turn": 1, "event": {"type": "token", "content": "by a Public Prosecut"}}
+{"turn": 1, "event": {"type": "token", "content": "or.\n*   **Plea:** Th"}}
+{"turn": 1, "event": {"type": "token", "content": "e accused is informe"}}
+{"turn": 1, "event": {"type": "token", "content": "d of the charges and"}}
+{"turn": 1, "event": {"type": "token", "content": " asked to plead guil"}}
+{"turn": 1, "event": {"type": "token", "content": "ty or claim trial.\n*"}}
+{"turn": 1, "event": {"type": "token", "content": "   **Evidence:**\n   "}}
+{"turn": 1, "event": {"type": "token", "content": " *   **Prosecution E"}}
+{"turn": 1, "event": {"type": "token", "content": "vidence:** Prosecuti"}}
+{"turn": 1, "event": {"type": "token", "content": "on witnesses testify"}}
+{"turn": 1, "event": {"type": "token", "content": " first.\n    *   **De"}}
+{"turn": 1, "event": {"type": "token", "content": "fence Evidence:** De"}}
+{"turn": 1, "event": {"type": "token", "content": "fence witnesses are "}}
+{"turn": 1, "event": {"type": "token", "content": "examined next.\n    *"}}
+{"turn": 1, "event": {"type": "token", "content": "   **Electronic Mode"}}
+{"turn": 1, "event": {"type": "token", "content": ":** Trials, inquirie"}}
+{"turn": 1, "event": {"type": "token", "content": "s, and proceedings m"}}
+{"turn": 1, "event": {"type": "token", "content": "ay be held in electr"}}
+{"turn": 1, "event": {"type": "token", "content": "onic mode, and witne"}}
+{"turn": 1, "event": {"type": "token", "content": "sses may be examined"}}
+{"turn": 1, "event": {"type": "token", "content": " through audio-video"}}
+{"turn": 1, "event": {"type": "token", "content": " electronic means.\n*"}}
+{"turn": 1, "event": {"type": "token", "content": "   **Examination of "}}
+{"turn": 1, "event": {"type": "token", "content": "Accused:** The accus"}}
+{"turn": 1, "event": {"type": "token", "content": "ed is also examined "}}
+{"turn": 1, "event": {"type": "token", "content": "by the court.\n\n### 9"}}
+{"turn": 1, "event": {"type": "token", "content": ". Final Arguments an"}}
+{"turn": 1, "event": {"type": "token", "content": "d Judgment\n\n*   **Ar"}}
+{"turn": 1, "event": {"type": "token", "content": "guments:** After wit"}}
+{"turn": 1, "event": {"type": "token", "content": "ness examination, bo"}}
+{"turn": 1, "event": {"type": "token", "content": "th sides present the"}}
+{"turn": 1, "event": {"type": "token", "content": "ir final arguments.\n"}}
+{"turn": 1, "event": {"type": "token", "content": "*   **Judgment:** Th"}}
+{"turn": 1, "event": {"type": "token", "content": "e judge then deliver"}}
+{"turn": 1, "event": {"type": "token", "content": "s the judgment, whic"}}
+{"turn": 1, "event": {"type": "token", "content": "h can be an acquitta"}}
+{"turn": 1, "event": {"type": "token", "content": "l (if evidence is in"}}
+{"turn": 1, "event": {"type": "token", "content": "sufficient) or a con"}}
+{"turn": 1, "event": {"type": "token", "content": "viction (if guilt is"}}
+{"turn": 1, "event": {"type": "token", "content": " proven beyond doubt"}}
+{"turn": 1, "event": {"type": "token", "content": ").\n*   **Timelines:*"}}
+{"turn": 1, "event": {"type": "token", "content": "* Judgment must be d"}}
+{"turn": 1, "event": {"type": "token", "content": "elivered within 30 d"}}
+{"turn": 1, "event": {"type": "token", "content": "ays of the completio"}}
+{"turn": 1, "event": {"type": "token", "content": "n of arguments, exte"}}
+{"turn": 1, "event": {"type": "token", "content": "ndable up to 60 days"}}
+{"turn": 1, "event": {"type": "token", "content": ".\n\n### 10. Sentencin"}}
+{"turn": 1, "event": {"type": "token", "content": "g\n\n*   If convicted,"}}
+{"turn": 1, "event": {"type": "token", "content": " the accused must se"}}
+{"turn": 1, "event": {"type": "token", "content": "rve the sentence unl"}}
+{"turn": 1, "event": {"type": "token", "content": "ess a stay order is "}}
+{"turn": 1, "event": {"type": "token", "content": "obtained from a high"}}
+{"turn": 1, "event": {"type": "token", "content": "er court or a pardon"}}
+{"turn": 1, "event": {"type": "token", "content": "/commutation is gran"}}
+{"turn": 1, "event": {"type": "token", "content": "ted. BNSS introduces"}}
+{"turn": 1, "event": {"type": "token", "content": " community service a"}}
+{"turn": 1, "event": {"type": "token", "content": "s a form of punishme"}}
+{"turn": 1, "event": {"type": "token", "content": "nt for certain petty"}}
+{"turn": 1, "event": {"type": "token", "content": " offences.\n\n### 11. "}}
+{"turn": 1, "event": {"type": "token", "content": "Appeal Process\n\n*   "}}
+{"turn": 1, "event": {"type": "token", "content": "**Right to Appeal:**"}}
+{"turn": 1, "event": {"type": "token", "content": " Appeal is a statuto"}}
+{"turn": 1, "event": {"type": "token", "content": "ry right, not an inh"}}
+{"turn": 1, "event": {"type": "token", "content": "erent one. If dissat"}}
+{"turn": 1, "event": {"type": "token", "content": "isfied with the verd"}}
+{"turn": 1, "event": {"type": "token", "content": "ict, the accused or "}}
+{"turn": 1, "event": {"type": "token", "content": "victim can file an a"}}
+{"turn": 1, "event": {"type": "token", "content": "ppeal under BNSS.\n* "}}
+{"turn": 1, "event": {"type": "token", "content": "  **Hierarchy of App"}}
+{"turn": 1, "event": {"type": "token", "content": "eals:** Appeals gene"}}
+{"turn": 1, "event": {"type": "token", "content": "rally follow a hiera"}}
+{"turn": 1, "event": {"type": "token", "content": "rchy: Sessions Court"}}
+{"turn": 1, "event": {"type": "token", "content": " → High Court → Supr"}}
+{"turn": 1, "event": {"type": "token", "content": "eme Court.\n*   **BNS"}}
+{"turn": 1, "event": {"type": "token", "content": "S Provisions:** Chap"}}
+{"turn": 1, "event": {"type": "token", "content": "ter XXXI of BNSS (Se"}}
+{"turn": 1, "event": {"type": "token", "content": "ctions 413 to 435) d"}}
+{"turn": 1, "event": {"type": "token", "content": "eals with appeals.\n "}}
+{"turn": 1, "event": {"type": "token", "content": "   *   **Appeal agai"}}
+{"turn": 1, "event": {"type": "token", "content": "nst Conviction:** An"}}
+{"turn": 1, "event": {"type": "token", "content": " accused convicted b"}}
+{"turn": 1, "event": {"type": "token", "content": "y a Sessions Court h"}}
+{"turn": 1, "event": {"type": "token", "content": "as the right to appe"}}
+{"turn": 1, "event": {"type": "token", "content": "al to the High Court"}}
+{"turn": 1, "event": {"type": "token", "content": " under Section 455 o"}}
+{"turn": 1, "event": {"type": "token", "content": "f BNSS.\n    *   **Ap"}}
+{"turn": 1, "event": {"type": "token", "content": "peal against Acquitt"}}
+{"turn": 1, "event": {"type": "token", "content": "al:** The State Gove"}}
+{"turn": 1, "event": {"type": "token", "content": "rnment or victim can"}}
+{"turn": 1, "event": {"type": "token", "content": " appeal against an a"}}
+{"turn": 1, "event": {"type": "token", "content": "cquittal under Secti"}}
+{"turn": 1, "event": {"type": "token", "content": "on 419 of BNSS.\n    "}}
+{"turn": 1, "event": {"type": "token", "content": "*   **Appeal for Sen"}}
+{"turn": 1, "event": {"type": "token", "content": "tence Enhancement:**"}}
+{"turn": 1, "event": {"type": "token", "content": " The State Governmen"}}
+{"turn": 1, "event": {"type": "token", "content": "t can appeal for a s"}}
+{"turn": 1, "event": {"type": "token", "content": "tricter sentence und"}}
+{"turn": 1, "event": {"type": "token", "content": "er Section 418 of BN"}}
+{"turn": 1, "event": {"type": "token", "content": "SS if the punishment"}}
+{"turn": 1, "event": {"type": "token", "content": " awarded is inadequa"}}
+{"turn": 1, "event": {"type": "token", "content": "te.\n    *   **Appeal"}}
+{"turn": 1, "event": {"type": "token", "content": " to Supreme Court:**"}}
+{"turn": 1, "event": {"type": "token", "content": " If a High Court rev"}}
+{"turn": 1, "event": {"type": "token", "content": "erses an acquittal a"}}
+{"turn": 1, "event": {"type": "token", "content": "nd convicts a person"}}
+{"turn": 1, "event": {"type": "token", "content": ", sentencing them to"}}
+{"turn": 1, "event": {"type": "token", "content": " death, life impriso"}}
+{"turn": 1, "event": {"type": "token", "content": "nment, or ten years "}}
+{"turn": 1, "event": {"type": "token", "content": "or more, the accused"}}
+{"turn": 1, "event": {"type": "token", "content": " may appeal to the S"}}
+{"turn": 1, "event": {"type": "token", "content": "upreme Court.\n*   **"}}
+{"turn": 1, "event": {"type": "token", "content": "Timelines for Appeal"}}
+{"turn": 1, "event": {"type": "token", "content": "s:** Time limits for"}}
+{"turn": 1, "event": {"type": "token", "content": " appeals are stricte"}}
+{"turn": 1, "event": {"type": "token", "content": "r under BNSS than un"}}
+{"turn": 1, "event": {"type": "token", "content": "der the previous CrP"}}
+{"turn": 1, "event": {"type": "token", "content": "C. An appeal by the "}}
+{"turn": 1, "event": {"type": "token", "content": "State Government mus"}}
+{"turn": 1, "event": {"type": "token", "content": "t be filed within si"}}
+{"turn": 1, "event": {"type": "token", "content": "x months, and by oth"}}
+{"turn": 1, "event": {"type": "token", "content": "ers within sixty day"}}
+{"turn": 1, "event": {"type": "token", "content": "s.\n\n### Key Legal Pr"}}
+{"turn": 1, "event": {"type": "token", "content": "ovisions\n\n*   **Bhar"}}
+{"turn": 1, "event": {"type": "token", "content": "atiya Nyaya Sanhita "}}
+{"turn": 1, "event": {"type": "token", "content": "(BNS), 2023:** This "}}
+{"turn": 1, "event": {"type": "token", "content": "Act defines various "}}
+{"turn": 1, "event": {"type": "token", "content": "criminal offences an"}}
+{"turn": 1, "event": {"type": "token", "content": "d their punishments."}}
+{"turn": 1, "event": {"type": "token", "content": " It replaced the Ind"}}
+{"turn": 1, "event": {"type": "token", "content": "ian Penal Code, 1860"}}
+{"turn": 1, "event": {"type": "token", "content": ", and came into forc"}}
+{"turn": 1, "event": {"type": "token", "content": "e on July 1, 2024.\n*"}}
+{"turn": 1, "event": {"type": "token", "content": "   **Bharatiya Nagar"}}
+{"turn": 1, "event": {"type": "token", "content": "ik Suraksha Sanhita "}}
+{"turn": 1, "event": {"type": "token", "content": "(BNSS), 2023:** This"}}
+{"turn": 1, "event": {"type": "token", "content": " Act governs the pro"}}
+{"turn": 1, "event": {"type": "token", "content": "cedure for criminal "}}
+{"turn": 1, "event": {"type": "token", "content": "investigations, tria"}}
+{"turn": 1, "event": {"type": "token", "content": "ls, and related matt"}}
+{"turn": 1, "event": {"type": "token", "content": "ers. It replaced the"}}
+{"turn": 1, "event": {"type": "token", "content": " Code of Criminal Pr"}}
+{"turn": 1, "event": {"type": "token", "content": "ocedure, 1973, and c"}}
+{"turn": 1, "event": {"type": "token", "content": "ame into force on Ju"}}
+{"turn": 1, "event": {"type": "token", "content": "ly 1, 2024.\n*   **Bh"}}
+{"turn": 1, "event": {"type": "token", "content": "aratiya Sakshya Adhi"}}
+{"turn": 1, "event": {"type": "token", "content": "niyam (BSA), 2023:**"}}
+{"turn": 1, "event": {"type": "token", "content": " This Act deals with"}}
+{"turn": 1, "event": {"type": "token", "content": " the law of evidence"}}
+{"turn": 1, "event": {"type": "token", "content": " in judicial proceed"}}
+{"turn": 1, "event": {"type": "token", "content": "ings. It replaced th"}}
+{"turn": 1, "event": {"type": "token", "content": "e Indian Evidence Ac"}}
+{"turn": 1, "event": {"type": "token", "content": "t, 1872, and came in"}}
+{"turn": 1, "event": {"type": "token", "content": "to force on July 1, "}}
+{"turn": 1, "event": {"type": "token", "content": "2024."}}
+{"turn": 1, "event": {"type": "progress", "agent": "legal_concepts", "message": "Generating explanation...", "ts": 1784749851.8296828, "step": "generate"}}
+{"turn": 1, "event": {"type": "status", "agent": "legal_concepts", "message": "Explaining legal concepts..."}}
+{"turn": 1, "event": {"type": "progress", "agent": "orchestrator", "message": "Merging results from 1 agents...", "ts": 1784749851.8986592, "found": 1, "step": "synthesize"}}
+{"turn": 1, "event": {"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}}
+{"turn": 1, "event": {"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1784749851.9010682, "step": "finalize"}}
+{"turn": 1, "event": {"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}}
+{"turn": 1, "event": {"type": "response", "content": "Dealing with a criminal case in India involves a structured legal process governed primarily by the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, which replaced the Code of Criminal Procedure, 1973, and the Bharatiya Nyaya Sanhita (BNS), 2023, which replaced the Indian Penal Code, 1860. The Bharatiya Sakshya Adhiniyam (BSA), 2023, replaced the Indian Evidence Act, 1872. These new laws came into effect on July 1, 2024.\n\nThe process generally unfolds through several stages:\n\n### 1. Registration of First Information Report (FIR)\n\n-   **Initiation:** The criminal justice process typically begins with the registration of a First Information Report (FIR) under Section 173 of the Bharatiya Nagarik Suraksha Sanhita, 2023 (BNSS). An FIR is the police record of the initial information received about a cognizable offence. A cognizable offence is one where the police can arrest and initiate an investigation without a warrant.\n-   **Mode of Filing:** Information relating to a cognizable offence can be given orally or by electronic communication. If given orally, it must be reduced to writing and read to the informant, who then signs it. BNSS mandates that FIRs must be registered online, ensuring transparency and reducing delays. Victims can file complaints electronically.\n-   **Zero FIR:** The BNSS explicitly recognizes the concept of a \"Zero FIR,\" allowing a complaint to be registered at any police station, irrespective of territorial jurisdiction. This FIR is then transferred to the appropriate police station.\n-   **Mandatory Registration:** Police are duty-bound to register an FIR if the information discloses the commission of a cognizable offence. Refusal to register an FIR can lead to disciplinary action against the officer.\n\n### 2. Investigation by Police\n\n-   **Commencement:** Once an FIR is lodged, the police commence their investigation under BNSS. The investigation involves collecting facts, evidence, and materials related to the offence to ascertain if an offence has been committed and who is responsible.\n-   **Process:** This includes visiting the crime scene, collecting evidence, examining witnesses, conducting searches and seizures, and arresting the accused if necessary. BNSS allows video recording of statements to prevent coercion.\n-   **Timelines:** BNSS imposes stricter timelines for investigation. It must be completed within 60 days for offences punishable with up to 10 years of imprisonment and within 90 days for offences punishable with death or life imprisonment. Victims have the right to receive updates on the investigation.\n-   **Forensic Evidence:** For offences punishable with seven years of imprisonment or more, forensic evidence collection by a forensic team at the crime scene is mandatory, and the process must be recorded.\n\n### 3. Arrest and Custody\n\n-   **Arrest:** If the investigation reveals sufficient evidence, the police may arrest the accused.\n-   **Custody:** The Constitution and BNSS prohibit detention in police custody beyond 24 hours without a Magistrate's order. The Magistrate can extend police custody up to 15 days, which can be authorised in parts during the initial 40 or 60 days of the total 60 or 90 days of judicial custody. Overall detention cannot exceed 60 or 90 days, depending on the offence.\n\n### 4. Bail\n\n-   **Definition:** Bail, as defined under Section 2(1)(b) of BNSS, is the release of a person accused or suspected of an offence from legal custody upon certain conditions, usually involving a bond or bail bond.\n-   **Types of Bail:**\n    -   **Bailable Offences:** For bailable offences, bail is a matter of right upon furnishing a bail bond or personal bond. Section 478 of BNSS deals with bail in bailable offences.\n    -   **Non-Bailable Offences:** For non-bailable offences, bail is at the discretion of the court, considering factors like the nature and gravity of the offence, the evidence, and the likelihood of the accused absconding.\n    -   **Anticipatory Bail:** Section 482 of BNSS allows a person apprehending arrest for a non-bailable offence to apply to the High Court or Sessions Court for directions for release on bail in the event of arrest.\n-   **Undertrial Prisoners:** Section 479 of BNSS provides for bail to undertrial prisoners. A person not accused of an offence punishable with death or life imprisonment must be released on bail if detained for half the maximum punishment, or one-third if a first-time offender. However, this provision does not apply if the undertrial is facing multiple charges.\n-   **Indigent Persons:** BNSS allows indigent individuals accused of bailable offences to be released on a bail bond without surety if they cannot provide bail within a week.\n\n### 5. Filing of Charge Sheet/Final Report\n\n-   **Submission:** After completing the investigation, the police submit a \"police report\" to the Magistrate, which can be a charge sheet or a closure report. A charge sheet is defined under Section 193 of BNSS as the final report prepared by a police officer.\n-   **Contents:** The charge sheet includes collected evidence, witness statements, the accused's criminal history (if any), and other documentary evidence.\n-   **Timelines:** BNSS imposes stricter timelines for charge sheet submission. For serious offences punishable with life imprisonment or death, the charge sheet must be filed within 90 days. For offences punishable with up to 10 years, the timeline is 60 days.\n\n### 6. Cognizance by Magistrate and Committal\n\n-   **Cognizance:** Upon receiving the charge sheet, the Magistrate takes cognizance of the offence.\n-   **Committal:** For grave offences exclusively triable by a Court of Sessions (e.g., murder, rape, dacoity, offences punishable with death, life imprisonment, or imprisonment exceeding seven years), the Magistrate commits the case to the Sessions Court. BNSS prescribes a 90-day period for commitments to Sessions Courts.\n\n### 7. Framing of Charges\n\n-   **Court's Role:** The court examines the evidence and decides which charges to formally bring against the accused.\n-   **Procedure:** Section 251 of BNSS deals with the framing of charges. The charge must be precise, stating the specific offence and its particulars (time, place, person).\n-   **Timelines:** Charges should be framed within 60 days of the first hearing on such charges.\n-   **Discharge:** If the court finds insufficient grounds to proceed after examining the evidence and hearing arguments, the accused may be discharged under Section 250 of BNSS before charges are framed.\n\n### 8. Trial Process\n\n-   **Types of Trials:** BNSS outlines procedures for different types of trials:\n    -   **Summons Trial:** For petty crimes, with no formal charge framing required.\n    -   **Warrant Trial:** For offences punishable with more than 2 years of imprisonment, involving strict evidence and witness examination.\n    -   **Sessions Trial:** Handled by the Sessions Court for grave offences, involving detailed witness and cross-examination. The prosecution is conducted by a Public Prosecutor.\n-   **Plea:** The accused is informed of the charges and asked to plead guilty or claim trial.\n-   **Evidence:**\n    -   **Prosecution Evidence:** Prosecution witnesses testify first.\n    -   **Defence Evidence:** Defence witnesses are examined next.\n    -   **Electronic Mode:** Trials, inquiries, and proceedings may be held in electronic mode, and witnesses may be examined through audio-video electronic means.\n-   **Examination of Accused:** The accused is also examined by the court.\n\n### 9. Final Arguments and Judgment\n\n-   **Arguments:** After witness examination, both sides present their final arguments.\n-   **Judgment:** The judge then delivers the judgment, which can be an acquittal (if evidence is insufficient) or a conviction (if guilt is proven beyond doubt).\n-   **Timelines:** Judgment must be delivered within 30 days of the completion of arguments, extendable up to 60 days.\n\n### 10. Sentencing\n\n-   If convicted, the accused must serve the sentence unless a stay order is obtained from a higher court or a pardon/commutation is granted. BNSS introduces community service as a form of punishment for certain petty offences.\n\n### 11. Appeal Process\n\n-   **Right to Appeal:** Appeal is a statutory right, not an inherent one. If dissatisfied with the verdict, the accused or victim can file an appeal under BNSS.\n-   **Hierarchy of Appeals:** Appeals generally follow a hierarchy: Sessions Court → High Court → Supreme Court.\n-   **BNSS Provisions:** Chapter XXXI of BNSS (Sections 413 to 435) deals with appeals.\n    -   **Appeal against Conviction:** An accused convicted by a Sessions Court has the right to appeal to the High Court under Section 455 of BNSS.\n    -   **Appeal against Acquittal:** The State Government or victim can appeal against an acquittal under Section 419 of BNSS.\n    -   **Appeal for Sentence Enhancement:** The State Government can appeal for a stricter sentence under Section 418 of BNSS if the punishment awarded is inadequate.\n    -   **Appeal to Supreme Court:** If a High Court reverses an acquittal and convicts a person, sentencing them to death, life imprisonment, or ten years or more, the accused may appeal to the Supreme Court.\n-   **Timelines for Appeals:** Time limits for appeals are stricter under BNSS than under the previous CrPC. An appeal by the State Government must be filed within six months, and by others within sixty days.\n\n### Key Legal Provisions\n\n-   **Bharatiya Nyaya Sanhita (BNS), 2023:** This Act defines various criminal offences and their punishments. It replaced the Indian Penal Code, 1860, and came into force on July 1, 2024.\n-   **Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023:** This Act governs the procedure for criminal investigations, trials, and related matters. It replaced the Code of Criminal Procedure, 1973, and came into force on July 1, 2024.\n-   **Bharatiya Sakshya Adhiniyam (BSA), 2023:** This Act deals with the law of evidence in judicial proceedings. It replaced the Indian Evidence Act, 1872, and came into force on July 1, 2024.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."}}
+{"turn": 1, "event": {"type": "sources", "data": [{"source_type": "legal_concepts", "title": "lawcrust.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGTRJEf6GWxt5wfKvtTrDPZwBS2tGyTuTqjBwv7d2oRvOpWeSBkJRTCdjI3cJeEEDQVbqFdh1fxoiftDiFUnh4m6HcikB9_hzPo47nXvCq5ryeavfK17D4ywpJjRu3Q6evrQdgBB58YmXVJI5IquUgRJsU=", "web_title": "lawcrust.in"}, {"source_type": "legal_concepts", "title": "wikipedia.org", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQELnFC4oVm_IGTn5A7NAkdaZH6hvIemn8VOUkCsXQFYVglOri4t3Ijjv-eRz_LZqOSgfHlLi3BsKohkL0NyJ5QRhMk2elitHPIZqGwVR7s-B6rSa5m48l_-oBU_QRtpj2KqkqTuHPvwmm4aD9-2-ZuJCxS0F2g3", "web_title": "wikipedia.org"}, {"source_type": "legal_concepts", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHgxkN9iuBTvtaj6dANz9HMM4M_rpm0dAMhirjMqwgsxHcjdzcF-zlwmMA-KTf6yOF0jUQCW6EmMdhbswu-isJ_3mScerz8t2vlw-0JIsUh--fzyn4pRtjTi-Vf7BCeSV1n6skhHtSIAXrzwBYjhyYfcLseQyYmkosklHt5wPC5dIqe4q2Yq_LVU4ZpOm4N72A9Lzn__TAnThRZlwLfXDWx", "web_title": "ipleaders.in"}, {"source_type": "legal_concepts", "title": "testbook.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFlVGZYh6kdNvyPnWm1x_cLmwmIWpxHVrusVEcfMxSoMuS9M7owCooeQXuI7tQFocUB2uWoMJcuW4sEUgvsX5xwJ--6R0pirbIg4a_FTYn_UDA6uLiAvUufwTKFxKbqiuaU_2YYMN041EyDxhCdGOwH4FMFqYbwpcwPJmVuM5jgjNxnrnsqO0hRpecErvBJvPHUyA8bb1ZpAr3btewPO9QRRvtQhx0VGKqe", "web_title": "testbook.com"}, {"source_type": "legal_concepts", "title": "sairamlawassociates.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFgRIrlYkrkaJ4QfcvBbwRnKSBWvZbWj49OPGnuXhM3K09gSF-e69oFJlVgknRPjbopkP2GLkPuDj0tkceC5dLgLpBgIlNCautDoUcX_0uHeQfYULTLRN3QCV6JfUjVzBUkxCr3se8dhM_DLlM2ww1P3lzgle58_1VvqKiBWo4r7_3kG5uqamlsQ1M3-NE21-bCMGVD7Oetf8WoAU51SxBZVulBwLtbwgPE", "web_title": "sairamlawassociates.in"}, {"source_type": "legal_concepts", "title": "indianlegalbooks.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHoDq2AvMfReXXYPSMwqViuBsvQbhiLH_LTLPnyb8KgbK_UNjr2XgvqPU8o3rqtn4HCV6QFIkomJp-AlPL47Brqgvm3MSDkcFhzXQ_KOHgtsX7HUHoEXWQY5SzAbW8MRyjFqOv0YT23w_2CO9CIHURV92bRqpPPBaoc3TI14A==", "web_title": "indianlegalbooks.com"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQExj8nZE7IpUPhG7SoRna0nFmtO4ilj2-9MtiZ9aCDShWIvzAnrBfIcDoUC_g5E2ojGxcQ6Y-T3FjlSMD1zYOHowh0F1hE644EZJWmEv3SYSNuJ1ZU8sBx3BB1o3Oz2HVU1IqKXbWFVFMomF3AXDKeuq3JCYLSV3kuGWwo=", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "aninews.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGObLxZVLL061JyKYTgC2BZaqxyeKwY5rdpK5CoDDr7LUxYIHwDyv13KboukGC5W0UgAdL5fMHtUT4V2tnNAYqjHeYYoygOD_-X0A3444S58jJ-65sgkWX9EkqVQcXG96PWXy4m24ME2t_sz3HTsgdlQZmjjPSSXsDxeOC_3rrp0lsj-sTjNoLfrTwPW300nu2fiEbD8QyODuMx-bG2yQHIsFaBHTcpm6Q0X9fK_sUhLHz75hPBOw==", "web_title": "aninews.in"}, {"source_type": "legal_concepts", "title": "vikaspedia.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGnmwqroPlr-mF5_TTu4Twt3Id4XWXd4ND0E-Fh9wdJma3e21-UzQVj9R5jHbFBmTNBCruNRMnWsqQC7v_AGHixRztqCjsmk7ac6TE08u9U96hdjKf_RLGWtl_YfWK97q3TKak4mT6NyuDlbbz-1rV80xFFiF9-zMWHTzbJACH5HBp_YqipU82dzdZAjFFa8J9CrDl_nQ91qnOGjFrHTimlyElwsoo1pSZ8qZpzFxg_b8FLtwIhG0bC7HwwDEAJ4M8=", "web_title": "vikaspedia.in"}, {"source_type": "legal_concepts", "title": "testbook.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHRx4dkXz4sNw9SaqKoUbyLP2aqxvSwK48lrnZ_IP-9lMlkffFOvDBW8RWbYYvHl4bzD6tXHjpyN-oWk0MqgJHb3ZUi0r3J4RCE7tj06nS7cABkNEXQq01Sk23vwQYjrHHYRHXkj_WhU0BzOHo7ZjvbhyB9UCOaGsXoYGBKebBlLyZzpBvJH6mQgY1tN3sD5JoEUMFEYD7dVe9C_HaMG5t3mQKlXgAngDxaUA==", "web_title": "testbook.com"}, {"source_type": "legal_concepts", "title": "collegedunia.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGTNTGdv0M-gt4l8-qp3gYRvUOmgJIdx1dewvwvTogMjMdsugB1oBQLIqTeJX_sYnPrmsy5AXl9Khcd5LAaDn6DvCkvyrSVoYlK7FXtPeU3Iqs75fG8RNEcTmlgFIBiSXg9FCINk3SeLsNrA3ZhFXTcakGI_iNxw3GLwBJzXHRTgyfzMGx2gmdRtzTJ0yZYf8Kj8cE-2GwM0zIUYuYkG1-KlbsxdLrF7irMKWQmwsAa", "web_title": "collegedunia.com"}, {"source_type": "legal_concepts", "title": "legalsakhi.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFdJw9UPQ8ReBbQe-W5hd0G58_ee52YOIaIT3BinPTFz1GZLpWNzq8ZNVqsL1-RX2LmGZUVXFG3IsupAA-N-uXV1gPGW-McHDWV4SAEogagHAP0nk9rZNWHmArOMkNpVJc--NfRIqkfuxKW-l7cyTVPC76p34hW", "web_title": "legalsakhi.com"}, {"source_type": "legal_concepts", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGEUJjP_zqHiQZnzrAGuiY2GuMzFhb-1WCo5ag35WuIFfeEePrttk0_LmIaDnmeKEzYr3XuR8ydGmDR1TMcNOBUdrWUuyWGyQiu_nsZwZHxrPiXVQ3WQlo-Aigg9-PiatP9tXcrTi7V3TB_94LfsIZSyf7qd0FjGC1InrSR6zj9Q-juZOAjlV5FFNf3Vfi1XabvcA==", "web_title": "ipleaders.in"}, {"source_type": "legal_concepts", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGCV13-ek9r9_LRozOHcNgRin4lWjIzfaLcDuLa5G1y3SeN2U67EeAKfm6tR1d_CM-DFToF7l1HqNXpZGc6DE9tGmKvnwF6EhTVZGEOzT2bqrdIiGwPzWwadxKpsle-gxQ0OJWUMSAo_Wu2wpMWPAwgm0K2lDW5EVROdeb3pMF5WEMSSa9TD2RTUOGuNclsuIz0X-pr8w7rlEU=", "web_title": "ipleaders.in"}, {"source_type": "legal_concepts", "title": "ijirl.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGAjjULhLoeCRgt4e5PWrdZF3Z9ypMUfpRZnEwGL5VECEu7qkY-kKK64qnbvJhFfn3cH2e51SOzGV6aPTwTlUP4TJWfTJzNSei2-78LIlq4easg1zU9URjiv6g7HxMhk2Kse7iNCTonysLkwrDuTTKz3bxMvG6V_cnIQ-AmMiCCp170wA9LtGfiiwwMjRbYB8Pq2PTHhOCaAQ0gN1I-m3q4gFcfPqNmZnBO4VEuaMY=", "web_title": "ijirl.com"}, {"source_type": "legal_concepts", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHvB9Q_lOiNbxJYCuuma8SnbFQK53AWIdETrLHDsOvLguwnV-rSofRywhqaBMQXXZu8HcFUHIx84ocuiCU2niONJmSaruzYj5za8Uy7QvOHslhiLFvCGTTShsvwRWpYpZqHGEzvjl98MTI7XQ8RRbVG5HPqvjYCKkr9QFZ-sEV-aPHNmo9GEQGFW9UHZqo3", "web_title": "ipleaders.in"}, {"source_type": "legal_concepts", "title": "lawsho.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHAcUcLK4wo7ZDl16D9gQn39za6NUJ737lf8onldUWINnseZL0X1PMklvrR3h_Um7Fj7REvJotFfQUF2yurXebd4ZEfCfl3AOkSLSZ4Wxlx5os3Asa7mSrCTVo69YZ9MrfryayzRIXflGwbXFoRrg==", "web_title": "lawsho.com"}, {"source_type": "legal_concepts", "title": "cyberlawconsulting.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQENm3SMhyk0Q-3hHnuX_ZOlI7wtsLjaD2B1v3V4xzUTeb8pwnuMN4KYGbLqASHO4ii-GNhwtioREL8Pect8PNExxykvUS-5atzDg7zdYWSX_d-JwCBU_LzmX3zoelYRCstx0yDROlt-h8sxfjGwff77ENKo6qVK-qePyUQhquVktQ==", "web_title": "cyberlawconsulting.com"}, {"source_type": "legal_concepts", "title": "prsindia.org", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHOvfRhmZoTizvo1MYn8HERsQoImABIcdB599cx-FZ0Lgm7T5sfwC8XpFi_affwRht4ByS1dw6oZCOgLuK7X6wbG5TwINRk_k7Rzcm40l3gf8uXEEkfklN-NeD7OJsGFhL9tdAnJYhtUvXcUDTdu1-JBycCVk17w0JewWRXOJdsIsEPSLGI", "web_title": "prsindia.org"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFKnz_qqeq4l2ABY-fve5Ye1xeHNVXIGPfQHy3QgDkO0e8WefiWeqN-sNgXAZQAJVqZyz97y-V9PGomfV1Mdw29lv3vmz3lh9zsEZ1eDuPz28mnaK58e5yc_V5zXgHunuQc3tBIO3LWcukt-yCbpKhxgjJJeEO9vOxgR_6guPrF", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "judextutorials.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF4FRTcIcqHEUPf8MH4L9xvf3afjB3u4wG_SLUXEXei2BXHtHyMogbG3a83CoXmlXIsEnxXpEpLMh1edM3DP2JtWSSaJiCVgKMHnY5Y5BPVfMNVzBSORthYPTl3ZuNv4X3dNhWwF4FSVY6DC9mQ1Dmurax_6LiZ8m8NVdUdECTfG_U1oGJCierXhRBvi6v5Yrht4fSF02AWy5rMFzk=", "web_title": "judextutorials.com"}, {"source_type": "legal_concepts", "title": "supremetoday.ai", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH_o-pWaMrZGVHHjPR7ry5qxgibR37u_rbHFV8HyBfTBgorc3bO7y7avnTkcqf1f1dr3pTgXcNDB_mkEmSufV1O5BcWsEj4wP1HSbWe5SIlGvqUmfRANslQ_w-0E5WjZ00xMWKEAbVeu6QmYY7ysxY8jk0kYZvV8orf", "web_title": "supremetoday.ai"}, {"source_type": "legal_concepts", "title": "mcrhrdi.gov.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcbU1Z-xMMrISZjFcm_9wpGHjpK8kLp2MfuPLHFCk5HRsE8h4vhFZcDeQQUwqecIWtfKZxzmdJISKktrogDN0DpepTjEbPm6v0eXwHSTymgc8N4VLooNNgk9cZqjzEDitctJxkGibpxDP0FI2L3Y80xKAg3cvJdlcgqBupMf19cC1EjyA=", "web_title": "mcrhrdi.gov.in"}, {"source_type": "legal_concepts", "title": "lawrato.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFVHd6cXT0mcnUceGaDmnJ87g6ipYTZPwYryXHP1ZRDnmOb30M5XWeOvKAYC9X0z0M6k2MfJYkwlN5dGZwE9qYC-cUfHNXmlj6Xh8TOh3aKuFudB2opiggT87Nyu5gUCWthTAiHOYZTgXQDvSiVXf44DQ9aE2_waImwhiOz-rVCaPNhJ6Y8mEhGGeW23mHYmPS6ARR-BxxaoQDHG3EcNCCANVf4", "web_title": "lawrato.com"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFWWj2_BHkVggfc-NQBJae0i4eIZKLC7VRnIf-14Y6ruR10YQvhvnjkPy_zxNbndXrsie2Avhlkh4POw0BaX9BF095uwpxOha0jLQoDJdxGEg7uf749Vu2XzmaQpP466JLRYwJCUi_3Ptyshr-KsrznudiFVfGI3b6WOOMEdg==", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "divorcebylaw.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEfI-0SPxccoKiSfO8YhmIfPJUUsxkpF_jdL2ofAnSW66LZ4NJEIh6XJ-gxD4bHZhMdkSaLldttCkLDRn7FHFxpoePwVGAiezPRvD3Agmrfp5zaUvXysBhaS8uDRZKSlZaRcXeG5SVNO_Uh1OjzbHoVRKFcsy17EG8=", "web_title": "divorcebylaw.com"}, {"source_type": "legal_concepts", "title": "legalonus.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFgyFw3_rRFAXOds7msMsuHQAc0UCrxAdNbJEN4BOVqb2Jz9Tz85VT7lOJO9xgRlPH0yM14-2iodP16XIzVgrgy0lk0DaKzxz1AxMHQNcTNsrsNWSj9qi602w2z-dfhCzyee6MjgUklcgDOrKA5Eq7k0rxMssC6gaZkP03vWW38Ivhfxhk2TwKj4hBMOjzTKcdj", "web_title": "legalonus.com"}, {"source_type": "legal_concepts", "title": "finology.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH-J6kc4ISmY8adKFN6CJ7qFCmNM_T6eHDaAryXMg50gZ97Me3vByP8DrmyCJ6zI5OBAE2hBbBnrVOEbb3_1_Cxf8oszehqN5rAhGcvAhO2--sB3mCNeyJxmrFihph3VvwWrFIsa5OIZQpkeXiQE_VrcgCg5pEv", "web_title": "finology.in"}, {"source_type": "legal_concepts", "title": "pib.gov.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH5mRYUHe3cOgp0HYU29Qas_HZcR22r0nZt6ykx0tp8XvX99BOvkHir4dGLiQOD7n9pg9r9WJ0RSZpd2zMD3NxkiB1l9_AxgcfUflWam_e_9WHz-11r5NQsJVa8DJnJReXNGbPyv-B_VaIyiSsGZIgP73-cCQ==", "web_title": "pib.gov.in"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH9gMeTjjWF2R0sG_s11WNfxiuQn3m13l64svcYIZVFosTDRKdKfXuuWKAtuduUj0zYkcg_Ln0y5M7BoW0jug8sVyGiCAUBUqV0yp1n3l_FK2cW0GbS2lgYdcqFwwkcjK77MtXs6ORK-AGpdJiePgYXpLQTJGsKrQtMZGBr_H1bzpixjg==", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "drishtijudiciary.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFMKhFwL4pswfHR_PeA0yPb_Q6oJP3hOUp2X8MheyEJ8wedO6afPDuFdGs8gAGz-UqXzRK-Ge74npyigiDU6cBk2dCoW1TlXwiYIIjp8OvxfbYJSHu4NxMQMNlmFw1X-WOEQqT3yV-c7frl-xY2eiJy3Z7GyjNKMUdpshR_rHf5s1hjLUNEdIfsX83wgNtSyBapsEIKBZwJxqmOCME9ekoCdV6ndZn3lX2HAhBCz7HQYQ9JOZI=", "web_title": "drishtijudiciary.com"}, {"source_type": "legal_concepts", "title": "legalbites.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH1fl7AiEJGQ_Hohbo_ZXH7GoREYapRC3urrDaywWegqjI2x2GMhlQm_rcoEkCLjtxrAha3_HGu8_Ammst7eDttnhg-D4ZClpB4uyte8O3Yh_QyHpLR7ZLAYq7aSwlInAzZPkTez5_D0FqebnXY0aNdHIFetuEiOx11B0VfgeiUon4mIb0QwvbJPn2PD9vvmvdP3G3wvxQtp4AtEiOPS51HI8Jt-6xSKEScc28YOdFmTaL-XVWufhOqUQ5fcv4qlKi4K0uKLOI=", "web_title": "legalbites.in"}, {"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHwJbpOs7nX2fgXbUvgKSgU-u8Me-HjDI7hJsseW0wGsEJagOIUF4X4t-PpU_ALXe52KGVrv8UWbCqUQL5wIZqAhc_8-HlU6BPSuHgXSkXQNLtmA2I288Zmf7hS52PQ3H6qu1bStKMdYVdnKpPIwhs_nO-0RVd79Ir6GbOaj7Nf3Ai2mo8a5z9NTCiG2sClhHk=", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "pib.gov.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHi_fs7x6OxtZ4xDDmIH6EvB5aUmAkxMdcC7U2zwIRiasaKuti_2G_LakUkjfgDAIw9RQ2zLCGPbwf4OfcwNN5HL6CHCEfkLrpNYpBrn1NbcUdMsT0ymBbJ3iLVlbDdHM-NjjVzn2VXHBs_jrxi9vJXrt9D4w==", "web_title": "pib.gov.in"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG0UsnrCrPjUz7ieSBNAijgnVzJGv-8W94ofnQLGCyme-oGnAWoUShXBZxBM2Z3BYOgbeturC_w6THxYkLkLSdsl9-DLAM-FHiBtwiMkgevZ0J-h6kF6IflqLOrWM7_n23_K1UjQafFIJyPsf2EtkxQenkPmS7F5pd1utDK-UZqUBdnlArmxULyrfH8wS9PQ7xpBn2UF2HKW6Z5HhMi79iOXA==", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "nayalegal.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHjiukQvkIYtKNp4iro6kpC6K19KeMpv4RWSGywBWNHeop0BtJPknko6_1JbNOYAH6FC6YoTpcNaLiDh5CZ4YrWX1Irhgi0SvBzF-zsGr1IFfTnSttyy_mxTKKZDQrtGEMm37UDQGIRGxhLiHmugacrpw==", "web_title": "nayalegal.com"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF8LsUkCMLU75MP5sL73K9zlxaQq3xbwLgh7yCskolz8wGDS4lNC_G_XM0Y6ZDtsmQ0LDIVJY4BmjdVjC_m3nHSIpG8phtrOr5jq_V03A8YHrQArpKXBlv8BN4QJ_VDgV1aJ2hDqjN-DPyJKeE-tXToxuHC1oWHXzvJcjW1tQ==", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "drishtijudiciary.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGxXi0NNjO7v89I_S_Z4B0tH9CnG4nz5sU0IQzh8h8wEoUQ97Y2WfjaiUqBSh2FKa8jJH19ygMMLAjpg6ZsSFtipJlL2l0vz3iLry2qpaia6Hpw_NuSj_c_LO9ir1O32Beja-Ko3QsqLPgzyOjE_5noTNivNzqInbAzDo5E-DSfyWj0jSe5lLuVnPw_opW7tYaKPFM0kVEgySrEjD0vIKC6PsgJwC4z6ea6syO4eB9eaw==", "web_title": "drishtijudiciary.com"}, {"source_type": "legal_concepts", "title": "quora.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFa1PHqlVeJ1Gbk_dqxHNn_Jdoy_eRlVJtLP8t8UlNFB1HFJqPXCjYG1l36jX-2Z4SOnpi4euJhYF1YE7b0TS1rJcFbOHddMBaJRXkBXvbJ5738uMudExpjxWbAAHciqpGf4aGZh8Ej9xiZ-NmaECBNiXPIsMGxU2fC8GMGF36GUl80wSZUpnNIsnsGJPTk-QkhSt0nzVb2gyy-cwf3YkCT5e90YQty6QPmLXAQ1UHFen0=", "web_title": "quora.com"}, {"source_type": "legal_concepts", "title": "sheokandlegal.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH0wqd-AVsMBdMKdJV1Rl3kHLEdccR_l_nVjmNxBxkFE9yQ9ewxm91YDBpDEPGcn-InNzoeh2PW8xmOPOIXKN7HnwjUBwISTVu3QnGWG4qp5sTM5OzLSZJJFJYobSCoT0NiZ5CMEU2_2_7SXAUSmqsR_zJCo3q6pMUvn67AMQ==", "web_title": "sheokandlegal.com"}, {"source_type": "legal_concepts", "title": "scribd.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGeweS-8W8jc-mSBSpdEbWry-Y3jzrQnEOjUC7691FiQbaDEGKtYBfsUPhQAbTx78mXk7C-hNBgGKfm-YbiY6AWL3UyzSP6KA-AaCeJcAOsp_hqzOj4puMcxocUZV7DS5JyoqSTfJpJcm5LlSvS5p7xCkpBi00bp5cV1zf20u1Jn2voPZP_11Y=", "web_title": "scribd.com"}, {"source_type": "legal_concepts", "title": "indiacode.nic.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGVvpZRGDHQY8cGSZAOMCx_cMcqN0pL-55UTXalQ5No1Ks67ZSZqPyclbmJLXpoiobsRoZU6ExsXk2GV9jXtyA_Vwj1nvMTV8vz3AakJvaGZ3ueabcmlGkTtPPe2IhHWdgEBOXzEf-InAJdUI0C4A==", "web_title": "indiacode.nic.in"}, {"source_type": "legal_concepts", "title": "wikipedia.org", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHltjIwbupfmRtmpPoqNlDCYryzVw_26mVYlDFa47PH6JT48IGl8l09w7LjdxQN8w5vq9ogqyr02joLTJajpT7JB-mDKuxLm0PQsc2L0FLDI5OJLzDYVvUXbYK43Ex8qXo_tLon3MxnVuWlfKzEwuFGR80h6quC5nkkq88=", "web_title": "wikipedia.org"}, {"source_type": "legal_concepts", "title": "csja.gov.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGx0XwfTLl8En1gvow6kXODsFq8_kJm5ponQLtWUWu144iagAmzWAjsp7LqT4Dkq-qQfpU-tooZKFDC18oxECgo9dtu0uUVgW-3PegAs8OIcg5XVFpBVkgIzF76jlkbIH_eDS4_hsdk4LLg1xh2nQSvt4UgJ9x9GgR0LRKDMa7HE2_jYQLRtABBxalcTWPjjefYFhjRd70ZhWwNXaKv-7I8rnvDrbk7fIGN0jwc", "web_title": "csja.gov.in"}]}}
+{"turn": 1, "event": {"type": "followup_suggestions", "data": ["What are my rights if arrested?", "When is a lawyer required?", "What are the stages after arrest?"]}}
+{"turn": 1, "event": {"type": "done", "agents_used": ["Legal_Concepts"], "token_usage": {"input_tokens": 6871, "output_tokens": 322, "total_tokens": 7193, "cache_read_tokens": 0, "cache_creation_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.000816, "by_agent": {"Orchestrator": {"input": 6871, "output": 322, "total": 7193, "cache_read": 0, "calls": 2, "cost_usd": 0.000815}}, "calls": [{"agent": "Orchestrator", "step": "classify_and_plan", "input": 1371, "output": 61, "total": 1432, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000161}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5500, "output": 261, "total": 5761, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000654}]}, "thread_id": "d823a766-0fdb-4866-81eb-d855e3950fd0", "conversation_turn": 1, "query_rewritten": false, "effective_query": null}}
+{"turn": 2, "event": {"type": "thread_id", "data": "d823a766-0fdb-4866-81eb-d855e3950fd0"}}
+{"turn": 2, "event": {"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1784749852.9621687, "step": "validate"}}
+{"turn": 2, "event": {"type": "status", "agent": "guardrail_input", "message": "Validating query..."}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1784749852.9646325, "step": "language"}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1784749852.9668097, "step": "language", "substep": true}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1784749852.9670944, "step": "history"}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Found 1 previous turns", "ts": 1784749852.9706345, "found": 1, "step": "history", "substep": true}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Rewriting follow-up query...", "ts": 1784749852.9728816, "step": "rewrite"}}
+{"turn": 2, "event": {"type": "progress", "agent": "memory", "message": "Expanded: When should an individual hire a lawyer in the context of de", "ts": 1784749854.0222561, "detail": "When should an individual hire a lawyer in the context of dealing with a crimina", "step": "rewrite", "substep": true}}
+{"turn": 2, "event": {"type": "status", "agent": "memory", "message": "Loading context..."}}
+{"turn": 2, "event": {"type": "context", "query_rewritten": true, "effective_query": "When should an individual hire a lawyer in the context of dealing with a criminal case in India, considering the procedures outlined in the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, the Bharatiya Nyaya Sanhita (BNS), 2023, and the Bharatiya Sakshya Adhiniyam (BSA), 2023, particularly in relation to the registration of a First Information Report (FIR) and the concept of a Zero FIR?", "history_turns": 1, "has_summary": false}}
+{"turn": 2, "event": {"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1784749854.0242972, "step": "classify"}}
+{"turn": 2, "event": {"type": "progress", "agent": "orchestrator", "message": "Identified: Legal_Concepts, Newacts", "ts": 1784749855.6246765, "detail": "Legal_Concepts", "step": "classify", "substep": true}}
+{"turn": 2, "event": {"type": "progress", "agent": "orchestrator", "message": "Preparing search queries for 2 agents...", "ts": 1784749855.6246958, "found": 2, "step": "plan"}}
+{"turn": 2, "event": {"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}}
+{"turn": 2, "event": {"type": "agents_planned", "agents": ["Legal_Concepts", "Newacts"]}}
+{"turn": 2, "event": {"type": "progress", "agent": "legal_concepts", "message": "Researching legal concept...", "ts": 1784749856.6410918, "step": "research"}}
+{"turn": 2, "event": {"type": "progress", "agent": "newacts", "message": "Extracting act and section details...", "ts": 1784749856.6431005, "step": "parse"}}
+{"turn": 2, "event": {"type": "progress", "agent": "newacts", "message": "Searching new acts database...", "ts": 1784749857.5523632, "step": "search"}}
+{"turn": 2, "event": {"type": "progress", "agent": "newacts", "message": "Found 15 matching provisions", "ts": 1784749857.5978036, "found": 15, "step": "search"}}
+{"turn": 2, "event": {"type": "progress", "agent": "newacts", "message": "Generating response...", "ts": 1784749857.5988097, "step": "generate"}}
+{"turn": 2, "event": {"type": "token", "content": "The Bharatiya"}}
+{"turn": 2, "event": {"type": "token", "content": " Nyaya Sanhita (BNS), 2023, the Bharatiya"}}
+{"turn": 2, "event": {"type": "token", "content": " Nagarik Suraksha Sanhita (BNSS), 2023, and the Bharatiya Sakshya Adhiniyam (BSA), 2023, are the new criminal laws that came into effect on July 1, "}}
+{"turn": 2, "event": {"type": "token", "content": "2024, replacing the Indian Penal Code, 1860, the Code of Criminal Procedure, 1973, and the Indian Evidence Act, 1872, respectively.\n\n### FIR Registration and"}}
+{"turn": 2, "event": {"type": "token", "content": " Zero FIR under BNSS, 2023\n\n**FIR Registration:**\nThe process of registering a First Information Report (FIR) is crucial for initiating criminal proceedings. Under the Bharatiya Nagarik Suraksha Sanhita (BNSS), "}}
+{"turn": 2, "event": {"type": "token", "content": "2023, the procedure for FIR registration has been streamlined and made more victim-centric.\n\n*   **Section 173 of BNSS, 2023** (corresponding to Section 154 of Cr"}}
+{"turn": 2, "event": {"type": "token", "content": "PC, 1973) deals with information in cognizable cases. It mandates that every information relating to the commission of a cognizable offence, if given orally, shall be reduced to writing by the officer in charge of a police station and read"}}
+{"turn": 2, "event": {"type": "token", "content": " over to the informant. It shall be signed by the person giving it and the substance thereof shall be entered in a book to be kept by such officer in such form as the State Government may prescribe.\n*   **Electronic Filing:** BNSS, "}}
+{"turn": 2, "event": {"type": "token", "content": "2023, explicitly allows for the electronic filing of FIRs, making the process more accessible and efficient. This is a significant change from the previous law, which primarily focused on physical reporting.\n*   **Video Recording:** The BN"}}
+{"turn": 2, "event": {"type": "token", "content": "SS also provides for the video recording of the statement of the victim of sexual offences, ensuring a more accurate and less intimidating process for the victim.\n\n**Zero FIR:**\nThe concept of \"Zero FIR\" has been formally incorporated and strengthened"}}
+{"turn": 2, "event": {"type": "token", "content": " under the BNSS, 2023.\n\n*   A **Zero FIR** means that an FIR can be registered at any police station, regardless of the place of occurrence of the crime. The police station that registers the Zero"}}
+{"turn": 2, "event": {"type": "token", "content": " FIR is then required to transfer it to the police station having the appropriate territorial jurisdiction for investigation.\n*   This provision is particularly beneficial in cases where the victim might be in a different location from where the crime occurred or might be unaware of the exact"}}
+{"turn": 2, "event": {"type": "token", "content": " jurisdiction. It ensures that no time is lost in initiating the investigation due to jurisdictional issues.\n\n### Role of a Lawyer in Criminal Proceedings\n\nA lawyer plays a critical and multifaceted role throughout the entire criminal justice process, from the initial stages of FIR"}}
+{"turn": 2, "event": {"type": "token", "content": " registration to appeals.\n\n1.  **Pre-FIR Stage / FIR Registration:**\n    *   **Guidance on FIR Filing:** A lawyer can guide the victim or informant on how to file an FIR, ensuring all necessary details are included and"}}
+{"turn": 2, "event": {"type": "token", "content": " the complaint is legally sound.\n    *   **Protection of Accused's Rights:** If a person is falsely implicated or apprehends arrest, a lawyer can advise on seeking anticipatory bail under **Section 482 of BN"}}
+{"turn": 2, "event": {"type": "token", "content": "SS, 2023** (corresponding to Section 438 of CrPC, 1973).\n    *   **Monitoring FIR Registration:** A lawyer can ensure that the police register the FIR promptly and correctly"}}
+{"turn": 2, "event": {"type": "token", "content": ", and can take legal action if the police refuse to register an FIR.\n\n2.  **Investigation Stage:**\n    *   **Protecting Rights during Interrogation:** A lawyer ensures that the accused's rights are protected during police"}}
+{"turn": 2, "event": {"type": "token", "content": " interrogation, preventing coercion or illegal detention.\n    *   **Bail Applications:** A lawyer files and argues for bail applications (regular bail, anticipatory bail) at various stages of the investigation and trial, citing relevant provisions of BNSS, 2"}}
+{"turn": 2, "event": {"type": "token", "content": "023, such as **Section 478 (bail in bailable offences)** and **Section 482 (anticipatory bail)**.\n    *   **Monitoring Investigation:** A lawyer can monitor the progress of the investigation,"}}
+{"turn": 2, "event": {"type": "token", "content": " ensuring it is conducted fairly and legally. They can also represent the victim to ensure the investigation is thorough.\n    *   **Access to Case Diary:** While the accused or their agents are not entitled to call for police diaries, a lawyer can ensure"}}
+{"turn": 2, "event": {"type": "token", "content": " that if the court uses them to aid inquiry or trial, or if the police officer uses them to refresh memory or for contradiction, the provisions of **Section 148 or Section 164 of BSA, 202"}}
+{"turn": 2, "event": {"type": "token", "content": "3** (corresponding to Section 145 or Section 161 of IEA, 1872) are applied, as per **Section 192(5) of BNSS, 2023**.\n\n"}}
+{"turn": 2, "event": {"type": "token", "content": "3.  **Trial Stage:**\n    *   **Framing of Charges:** A lawyer argues for or against the framing of charges, seeking discharge of the accused if there is insufficient evidence under **Section 250 of BNSS, 2"}}
+{"turn": 2, "event": {"type": "token", "content": "023** (corresponding to Section 239 of CrPC, 1973).\n    *   **Evidence Presentation and Cross-Examination:** A lawyer is crucial in presenting evidence, examining and cross-examining"}}
+{"turn": 2, "event": {"type": "token", "content": " witnesses, and raising objections to inadmissible evidence under the Bharatiya Sakshya Adhiniyam (BSA), 2023.\n    *   **Character Evidence:** A lawyer uses provisions like **Section 47 of BSA, 20"}}
+{"turn": 2, "event": {"type": "token", "content": "23** (previous good character relevant in criminal cases) and **Section 49 of BSA, 2023** (previous bad character not relevant, except in reply) to build or defend the character of the accused."}}
+{"turn": 2, "event": {"type": "token", "content": "\n    *   **Competency of Witnesses:** A lawyer ensures that witnesses, including the husband or wife of the accused, are competent to testify as per **Section 126 of BSA, 2023** (corresponding to"}}
+{"turn": 2, "event": {"type": "token", "content": " Section 120 of IEA, 1872).\n    *   **Final Arguments:** A lawyer presents compelling final arguments to the court, summarizing the case and advocating for their client's position.\n\n4."}}
+{"turn": 2, "event": {"type": "token", "content": "  **Post-Trial Stage:**\n    *   **Sentencing:** In case of conviction, a lawyer argues on the quantum of sentence, presenting mitigating factors.\n    *   **Appeals:** If dissatisfied with the judgment, a lawyer files"}}
+{"turn": 2, "event": {"type": "token", "content": "In India, engaging a"}}
+{"turn": 2, "event": {"type": "token", "content": " lawyer for a crimin"}}
+{"turn": 2, "event": {"type": "token", "content": "al case is crucial a"}}
+{"turn": 2, "event": {"type": "token", "content": "t various stages, id"}}
+{"turn": 2, "event": {"type": "token", "content": "eally as early as po"}}
+{"turn": 2, "event": {"type": "token", "content": "ssible, to safeguard"}}
+{"turn": 2, "event": {"type": "token", "content": " one's rights and na"}}
+{"turn": 2, "event": {"type": "token", "content": "vigate the complex l"}}
+{"turn": 2, "event": {"type": "token", "content": "egal system effectiv"}}
+{"turn": 2, "event": {"type": "token", "content": "ely. The criminal ju"}}
+{"turn": 2, "event": {"type": "token", "content": "stice process in Ind"}}
+{"turn": 2, "event": {"type": "token", "content": "ia generally involve"}}
+{"turn": 2, "event": {"type": "token", "content": "s three broad stages"}}
+{"turn": 2, "event": {"type": "token", "content": ": investigation, inq"}}
+{"turn": 2, "event": {"type": "token", "content": "uiry, and trial.\n\nHe"}}
+{"turn": 2, "event": {"type": "token", "content": "re are the key situa"}}
+{"turn": 2, "event": {"type": "token", "content": "tions when it is adv"}}
+{"turn": 2, "event": {"type": "token", "content": "isable to hire a law"}}
+{"turn": 2, "event": {"type": "token", "content": "yer for a criminal c"}}
+{"turn": 2, "event": {"type": "token", "content": "ase:\n\n*   **Upon rec"}}
+{"turn": 2, "event": {"type": "token", "content": "eiving a Police Noti"}}
+{"turn": 2, "event": {"type": "token", "content": "ce or Summons:** Eve"}}
+{"turn": 2, "event": {"type": "token", "content": "n if formal charges "}}
+{"turn": 2, "event": {"type": "token", "content": "have not been filed,"}}
+{"turn": 2, "event": {"type": "token", "content": " receiving a police "}}
+{"turn": 2, "event": {"type": "token", "content": "notice or summons fo"}}
+{"turn": 2, "event": {"type": "token", "content": "r questioning indica"}}
+{"turn": 2, "event": {"type": "token", "content": "tes that you are und"}}
+{"turn": 2, "event": {"type": "token", "content": "er suspicion or your"}}
+{"turn": 2, "event": {"type": "token", "content": " name has been menti"}}
+{"turn": 2, "event": {"type": "token", "content": "oned in a complaint."}}
+{"turn": 2, "event": {"type": "token", "content": " Consulting a lawyer"}}
+{"turn": 2, "event": {"type": "token", "content": " at this stage can h"}}
+{"turn": 2, "event": {"type": "token", "content": "elp in drafting the "}}
+{"turn": 2, "event": {"type": "token", "content": "correct reply, prepa"}}
+{"turn": 2, "event": {"type": "token", "content": "ring your defense, a"}}
+{"turn": 2, "event": {"type": "token", "content": "nd preventing escala"}}
+{"turn": 2, "event": {"type": "token", "content": "tion into a First In"}}
+{"turn": 2, "event": {"type": "token", "content": "formation Report (FI"}}
+{"turn": 2, "event": {"type": "token", "content": "R). A lawyer can gui"}}
+{"turn": 2, "event": {"type": "token", "content": "de you on what to sa"}}
+{"turn": 2, "event": {"type": "token", "content": "y and what not to sa"}}
+{"turn": 2, "event": {"type": "token", "content": "y, ensuring you do n"}}
+{"turn": 2, "event": {"type": "token", "content": "ot unintentionally i"}}
+{"turn": 2, "event": {"type": "token", "content": "ncriminate yourself "}}
+{"turn": 2, "event": {"type": "token", "content": "or provide informati"}}
+{"turn": 2, "event": {"type": "token", "content": "on that could be tak"}}
+{"turn": 2, "event": {"type": "token", "content": "en out of context.\n\n"}}
+{"turn": 2, "event": {"type": "token", "content": "*   **When an FIR is"}}
+{"turn": 2, "event": {"type": "token", "content": " Filed Against You:*"}}
+{"turn": 2, "event": {"type": "token", "content": "* The registration o"}}
+{"turn": 2, "event": {"type": "token", "content": "f an FIR under Secti"}}
+{"turn": 2, "event": {"type": "token", "content": "on 154 of the Code o"}}
+{"turn": 2, "event": {"type": "token", "content": "f Criminal Procedure"}}
+{"turn": 2, "event": {"type": "token", "content": ", 1973 (CrPC) (now l"}}
+{"turn": 2, "event": {"type": "token", "content": "argely replaced by t"}}
+{"turn": 2, "event": {"type": "token", "content": "he Bharatiya Nagarik"}}
+{"turn": 2, "event": {"type": "token", "content": " Suraksha Sanhita, 2"}}
+{"turn": 2, "event": {"type": "token", "content": "023 (BNSS)) sets the"}}
+{"turn": 2, "event": {"type": "token", "content": " criminal machinery "}}
+{"turn": 2, "event": {"type": "token", "content": "in motion. For cogni"}}
+{"turn": 2, "event": {"type": "token", "content": "zable offenses, the "}}
+{"turn": 2, "event": {"type": "token", "content": "police can begin inv"}}
+{"turn": 2, "event": {"type": "token", "content": "estigation and arres"}}
+{"turn": 2, "event": {"type": "token", "content": "t the accused withou"}}
+{"turn": 2, "event": {"type": "token", "content": "t prior permission f"}}
+{"turn": 2, "event": {"type": "token", "content": "rom a magistrate. At"}}
+{"turn": 2, "event": {"type": "token", "content": " this critical junct"}}
+{"turn": 2, "event": {"type": "token", "content": "ure, a lawyer can:\n "}}
+{"turn": 2, "event": {"type": "token", "content": "   *   Guide you on "}}
+{"turn": 2, "event": {"type": "token", "content": "how to interact with"}}
+{"turn": 2, "event": {"type": "token", "content": " the police.\n    *  "}}
+{"turn": 2, "event": {"type": "token", "content": " Help you apply for "}}
+{"turn": 2, "event": {"type": "token", "content": "bail or anticipatory"}}
+{"turn": 2, "event": {"type": "token", "content": " bail.\n    *   Prote"}}
+{"turn": 2, "event": {"type": "token", "content": "ct you from wrongful"}}
+{"turn": 2, "event": {"type": "token", "content": " procedures and ensu"}}
+{"turn": 2, "event": {"type": "token", "content": "re your rights are n"}}
+{"turn": 2, "event": {"type": "token", "content": "ot violated.\n\n*   **"}}
+{"turn": 2, "event": {"type": "token", "content": "Upon Arrest or Fear "}}
+{"turn": 2, "event": {"type": "token", "content": "of Arrest:** If you "}}
+{"turn": 2, "event": {"type": "token", "content": "are arrested, or ant"}}
+{"turn": 2, "event": {"type": "token", "content": "icipate an arrest, i"}}
+{"turn": 2, "event": {"type": "token", "content": "mmediate legal consu"}}
+{"turn": 2, "event": {"type": "token", "content": "ltation is imperativ"}}
+{"turn": 2, "event": {"type": "token", "content": "e. Article 22(1) of "}}
+{"turn": 2, "event": {"type": "token", "content": "the Indian Constitut"}}
+{"turn": 2, "event": {"type": "token", "content": "ion guarantees the f"}}
+{"turn": 2, "event": {"type": "token", "content": "undamental right to "}}
+{"turn": 2, "event": {"type": "token", "content": "consult and be defen"}}
+{"turn": 2, "event": {"type": "token", "content": "ded by a legal pract"}}
+{"turn": 2, "event": {"type": "token", "content": "itioner of one's cho"}}
+{"turn": 2, "event": {"type": "token", "content": "ice. Section 41D of "}}
+{"turn": 2, "event": {"type": "token", "content": "the CrPC (and subseq"}}
+{"turn": 2, "event": {"type": "token", "content": "uently Section 37 BN"}}
+{"turn": 2, "event": {"type": "token", "content": "SS) also affirms an "}}
+{"turn": 2, "event": {"type": "token", "content": "arrested individual'"}}
+{"turn": 2, "event": {"type": "token", "content": "s right to meet an a"}}
+{"turn": 2, "event": {"type": "token", "content": "dvocate of their cho"}}
+{"turn": 2, "event": {"type": "token", "content": "ice during interroga"}}
+{"turn": 2, "event": {"type": "token", "content": "tion, though not con"}}
+{"turn": 2, "event": {"type": "token", "content": "tinuously throughout"}}
+{"turn": 2, "event": {"type": "token", "content": " it. A lawyer will:\n"}}
+{"turn": 2, "event": {"type": "token", "content": "    *   Apply for re"}}
+{"turn": 2, "event": {"type": "token", "content": "gular bail or antici"}}
+{"turn": 2, "event": {"type": "token", "content": "patory bail.\n    *  "}}
+{"turn": 2, "event": {"type": "token", "content": " Ensure your rights "}}
+{"turn": 2, "event": {"type": "token", "content": "are not violated dur"}}
+{"turn": 2, "event": {"type": "token", "content": "ing custody.\n    *  "}}
+{"turn": 2, "event": {"type": "token", "content": " Represent you befor"}}
+{"turn": 2, "event": {"type": "token", "content": "e the court within 2"}}
+{"turn": 2, "event": {"type": "token", "content": "4 hours of arrest, a"}}
+{"turn": 2, "event": {"type": "token", "content": "s mandated by consti"}}
+{"turn": 2, "event": {"type": "token", "content": "tutional safeguards."}}
+{"turn": 2, "event": {"type": "token", "content": "\n\n*   **During Polic"}}
+{"turn": 2, "event": {"type": "token", "content": "e Investigation:** T"}}
+{"turn": 2, "event": {"type": "token", "content": "he police investigat"}}
+{"turn": 2, "event": {"type": "token", "content": "ion involves collect"}}
+{"turn": 2, "event": {"type": "token", "content": "ing evidence, examin"}}
+{"turn": 2, "event": {"type": "token", "content": "ing witnesses, recor"}}
+{"turn": 2, "event": {"type": "token", "content": "ding statements unde"}}
+{"turn": 2, "event": {"type": "token", "content": "r Section 161 of the"}}
+{"turn": 2, "event": {"type": "token", "content": " CrPC, and conductin"}}
+{"turn": 2, "event": {"type": "token", "content": "g forensic analysis."}}
+{"turn": 2, "event": {"type": "token", "content": " A defense lawyer pl"}}
+{"turn": 2, "event": {"type": "token", "content": "ays a critical role "}}
+{"turn": 2, "event": {"type": "token", "content": "during police interr"}}
+{"turn": 2, "event": {"type": "token", "content": "ogation by advising "}}
+{"turn": 2, "event": {"type": "token", "content": "their client on what"}}
+{"turn": 2, "event": {"type": "token", "content": " to say and ensuring"}}
+{"turn": 2, "event": {"type": "token", "content": " their rights are no"}}
+{"turn": 2, "event": {"type": "token", "content": "t violated. The lawy"}}
+{"turn": 2, "event": {"type": "token", "content": "er's presence or gui"}}
+{"turn": 2, "event": {"type": "token", "content": "dance acts as a chec"}}
+{"turn": 2, "event": {"type": "token", "content": "k against abuse of p"}}
+{"turn": 2, "event": {"type": "token", "content": "ower, ensuring confe"}}
+{"turn": 2, "event": {"type": "token", "content": "ssions are voluntary"}}
+{"turn": 2, "event": {"type": "token", "content": " and arrests and sea"}}
+{"turn": 2, "event": {"type": "token", "content": "rches follow due pro"}}
+{"turn": 2, "event": {"type": "token", "content": "cess.\n\n*   **After F"}}
+{"turn": 2, "event": {"type": "token", "content": "iling of Charge Shee"}}
+{"turn": 2, "event": {"type": "token", "content": "t and Framing of Cha"}}
+{"turn": 2, "event": {"type": "token", "content": "rges:** Once the inv"}}
+{"turn": 2, "event": {"type": "token", "content": "estigation is comple"}}
+{"turn": 2, "event": {"type": "token", "content": "te, the police file "}}
+{"turn": 2, "event": {"type": "token", "content": "a charge sheet under"}}
+{"turn": 2, "event": {"type": "token", "content": " Section 173 of the "}}
+{"turn": 2, "event": {"type": "token", "content": "CrPC. The framing of"}}
+{"turn": 2, "event": {"type": "token", "content": " charges is a pivota"}}
+{"turn": 2, "event": {"type": "token", "content": "l moment, formally c"}}
+{"turn": 2, "event": {"type": "token", "content": "ommunicating to the "}}
+{"turn": 2, "event": {"type": "token", "content": "accused the precise "}}
+{"turn": 2, "event": {"type": "token", "content": "nature of the offens"}}
+{"turn": 2, "event": {"type": "token", "content": "e they are alleged t"}}
+{"turn": 2, "event": {"type": "token", "content": "o have committed. A "}}
+{"turn": 2, "event": {"type": "token", "content": "lawyer is essential "}}
+{"turn": 2, "event": {"type": "token", "content": "to understand the ch"}}
+{"turn": 2, "event": {"type": "token", "content": "arges, possible pena"}}
+{"turn": 2, "event": {"type": "token", "content": "lties, and to prepar"}}
+{"turn": 2, "event": {"type": "token", "content": "e an effective defen"}}
+{"turn": 2, "event": {"type": "token", "content": "se.\n\n*   **During Tr"}}
+{"turn": 2, "event": {"type": "token", "content": "ial Proceedings:** I"}}
+{"turn": 2, "event": {"type": "token", "content": "f the case proceeds "}}
+{"turn": 2, "event": {"type": "token", "content": "to trial, profession"}}
+{"turn": 2, "event": {"type": "token", "content": "al legal representat"}}
+{"turn": 2, "event": {"type": "token", "content": "ion becomes indispen"}}
+{"turn": 2, "event": {"type": "token", "content": "sable. The trial inv"}}
+{"turn": 2, "event": {"type": "token", "content": "olves the examinatio"}}
+{"turn": 2, "event": {"type": "token", "content": "n of prosecution wit"}}
+{"turn": 2, "event": {"type": "token", "content": "nesses, cross-examin"}}
+{"turn": 2, "event": {"type": "token", "content": "ation by the defense"}}
+{"turn": 2, "event": {"type": "token", "content": " counsel, the accuse"}}
+{"turn": 2, "event": {"type": "token", "content": "d's statement under "}}
+{"turn": 2, "event": {"type": "token", "content": "Section 313 of the C"}}
+{"turn": 2, "event": {"type": "token", "content": "rPC (now BNSS), defe"}}
+{"turn": 2, "event": {"type": "token", "content": "nse evidence, and fi"}}
+{"turn": 2, "event": {"type": "token", "content": "nal arguments. A ski"}}
+{"turn": 2, "event": {"type": "token", "content": "lled lawyer can:\n   "}}
+{"turn": 2, "event": {"type": "token", "content": " *   Perform meticul"}}
+{"turn": 2, "event": {"type": "token", "content": "ous cross-examinatio"}}
+{"turn": 2, "event": {"type": "token", "content": "n to challenge prose"}}
+{"turn": 2, "event": {"type": "token", "content": "cution witnesses and"}}
+{"turn": 2, "event": {"type": "token", "content": " expose inconsistenc"}}
+{"turn": 2, "event": {"type": "token", "content": "ies.\n    *   Present"}}
+{"turn": 2, "event": {"type": "token", "content": " evidence and build "}}
+{"turn": 2, "event": {"type": "token", "content": "arguments in your fa"}}
+{"turn": 2, "event": {"type": "token", "content": "vor.\n    *   Ensure "}}
+{"turn": 2, "event": {"type": "token", "content": "proper legal procedu"}}
+{"turn": 2, "event": {"type": "token", "content": "res are followed.\n\n*"}}
+{"turn": 2, "event": {"type": "token", "content": "   **Post-Trial (App"}}
+{"turn": 2, "event": {"type": "token", "content": "eal, Revision, and S"}}
+{"turn": 2, "event": {"type": "token", "content": "entence Execution):*"}}
+{"turn": 2, "event": {"type": "token", "content": "* Even after a judgm"}}
+{"turn": 2, "event": {"type": "token", "content": "ent, a lawyer can as"}}
+{"turn": 2, "event": {"type": "token", "content": "sist with appeals or"}}
+{"turn": 2, "event": {"type": "token", "content": " revisions if the cl"}}
+{"turn": 2, "event": {"type": "token", "content": "ient is convicted. T"}}
+{"turn": 2, "event": {"type": "token", "content": "hey review trial pro"}}
+{"turn": 2, "event": {"type": "token", "content": "ceedings for legal e"}}
+{"turn": 2, "event": {"type": "token", "content": "rrors and file neces"}}
+{"turn": 2, "event": {"type": "token", "content": "sary documents to ch"}}
+{"turn": 2, "event": {"type": "token", "content": "allenge the convicti"}}
+{"turn": 2, "event": {"type": "token", "content": "on in a higher court"}}
+{"turn": 2, "event": {"type": "token", "content": ".\n\nIn essence, a cri"}}
+{"turn": 2, "event": {"type": "token", "content": "minal lawyer provide"}}
+{"turn": 2, "event": {"type": "token", "content": "s legal advice and g"}}
+{"turn": 2, "event": {"type": "token", "content": "uidance at every sta"}}
+{"turn": 2, "event": {"type": "token", "content": "ge, from arrest to t"}}
+{"turn": 2, "event": {"type": "token", "content": "rial, helping the ac"}}
+{"turn": 2, "event": {"type": "token", "content": "cused understand the"}}
+{"turn": 2, "event": {"type": "token", "content": "ir rights, the charg"}}
+{"turn": 2, "event": {"type": "token", "content": "es, potential outcom"}}
+{"turn": 2, "event": {"type": "token", "content": "es, and the best str"}}
+{"turn": 2, "event": {"type": "token", "content": "ategy to pursue. Del"}}
+{"turn": 2, "event": {"type": "token", "content": "aying legal consulta"}}
+{"turn": 2, "event": {"type": "token", "content": "tion can lead to com"}}
+{"turn": 2, "event": {"type": "token", "content": "plications, costly m"}}
+{"turn": 2, "event": {"type": "token", "content": "istakes, and potenti"}}
+{"turn": 2, "event": {"type": "token", "content": "ally irreparable con"}}
+{"turn": 2, "event": {"type": "token", "content": "sequences."}}
+{"turn": 2, "event": {"type": "progress", "agent": "legal_concepts", "message": "Generating explanation...", "ts": 1784749865.0957367, "step": "generate"}}
+{"turn": 2, "event": {"type": "status", "agent": "legal_concepts", "message": "Explaining legal concepts..."}}
+{"turn": 2, "event": {"type": "token", "content": " and argues appeals in higher courts, such as under **Section 495 of BNSS, 2023** (appeal from orders under Section 491 of BNSS, 2023, corresponding to Section "}}
+{"turn": 2, "event": {"type": "token", "content": "449 of CrPC, 1973) or **Section 453 of BNSS, 2023** (execution of order passed under Section 409 of BNSS, 20"}}
+{"turn": 2, "event": {"type": "token", "content": "23, corresponding to Section 413 of CrPC, 1973).\n\n5.  **Special Cases:**\n    *   **Security for Good Behaviour:** In cases involving security for good behaviour from persons disseminating certain matters"}}
+{"turn": 2, "event": {"type": "token", "content": ", a lawyer can represent the individual before the Executive Magistrate under **Section 127 of BNSS, 2023** (corresponding to Section 108 of CrPC, 1973), arguing against the requirement"}}
+{"turn": 2, "event": {"type": "token", "content": " to execute a bond.\n\nIn essence, a lawyer acts as a guide, advocate, and protector of rights throughout the criminal justice system, ensuring due process and a fair trial for their client under the new legal framework of BNS, BN"}}
+{"turn": 2, "event": {"type": "token", "content": "SS, and BSA."}}
+{"turn": 2, "event": {"type": "status", "agent": "newacts", "message": "Searching legal provisions..."}}
+{"turn": 2, "event": {"type": "progress", "agent": "orchestrator", "message": "Merging results from 2 agents...", "ts": 1784749865.948234, "found": 2, "step": "synthesize"}}
+{"turn": 2, "event": {"type": "token_reset"}}
+{"turn": 2, "event": {"type": "token", "content": "In"}}
+{"turn": 2, "event": {"type": "token", "content": " India, an individual should hire a lawyer in a criminal case at the earliest possible stage"}}
+{"turn": 2, "event": {"type": "token", "content": " to protect their rights and effectively navigate the legal system, which is now governed by the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, the Bharatiya Nyaya Sanhita (BNS), 2023,"}}
+{"turn": 2, "event": {"type": "token", "content": " and the Bharatiya Sakshya Adhiniyam (BSA), 2023, effective July 1, 2024. The criminal justice process involves investigation, inquiry, and trial stages.\n\n### Key Stages for"}}
+{"turn": 2, "event": {"type": "token", "content": " Legal Engagement\n\n1.  **Upon Receiving a Police Notice or Summons:**\n    Even before formal charges, a police notice or summons for questioning indicates suspicion or mention in a complaint. A lawyer can assist in drafting a proper reply, preparing a"}}
+{"turn": 2, "event": {"type": "token", "content": " defense, and preventing the matter from escalating into a First Information Report (FIR). This guidance ensures that individuals do not inadvertently incriminate themselves or provide information that could be misinterpreted (web-943958, web-67"}}
+{"turn": 2, "event": {"type": "token", "content": "0410).\n\n2.  **When an FIR is Filed Against You:**\n    The registration of an FIR, now governed by **Section 173 of BNSS, 2023** (corresponding to Section"}}
+{"turn": 2, "event": {"type": "token", "content": " 154 of CrPC, 1973), initiates criminal proceedings. For cognizable offenses, the police can investigate and arrest without a magistrate's prior permission. At this critical juncture, a lawyer can (web-94"}}
+{"turn": 2, "event": {"type": "token", "content": "3958, web-670410):\n    *   Guide interaction with the police.\n    *   Assist in applying for bail or anticipatory bail.\n    *   Protect against wrongful procedures and rights"}}
+{"turn": 2, "event": {"type": "token", "content": " violations.\n\n3.  **Upon Arrest or Fear of Arrest:**\n    Immediate legal consultation is crucial upon arrest or apprehension of arrest. Article 22(1) of the Indian Constitution guarantees the right to consult and be defended by a"}}
+{"turn": 2, "event": {"type": "token", "content": " legal practitioner. **Section 37 of BNSS, 2023** (corresponding to Section 41D of CrPC, 1973) affirms an arrested individual's right to meet an advocate during interrogation,"}}
+{"turn": 2, "event": {"type": "token", "content": " though not continuously (web-943958, web-670410). A lawyer will:\n    *   Apply for regular bail or anticipatory bail under **Section 482 of BNSS, 2"}}
+{"turn": 2, "event": {"type": "token", "content": "023** (corresponding to Section 438 of CrPC, 1973) (web-943958).\n    *   Ensure rights are not violated during custody.\n    *   "}}
+{"turn": 2, "event": {"type": "token", "content": "Represent the individual before the court within 24 hours of arrest, as constitutionally mandated (web-943958).\n\n4.  **During Police Investigation:**\n    The investigation involves evidence collection, witness examination,"}}
+{"turn": 2, "event": {"type": "token", "content": " and recording statements. A defense lawyer advises clients during interrogation, ensuring rights are protected and preventing coercion or illegal detention. They act as a check against abuse of power, ensuring voluntary confessions and adherence to due process during arrests and searches (web-94"}}
+{"turn": 2, "event": {"type": "token", "content": "3958, web-670410). While the accused or their agents are not entitled to call for police diaries, a lawyer can ensure that if the court uses them or the police officer uses them to refresh memory"}}
+{"turn": 2, "event": {"type": "token", "content": ", the provisions of **Section 148 or Section 164 of BSA, 2023** (corresponding to Section 145 or Section 161 of IEA, 1872) are"}}
+{"turn": 2, "event": {"type": "token", "content": " applied, as per **Section 192(5) of BNSS, 2023** (web-943958).\n\n5.  **After Filing of Charge Sheet and Framing of Charges:**"}}
+{"turn": 2, "event": {"type": "token", "content": "\n    Upon completion of the investigation, the police file a charge sheet under **Section 193 of BNSS, 2023** (corresponding to Section 173 of CrPC, 1973"}}
+{"turn": 2, "event": {"type": "token", "content": "). The framing of charges formally communicates the alleged offense. A lawyer is essential to understand the charges, potential penalties, and to prepare an effective defense (web-943958, web-670410). A"}}
+{"turn": 2, "event": {"type": "token", "content": " lawyer can argue for or against the framing of charges, seeking discharge if there is insufficient evidence under **Section 250 of BNSS, 2023** (corresponding to Section 239 of CrPC, 19"}}
+{"turn": 2, "event": {"type": "token", "content": "73) (web-943958).\n\n6.  **During Trial Proceedings:**\n    Professional legal representation is indispensable if the case proceeds to trial. The trial involves examination and cross-examination of witnesses, the"}}
+{"turn": 2, "event": {"type": "token", "content": " accused's statement under **Section 313 of BNSS, 2023** (corresponding to Section 313 of CrPC, 1973), defense evidence, and final arguments (web-94"}}
+{"turn": 2, "event": {"type": "token", "content": "3958, web-670410). A skilled lawyer can (web-943958):\n    *   Perform meticulous cross-examination to challenge prosecution witnesses and expose inconsistencies.\n    *   Present evidence"}}
+{"turn": 2, "event": {"type": "token", "content": " and build arguments in favor of the client, adhering to the Bharatiya Sakshya Adhiniyam (BSA), 2023.\n    *   Ensure proper legal procedures are followed.\n    *   Utilize provisions like **"}}
+{"turn": 2, "event": {"type": "token", "content": "Section 47 of BSA, 2023** (corresponding to Section 53 of IEA, 1872) regarding previous good character, and **Section 49 of BSA, 2023** ("}}
+{"turn": 2, "event": {"type": "token", "content": "corresponding to Section 54 of IEA, 1872) regarding previous bad character (leg-/content/bharitya_new_acts/the-47-90282, leg-/content/bharitya_"}}
+{"turn": 2, "event": {"type": "token", "content": "new_acts/the-49-90050, leg-/content/bharitya_new_acts/the-53-90885).\n    *   Ensure competency of witnesses, including the husband or wife"}}
+{"turn": 2, "event": {"type": "token", "content": " of the accused, as per **Section 126 of BSA, 2023** (corresponding to Section 120 of IEA, 1872) (leg-/content/bharitya_new"}}
+{"turn": 2, "event": {"type": "token", "content": "_acts/the-120-3592, leg-/content/bharitya_new_acts/the-126-71574).\n\n7.  **Post-Trial (Appeal,"}}
+{"turn": 2, "event": {"type": "token", "content": " Revision, and Sentence Execution):**\n    After a judgment, a lawyer can assist with appeals or revisions if the client is convicted. They review trial proceedings for legal errors and file necessary documents to challenge the conviction in a higher court (web-9"}}
+{"turn": 2, "event": {"type": "token", "content": "43958, web-670410). This includes filing appeals under **Section 495 of BNSS, 2023** (corresponding to Section 449 of CrPC,"}}
+{"turn": 2, "event": {"type": "token", "content": " 1973) or ensuring execution of orders under **Section 453 of BNSS, 2023** (corresponding to Section 413 of CrPC, 1973) (web"}}
+{"turn": 2, "event": {"type": "token", "content": "-943958).\n\n### FIR Registration and Zero FIR under BNSS, 2023\n\nThe Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, has streamlined the process of FIR registration and"}}
+{"turn": 2, "event": {"type": "token", "content": " formally incorporated the concept of Zero FIR (web-943958).\n\n*   **FIR Registration:** **Section 173 of BNSS, 2023** (corresponding to Section 154 of"}}
+{"turn": 2, "event": {"type": "token", "content": " CrPC, 1973) mandates that information relating to a cognizable offense, if given orally, must be reduced to writing, read over to the informant, and signed. The BNSS, 2023, explicitly"}}
+{"turn": 2, "event": {"type": "token", "content": " allows for electronic filing of FIRs and provides for video recording of statements of victims of sexual offenses (web-943958).\n*   **Zero FIR:** This concept, formally strengthened under BNSS, 2023,"}}
+{"turn": 2, "event": {"type": "token", "content": " allows an FIR to be registered at any police station, irrespective of the place of occurrence of the crime. The registering police station then transfers it to the appropriate territorial jurisdiction for investigation. This ensures that no time is lost due to jurisdictional issues,"}}
+{"turn": 2, "event": {"type": "token", "content": " particularly benefiting victims who may be in a different location or unaware of the exact jurisdiction (web-943958).\n\n### Role of a Lawyer in Relation to FIR and Zero FIR\n\nA lawyer plays a critical role from the pre-FIR"}}
+{"turn": 2, "event": {"type": "token", "content": " stage (web-943958):\n\n*   **Guidance on FIR Filing:** A lawyer can guide victims or informants on how to file an FIR, ensuring all necessary details are included and the complaint is legally sound (web-"}}
+{"turn": 2, "event": {"type": "token", "content": "943958).\n*   **Protection of Accused's Rights:** If a person is falsely implicated or apprehends arrest, a lawyer can advise on seeking anticipatory bail under **Section 482 of BNSS, "}}
+{"turn": 2, "event": {"type": "token", "content": "2023** (corresponding to Section 438 of CrPC, 1973) (web-943958).\n*   **Monitoring FIR Registration:** A lawyer can ensure that the police"}}
+{"turn": 2, "event": {"type": "token", "content": " register the FIR promptly and correctly, and can take legal action if the police refuse to register an FIR (web-943958).\n*   **Zero FIR Implementation:** A lawyer can facilitate the registration of a Zero FIR, ensuring"}}
+{"turn": 2, "event": {"type": "token", "content": " that the complaint is recorded without delay, and subsequently assist in its proper transfer to the correct jurisdictional police station.\n\nIn essence, delaying legal consultation can lead to complications, costly mistakes, and potentially irreparable consequences (web-670410"}}
+{"turn": 2, "event": {"type": "token", "content": "). A criminal lawyer provides comprehensive legal advice and guidance at every stage, from arrest to trial, ensuring due process and a fair trial under the new legal framework of BNS, BNSS, and BSA (web-943958)."}}
+{"turn": 2, "event": {"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}}
+{"turn": 2, "event": {"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1784749876.771745, "step": "finalize"}}
+{"turn": 2, "event": {"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}}
+{"turn": 2, "event": {"type": "response", "content": "In India, an individual should hire a lawyer in a criminal case at the earliest possible stage to protect their rights and effectively navigate the legal system, which is now governed by the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, the Bharatiya Nyaya Sanhita (BNS), 2023, and the Bharatiya Sakshya Adhiniyam (BSA), 2023, effective July 1, 2024. The criminal justice process involves investigation, inquiry, and trial stages.\n\n### Key Stages for Legal Engagement\n\n1.  **Upon Receiving a Police Notice or Summons:**\n    Even before formal charges, a police notice or summons for questioning indicates suspicion or mention in a complaint. A lawyer can assist in drafting a proper reply, preparing a defense, and preventing the matter from escalating into a First Information Report (FIR). This guidance ensures that individuals do not inadvertently incriminate themselves or provide information that could be misinterpreted (web-943958, web-670410).\n\n2.  **When an FIR is Filed Against You:**\n    The registration of an FIR, now governed by **Section 173 of BNSS, 2023** (corresponding to Section 154 of CrPC, 1973), initiates criminal proceedings. For cognizable offenses, the police can investigate and arrest without a magistrate's prior permission. At this critical juncture, a lawyer can (web-943958, web-670410):\n    -   Guide interaction with the police.\n    -   Assist in applying for bail or anticipatory bail.\n    -   Protect against wrongful procedures and rights violations.\n\n3.  **Upon Arrest or Fear of Arrest:**\n    Immediate legal consultation is crucial upon arrest or apprehension of arrest. Article 22(1) of the Indian Constitution guarantees the right to consult and be defended by a legal practitioner. **Section 37 of BNSS, 2023** (corresponding to Section 41D of CrPC, 1973) affirms an arrested individual's right to meet an advocate during interrogation, though not continuously (web-943958, web-670410). A lawyer will:\n    -   Apply for regular bail or anticipatory bail under **Section 482 of BNSS, 2023** (corresponding to Section 438 of CrPC, 1973) (web-943958).\n    -   Ensure rights are not violated during custody.\n    -   Represent the individual before the court within 24 hours of arrest, as constitutionally mandated (web-943958).\n\n4.  **During Police Investigation:**\nThe investigation involves evidence collection, witness examination, and recording statements. A defense lawyer advises\nclients during interrogation, ensuring rights are protected and preventing coercion or illegal detention. They act as a\ncheck against abuse of power, ensuring voluntary confessions and adherence to due process during arrests and searches\n(web-943958, web-670410). While the accused or their agents are not entitled to call for police diaries, a lawyer can\nensure that if the court uses them or the police officer uses them to refresh memory, the provisions of **Section 148 or**\nSection 164 of BSA, 2023** (corresponding to Section 145 or Section 161 of IEA, 1872) are applied, as per **Section\n192(5) of BNSS, 2023** (web-943958).**\n\n5.  **After Filing of Charge Sheet and Framing of Charges:**\nUpon completion of the investigation, the police file a charge sheet under **Section 193 of BNSS, 2023** (corresponding\nto Section 173 of CrPC, 1973). The framing of charges formally communicates the alleged offense. A lawyer is essential\nto understand the charges, potential penalties, and to prepare an effective defense (web-943958, web-670410). A lawyer\ncan argue for or against the framing of charges, seeking discharge if there is insufficient evidence under **Section 250**\nof BNSS, 2023** (corresponding to Section 239 of CrPC, 1973) (web-943958).**\n\n6.  **During Trial Proceedings:**\n    Professional legal representation is indispensable if the case proceeds to trial. The trial involves examination and cross-examination of witnesses, the accused's statement under **Section 313 of BNSS, 2023** (corresponding to Section 313 of CrPC, 1973), defense evidence, and final arguments (web-943958, web-670410). A skilled lawyer can (web-943958):\n    -   Perform meticulous cross-examination to challenge prosecution witnesses and expose inconsistencies.\n    -   Present evidence and build arguments in favor of the client, adhering to the Bharatiya Sakshya Adhiniyam (BSA), 2023.\n    -   Ensure proper legal procedures are followed.\n    -   Utilize provisions like **Section 47 of BSA, 2023** (corresponding to Section 53 of IEA, 1872) regarding previous good character, and **Section 49 of BSA, 2023** (corresponding to Section 54 of IEA, 1872) regarding previous bad character (leg-/content/bharitya_new_acts/the-47-90282, leg-/content/bharitya_new_acts/the-49-90050, leg-/content/bharitya_new_acts/the-53-90885).\n    -   Ensure competency of witnesses, including the husband or wife of the accused, as per **Section 126 of BSA, 2023** (corresponding to Section 120 of IEA, 1872) (leg-/content/bharitya_new_acts/the-120-3592, leg-/content/bharitya_new_acts/the-126-71574).\n\n7.  **Post-Trial (Appeal, Revision, and Sentence Execution):**\n    After a judgment, a lawyer can assist with appeals or revisions if the client is convicted. They review trial proceedings for legal errors and file necessary documents to challenge the conviction in a higher court (web-943958, web-670410). This includes filing appeals under **Section 495 of BNSS, 2023** (corresponding to Section 449 of CrPC, 1973) or ensuring execution of orders under **Section 453 of BNSS, 2023** (corresponding to Section 413 of CrPC, 1973) (web-943958).\n\n### FIR Registration and Zero FIR under BNSS, 2023\n\nThe Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, has streamlined the process of FIR registration and formally incorporated the concept of Zero FIR (web-943958).\n\n-   **FIR Registration:** **Section 173 of BNSS, 2023** (corresponding to Section 154 of CrPC, 1973) mandates that information relating to a cognizable offense, if given orally, must be reduced to writing, read over to the informant, and signed. The BNSS, 2023, explicitly allows for electronic filing of FIRs and provides for video recording of statements of victims of sexual offenses (web-943958).\n-   **Zero FIR:** This concept, formally strengthened under BNSS, 2023, allows an FIR to be registered at any police station, irrespective of the place of occurrence of the crime. The registering police station then transfers it to the appropriate territorial jurisdiction for investigation. This ensures that no time is lost due to jurisdictional issues, particularly benefiting victims who may be in a different location or unaware of the exact jurisdiction (web-943958).\n\n### Role of a Lawyer in Relation to FIR and Zero FIR\n\nA lawyer plays a critical role from the pre-FIR stage (web-943958):\n\n-   **Guidance on FIR Filing:** A lawyer can guide victims or informants on how to file an FIR, ensuring all necessary details are included and the complaint is legally sound (web-943958).\n-   **Protection of Accused's Rights:** If a person is falsely implicated or apprehends arrest, a lawyer can advise on seeking anticipatory bail under **Section 482 of BNSS, 2023** (corresponding to Section 438 of CrPC, 1973) (web-943958).\n-   **Monitoring FIR Registration:** A lawyer can ensure that the police register the FIR promptly and correctly, and can take legal action if the police refuse to register an FIR (web-943958).\n-   **Zero FIR Implementation:** A lawyer can facilitate the registration of a Zero FIR, ensuring that the complaint is recorded without delay, and subsequently assist in its proper transfer to the correct jurisdictional police station.\n\nIn essence, delaying legal consultation can lead to complications, costly mistakes, and potentially irreparable consequences (web-670410). A criminal lawyer provides comprehensive legal advice and guidance at every stage, from arrest to trial, ensuring due process and a fair trial under the new legal framework of BNS, BNSS, and BSA (web-943958).\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."}}
+{"turn": 2, "event": {"type": "sources", "data": [{"source_type": "legal_concepts", "title": "thelaw.institute", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHcX75Ad4uTGiA9pRB2EJjH5oocEObLmTZiJsNKKbqPRfJA60kkvWU0y4B92yYnqbvmj0eJG6J6kdwoGnnr9Qh9bGW9cUcttJ6_I5FgpExhN5o-6B_D05hS2C53AdjlAApBOrpjhDoDxNMCnCpYnUfLkY0FhwiiU-KqSYAaAStv_Zk5vGCeSaJ10qA=", "web_title": "thelaw.institute"}, {"source_type": "legal_concepts", "title": "panindiaadvocate.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFQ_V-yUEFFvSzeVHIGXoURiNoTPe8epda4ZytM6b42z0GtRgqumcwD3ragf8zR5c23Wa6SjAt2cLcWupXFgtDRxeAUltPaNsbohRE5gSxaFFyEp5Tm2GxSGT1vzL2sXZf20ciQhK7Kv5lcO4Gwh_7xDFxpwihFJYi5E_RNuK4PtbVTlyE-vkGmrDH4K30CFJAr0ThLKAEmG3H7O3c8jQ==", "web_title": "panindiaadvocate.com"}, {"source_type": "legal_concepts", "title": "ankurtripathi.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHJZ2Xql3D2RnxAgPdH4g232CRKSlqjpdFK8jYCtBgzQem_jiCyHtNK3jzI8mbALYj-W1DWsEnDkv3K3TCKDv6nYQ4_g0-x1AF8exfiXYg_YH9EVmPKtaMAfkHqewBHuYgf44muTigxz6Sk9ZMVXr725veZFs66lFezrTSh_iiDp_ea7hkdUoWHgsOxYAGe89hjjo-RX7Fo7QCuvbpXRq8moCBSSn_gHi_2gaYl8HTjaeum0VLr8DF5x9KgDMFMknlK5Res71YmZg==", "web_title": "ankurtripathi.com"}, {"source_type": "legal_concepts", "title": "aggarwalsandassociates.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcCMXNTCvWNL-GB02aIBF7byn2obsmTaGQinjUHC9m_T4VEBCBeHDUURg8Y5oz1G0-LUdJ3OnFpMJwvfMFsxtg7bNGS-8z-S8FDURapJ0_2pI6_i35_x1O8Rk8EHjPtqCQwRKCxIDzbczMS2Zngh7_ABno2zCvWnVX6N5na75FDF_qVWcMXYQ3g_nkYk9WTCnJTy6uiuwXh3TnJCIMy_0rtUTgDcli2A==", "web_title": "aggarwalsandassociates.com"}, {"source_type": "legal_concepts", "title": "lexspeak.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFJvAgYFa5boYRYssM9DnGKpbTa_hAJwfBFALyq9AQAkm2MGf86ki3QW1bfeH2njhmJ_Z-5EnMHubCk9F9xpgkZLldvc4A4AnNjUZSwaRhlha50eT3HBNIUEdCfnkiwIJRbKxDV4HI4iSbZsr99yLrJFowu2aiEzH7Mqh2yNi01_ov420Nh9xnqiCdtulriOSV-0w==", "web_title": "lexspeak.in"}, {"source_type": "legal_concepts", "title": "globaljudex.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEJrRFP5zSIBui07iGaeNI7hMMJar38pg6a_PSl3se6nuild5KiRnqhFWKdTbgZrDcmRlDvUmSbwD43FWYimD2GlGq7zg-IGUbWTiMcWdysIN02tbET9o4GUielfJ797aIlRSId4fzTfjlwyowei3RsEwX1OJQOHPzsK-iddVc7Q49IzQZQWArPTC9-SZiCo1B54Qw=", "web_title": "globaljudex.in"}, {"source_type": "legal_concepts", "title": "lawyersclubindia.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEsHaQI0rQwmgvAXowpTMRBMuqAT5QdIsY01LeyCWpx-B429GoB8BOFWkzKbzZalzp2lV0nWD6y9eAe3lCsuiN6evazSATS64EJnM07IDN0I5z2CaIDrNPM0OQAoaWv-GsegQAvP6QIG4iEtSPd7c3i-o7lUkkpbcJvizKcqux-Q90PEjI9m9JTT5KjBY2SYo1GGVk1Nxsalq5IzYDHzBVrLFiZiqVnXwZR6pzRkvc9udg=", "web_title": "lawyersclubindia.com"}, {"source_type": "legal_concepts", "title": "scconline.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF1zIAn_nKC3B8ZtUvVnfd5U9q7YndpqEhf2GxDW3bYzttI6UP836XnprqUCglGuVNbX9vuRjs_o_GG6bh7-WGMfjRXDPE-k7Ez1e-DIGbxGSahqmW1LCnslIdMY7FdD_DWQJFEVzOQzl36S03gx14JaJdguoAWuyZnUiJ7g1y9G7Efe45TSf4tSINT7SVXhJNT02K6h8eqF2giU35qmWMKcaYBnESfGnzInUBlVDzUmlYjM7tIBGjLUK6Qy42VVWk5v0_aUf9-X70t5-UipXs=", "web_title": "scconline.com"}, {"source_type": "legal_concepts", "title": "lloydlawcollege.edu.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF0cCtFk2QFPih5qr0RUgs1_XH_qERrT3JOYhQs43rgqF_Alt0yAuzmu8SSw5chea4p5Wf3mDSPrjzuiRY4rHXmX2lQlNQbgtzkKIEBe4_1P2zWBHoVjLQIl3RdI12SCaPSBW-yDIQ9IKZUfsJN9xhmQ1pdd6MvnX3mMDLAWkoFtOPJQkyV9aw=", "web_title": "lloydlawcollege.edu.in"}, {"source_type": "legal_concepts", "title": "sheokandlegal.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFPyCLO59cFOYBtHVtrqvc0_dT6d5VqFlm-HiFo0xMJ75W2Q3wHvbgA-F16LXq0D4u94Nej95td4H5CVasLQtaFNkE8y1EqgSu5ouQYx4qBz5VxHE45gNGvN_AbPAv-qeKHzv-2zFttRkc7VjCcr0SCFb1jQ21avzSuUJIFp8kB-vxEZg==", "web_title": "sheokandlegal.com"}, {"source_type": "legal_concepts", "title": "vakeelkhoj.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF83bf6PQ9_ifROWYygCZBSEA4aOKPLfUxm9KzvkXesIHqlN0S4QmO2Fkrs1mzH5qlG-VgcnjePcyAFP8co7Zkb5gceOn4WdQFW8CBxIeqsQA4zYc8b-K8mIFUUEGqgJ46YyLSnyzVb7u8INNgmMcH_hKwoD29fbts1hSpQWfNA5S6HEsNejzHXQUArFenEinM=", "web_title": "vakeelkhoj.com"}, {"source_type": "legal_concepts", "title": "hemanthassociates.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFVQ_Xwt6HrsCySoVgdtFiHgd3Z6CDyAMlllhj50aPuogW2LuT7ZoEtEBvOHnzpBbCI0BxiADieV7gi29ojnAYb4zSjXn7H08phRjqm5vWPoYfHKKF7YP5KXz-Z_VEH-EwPbnIJAMWJ", "web_title": "hemanthassociates.com"}, {"source_type": "legal_concepts", "title": "advocateomsharma.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEmvi-zYuBBHf0F4qNW7i8CoUBh6tHEa7k6MGTBctFgp8nq23VknZJg-ZvXGpVasphJL4Fl-llm6y6vZueFcoOrPjKWJKer0rO14fsJTMWyeRS9JbGYcEbUxc039Z8v6BuRO9Wuw0_0UQGYqc-1GnEPj6YZniNDN3vYsTlczI0M", "web_title": "advocateomsharma.in"}, {"source_type": "legal_concepts", "title": "advocateshirish.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFB2SKtKrQ1NzhtAIkFYy89wnH3UDAgkIQQTgrppWcEQmeb8n-RGSMiA7GNwXEbr2OWO1NXBEaP_QdbEvYZ3gSqM79M1-z2qrXe7oyLVZlRcjjuYD__jIHtUIabPRZaL8OUY1ZLYoCb_sBrHb3zkcNSCRfOiU-gajUI_lDXWTBQ6EYEFwm3", "web_title": "advocateshirish.com"}, {"source_type": "legal_concepts", "title": "kamalandcoadvocates.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFV75TyvXMxw_ADLJPBlkt1XEU7Qut6Tt4BXkLmTBphtJZ8DP4ic9QL-y6Hj_FahY-uJonnpjjYVKxBw0O1J1Ho7Kj7qKKSuuZgbIPGG9jRYN777tADo8xzB_IAP0BYWjr2ZJFLqBMBMxKJbXJ2vPdc8Bdcdqmk08Z5JjgumSPuStdmHg==", "web_title": "kamalandcoadvocates.com"}, {"source_type": "legal_concepts", "title": "timbaliaassociates.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Legal_Concepts", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFW0jp1Gd1K92nDt3_haG6U4mhhw-64Bjgoata1_1tQeA4eBJJ1EKq87M52h1x00zjARxgSaNjnKyrhzIB-fNWWymEIToy27NMTJ3UVuiMLthcuD3Py4IA7UtaakrsGddcYopKqsHVitm6ESRQhXM3rfqbNEEL_cIVcQIgFcC5m_9HPC_ozS0VjbV4da4FBXY9K9psKdzO1GnmY64l2cWKeobp-BVWRQ6XXTiOxZLhxszWqZu-d", "web_title": "timbaliaassociates.com"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 47", "content": ["Section Number: Section 47 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: In criminal cases, previous good character relevant\nSection Provision: In criminal proceedings the fact that the person accused is of a good character, is\nrelevant."], "doc_link": null, "file_name": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv", "agent_name": "Newacts", "relevance_score": 5.9649596, "section_number": "47"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 127", "content": ["Section Number: Section 127 of The Bharatiya Nagarik Suraksha Sanhita, 2023\nSection Name: Security for good behaviour from persons disseminating certain matters\nSection Provisions: (1)When an Executive Magistrate receives information that there is within his local jurisdiction any person who, \nwithi"], "doc_link": null, "file_name": "/content/Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv", "agent_name": "Newacts", "relevance_score": 5.839892, "section_number": "127"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 120", "content": ["section number: Section 120 of Indian Evidence Act, 1872\nsection name: Parties to civil suit and their wives or husbands-Husband or wife of person under criminal trial\nnew provisions: Section 126 of Bharatiya Sakshya Adhiniyam, 2023:\n(1)In all civil proceedings the parties to the suit, and the husba"], "doc_link": null, "file_name": "/content/Bharitya New Acts/Indian Evidence Act 1872.csv", "agent_name": "Newacts", "relevance_score": 5.785786, "section_number": "120"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 53", "content": ["section number: Section 53 of Indian Evidence Act, 1872\nsection name: In criminal cases previous good character relevant\nnew provisions: Section 47 of Bharatiya Sakshya Adhiniyam, 2023:\nIn criminal proceedings the fact that the person accused is of a good character, is relevant.\nold provisions: In c"], "doc_link": null, "file_name": "/content/Bharitya New Acts/Indian Evidence Act 1872.csv", "agent_name": "Newacts", "relevance_score": 5.7524896, "section_number": "53"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 68", "content": ["section number: Section 68 of Indian Evidence Act, 1872\nsection name: Proof of execution of document required by law to be attested\nnew provisions: Section 67 of Bharatiya Sakshya Adhiniyam, 2023:\nIf a document is required by law to be attested, it shall not be used as evidence until one attesting w"], "doc_link": null, "file_name": "/content/Bharitya New Acts/Indian Evidence Act 1872.csv", "agent_name": "Newacts", "relevance_score": 5.711342, "section_number": "68"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 347", "content": ["section number: Section 347 of The Code of Criminal Procedure 1973\nsection name: When Registrar or Sub-Registrar to be deemed a Civil Court\nNew Provision: Section 386 of The Bharatiya Nagarik Suraksha Sanhita, 2023:\nWhen the State Government so directs, any Registrar or any Sub-Registrar appointed u"], "doc_link": null, "file_name": "/content/Bharitya New Acts/Code of Criminal Procedure 1974.csv", "agent_name": "Newacts", "relevance_score": 5.709652, "section_number": "347"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 126", "content": ["Section Number: Section 126 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: Competency of husband and wife as witnesses in certain cases\nSection Provision: (1)In all civil proceedings the parties to the suit, and the husband or wife of any\nparty to the suit, shall be competent witnesses.\n(2)I"], "doc_link": null, "file_name": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv", "agent_name": "Newacts", "relevance_score": 5.4509254, "section_number": "126"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 108", "content": ["section number: Section 108 of The Code of Criminal Procedure 1973\nsection name: Security for good behaviour from persons disseminating seditious matters\nNew Provision: Section 127 of The Bharatiya Nagarik Suraksha Sanhita, 2023:\n(1)When an Executive Magistrate receives information that there is wit"], "doc_link": null, "file_name": "/content/Bharitya New Acts/Code of Criminal Procedure 1974.csv", "agent_name": "Newacts", "relevance_score": 5.3680573, "section_number": "108"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 67", "content": ["Section Number: Section 67 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: Proof of execution of document required by law to be attested\nSection Provision: If a document is required by law to be attested, it shall not be used as evidence\nuntil one attesting witness at least has been called fo"], "doc_link": null, "file_name": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv", "agent_name": "Newacts", "relevance_score": 5.333938, "section_number": "67"}, {"source_type": "newacts", "title": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv - Section 49", "content": ["Section Number: Section 49 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: Previous bad character not relevant, except in reply\nSection Provision: In criminal proceedings, the fact that the accused has a bad character, is irrelevant,\nunless evidence has been given that he has a good character"], "doc_link": null, "file_name": "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv", "agent_name": "Newacts", "relevance_score": 5.249083, "section_number": "49"}]}}
+{"turn": 2, "event": {"type": "followup_suggestions", "data": ["What if it's a civil matter?", "What are lawyer costs?", "Can I get legal aid?"]}}
+{"turn": 2, "event": {"type": "done", "agents_used": ["Legal_Concepts", "Newacts"], "token_usage": {"input_tokens": 28151, "output_tokens": 710, "total_tokens": 28861, "cache_read_tokens": 5262, "cache_creation_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.006966, "by_agent": {"Memory": {"input": 1499, "output": 99, "total": 1598, "cache_read": 0, "calls": 1, "cost_usd": 0.000189}, "Orchestrator": {"input": 7839, "output": 482, "total": 8321, "cache_read": 5262, "calls": 4, "cost_usd": 0.000957}, "Newacts": {"input": 364, "output": 34, "total": 398, "cache_read": 0, "calls": 2, "cost_usd": 4.8e-05}, "SelfRefine": {"input": 18449, "output": 95, "total": 18544, "cache_read": 0, "calls": 1, "cost_usd": 0.005772}}, "calls": [{"agent": "Memory", "step": "rewrite_query", "input": 1499, "output": 99, "total": 1598, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000189}, {"agent": "Orchestrator", "step": "classify_and_plan", "input": 1462, "output": 74, "total": 1536, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000176}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5499, "output": 260, "total": 5759, "cache_read": 5262, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000654}, {"agent": "Orchestrator", "step": "rewrite_per_agent_queries", "input": 878, "output": 98, "total": 976, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000127}, {"agent": "Newacts", "step": "extract_metadata", "input": 364, "output": 29, "total": 393, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 4.8e-05}, {"agent": "Newacts", "step": "generate", "input": 0, "output": 5, "total": 5, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.0}, {"agent": "Orchestrator", "step": "merge_synthesis", "input": 0, "output": 50, "total": 50, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.0}, {"agent": "SelfRefine", "step": "critique", "input": 18449, "output": 95, "total": 18544, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.005772}]}, "thread_id": "d823a766-0fdb-4866-81eb-d855e3950fd0", "conversation_turn": 2, "query_rewritten": true, "effective_query": "When should an individual hire a lawyer in the context of dealing with a criminal case in India, considering the procedures outlined in the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, the Bharatiya Nyaya Sanhita (BNS), 2023, and the Bharatiya Sakshya Adhiniyam (BSA), 2023, particularly in relation to the registration of a First Information Report (FIR) and the concept of a Zero FIR?"}}

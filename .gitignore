@@ -1,8 +1,7 @@
-# Environment
+# Environment — every .env* is ignored. Templates use the .example suffix
+# (.env.example, .env.production.example) which does NOT match .env.*.
 .env
 .env.*
-!.env.example
-!.env.production
 
 # SSH keys / server credentials — NEVER commit
 mainserver/

@@ -196,7 +196,7 @@ class TestAcquireReferenceDraft:
                    AsyncMock(return_value="/templates/Notice 138 NI.csv")), \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="UNEXPECTED-WEB-CALL")) as web_mock:
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft a demand notice under section 138 NI act",
                 self._silent_progress,
             ))
@@ -217,7 +217,7 @@ class TestAcquireReferenceDraft:
                    AsyncMock(return_value=None)), \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="WEB-SYNTHESISED REFERENCE")) as web_mock:
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft an RTI application to the PIO", self._silent_progress,
             ))
         assert kind == "web"
@@ -235,7 +235,7 @@ class TestAcquireReferenceDraft:
                    AsyncMock()) as picker_mock, \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="WEB-SYNTHESISED REFERENCE")):
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft a niche-format submission", self._silent_progress,
             ))
         assert kind == "web"
@@ -259,12 +259,74 @@ class TestAcquireReferenceDraft:
                    AsyncMock(return_value="/templates/Stale Path.csv")), \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="WEB-SYNTHESISED REFERENCE")) as web_mock:
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft a notice", self._silent_progress,
             ))
         assert kind == "web"
         assert source == "<web:fetch-failed>"
         web_mock.assert_called_once()
+
+    def test_english_query_returned_for_regional_language(self):
+        """A regional-language request returns the ENGLISH translation as the
+        4th tuple element, so `_generate_draft` can plan against English.
+
+        Regression guard for the depth-collapse bug: fed a regional-script
+        query the fan-out judge planned 6 sections where English planned 8,
+        silently dropping ~a quarter of the document.
+        """
+        fake_es = MagicMock()
+        fake_es.search = MagicMock(side_effect=[
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv"}},
+            ]}},
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv",
+                             "page_content": "REFERENCE BAIL BODY ..."}},
+            ]}},
+        ])
+
+        with patch("agents.drafting.get_es_client", return_value=fake_es), \
+             patch("agents.drafting._translate_query_for_es_match",
+                   AsyncMock(return_value="Prepare a regular bail application")), \
+             patch("agents.drafting._pick_reference_source",
+                   AsyncMock(return_value="/templates/Bail Application.csv")):
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
+                "નિયમિત જામીન અરજી તૈયાર કરો",
+                self._silent_progress,
+                user_language="gu",
+            ))
+
+        assert kind == "es"
+        assert eng_q == "Prepare a regular bail application"
+
+    def test_english_query_is_original_when_already_english(self):
+        """English requests get the original query back — no translation call,
+        so `english_query or query` in the dispatcher is a no-op for English.
+        """
+        fake_es = MagicMock()
+        fake_es.search = MagicMock(side_effect=[
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv"}},
+            ]}},
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv",
+                             "page_content": "REFERENCE BAIL BODY ..."}},
+            ]}},
+        ])
+
+        with patch("agents.drafting.get_es_client", return_value=fake_es), \
+             patch("agents.drafting._translate_query_for_es_match",
+                   AsyncMock()) as translate_mock, \
+             patch("agents.drafting._pick_reference_source",
+                   AsyncMock(return_value="/templates/Bail Application.csv")):
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
+                "draft a regular bail application",
+                self._silent_progress,
+                user_language="en",
+            ))
+
+        assert eng_q == "draft a regular bail application"
+        translate_mock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

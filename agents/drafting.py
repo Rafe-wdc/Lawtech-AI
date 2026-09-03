@@ -1390,6 +1390,19 @@ class _Section(BaseModel):
     )
 
 
+# Safety ceiling on the fan-out section list. NOT a target and NOT a default:
+# the planner sizes each plan to the request in front of it — a short
+# undertaking may need 5 sections, a writ petition with synopsis, grounds,
+# affidavit, schedule and index 18 — and this number only bounds the worst
+# case so a mis-behaving judge cannot blow the request budget.
+#
+# Interpolated into DRAFTING_FANOUT_JUDGE_PROMPT as `{max_sections}` rather
+# than restated there. Stating a ceiling in two places is what produced the
+# bug this constant replaces: the prompt allowed 15, the code kept 12, and
+# every plan of 13+ silently lost its closing section.
+MAX_SECTIONS = 20
+
+
 class _FanoutStrategy(BaseModel):
     """Structured output from `_judge_fanout`."""
     should_fanout: bool = Field(
@@ -1403,7 +1416,10 @@ class _FanoutStrategy(BaseModel):
         default_factory=list,
         description=(
             "Ordered section list — only meaningful when should_fanout=True. "
-            "Soft-capped at 15 by the prompt; no code-level cap."
+            "Size it to what THIS document needs — no target count, no "
+            "default shape — and never more than the ceiling stated in "
+            "the prompt. The LAST entry must be the block the document "
+            "ends with (prayer / verification / signature / execution)."
         ),
     )
     reasoning: str = Field(
@@ -1757,8 +1773,16 @@ async def _judge_fanout(
                     "user_language_name": lang_name,
                     "depth_directive": depth_directive,
                     "chat_history_hint": chat_history_hint,
+                    "max_sections": MAX_SECTIONS,
                 }),
-                local_timeout=15,
+                # 25s, up from 15s, sized from measured Flash latency: healthy
+                # calls run 5.6-14.8s, so 15s sat inside the observed spread and
+                # clipped slower-but-healthy calls into the single-pass
+                # fallback — which is a shorter one-call document, i.e. a
+                # quieter version of the same complaint. `bounded_wait_for`
+                # still clamps to whatever is left of the request deadline, so
+                # the wider bound cannot push a request past its budget.
+                local_timeout=25,
             )
         from core.token_tracker import record as _record_tokens
         _record_tokens("Drafting", "fanout_judge", raw_and_parsed.get("raw"))
@@ -2128,6 +2152,11 @@ _REPAIR_MIN_BUDGET_S = 40
 # because it used the wrong word for "facts".
 _MANDATORY_SECTION_HINTS = (
     "title", "cause", "fact", "ground", "prayer", "relief", "verif",
+    # Transactional instruments (MOU, agreement, deed, lease) end in an
+    # execution block, not a prayer. Without these a contract that lost its
+    # signature section reads as complete to the repair pass and ships as an
+    # unsigned fragment — the exact defect reported on a commercial MOU.
+    "execut", "signat", "attest", "witness",
 )
 _CONDITIONAL_SECTION_HINTS = (
     "parity", "co_accused", "coaccused", "medical", "family", "undertak",
@@ -2737,17 +2766,34 @@ async def _generate_draft(
         planned_headings=[s.heading[:24] for s in strategy.sections],
     )
 
-    # Hard code-level cap: prompt says "at most 15" but the LLM sometimes
-    # emits more, and 15 sequential Pro calls × ~25s ≈ 375s — over the
-    # 300s gunicorn timeout. Bug #9 in the prod inventory. Trim to 12
-    # deterministically so a mis-behaving judge can't blow the envelope.
-    _FANOUT_HARD_CAP = 12
-    if strategy.sections and len(strategy.sections) > _FANOUT_HARD_CAP:
+    # Code-level safety ceiling. The plan SIZE is the judge's decision and must
+    # not be normalised to a fixed number, but a mis-behaving judge emitting 40
+    # sections would blow the request budget, so the count is bounded here as
+    # well as in the prompt. Both read MAX_SECTIONS.
+    #
+    # KEEP THE FIRST N-1 AND THE LAST, never a plain `[:N]` head slice. Every
+    # document this pipeline drafts ends with a structurally required closing
+    # block — prayer, verification, signature / execution, schedule — and it is
+    # always LAST in the plan, so a head slice deletes precisely the section the
+    # document cannot be delivered without.
+    #
+    # Measured on a commercial-MOU request (2026-09-02): the judge planned 13
+    # sections, `[:12]` dropped `SIGNATURES`, and the draft was delivered ending
+    # after its governing-law clause with no execution block, no banner and no
+    # error — silent on every run. The section-repair pass below does not cover
+    # this case either: its mandatory list is pleading-shaped, so a missing
+    # `Execution` is never restored. Middle sections are the safe thing to drop.
+    if strategy.sections and len(strategy.sections) > MAX_SECTIONS:
+        _dropped = strategy.sections[MAX_SECTIONS - 1:-1]
         log.warning(
-            "Fan-out judge emitted more sections than the hard cap — trimming",
-            emitted=len(strategy.sections), cap=_FANOUT_HARD_CAP,
+            "Fan-out judge emitted more sections than the ceiling — trimming",
+            emitted=len(strategy.sections), max_sections=MAX_SECTIONS,
+            kept_last=strategy.sections[-1].heading[:40],
+            dropped=[s.heading[:32] for s in _dropped],
         )
-        strategy.sections = strategy.sections[:_FANOUT_HARD_CAP]
+        strategy.sections = (
+            strategy.sections[:MAX_SECTIONS - 1] + strategy.sections[-1:]
+        )
 
     if not strategy.should_fanout or not strategy.sections:
         log.info(

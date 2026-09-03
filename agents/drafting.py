@@ -62,7 +62,10 @@ from core.clients import (
     record_gemini_flash_success,
 )
 from core.settings import ES_INDICES
-from core.language import localize_prompt, detect_source_languages
+from core.language import (
+    localize_prompt, detect_source_languages, language_name,
+    is_off_target_language, output_script_ratio,
+)
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.self_refine import self_refine
@@ -633,7 +636,7 @@ async def _acquire_reference_draft(
     user_language: str = "en",
     intent=None,
     original_query: str = "",
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     """Stage 1 of the simplified drafting pipeline (v1 DraftRetriever pattern).
 
     Flow:
@@ -645,8 +648,13 @@ async def _acquire_reference_draft(
          a draft, not an essay — v1's gap)
 
     Returns:
-      (reference_text, source_attribution, source_kind)
+      (reference_text, source_attribution, source_kind, search_query)
         source_kind is 'es' (from drafting corpus) or 'web' (synthesized).
+        search_query is the ENGLISH form of the user's request — the
+        translation we already computed for the corpus lookup, or the
+        original query when the user wrote in English. Returned so the
+        fan-out judge can plan against English instead of regional script;
+        see the depth-collapse note on `_judge_fanout`.
     """
     es = get_es_client()
     index = ES_INDICES["drafting"]
@@ -704,7 +712,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:no-corpus-hit>", "web"
+        return web_text, "<web:no-corpus-hit>", "web", search_query
 
     # Use the (possibly translated) English `search_query` for the picker so
     # the LLM reasons about English file names against English intent —
@@ -723,7 +731,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:picker-rejected>", "web"
+        return web_text, "<web:picker-rejected>", "web", search_query
 
     fetch_body = {
         "size": 1,
@@ -753,7 +761,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:fetch-failed>", "web"
+        return web_text, "<web:fetch-failed>", "web", search_query
 
     reference_text = fetch_hits[0]["_source"].get("page_content", "") or ""
     display_name = os.path.basename(picked)
@@ -764,7 +772,7 @@ async def _acquire_reference_draft(
     )
     log.info("Reference draft acquired from corpus",
              source=picked, length=len(reference_text))
-    return reference_text, picked, "es"
+    return reference_text, picked, "es", search_query
 
 
 async def _acquire_reference_via_web(
@@ -1695,9 +1703,34 @@ async def _judge_fanout(
                 "Apply the default fan-out rules above."
             )
 
+        # Planner model: Gemini 2.5 Flash (full) with a thinking budget,
+        # upgraded from flash-lite.
+        #
+        # This is a deliberate TRADE, measured on hi/gu/ta/te + en, 3 runs
+        # each, reference held constant per language:
+        #
+        #   PAYS FOR ITSELF — heading script correctness
+        #     Gujarati headings, flash-lite : script match 0.00, 3/3
+        #                                     (emitted Devanagari, i.e. Hindi)
+        #     Gujarati headings, flash full : script match 1.00, 3/3
+        #     A Gujarati draft whose section headings are in Hindi is the
+        #     "not appropriate" half of the client complaint, and flash-lite
+        #     got it wrong every single time.
+        #
+        #   COSTS — planned section count drops
+        #     en  7,7,7 -> 4,4,4      hi  7,7,7 -> 6,6,6
+        #     gu  8,8,8 -> 6,6,7      ta  5,5,5 -> 5,5,5
+        #                             te  6,6,6 -> 6,6,7
+        #
+        # The section-count drop is real and must be watched: this is ONE
+        # call per request, so cost is not the issue, but a shorter plan
+        # means a shorter document. If drafts regress in length, revisit
+        # this before touching the writer — the writer honours whatever plan
+        # it is given (instrumentation shows planned == emitted).
         llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
+            "google_genai:gemini-2.5-flash",
             temperature=0.0,
+            thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)
@@ -1789,6 +1822,24 @@ async def _generate_section_pair(
         # party names, court, case number, etc.
         system_prompt = _REVIEW_AND_REDRAFT_MODE_OVERRIDE + "\n\n---\n\n" + system_prompt
 
+    # Per-section depth anchor for regional-language drafts.
+    #
+    # The SUBSTANTIVE DEPTH policy in core/language.py already says "same
+    # depth as English", but it lands ~96% of the way through a ~43,000-
+    # character system prompt and measurably does not move the output —
+    # regional-language sections still came back at 61% of the English word
+    # count with it in place. Restating the expectation HERE, inside the
+    # task list the model is actually executing, puts it where it cannot be
+    # missed. English is unaffected (empty string).
+    depth_anchor = ""
+    if user_language and user_language != "en":
+        depth_anchor = (
+            "\n   (DEPTH: write this section at full English depth — each "
+            "numbered paragraph is 3-5 complete sentences carrying its own "
+            "legal reasoning. Do NOT abbreviate because the output language "
+            "is not English.)"
+        )
+
     section_lines: list[str] = []
     for offset, sec in enumerate(sections_to_write):
         position = section_position_start + offset
@@ -1796,6 +1847,7 @@ async def _generate_section_pair(
             f"{offset + 1}. **{sec.heading}** — {sec.summary or '(see structure in reference)'}\n"
             f"   (Section {position} of {total_sections} in the full document; "
             f"slug: `{sec.id}`)"
+            f"{depth_anchor}"
         )
     sections_block = "\n\n".join(section_lines)
 
@@ -2047,6 +2099,116 @@ async def _generate_section_pair(
     return text
 
 
+# Repair budget. A section pair costs ~25s against a 300s request ceiling, so
+# repair is capped at two pairs and only runs with real budget left — a draft
+# missing its Prayer is worth 25s, but not a gateway timeout.
+_MAX_REPAIR_SECTIONS = 4
+_REPAIR_MIN_BUDGET_S = 40
+
+
+# Not every planned section that fails to appear is a defect.
+#
+# The planner works from a canonical checklist and lists what a document of
+# this family CAN carry; the section prompt then tells the writer to "OMIT
+# ONLY FOR A FACTUAL REASON" — drop parity when there are no co-accused, drop
+# medical grounds when none are pleaded. That omission is CORRECT, and the
+# test scenario (one accused, no co-accused) triggers it constantly.
+#
+# Measured over 20 drafts: planned-vs-emitted disagreed in half of them, but
+# almost every gap was a conditional section the writer was right to drop.
+# Exactly ONE draft was genuinely defective — a Bengali filing missing its
+# Verification. Repairing indiscriminately would have re-inserted parity
+# sections into cases with no co-accused, i.e. made the drafts worse while
+# spending ~25s per call to do it.
+#
+# So repair is limited to the sections a filing cannot be without. Matching is
+# on the planner's English `id` slug rather than the localized heading, so it
+# works identically for Odia and Kannada without a per-language word list —
+# an earlier keyword-based attempt produced five false positives on Kannada
+# because it used the wrong word for "facts".
+_MANDATORY_SECTION_HINTS = (
+    "title", "cause", "fact", "ground", "prayer", "relief", "verif",
+)
+_CONDITIONAL_SECTION_HINTS = (
+    "parity", "co_accused", "coaccused", "medical", "family", "undertak",
+    "advocate", "document", "annexure", "schedule", "index",
+)
+
+
+def _is_mandatory_section(sec: "_Section") -> bool:
+    """Is this a section the document is invalid without?
+
+    Conditional hints are checked FIRST: "medical_family_grounds" contains
+    "ground" and would otherwise read as mandatory when it is exactly the
+    kind of section the writer is supposed to drop when the facts are silent.
+    """
+    slug = f"{getattr(sec, 'id', '')} {getattr(sec, 'heading', '')}".lower()
+    if any(h in slug for h in _CONDITIONAL_SECTION_HINTS):
+        return False
+    return any(h in slug for h in _MANDATORY_SECTION_HINTS)
+
+# A full redraft costs about as much as the first pass (~150s measured), and
+# the request ceiling is 300s. Only retry with real budget left.
+_OFF_TARGET_RETRY_MIN_BUDGET_S = 150
+
+
+def _normalise_heading(text: str) -> str:
+    """Fold a heading for comparison: strip markdown, punctuation, case, space.
+
+    Deliberately script-agnostic — `str.lower()` is a no-op on Indic scripts,
+    and the comparison must work identically for Odia and English.
+    """
+    t = re.sub(r"[#*_`>]", " ", text or "")
+    t = re.sub(r"[\s ]+", " ", t)
+    t = t.strip(" :.-—–\t").lower()
+    return t
+
+
+def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
+    """Planned sections whose heading never made it into the draft.
+
+    A section counts as present when its normalised heading appears anywhere
+    in the draft's own headings, in either direction — the writer is allowed
+    to lengthen a heading ("Prayer" -> "Prayer for Bail") or trim a long one,
+    but not to drop the section or rename it into something unrelated.
+
+    Substring matching in both directions is deliberately permissive: the goal
+    is catching a DROPPED section, not policing wording. A false "missing"
+    triggers a wasted 25s repair call, so the bar is set to avoid that.
+    """
+    if not draft or not sections:
+        return []
+    draft_headings: list[str] = []
+    for line in draft.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # `## Heading`, and also `**Heading**` alone on a line — some drafts
+        # mark sections in bold rather than with hashes, and treating those as
+        # "no heading" would flag a complete document as entirely missing.
+        if s.startswith("#") or (s.startswith("**") and s.endswith("**") and len(s) < 120):
+            h = _normalise_heading(s)
+            if h:
+                draft_headings.append(h)
+
+    # No headings recognised at all: the writer is not marking sections in a
+    # form we can read, so we cannot tell a dropped section from a differently
+    # formatted one. Repairing here would burn ~25s per pair to append
+    # duplicates of content that may already be present. Judge nothing.
+    if not draft_headings:
+        return []
+
+    missing: list["_Section"] = []
+    for sec in sections:
+        want = _normalise_heading(sec.heading)
+        if not want:
+            continue
+        if any(want in got or got in want for got in draft_headings):
+            continue
+        missing.append(sec)
+    return missing
+
+
 async def _generate_sectionwise(
     *,
     sections: list[_Section],
@@ -2241,6 +2403,79 @@ async def _generate_sectionwise(
 
     draft = "\n\n".join(completed)
 
+    # --- Plan adherence -----------------------------------------------------
+    #
+    # `failed_pairs` above only catches a pair that threw or returned nothing.
+    # It does NOT catch the more damaging failure: a pair that returns fluent
+    # text while ignoring the section list it was given.
+    #
+    # Observed on Odia (3/3 runs planned correctly, the writer still deviated):
+    # the plan was cause title / facts / grounds / family / undertakings /
+    # PRAYER / VERIFICATION, and the writer emitted "An analysis regarding a
+    # regular bail application", silently dropped Prayer and Verification, and
+    # invented a "Relevant legal provisions" section into which it dumped the
+    # retrieved statutes verbatim in English. The result reads well and is not
+    # a filing — no cause title, no prayer, no verification.
+    #
+    # Section-pair rule 2 already says "USE THE EXACT HEADING TEXT GIVEN".
+    # Bug 1 established that a prompt rule alone does not hold, so this is a
+    # deterministic check with a bounded repair rather than more prompt text.
+    _all_missing = _missing_planned_sections(draft, sections)
+    missing = [s for s in _all_missing if _is_mandatory_section(s)]
+    _conditional = [s for s in _all_missing if s not in missing]
+    if _conditional:
+        # Expected and correct — the facts gave these nothing to say. Logged
+        # at info so the planned-vs-emitted gap is explainable in the logs
+        # without looking like a defect.
+        log.info(
+            "Conditional sections omitted (expected)",
+            omitted=[s.id for s in _conditional],
+        )
+    if missing:
+        log.warning(
+            "Writer dropped MANDATORY sections",
+            missing=[s.id for s in missing],
+            planned=total, emitted=total - len(_all_missing),
+        )
+        # Repair in pairs, cheapest-first, and only while the request budget
+        # allows. A full regeneration would cost another ~150s against a 300s
+        # ceiling, so repair is capped rather than unbounded.
+        from core.deadline import remaining as _remaining
+        repaired: list[str] = []
+        for j in range(0, min(len(missing), _MAX_REPAIR_SECTIONS), 2):
+            if _remaining() is not None and _remaining() < _REPAIR_MIN_BUDGET_S:
+                log.warning("Skipping section repair — request budget exhausted",
+                            remaining_s=_remaining())
+                break
+            chunk = missing[j:j + 2]
+            try:
+                text = await _generate_section_pair(
+                    sections_to_write=chunk,
+                    section_position_start=total - len(missing) + j + 1,
+                    total_sections=total,
+                    query=query,
+                    user_facts=user_facts,
+                    reference_draft=reference_draft,
+                    prior_text=draft,
+                    gathered_context=gathered_context,
+                    user_intent=user_intent,
+                    user_language=user_language,
+                    review_and_redraft_mode=review_and_redraft_mode,
+                )
+                if text.strip():
+                    repaired.append(text.strip())
+                    log.info("Section repair succeeded",
+                             headings=[s.heading[:40] for s in chunk])
+            except Exception as e:
+                log.warning("Section repair failed", error=short_err(e),
+                            headings=[s.heading[:40] for s in chunk])
+        if repaired:
+            draft = draft + "\n\n" + "\n\n".join(repaired)
+            still_missing = _missing_planned_sections(draft, sections)
+            log.info("Plan adherence after repair",
+                     recovered=len(missing) - len(still_missing),
+                     still_missing=[s.heading[:40] for s in still_missing])
+
     # G-24: emit draft_incomplete SSE + prepend a banner when any pair
     # failed. The frontend already listens for draft_incomplete (see
     # chat_runner.py handler); the banner is belt-and-suspenders so
@@ -2393,6 +2628,7 @@ async def _generate_draft(
     gathered_context: dict[str, str] | None = None,
     review_and_redraft_mode: bool = False,
     chat_history=None,
+    english_query: str = "",
 ) -> str:
     """Thin dispatcher: judge call decides single-pass vs section-wise.
 
@@ -2452,12 +2688,53 @@ async def _generate_draft(
             "properly."
         )
 
+    # Plan against ENGLISH when the user wrote in a regional language.
+    #
+    # The judge decides how many sections the document gets. Fed a
+    # regional-script query it consistently plans FEWER sections than the
+    # same request in English — measured 6 vs 8 for an identical bail
+    # request, deterministic across runs — which is roughly a quarter of
+    # the document silently dropped (Undertakings, advocate block, parity
+    # and medical grounds collapsed into one).
+    #
+    # `english_query` is the translation `_acquire_reference_draft` already
+    # computed for the English-only corpus lookup, so this costs no extra
+    # LLM call. `user_language` is still passed through unchanged, so the
+    # judge continues to emit headings in the user's script — only the
+    # PLANNING becomes language-invariant.
     strategy = await _judge_fanout(
-        query=query,
+        query=english_query or query,
         reference_draft=reference_draft,
         user_language=user_language,
         user_intent=user_intent,
         chat_history=chat_history,
+    )
+
+    # Diagnostic: splits the regional-language section deficit into its three
+    # possible causes. Some languages deliver 4-6 sections where English
+    # reliably delivers 9, and the fix differs per cause:
+    #   english_query_is_ascii False -> translation failed for this language
+    #   is_ascii True but planned low -> the judge is biased even in English
+    #   planned high but emitted low  -> sections dropped during writing
+    # Pair this with the `draft_done` line at the end of drafting_node.
+    _plan_q = english_query or query
+    # The judge mirrors the REFERENCE TEMPLATE's structure, and each language
+    # retrieves a different template (translation wording differs, so ES
+    # returns different documents). Log the template's own section count so a
+    # low plan can be attributed to the template rather than the language or
+    # the model. `ref_*` counts several conventions because corpus templates
+    # are CSV-derived and do not use markdown headings.
+    _ref = reference_draft or ""
+    log.info(
+        "draft_plan",
+        user_language=user_language,
+        english_query_head=_plan_q[:60],
+        english_query_is_ascii=_plan_q.isascii(),
+        planned_sections=len(strategy.sections),
+        ref_chars=len(_ref),
+        ref_numbered=len(re.findall(r"^\s*\d{1,2}[\.\)]\s+\S", _ref, re.M)),
+        ref_allcaps_lines=len(re.findall(r"^[A-Z][A-Z \-:/,\.]{6,}$", _ref, re.M)),
+        planned_headings=[s.heading[:24] for s in strategy.sections],
     )
 
     # Hard code-level cap: prompt says "at most 15" but the LLM sometimes
@@ -2500,7 +2777,7 @@ async def _generate_draft(
         f"Drafting {len(strategy.sections)} sections one by one...",
         step="generate",
     )
-    return await _generate_sectionwise(
+    draft = await _generate_sectionwise(
         sections=strategy.sections,
         query=query,
         user_facts=user_facts,
@@ -2511,6 +2788,69 @@ async def _generate_draft(
         gathered_context=gathered_context,
         review_and_redraft_mode=review_and_redraft_mode,
     )
+
+    # --- Off-target language gate ------------------------------------------
+    #
+    # 4 of 42 regional drafts came back wholly or largely in English despite a
+    # regional request — two at a script ratio of 0.00, not one character of
+    # the requested script. A client who asks in Kannada and receives English
+    # is the same complaint that started this work.
+    #
+    # Deterministic, not routed through the critic: the critic was measured
+    # defaulting to "pass" on exactly these drafts. Recorded as an explicit
+    # exception under CLAUDE.md drafting invariant 2.
+    #
+    # Regeneration is budget-gated. A full redraft costs roughly as much as
+    # the first, and the request ceiling is 300s — so we retry only when the
+    # budget genuinely allows, and otherwise ship the draft with a visible
+    # banner. A banner is a bad outcome; a gateway timeout returning nothing
+    # is a worse one.
+    if user_language and user_language != "en" and is_off_target_language(draft, user_language):
+        ratio = output_script_ratio(draft, user_language)
+        from core.deadline import remaining as _remaining
+        budget = _remaining()
+        log.warning(
+            "Draft came back off-target language",
+            user_language=user_language, script_ratio=round(ratio, 2),
+            remaining_s=budget,
+        )
+        if budget is None or budget > _OFF_TARGET_RETRY_MIN_BUDGET_S:
+            progress_emit(
+                "drafting",
+                "Draft came back in the wrong language — regenerating...",
+                substep=True, step="generate",
+            )
+            retry = await _generate_sectionwise(
+                sections=strategy.sections,
+                query=query,
+                user_facts=user_facts,
+                reference_draft=reference_draft,
+                user_intent=user_intent,
+                user_language=user_language,
+                progress_emit=progress_emit,
+                gathered_context=gathered_context,
+                review_and_redraft_mode=review_and_redraft_mode,
+            )
+            retry_ratio = output_script_ratio(retry, user_language)
+            log.info("Off-target regeneration finished",
+                     before=round(ratio, 2), after=round(retry_ratio, 2),
+                     accepted=retry_ratio > ratio)
+            # Keep whichever is closer to the requested language. A retry that
+            # comes back English too is no improvement, and the first draft at
+            # least had the sections.
+            if retry.strip() and retry_ratio > ratio:
+                return retry
+            draft = retry if retry_ratio > ratio else draft
+            ratio = max(ratio, retry_ratio)
+
+        if is_off_target_language(draft, user_language):
+            lang_name = language_name(user_language)
+            draft = (
+                f"> ⚠ **This draft came back in English rather than {lang_name}.** "
+                "Please re-send your prompt to retry.\n\n"
+            ) + draft
+
+    return draft
 
 
 # ---------------------------------------------------------------------------
@@ -2836,6 +3176,9 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = user_facts
             reference_source = "<uploaded:review_and_redraft>"
             reference_kind = "uploaded"
+            # No corpus lookup happened on this path, so there is no English
+            # translation to plan against; the judge falls back to `query`.
+            english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         elif _INLINED_PRIOR_DRAFT_MARKER in query:
             # (c) Directive follow-up whose query already carries the full
@@ -2857,11 +3200,13 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = ""
             reference_source = "<prior_turn:inlined>"
             reference_kind = "prior_turn"
+            english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         else:
             progress("drafting", "Searching templates and relevant law...",
                      step="reference")
-            (reference_text, reference_source, reference_kind), gathered_ctx = \
+            (reference_text, reference_source, reference_kind,
+             english_query), gathered_ctx = \
                 await asyncio.gather(
                     _acquire_reference_draft(
                         query,
@@ -2900,6 +3245,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
             gathered_context=gathered_ctx,
             review_and_redraft_mode=use_upload_as_ref,
             chat_history=_judge_chat_history,
+            english_query=english_query,
         )
 
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
@@ -3008,7 +3354,36 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         original_len=len(draft),
                         refined_len=len(refined_draft),
                     )
-                    draft = refined_draft
+                    # The refiner must never change the LANGUAGE of a draft.
+                    #
+                    # Measured (Odia, req 65f6dfd1): the generator produced a
+                    # 9,740-char draft in Odia — the generation-time script
+                    # gate passed it — and self-refine then rewrote it to
+                    # 12,411 chars of English across 2 iterations. The final
+                    # output contained not one Odia character. This is the
+                    # same failure class as the doc-type flip: the critic
+                    # raises violations and the refiner "fixes" them by
+                    # producing a document the user did not ask for.
+                    #
+                    # Reverting is the right remedy rather than regenerating:
+                    # we already hold a correct draft in the requested
+                    # language, and it cost ~150s to make. The refinement's
+                    # improvements are forfeited, which is the cheaper loss.
+                    if (
+                        user_language
+                        and user_language != "en"
+                        and is_off_target_language(refined_draft, user_language)
+                        and not is_off_target_language(draft, user_language)
+                    ):
+                        log.warning(
+                            "Self-refine changed the draft language — reverting",
+                            user_language=user_language,
+                            before=round(output_script_ratio(draft, user_language), 2),
+                            after=round(output_script_ratio(refined_draft, user_language), 2),
+                            iterations=len(refine_history),
+                        )
+                    else:
+                        draft = refined_draft
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))
@@ -3047,6 +3422,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 agent_name="Drafting",
                 template_type="web-synthesized",
             )]
+
+        # Pairs with the `draft_plan` line above. `emitted_h2` counts SECTION
+        # headings only (`##`); `###` is a sub-heading inside a section and
+        # inflated an earlier version of this measurement.
+        log.info(
+            "draft_done",
+            user_language=user_language,
+            emitted_h2=len(re.findall(r"^##\s+\S", draft, re.M)),
+            emitted_h3=len(re.findall(r"^###\s+\S", draft, re.M)),
+            draft_words=len(draft.split()),
+        )
 
         log.info(
             "Agent completed -- simplified pipeline",

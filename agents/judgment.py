@@ -101,6 +101,81 @@ def _is_exact_section_lookup(
     return ratio >= min_match_ratio
 
 
+# --- Court allowlist for the `judgements` ES index ---------------------
+#
+# The `judgements` index has exactly 17 distinct court_name values (per
+# an ES terms aggregation on 2026-09-01). When the metadata extractor
+# emits a *specific* named court that is NOT in this set (e.g.
+# "karnataka high court", "allahabad high court", "punjab and haryana
+# high court", "andhra pradesh high court", "telangana high court",
+# "himachal pradesh high court", "patna high court", "chhattisgarh
+# high court", "jharkhand high court"), passing it as a hard
+# `match_phrase` filter guarantees zero ES hits. The pipeline still
+# falls through to the web fallback via the 0-hits path, but that
+# wastes ~3-5s of ES latency (preliminary + refined + rewrite+retry
+# all return empty). Detect the mismatch up front and route straight
+# to the web fallback.
+#
+# Two normalisation edge cases baked into `_normalize_court_filter`:
+#   1. The index stores "odisa high court" (source-data typo).
+#      Users typing the correct "odisha high court" would otherwise
+#      miss their own court's docs. Normalise both spellings to the
+#      typo'd bucket.
+#   2. The index stores "Tribunal" (capital T). `smart_judgment_search`
+#      lowercases the filter before `match_phrase`, so the comparison
+#      here is lowercase-only.
+
+_INDEXED_COURTS: frozenset[str] = frozenset({
+    "bombay high court",
+    "kerala high court",
+    "rajasthan high court",
+    "madhya pradesh high court",
+    "odisa high court",  # sic — matches the source-data typo
+    "gujarat high court",
+    "calcutta high court",
+    "delhi high court",
+    "gauhati high court",
+    "uttarakhand high court",
+    "jammu and kashmir high court",
+    "supreme court",
+    "tripura high court",
+    "manipur high court",
+    "meghalaya high court",
+    "sikkim high court",
+    "tribunal",
+})
+
+
+def _normalize_court_filter(court: str | None) -> tuple[str | None, bool]:
+    """Normalise an extracted court name against the ES index allowlist.
+
+    Returns `(filter_value, court_not_indexed)`:
+      - `(None, False)` — no court, empty string, or generic "high court"
+        with no location prefix. The search should run without any court
+        filter (all courts eligible).
+      - `(str, False)` — court exists in the index. Pass as a filter.
+      - `(None, True)` — court is a *specific* named court NOT in the
+        index. The pipeline should skip ES and route straight to the web
+        fallback. `filter_value` is None (unused in that path).
+    """
+    if not court:
+        return None, False
+    normalized = court.strip().lower()
+    if not normalized:
+        return None, False
+    # Fold correct Odisha / Orissa spellings into the index's typo bucket.
+    if normalized in ("odisha high court", "orissa high court"):
+        normalized = "odisa high court"
+    if normalized in _INDEXED_COURTS:
+        return normalized, False
+    # Generic "high court" (no location prefix) — user did not name a
+    # specific court, so drop the filter and search across all courts.
+    if normalized == "high court":
+        return None, False
+    # Specific named court not present in the ES index.
+    return None, True
+
+
 # --- Case Metadata Extraction ---
 
 METADATA_EXTRACTION_PROMPT = """You are an expert in legal text parsing and Elasticsearch query formulation.
@@ -377,12 +452,13 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # richer metadata. If preliminary hits are found, we skip the refined search.
         def _preliminary_search():
             prelim_meta = _judgment_regex_fallback(query)
+            prelim_court, _ = _normalize_court_filter(prelim_meta.court_name)
             return smart_judgment_search(
                 query=query,
                 petitioner=(prelim_meta.petitioner_names or [""])[0],
                 respondent=(prelim_meta.respondent_names or [""])[0],
                 year=prelim_meta.year,
-                court=prelim_meta.court_name,
+                court=prelim_court,
                 topics=prelim_meta.topics,
                 acts_or_sections=prelim_meta.acts_or_sections,
                 lexical_query=prelim_meta.lexical_query or "",
@@ -418,6 +494,32 @@ async def judgment_node(state: LegalAgentState) -> dict:
                         error=short_err(es_err))
             prelim_result = {"hits": [], "strategy_used": "none", "strategies_tried": []}
 
+        # Normalise the extracted court against the ES index allowlist.
+        # If the extractor named a specific court NOT in our index (e.g.
+        # Karnataka / Allahabad / Punjab & Haryana / Andhra / Telangana /
+        # etc.), skip ES entirely and route to the web fallback — no
+        # amount of ES retrying will surface docs that aren't there.
+        # Preliminary hits (if any) are discarded in this branch because
+        # the extractor's LLM view of the court intent is more reliable
+        # than the regex fallback that ran during preliminary.
+        court_filter, court_not_indexed = _normalize_court_filter(metadata.court_name)
+        if court_not_indexed:
+            log.info("Requested court not in ES judgements index — skipping "
+                     "ES searches and routing to web fallback",
+                     requested_court=metadata.court_name,
+                     preliminary_hits=len(prelim_result["hits"]))
+            progress("judgment",
+                     f"'{metadata.court_name}' isn't in our judgment index "
+                     "— searching the web...",
+                     step="fallback")
+            from core.agent_fallback import web_search_fallback
+            fallback_result = await web_search_fallback(
+                query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
+                original_query=original_query,
+                user_language=_user_language, intent=_intent)
+            fallback_result.fallback_used = True
+            return {"agent_results": {"Judgment": fallback_result}}
+
         # If preliminary search found hits, use them directly
         if prelim_result["hits"]:
             search_result = prelim_result
@@ -438,7 +540,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
                         petitioner=(metadata.petitioner_names or [""])[0],
                         respondent=(metadata.respondent_names or [""])[0],
                         year=metadata.year,
-                        court=metadata.court_name,
+                        court=court_filter,
                         topics=metadata.topics,
                         acts_or_sections=metadata.acts_or_sections,
                         lexical_query=metadata.lexical_query or "",
@@ -486,7 +588,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
                         petitioner=(metadata.petitioner_names or [""])[0],
                         respondent=(metadata.respondent_names or [""])[0],
                         year=metadata.year,
-                        court=metadata.court_name,
+                        court=court_filter,
                         topics=metadata.topics,
                         acts_or_sections=metadata.acts_or_sections,
                         lexical_query=rewritten,

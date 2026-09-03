@@ -141,42 +141,32 @@ async def web_search_fallback(
     METRICS["fallback_total"].labels(agent=agent_name, tier="web_search").inc()
 
     try:
-        # Override any "use only provided context" instructions since we're
-        # using web search grounding — the model should use search results.
-        # Also inject the Indian authorized-sources allowlist here so EVERY
-        # web fallback caller (Newacts / Judgment / Legislation / Drafting /
-        # Scenario) gets the discipline — not just the ones whose system
-        # prompts wire it in directly. Restores V1's allowlist that was
-        # lost in the V2 rewrite; would have prevented the testbook.com /
-        # ipleaders.in pollution seen in 2026-06-15 cross-act fallback.
+        # Build the fallback prompt from the SHARED web-fallback template
+        # (config.prompts.WEB_FALLBACK_BASE_PROMPT) rather than the caller's
+        # ES-context system prompt. The caller's `system_prompt` is designed
+        # for the "answer strictly from supplied context" ES path — reusing
+        # it here tells the model to refuse when ES returned nothing (the
+        # exact scenario that triggered this fallback). The shared prompt
+        # inverts that default and enforces strict "hidden source, prose
+        # only, no URLs / domain names" discipline for the visible response.
+        #
+        # `system_prompt` is retained in the signature for backward compat
+        # with the 20 call sites (Judgment, Newacts, Legislation, SCI,
+        # GST, Constitution, Maxim, Scenario, orchestrator last-resort),
+        # but is no longer used as the primary system prompt.
         from config.prompts import (
-            INDIAN_LEGAL_AUTHORIZED_SOURCES,
-            INDIAN_LEGAL_CITATION_GROUNDING,
+            WEB_FALLBACK_BASE_PROMPT,
+            WEB_FALLBACK_AGENT_HINTS,
         )
         from core.language import localize_prompt
-        fallback_instruction = (
-            "\n\nIMPORTANT: You are now using web search grounding. "
-            "Use the search results to REASON about a comprehensive, accurate "
-            "answer. Do NOT say you lack context — synthesise from the search "
-            "results. HOWEVER, treat every web result as HIDDEN reasoning "
-            "context: the domain name, URL, retrieval id, or search-chunk "
-            "identifier from any web result MUST NOT appear anywhere in the "
-            "response body. Do NOT write '[leg-<domain>-<digits>]', "
-            "'[web-<digits>]', 'Source: <domain>', 'According to <site>', "
-            "'per <blog>', 'as noted by <news outlet>', or any external "
-            "hyperlink to a web page. Do NOT emit any bracketed marker whose "
-            "content is a domain name. When a proposition is grounded only "
-            "in a web result and no verified Lawttorney source backs it up, "
-            "restate the proposition as general legal background without any "
-            "citation, or omit it — never attribute it to the web page."
-            "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
-            + "\n\n" + INDIAN_LEGAL_CITATION_GROUNDING
-        )
-        # Apply the language directive at the fallback layer so callers that
-        # passed a raw English prompt also get language consistency.
-        localized_system = localize_prompt(
-            system_prompt + fallback_instruction, user_language, intent,
-        )
+        agent_hint = WEB_FALLBACK_AGENT_HINTS.get(agent_name, "")
+        web_prompt = WEB_FALLBACK_BASE_PROMPT
+        if agent_hint:
+            web_prompt = f"{web_prompt}\n\n{agent_hint}"
+        # Apply the language / user-intent directive at the fallback layer
+        # so responses match the user's requested language even for callers
+        # that pass a default `user_language="en"`.
+        localized_system = localize_prompt(web_prompt, user_language, intent)
         full_prompt = f"{localized_system}\n\nUser Query: {query}"
         client = get_genai_client()
 
@@ -247,6 +237,25 @@ async def web_search_fallback(
         else:
             content = getattr(response.candidates[0].content.parts[0], "text", None) or "I was unable to retrieve information on this topic at the moment. Please try rephrasing your question."
         tokens = getattr(response.usage_metadata, "total_token_count", 0)
+
+        # Safety net: even with the new WEB_FALLBACK_BASE_PROMPT explicitly
+        # forbidding hedges, Gemini occasionally still returns "I could not
+        # find..." style content for very specific case lookups. Detect it
+        # here so we get observability on how often the fallback still
+        # hedges after the prompt rewrite — same detector the ES path uses
+        # at judgment.py:606 / newacts.py etc.
+        try:
+            from core.retrieval_relevance import head_tail_apology_detected
+            if head_tail_apology_detected(content):
+                log.warning("Web fallback response is still an apology / hedge",
+                            agent=agent_name,
+                            response_preview=content[:200])
+                METRICS["fallback_total"].labels(
+                    agent=agent_name, tier="web_search_apology",
+                ).inc()
+        except Exception as _apology_err:
+            log.debug("Apology check on web fallback output failed",
+                      error=str(_apology_err)[:120])
         # Feed the raw genai response into the per-request TokenUsage tracker
         # so this call shows up in by_agent / by_model / cost_usd summaries.
         # Closes the observability gap where web-grounded fallback tokens

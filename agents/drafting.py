@@ -825,6 +825,38 @@ async def _acquire_reference_via_web(
 # real grounding instead of begging the model not to hallucinate.
 # ---------------------------------------------------------------------------
 
+# Drafting instructions are imperative and long ("Draft a detailed regular
+# bail application for my client charged under Sections … Include relevant
+# Supreme Court case law with citations supporting the grounds for bail").
+# The instruction words carry no retrieval signal and push the clause count
+# past Elasticsearch's 1024 cap. Keep the legal content, drop the command.
+_DRAFTING_STOPWORDS = frozenset("""
+draft drafting prepare create write generate compose make give me my client
+please kindly detailed detail include including relevant with supporting
+supporting grounds application for the a an and or of in on under as per
+that this these those is are was were be been being to from into it its
+""".split())
+
+_SCI_QUERY_MAX_WORDS = 14
+
+
+def _topical_query(query: str) -> str:
+    """Shorten a drafting instruction into a topical query for SCI search.
+
+    Measured: 41 words -> "maxClauseCount is set to 1024" error; 8-10 words ->
+    hits or a clean empty. Keeps ordering so the phrase still reads naturally
+    to a semantic search, and falls back to a plain truncation when filtering
+    removes too much.
+    """
+    if not query:
+        return query
+    words = re.findall(r"[\w()\-/.]+", query)
+    kept = [w for w in words if w.lower() not in _DRAFTING_STOPWORDS]
+    if len(kept) < 4:
+        kept = words
+    return " ".join(kept[:_SCI_QUERY_MAX_WORDS])
+
+
 class _ContextBlocks(dict):
     """Prompt blocks, carrying the SourceRegistry built from the same hits.
 
@@ -958,7 +990,14 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
         _run(search_newacts, {"query": query}),
         _run(search_legislation, {"query": query}),
         _run(search_judgments, {"query": query}),
-        _run(sci_judgment_tools.search_by_topic, {"query": query, "top_k": 3}),
+        # SCI gets a SHORTENED query. Its semantic search builds one boolean
+        # clause per term and Elasticsearch caps that at 1024, so a full
+        # drafting instruction (41 words in the measured case) fails with
+        # "maxClauseCount is set to 1024" while an 8-word topical query
+        # succeeds. Drafting was passing the whole instruction, so SCI failed
+        # on precisely the requests that ask for case law.
+        _run(sci_judgment_tools.search_by_topic,
+             {"query": _topical_query(query), "top_k": 3}),
         return_exceptions=False,
     )
 
@@ -983,12 +1022,36 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
         return f"## {label}\n{body}\n"
 
     def _format_sci(result, max_chars: int = 2400) -> str:
-        """SCI tool returns a JSON-stringified result. Trim to a sane size."""
+        """Format the SCI tool's output, or nothing when it did not succeed.
+
+        The tool has FOUR observed modes, not two:
+
+            HITS          "Found 3 relevant judgment(s):\\n\\n**PARTIES** (DB ID: n)…"
+            EMPTY         "No matching judgments found."
+            ERROR-STRING  "Semantic search error: TransportError(500, …)"
+            (exception)   raised, handled by _safe_invoke
+
+        Only EMPTY was filtered. An error string does not start with "No ", so
+        it was injected into the writer's prompt underneath a heading reading
+        "## RELEVANT SUPREME COURT JUDGMENTS" — the writer saw a promise of
+        Supreme Court authority followed by a stack trace, had none, was asked
+        for case law, and supplied it from memory in the tool's own
+        "(DB ID: n)" format.
+
+        That is the mechanism behind the ungrounded citations: retrieval
+        failed and the failure was formatted as content.
+        """
         if not result:
             return ""
         text = result if isinstance(result, str) else str(result)
         text = text.strip()
         if not text or text.startswith("No "):
+            return ""
+        if not text.startswith("Found "):
+            # Anything that is not a hit block is a failure, however it is
+            # worded. Fail closed: no block beats a block that lies.
+            log.warning("SCI search did not return hits; omitting the block",
+                        preview=text[:160])
             return ""
         return f"## RELEVANT SUPREME COURT JUDGMENTS\n{text[:max_chars]}\n"
 
@@ -3195,6 +3258,26 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # the future is one they must see. Stripped signals (DB IDs,
         # placeholder markers) need no banner — removing them is the whole
         # fix — but a suspect authority that REMAINS in the text does.
+        # Strict citation whitelisting — SHADOW BY DEFAULT. Computes and logs
+        # which citations are not traceable to retrieval, and changes nothing
+        # unless CITATION_STRIP_MODE=enforce. Enforce must not be switched on
+        # until advocate review of production shadow logs classifies the
+        # would-be strips as fabrication rather than retrieval gaps; the SCI
+        # index is already known to return no hits for most bail queries, so
+        # enforcing today would delete real authorities.
+        try:
+            from core.citation_whitelist import apply_citation_policy
+            draft, _cite_audit = apply_citation_policy(draft, gathered_ctx)
+            if _cite_audit.get("ungrounded"):
+                draft_warnings.append(
+                    f"[{_cite_audit['mode']}] "
+                    f"{len(_cite_audit['ungrounded'])} case citation(s) not "
+                    f"traceable to retrieved sources"
+                )
+        except Exception as _cite_err:
+            log.warning("Citation whitelist audit failed; draft unchanged",
+                        error=short_err(_cite_err))
+
         _unverifiable = [w for w in draft_warnings
                          if w.startswith("UNVERIFIABLE CITATION")]
         if _unverifiable:
@@ -3239,7 +3322,24 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 # no source registry; skip ... for this call)". Drafting has
                 # never passed one, so hallucinated authorities in generated
                 # filings have never been checked.
-                _registry = getattr(gathered_ctx, "registry", None)
+                # SHADOW-MODE SAFETY. Handing the registry to self_refine
+                # arms the critic's `unretrieved_citation` category, and the
+                # REFINER acts on whatever the critic raises — so passing it
+                # here would strip citations through a second code path even
+                # with CITATION_STRIP_MODE=shadow. Shadow must mean shadow on
+                # every path, not just the one that says "shadow" in its name.
+                #
+                # In shadow/off the registry is withheld, self_refine
+                # substitutes its "(none — skip unretrieved_citation)" marker,
+                # and behaviour is byte-identical to before this work.
+                from core.citation_whitelist import ENFORCE as _CITE_ENFORCE
+                from core.citation_whitelist import strip_mode as _cite_mode
+                _registry = (getattr(gathered_ctx, "registry", None)
+                             if _cite_mode() == _CITE_ENFORCE else None)
+                if _registry is None:
+                    log.info("Citation whitelist withheld from self_refine "
+                             "(shadow/off) — critic cannot strip citations",
+                             citation_strip_mode=_cite_mode())
                 refined_draft, refine_history = await self_refine(
                     draft,
                     user_query=query,

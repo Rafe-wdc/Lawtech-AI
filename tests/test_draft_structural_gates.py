@@ -118,3 +118,66 @@ def test_subheading_levels_count_as_emitted():
 def test_empty_inputs_are_safe():
     assert _missing_planned_sections("", [sec("a", "A")]) == []
     assert _missing_planned_sections("## A", []) == []
+
+
+# --- mandatory vs conditional sections -------------------------------------
+#
+# Half of all planned-vs-emitted gaps were conditional sections the writer was
+# RIGHT to drop (no co-accused -> no parity section). Repairing those would
+# re-insert irrelevant sections and cost ~25s per call to do it.
+
+from agents.drafting import _is_mandatory_section
+
+
+@pytest.mark.parametrize("sid,heading", [
+    ("cause_title", "In the Court of the Sessions Judge"),
+    ("facts", "Facts of the Case"),
+    ("facts_of_the_case", "ମାମଲାର ତଥ୍ୟ"),
+    ("grounds", "Grounds for Bail"),
+    ("grounds_for_bail", "ಜಾಮೀನು ನೀಡಲು ಆಧಾರಗಳು"),
+    ("prayer", "ପ୍ରାର୍ଥନା"),
+    ("verification", "ଚକାସଣୀ"),
+])
+def test_mandatory_sections_are_repaired(sid, heading):
+    assert _is_mandatory_section(sec(sid, heading))
+
+
+@pytest.mark.parametrize("sid,heading", [
+    ("parity", "Parity with Co-Accused"),
+    ("parity_grounds", "ସମାନ କେସର ଆଧାରରେ ଜାମିନ"),
+    ("medical_family_grounds", "Medical / Family Grounds"),
+    ("family", "ପାରିବାରିକ ଆଧାର"),
+    ("undertakings", "Undertakings Offered"),
+    ("advocate_details", "Advocate for Applicant"),
+    ("list_of_documents", "List of Documents"),
+])
+def test_conditional_sections_are_never_repaired(sid, heading):
+    """Dropping these when the facts are silent is CORRECT behaviour."""
+    assert not _is_mandatory_section(sec(sid, heading))
+
+
+def test_conditional_hint_wins_over_mandatory_substring():
+    """'medical_family_grounds' contains 'ground' — it must still read as
+    conditional, or the repair re-inserts sections the writer rightly cut."""
+    assert not _is_mandatory_section(sec("medical_family_grounds", "Medical Grounds"))
+    assert not _is_mandatory_section(sec("parity_grounds", "Parity Grounds"))
+
+
+def test_the_real_defect_is_still_caught():
+    """bn_2: a filing that lost its Verification. That must be repaired."""
+    sections = [
+        sec("cause_title", "মামলার শিরোনাম"),
+        sec("facts", "মামলার ঘটনা"),
+        sec("grounds", "জামিনের কারণসমূহ"),
+        sec("undertakings", "প্রস্তাবিত অঙ্গীকারসমূহ"),
+        sec("prayer", "প্রার্থনা"),
+        sec("verification", "যাচাইকরণ"),
+    ]
+    draft = ("## মামলার শিরোনাম\nx\n## জামিনের কারণসমূহ\nx\n"
+             "## প্রস্তাবিত অঙ্গীকারসমূহ\nx\n## প্রার্থনা\nx")
+    gone = _missing_planned_sections(draft, sections)
+    mandatory_gone = [s.id for s in gone if _is_mandatory_section(s)]
+    assert "verification" in mandatory_gone
+    assert "facts" in mandatory_gone
+    # ...and the conditional one is NOT queued for repair
+    assert "undertakings" not in mandatory_gone

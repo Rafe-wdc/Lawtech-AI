@@ -1898,6 +1898,48 @@ async def _generate_section_pair(
 _MAX_REPAIR_SECTIONS = 4
 _REPAIR_MIN_BUDGET_S = 40
 
+
+# Not every planned section that fails to appear is a defect.
+#
+# The planner works from a canonical checklist and lists what a document of
+# this family CAN carry; the section prompt then tells the writer to "OMIT
+# ONLY FOR A FACTUAL REASON" — drop parity when there are no co-accused, drop
+# medical grounds when none are pleaded. That omission is CORRECT, and the
+# test scenario (one accused, no co-accused) triggers it constantly.
+#
+# Measured over 20 drafts: planned-vs-emitted disagreed in half of them, but
+# almost every gap was a conditional section the writer was right to drop.
+# Exactly ONE draft was genuinely defective — a Bengali filing missing its
+# Verification. Repairing indiscriminately would have re-inserted parity
+# sections into cases with no co-accused, i.e. made the drafts worse while
+# spending ~25s per call to do it.
+#
+# So repair is limited to the sections a filing cannot be without. Matching is
+# on the planner's English `id` slug rather than the localized heading, so it
+# works identically for Odia and Kannada without a per-language word list —
+# an earlier keyword-based attempt produced five false positives on Kannada
+# because it used the wrong word for "facts".
+_MANDATORY_SECTION_HINTS = (
+    "title", "cause", "fact", "ground", "prayer", "relief", "verif",
+)
+_CONDITIONAL_SECTION_HINTS = (
+    "parity", "co_accused", "coaccused", "medical", "family", "undertak",
+    "advocate", "document", "annexure", "schedule", "index",
+)
+
+
+def _is_mandatory_section(sec: "_Section") -> bool:
+    """Is this a section the document is invalid without?
+
+    Conditional hints are checked FIRST: "medical_family_grounds" contains
+    "ground" and would otherwise read as mandatory when it is exactly the
+    kind of section the writer is supposed to drop when the facts are silent.
+    """
+    slug = f"{getattr(sec, 'id', '')} {getattr(sec, 'heading', '')}".lower()
+    if any(h in slug for h in _CONDITIONAL_SECTION_HINTS):
+        return False
+    return any(h in slug for h in _MANDATORY_SECTION_HINTS)
+
 # A full redraft costs about as much as the first pass (~150s measured), and
 # the request ceiling is 300s. Only retry with real budget left.
 _OFF_TARGET_RETRY_MIN_BUDGET_S = 150
@@ -2171,12 +2213,22 @@ async def _generate_sectionwise(
     # Section-pair rule 2 already says "USE THE EXACT HEADING TEXT GIVEN".
     # Bug 1 established that a prompt rule alone does not hold, so this is a
     # deterministic check with a bounded repair rather than more prompt text.
-    missing = _missing_planned_sections(draft, sections)
+    _all_missing = _missing_planned_sections(draft, sections)
+    missing = [s for s in _all_missing if _is_mandatory_section(s)]
+    _conditional = [s for s in _all_missing if s not in missing]
+    if _conditional:
+        # Expected and correct — the facts gave these nothing to say. Logged
+        # at info so the planned-vs-emitted gap is explainable in the logs
+        # without looking like a defect.
+        log.info(
+            "Conditional sections omitted (expected)",
+            omitted=[s.id for s in _conditional],
+        )
     if missing:
         log.warning(
-            "Writer deviated from the section plan",
-            missing=[s.heading[:40] for s in missing],
-            planned=total, emitted=total - len(missing),
+            "Writer dropped MANDATORY sections",
+            missing=[s.id for s in missing],
+            planned=total, emitted=total - len(_all_missing),
         )
         # Repair in pairs, cheapest-first, and only while the request budget
         # allows. A full regeneration would cost another ~150s against a 300s

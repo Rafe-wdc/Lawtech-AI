@@ -3392,6 +3392,15 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     intent=intent_obj,
                     source_languages=source_langs,
                     source_registry=_registry,
+                    # A finished draft has no business getting materially
+                    # shorter. The shared default (0.7) exists for
+                    # conversational answers that can legitimately compress on
+                    # a format fix; applied to a filing it let a 13% loss ship
+                    # silently. 0.90 still leaves room for the shrink that IS
+                    # correct — stripping a fabricated citation or a duplicated
+                    # paragraph costs 1-2% of a 20K draft, not 13%.
+                    shrink_floor=0.90,
+                    cumulative_shrink_floor=0.85,
                 )
                 if refined_draft != draft:
                     log.info(

@@ -1768,11 +1768,32 @@ async def _refine(
         text = getattr(result, "content", None)
         if text is None:
             text = str(result)
+
+        # A rewrite that ran out of output budget is a TRUNCATED document, not
+        # a refinement. The refiner re-emits the whole response, so hitting the
+        # cap means the tail is simply missing — and the length guards below
+        # cannot tell that apart from a legitimately tighter draft. Only the
+        # provider's own finish reason can, and until now nothing read it: the
+        # critic checks `finish_reason`, the refiner never did.
+        _finish = str(
+            (getattr(result, "response_metadata", None) or {}).get("finish_reason") or ""
+        ).upper()
+        if _finish in ("MAX_TOKENS", "LENGTH"):
+            log.warning(
+                "Refinement hit the output cap — discarding the truncated "
+                "rewrite and keeping the original response",
+                finish_reason=_finish,
+                original_len=len(response),
+                truncated_len=len(text),
+            )
+            return response
+
         log.info(
             "Refinement done",
             original_len=len(response),
             refined_len=len(text),
             len_diff=len(text) - len(response),
+            finish_reason=_finish or "unknown",
         )
         return text
     except Exception as e:
@@ -1801,6 +1822,8 @@ async def self_refine(
     source_languages: tuple[str, ...] = (),
     source_registry: object = None,
     placeholder_mode: bool = False,
+    shrink_floor: float = 0.7,
+    cumulative_shrink_floor: float = 0.65,
 ) -> tuple[str, list[Critique]]:
     """Generate-critique-refine loop over an existing response.
 
@@ -1888,10 +1911,38 @@ async def self_refine(
                 })
         history.append(critique)
         if critique.passes:
+            # Distinguish a real pass from a FAIL-SAFE pass. Every error path in
+            # `_critique` returns exactly `Critique(passes=True, confidence=0.0)`
+            # with no violations — an unparseable critique, a blocked call, or
+            # "Request deadline already exceeded; refusing to start work". A
+            # genuine pass carries the model's own confidence (measured: 0.9-1.0).
+            #
+            # That distinction matters because the loop returns `current`, which
+            # may already be a REFINED and shortened draft from an earlier
+            # iteration. Observed in production: iteration 1 shrank a draft 13%,
+            # iteration 2's refinement timed out, the critic then refused to
+            # start, and the loop logged `passed | confidence=0.0 |
+            # cumulative_violations=8` — shipping the shrunken intermediate as
+            # though it had been audited. Nothing verified that draft; fall back
+            # to what the caller gave us rather than keep an unaudited loss.
+            _unverified = critique.confidence == 0.0 and not critique.violations
+            if _unverified and len(current) < original_response_len:
+                log.warning(
+                    "Self-refine ended on an unverified pass with the response "
+                    "already shortened; reverting to the caller's original",
+                    iteration=iteration,
+                    original_len=original_response_len,
+                    current_len=len(current),
+                    drop_pct=round(
+                        100 * (1 - len(current) / max(original_response_len, 1)), 1),
+                    cumulative_violations=sum(len(c.violations) for c in history),
+                )
+                return response, history
             log.info(
                 "Self-refine passed",
                 iteration=iteration,
                 confidence=round(critique.confidence, 2),
+                verified=not _unverified,
                 cumulative_violations=sum(len(c.violations) for c in history),
             )
             return current, history
@@ -1928,12 +1979,23 @@ async def self_refine(
         # to under 70% of the input signals a runaway rewrite, not a fix.
         # Guard applies to responses >2K chars (short responses can
         # legitimately shrink after e.g. a table format fix).
-        if len(current) > 2000 and len(refined) < len(current) * 0.7:
+        #
+        # The floor is per-caller. 0.7 suits conversational answers, where a
+        # format fix can legitimately compress prose. It is far too loose for a
+        # finished DRAFT: a 13% loss measured on a real MOU (26,048 -> 22,626
+        # chars) sailed through and shipped, and a lawyer reading the result
+        # cannot tell that clauses were deleted after generation. Drafting
+        # therefore passes a much tighter floor — see agents/drafting.py.
+        # It is not set to ~1.0 because some shrink is CORRECT: stripping a
+        # fabricated citation or a duplicated paragraph makes the draft
+        # shorter and better.
+        if len(current) > 2000 and len(refined) < len(current) * shrink_floor:
             log.warning(
                 "Refinement destructively shortened response; keeping original",
                 original_len=len(current),
                 refined_len=len(refined),
                 drop_pct=round(100 * (1 - len(refined) / max(len(current), 1)), 1),
+                floor_pct=round(100 * shrink_floor),
                 iteration=iteration,
                 violation_count=len(critique.violations),
             )
@@ -1950,7 +2012,7 @@ async def self_refine(
         # partially-shrunk `current`) because both mid-states were also
         # unwanted shrinks.
         if (original_response_len > 2000
-                and len(refined) < original_response_len * 0.65):
+                and len(refined) < original_response_len * cumulative_shrink_floor):
             log.warning(
                 "Refinement cumulative-shrink exceeded budget; reverting to original",
                 original_response_len=original_response_len,

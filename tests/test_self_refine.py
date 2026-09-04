@@ -18,6 +18,7 @@ from core.self_refine import (
     Violation,
     _intent_has_directives,
     _format_violations,
+    _refine,
     self_refine,
 )
 from config.intent import (
@@ -344,3 +345,172 @@ class TestSelfRefineLoop:
         # Refinement was applied even though it shortened the response —
         # because the input was below the 2K guard threshold.
         assert result == "y" * 200
+
+
+# ---------------------------------------------------------------------------
+# Anti-shrink guards
+#
+# self_refine rewrites the whole response, so a bad refinement DELETES content
+# from a document that was already correct — and the reader cannot tell. Three
+# ways that shipped in production, one test class each.
+# ---------------------------------------------------------------------------
+
+
+def _drafting_intent() -> UserIntent:
+    return UserIntent(strict_language=True, language="mr",
+                      language_explicit=True, confidence=0.95)
+
+
+class TestRefinerRejectsItsOwnTruncation:
+    """A rewrite cut off at the output cap is a truncated document, not a fix."""
+
+    def _result(self, text: str, finish_reason: str):
+        return SimpleNamespace(
+            content=text,
+            response_metadata={"finish_reason": finish_reason},
+            usage_metadata={"total_tokens": 10},
+        )
+
+    def _run_refine(self, original: str, returned, monkey_ok=True) -> str:
+        crit = Critique(
+            passes=False, confidence=0.9,
+            violations=[Violation(field="strict_language", issue="x",
+                                  severity="major", suggested_fix="y")],
+        )
+        chain = SimpleNamespace(invoke=lambda payload: returned)
+        with patch("core.self_refine.ChatPromptTemplate") as mock_prompt, \
+             patch("core.self_refine.get_gemini_flash_full", return_value=object()), \
+             patch("core.clients.is_gemini_flash_available", return_value=True), \
+             patch("core.clients.record_gemini_flash_success"), \
+             patch("core.self_refine._record_tokens"):
+            mock_prompt.from_template.return_value.__or__ = lambda self, other: chain
+            return _run(_refine("q", _drafting_intent(), original, crit))
+
+    def test_max_tokens_rewrite_is_discarded(self):
+        original = "FULL DOCUMENT " * 200
+        truncated = "FULL DOCUMENT " * 40          # cut off mid-way
+        out = self._run_refine(original, self._result(truncated, "MAX_TOKENS"))
+
+        assert out == original, "a truncated rewrite must never replace the draft"
+
+    def test_length_finish_reason_is_also_discarded(self):
+        original = "FULL DOCUMENT " * 200
+        out = self._run_refine(original, self._result("short", "LENGTH"))
+
+        assert out == original
+
+    def test_normal_completion_is_accepted(self):
+        original = "FULL DOCUMENT " * 200
+        refined = original + " plus a corrected clause."
+        out = self._run_refine(original, self._result(refined, "STOP"))
+
+        assert out == refined
+
+
+class TestShrinkFloorIsPerCaller:
+    """Drafting holds a much tighter budget than a conversational answer."""
+
+    def _shrinking_loop(self, floor: float | None):
+        original = "CLAUSE. " * 500                 # 4000 chars
+        shrunk = "CLAUSE. " * 435                   # -13%, the measured case
+        c_fail = Critique(
+            passes=False, confidence=0.9,
+            violations=[Violation(field="strict_language", issue="x",
+                                  severity="major", suggested_fix="y")],
+        )
+        c_pass = Critique(passes=True, confidence=0.9)
+        kwargs = {} if floor is None else {"shrink_floor": floor}
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(side_effect=[c_fail, c_pass])), \
+             patch("core.self_refine._refine",
+                   new=AsyncMock(return_value=shrunk)):
+            result, _ = _run(self_refine(original, "q", _drafting_intent(), **kwargs))
+        return original, shrunk, result
+
+    def test_default_floor_still_allows_a_13_percent_shrink(self):
+        # Documents today's shared behaviour: 0.7 lets this through. This is
+        # what shipped a draft 3,422 chars shorter than the one generated.
+        original, shrunk, result = self._shrinking_loop(None)
+
+        assert result == shrunk
+
+    def test_drafting_floor_rejects_the_same_shrink(self):
+        original, shrunk, result = self._shrinking_loop(0.90)
+
+        assert result == original, "a 13% loss must not survive the drafting floor"
+
+    def test_small_legitimate_shrink_still_accepted_under_the_drafting_floor(self):
+        # Stripping a fabricated citation or a duplicated line is a CORRECT
+        # shrink and must not be reverted.
+        original = "CLAUSE. " * 500
+        trimmed = "CLAUSE. " * 490                  # -2%
+        c_fail = Critique(
+            passes=False, confidence=0.9,
+            violations=[Violation(field="unretrieved_citation", issue="x",
+                                  severity="critical", suggested_fix="y")],
+        )
+        c_pass = Critique(passes=True, confidence=0.9)
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(side_effect=[c_fail, c_pass])), \
+             patch("core.self_refine._refine",
+                   new=AsyncMock(return_value=trimmed)):
+            result, _ = _run(self_refine(original, "q", _drafting_intent(),
+                                         shrink_floor=0.90))
+
+        assert result == trimmed
+
+
+class TestUnverifiedPassCannotBlessAShrunkenDraft:
+    """The exact production sequence: shrink, then the critic dies."""
+
+    def test_failsafe_pass_after_a_shrink_reverts_to_the_original(self):
+        original = "CLAUSE. " * 500
+        shrunk = "CLAUSE. " * 460                   # -8%: under the floor
+        c_fail = Critique(
+            passes=False, confidence=0.9,
+            violations=[Violation(field="strict_language", issue="x",
+                                  severity="major", suggested_fix="y")],
+        )
+        # What _critique returns when the deadline is blown: passes=True,
+        # confidence=0.0, no violations — nothing actually audited this draft.
+        c_failsafe = Critique(passes=True, confidence=0.0)
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(side_effect=[c_fail, c_failsafe])), \
+             patch("core.self_refine._refine",
+                   new=AsyncMock(return_value=shrunk)):
+            result, history = _run(self_refine(original, "q", _drafting_intent(),
+                                               shrink_floor=0.5))
+
+        assert result == original
+        assert len(history) == 2
+
+    def test_genuine_pass_after_a_shrink_is_respected(self):
+        # A real critic verdict keeps its authority — only fail-safe passes
+        # are distrusted.
+        original = "CLAUSE. " * 500
+        shrunk = "CLAUSE. " * 460
+        c_fail = Critique(
+            passes=False, confidence=0.9,
+            violations=[Violation(field="strict_language", issue="x",
+                                  severity="major", suggested_fix="y")],
+        )
+        c_pass = Critique(passes=True, confidence=0.9)
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(side_effect=[c_fail, c_pass])), \
+             patch("core.self_refine._refine",
+                   new=AsyncMock(return_value=shrunk)):
+            result, _ = _run(self_refine(original, "q", _drafting_intent(),
+                                         shrink_floor=0.5))
+
+        assert result == shrunk
+
+    def test_failsafe_pass_without_a_shrink_changes_nothing(self):
+        original = "CLAUSE. " * 500
+        c_failsafe = Critique(passes=True, confidence=0.0)
+        with patch("core.self_refine._critique",
+                   new=AsyncMock(return_value=c_failsafe)), \
+             patch("core.self_refine._refine", new=AsyncMock()) as mock_r:
+            result, _ = _run(self_refine(original, "q", _drafting_intent()))
+
+        assert result == original
+        mock_r.assert_not_called()

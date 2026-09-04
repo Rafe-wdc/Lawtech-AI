@@ -857,6 +857,31 @@ def _topical_query(query: str) -> str:
     return " ".join(kept[:_SCI_QUERY_MAX_WORDS])
 
 
+def _parse_statute_refs(query: str) -> tuple[list[str] | None, str | None]:
+    """(section_numbers, act_name) parsed out of a drafting query.
+
+    Delegates to the Newacts agent's own parser so the two paths cannot
+    drift apart — it already handles "Sections 316(2) and 318(4) of the
+    Bharatiya Nyaya Sanhita, 2023" and the abbreviation map (IPC, BNS,
+    CrPC, BNSS, IEA, BSA).
+
+    Returns (None, None) on any failure. Retrieval then behaves exactly as
+    it did before: a plain BM25 query. Degraded, never broken.
+    """
+    if not query:
+        return None, None
+    try:
+        from agents.newacts import _regex_fallback_metadata
+        md = _regex_fallback_metadata(query)
+        secs = getattr(md, "section_number", None) or None
+        act = getattr(md, "act_name", None) or None
+        return (list(secs) if secs else None), act
+    except Exception as e:
+        log.warning("Statute-ref parse failed; falling back to plain query",
+                    error=short_err(e))
+        return None, None
+
+
 class _ContextBlocks(dict):
     """Prompt blocks, carrying the SourceRegistry built from the same hits.
 
@@ -985,9 +1010,38 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
     )
     from tools.shared import sci_judgment_tools
 
+    # Statute retrieval gets the SECTION and ACT parsed out of the query,
+    # not just the query text.
+    #
+    # `search_newacts` supports exact `section_numbers` / `act_name` filters
+    # and drafting was passing neither. Every row in the index begins
+    # "Section Number: Section N of The <Act> Section Name: ...", so a plain
+    # BM25 match on a query like "...under Sections 316(2) and 318(4) of the
+    # Bharatiya Nyaya Sanhita, 2023..." scores the SHORTEST rows highest —
+    # the short-title clauses. Measured: the query-only call returns
+    # sections [1, 1, 1, 1, 1, 1, 10, 10] and never the section asked for,
+    # while the same call with section_numbers=["309"] returns exactly the
+    # right row.
+    #
+    # That is why the citation registry was full of "Section 1, BNS" and
+    # "Section 10, IPC" — treated at the time as chunk-level noise and
+    # worked around by dropping statutes to Act level. It was this bug.
+    #
+    # The Newacts agent already parses both correctly, so reuse its parser
+    # rather than writing a second one that can drift out of step.
+    _sec_nums, _act_name = _parse_statute_refs(query)
+    _newacts_args: dict = {"query": query}
+    if _sec_nums:
+        _newacts_args["section_numbers"] = _sec_nums
+    if _act_name:
+        _newacts_args["act_name"] = _act_name
+    if _sec_nums or _act_name:
+        log.info("Statute retrieval filters parsed from query",
+                 sections=_sec_nums, act=_act_name)
+
     # Run all retrievers in parallel.
     newacts_t, legis_t, judg_t, sci_t = await asyncio.gather(
-        _run(search_newacts, {"query": query}),
+        _run(search_newacts, _newacts_args),
         _run(search_legislation, {"query": query}),
         _run(search_judgments, {"query": query}),
         # SCI gets a SHORTENED query. Its semantic search builds one boolean
@@ -3298,6 +3352,41 @@ async def drafting_node(state: LegalAgentState) -> dict:
         progress("drafting", "Cleaning up draft...", step="cleanup")
         draft, draft_warnings = validate_draft(draft)
 
+        # Old section number bolted to a new act name — "Section 439 BNSS".
+        # 439 is the CrPC bail provision; the BNSS counterpart is 483, so
+        # "439 BNSS" cites a provision that exists in neither code. The
+        # retrieved newacts row for CrPC 439 states its own counterpart, so
+        # the correction comes from the source material, not from us.
+        #
+        # Corrected in place rather than flagged with a banner: a draft is
+        # copied into a filing, where a caution at the top is lost and a
+        # wrong section number is not. Only the digits move — the act the
+        # writer named stays, because which era governs turns on the offence
+        # date and that is the advocate's call.
+        try:
+            from core.statute_citation_check import (
+                correct_cross_pairs, log_era_mismatch,
+            )
+            _newacts_ctx = (gathered_ctx or {}).get("newacts", "")
+            draft, _xpairs = correct_cross_pairs(draft, _newacts_ctx)
+            if _xpairs:
+                draft_warnings = list(draft_warnings or []) + [
+                    f"Corrected {c['cited']} to {c['correct']}"
+                    for c in _xpairs
+                ]
+            # Era mismatch — BNS charges pleaded under the CrPC — is measured
+            # here and repaired by the critic's `statute_era_mismatch`
+            # category, not rewritten in place. "439 CrPC" is a real
+            # provision that a draft may name legitimately (a pre-2024
+            # judgment, a proceeding begun before commencement), and telling
+            # that apart from stale recall needs the surrounding argument.
+            # Logging it before self_refine gives a per-draft number for
+            # whether the prompt rule and the critic actually hold.
+            log_era_mismatch(draft, where="pre_refine")
+        except Exception as e:
+            log.warning("Statute citation checks failed; draft unchanged",
+                        error=short_err(e))
+
         # A citation the pipeline cannot vouch for has to be visible IN the
         # document, not only in response metadata the UI may never render.
         # The advocate is the last check before filing; a judgment dated in
@@ -3402,6 +3491,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     shrink_floor=0.90,
                     cumulative_shrink_floor=0.85,
                 )
+                # Did the critic's `statute_era_mismatch` category actually
+                # repair it? Same check, after the refiner, so the pair of
+                # log lines answers that per draft instead of by impression.
+                try:
+                    from core.statute_citation_check import log_era_mismatch
+                    log_era_mismatch(refined_draft, where="post_refine")
+                except Exception:
+                    pass
                 if refined_draft != draft:
                     log.info(
                         "Self-refine altered draft",

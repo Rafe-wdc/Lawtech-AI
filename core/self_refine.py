@@ -574,6 +574,42 @@ violations specific to Indian drafting practice:
        Any other statute the user's typed intent / chat history
        indicates is the wrong authority for the relief sought.
 
+  statute_era_mismatch — the draft charges the offence under the NEW
+    codes (BNS 2023 / BSA 2023) but invokes the OLD procedural code
+    (CrPC 1973) for the relief it seeks, or the reverse. The charging
+    provision fixes the era: an offence charged under the BNS post-dates
+    01.07.2024, so the application lies under the BNSS, never the CrPC.
+    Observed: a bail application for offences under Sections 316(2) and
+    318(4) BNS captioned "APPLICATION FOR REGULAR BAIL UNDER SECTIONS
+    437/439 OF THE CODE OF CRIMINAL PROCEDURE, 1973" — even though the
+    reference draft supplied was itself a BNSS format. The old numbers
+    are far more frequent in training data than the new ones and surface
+    from memory. Bail: 437/439 CrPC -> 480/483 BNSS; anticipatory bail:
+    438 CrPC -> 482 BNSS; magistrate complaint: 200 CrPC -> 223 BNSS.
+    MAJOR.
+    NOT a violation when the old code is named in its own right: quoting
+    a pre-2024 judgment, describing a proceeding that began before
+    01.07.2024, or giving the old provision alongside the new one as a
+    cross-reference. Only the operative provision the document proceeds
+    under is in scope.
+
+  bail_provision_mismatch — the bail section cited does not match the
+    relief the draft actually seeks. Read the facts of the draft itself:
+       ANTICIPATORY bail (Section 482 BNSS / 438 CrPC) lies only for a
+       person APPREHENDING arrest. If the draft states the accused was
+       arrested, is in custody, or in judicial/police custody, an
+       anticipatory-bail provision is wrong — regular bail is meant.
+       MAJOR.
+       REGULAR bail before a Court of Session or a High Court is Section
+       483 BNSS (439 CrPC); before a Magistrate it is Section 480 BNSS
+       (437 CrPC). Read which court the cause title actually addresses.
+       A bailable offence is Section 478 BNSS (436 CrPC).
+    Measured: on a regular-bail request for an accused arrested on a
+    stated date and moved before a Sessions Court, the draft cited 482
+    BNSS in 2 of 11 runs and 478/480 in 3 more — the 478 copied straight
+    off the reference draft's own title. The section must follow the
+    court and the custody status in THIS draft, never the template's.
+
   placeholder_marker — surviving `[CITE: ...]` brackets, "(citation
     needed)", "{{section number}}", "<insert party>", "TBD", "FILL IN".
     The drafting prompt forbids these; if they survive, MAJOR.

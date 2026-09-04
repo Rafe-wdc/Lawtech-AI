@@ -2639,10 +2639,14 @@ Do NOT just search once with the user's raw text. Instead:
 - Co-owner dispute -> "partition suit", "co-owner alienation", "undivided share"
 - Tenant rights -> Rent Control Act, Transfer of Property Act Section 106, "eviction decree"
 - Employment termination -> "reinstatement", "back wages", Industrial Disputes Act
-- Criminal bail -> Section 483 BNSS (Section 439 CrPC for pre-01.07.2024
-  offences), "anticipatory bail Section 482 BNSS / 438 CrPC"
-- Matrimonial dispute -> Section 85 BNS (Section 498A IPC for pre-01.07.2024
-  offences), Hindu Marriage Act, "cruelty", "dowry"
+- Criminal bail -> Section 439 CrPC, "anticipatory bail Section 438" — and
+  the BNSS equivalents "Section 483 BNSS", "Section 482 BNSS". SEARCH BOTH:
+  these are query terms, not a statement of which code applies. The reported
+  judgments are overwhelmingly pre-01.07.2024 and say CrPC, so the old
+  numbers carry the recall; the new ones matter as post-2024 judgments
+  accumulate.
+- Matrimonial dispute -> Section 498A IPC (and "Section 85 BNS"), Hindu
+  Marriage Act, "cruelty", "dowry"
 - Land acquisition -> Right to Fair Compensation Act 2013, "market value", "solatium"
 - Contract breach -> Indian Contract Act, "specific performance", "damages"
 - Fundamental rights -> Article 14/19/21, "writ petition", "violation of fundamental rights"

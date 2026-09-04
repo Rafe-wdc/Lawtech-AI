@@ -1113,9 +1113,11 @@ async def newacts_node(state: LegalAgentState) -> dict:
         _answer = llm_response.text
         try:
             from core.statute_citation_check import annotate as _cite_annotate
-            _ctx = "\n".join((h.get("_source", {}) or {}).get("page_content", "")
-                             for h in hits)
-            _answer, _cite_audit = _cite_annotate(_answer, _ctx)
+            # `docs_text` is the exact retrieved text the model was given,
+            # built at step 5 from the same hits. Judge the answer against
+            # what the model actually saw, not a second assembly of it that
+            # could drift out of step.
+            _answer, _cite_audit = _cite_annotate(_answer, docs_text)
             if _cite_audit.get("ungrounded"):
                 log.warning("Newacts answer cited unretrieved new-code sections",
                             ungrounded=_cite_audit["ungrounded"][:5],

@@ -1576,6 +1576,14 @@ user's ask requires) document in a single response.
    - When you cite both the OLD and NEW criminal codes (IPC ↔ BNS; CrPC
      ↔ BNSS; IEA ↔ BSA), name BOTH where relevant — the old code section
      for the conduct + the new code section currently in force.
+   - THE CHARGING PROVISION FIXES THE PROCEDURAL ERA. An offence charged
+     under the BNS / BSA post-dates 01.07.2024, so the application lies
+     under the BNSS and NEVER under the CrPC. A bail application on BNS
+     charges is under Section 480 / 483 BNSS, not 437 / 439 CrPC;
+     anticipatory bail is Section 482 BNSS, not 438 CrPC. The old numbers
+     dominate training data and surface from memory even when the
+     reference draft you were given is a BNSS format — read the era off
+     the charging sections, not off recall.
 
 7. NO STOCK FILLER, NO PREAMBLE, NO META-COMMENTARY.
    - Do NOT write "It is humbly submitted that", "The Hon'ble Court may
@@ -1963,7 +1971,13 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 DRAFTING_SECTIONWISE_DISCLOSURES = """
 STATUTORY CURRENCY & PROCEDURAL DISCLOSURES (mandatory — these mirror rules 4A/4B of the single-pass prompt).
 
-A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA. The new criminal codes commenced on 1 July 2024; which code applies depends on the DATE OF THE OFFENCE, which you usually will not know. When the offence date is not stated, do NOT silently pick one: cite the provision the user named AND give its counterpart inline on first use — e.g. "Section 420 of the Indian Penal Code, 1860 [Section 318 of the Bharatiya Nyaya Sanhita, 2023, for offences on or after 01.07.2024]" — and do the same for the procedural provision (s.439 CrPC / s.483 BNSS). Use the mapping in the RELEVANT LEGAL CONTEXT block rather than reciting one from memory.
+A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA. The new criminal codes commenced on 1 July 2024; which code applies depends on the DATE OF THE OFFENCE.
+
+   A1. THE CHARGING PROVISION FIXES THE PROCEDURAL ERA. If the offence is charged under the BNS or the BSA, the offence post-dates 01.07.2024, so the application proceeds under the BNSS — NEVER the CrPC. Caption it, plead it and pray for it under the BNSS. Do not caption a BNS case "under Section 437/439 of the Code of Criminal Procedure, 1973"; that is Section 480/483 of the Bharatiya Nagarik Suraksha Sanhita, 2023. This is the single most frequent error on this pipeline: the old numbers dominate training data and surface from memory even when the reference draft supplied to you is itself a BNSS format. Read the era off the charging sections, not off recall.
+
+   A3. THE REFERENCE DRAFT SUPPLIES STRUCTURE, NOT ITS SECTION NUMBER. A template titled "Format For First Bail Application Under Section 478 BNSS" tells you how such an application is laid out; it does NOT tell you that this case lies under Section 478. Derive the provision from THIS case: which court is being moved, and whether the offence is bailable. Regular bail before a Sessions Court or High Court on non-bailable charges is Section 483 BNSS (Section 439 CrPC pre-01.07.2024); before a Magistrate on non-bailable charges, Section 480 BNSS (437 CrPC); a bailable offence is Section 478 BNSS (436 CrPC); anticipatory bail is Section 482 BNSS (438 CrPC) and lies ONLY for a person APPREHENDING arrest — if the accused is already arrested or in custody the application is for REGULAR bail and 482 / 438 is wrong. Copying the reference draft's own section number is the same error as copying its party names.
+
+   A2. WHEN THE OFFENCE DATE IS NOT STATED and the charging provisions do not settle the era, do NOT silently pick one: cite the provision the user named AND give its counterpart inline on first use — e.g. "Section 420 of the Indian Penal Code, 1860 [Section 318 of the Bharatiya Nyaya Sanhita, 2023, for offences on or after 01.07.2024]" — and do the same for the procedural provision. Take the counterpart from the mapping in the RELEVANT LEGAL CONTEXT block rather than reciting one from memory.
 
 B. PROCEDURAL DISCLOSURES THE DRAFTER MUST NOT SILENTLY OMIT. Where the document type calls for them, include them — bracketed when the facts are unknown:
    - Bail applications: a paragraph disclosing whether any earlier bail application has been made, and its outcome. Indian courts treat non-disclosure of a previous unsuccessful application as a serious lapse. Use e.g. "[STATE WHETHER ANY PREVIOUS BAIL APPLICATION HAS BEEN FILED. If yes, give the court, case number, date and outcome. If none, state: No previous application for bail has been filed by the Applicant in this matter before this or any other Court.]"
@@ -2260,6 +2274,34 @@ row. Trust that embedded cross-reference over the user's misnamed act.
 Do NOT silently substitute (the user won't learn the correct pairing).
 Do NOT refuse (the correct counterpart is in the context).
 
+**WHEN `New Provision:` IS EMPTY — DO NOT INVENT ONE.**
+
+"Almost always" is not always: 227 of the 1,297 old-code rows (17.5%) carry
+an EMPTY `New Provision:` field, the Evidence Act worst among them. An empty
+field is information, not an omission — it usually means the section was
+repealed, decriminalised, or has no clean one-to-one successor.
+
+When the retrieved old-act row shows `New Provision:` followed immediately by
+`Old Provisions:` — i.e. nothing between them — you MUST:
+
+  1. State plainly that the retrieved material contains no direct counterpart
+     for that section, e.g. "The retrieved provisions do not record a direct
+     counterpart to Section 309 IPC in the Bharatiya Nyaya Sanhita, 2023."
+  2. Answer with the OLD provision only, reproduced verbatim.
+  3. STOP. Do not supply a new-code section number from your own knowledge,
+     and do not borrow one from a neighbouring retrieved row.
+
+A wrong section number is worse than an absent one. A reader can act on
+"no counterpart recorded"; they cannot act on a number that turns out to
+govern an unrelated offence.
+
+Worked example of the failure this prevents — Section 309 IPC (attempt to
+commit suicide) has an empty `New Provision:` field. The correct answer is
+that no direct counterpart is recorded. Answering "Section 224 BNS" is wrong:
+BNS 224 is "Threat of injury to public servant" and has nothing to do with
+suicide. Reproducing the IPC text underneath that number, and then asserting
+the two are identical, compounds the error into three.
+
 ## Layout rule — single section vs multi-section queries:
 
 **SINGLE-section query** (user asked about ONE section, even if the old↔new
@@ -2274,6 +2316,13 @@ mapping returns both the OLD provision and its NEW equivalent — e.g.
   provisos, and Explanations, each on its own paragraph or short block.
 - Then `### New Provision: Section Y of <New Act Name>, <Year>` and
   reproduce the corresponding new section text the same way.
+  ONLY when the retrieved row actually names one. If `New Provision:` is
+  empty in the context, replace this whole heading with
+  `### New Provision: none recorded` and one sentence saying the retrieved
+  material records no direct counterpart. Do NOT emit a section number here
+  that does not appear in the context — the heading is not a slot that must
+  be filled, and filling it from memory is how a reader ends up with a
+  citation to an unrelated offence.
 - Close with a short `### Key Differences` paragraph (3-6 bullets at
   most) covering ONLY material textual changes (re-numbering of clauses,
   added / removed words, new explanations, new time limits, etc.). Skip
@@ -2590,8 +2639,14 @@ Do NOT just search once with the user's raw text. Instead:
 - Co-owner dispute -> "partition suit", "co-owner alienation", "undivided share"
 - Tenant rights -> Rent Control Act, Transfer of Property Act Section 106, "eviction decree"
 - Employment termination -> "reinstatement", "back wages", Industrial Disputes Act
-- Criminal bail -> Section 439 CrPC, "anticipatory bail Section 438"
-- Matrimonial dispute -> Section 498A IPC, Hindu Marriage Act, "cruelty", "dowry"
+- Criminal bail -> Section 439 CrPC, "anticipatory bail Section 438" — and
+  the BNSS equivalents "Section 483 BNSS", "Section 482 BNSS". SEARCH BOTH:
+  these are query terms, not a statement of which code applies. The reported
+  judgments are overwhelmingly pre-01.07.2024 and say CrPC, so the old
+  numbers carry the recall; the new ones matter as post-2024 judgments
+  accumulate.
+- Matrimonial dispute -> Section 498A IPC (and "Section 85 BNS"), Hindu
+  Marriage Act, "cruelty", "dowry"
 - Land acquisition -> Right to Fair Compensation Act 2013, "market value", "solatium"
 - Contract breach -> Indian Contract Act, "specific performance", "damages"
 - Fundamental rights -> Article 14/19/21, "writ petition", "violation of fundamental rights"

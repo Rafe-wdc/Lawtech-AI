@@ -37,6 +37,8 @@ from agents.drafting import (
     _generate_draft,
     _chunk_user_facts,
     _pick_relevant_chunk_indices,
+    MAX_SECTIONS,
+    _is_mandatory_section,
     _SelectedChunks,
     _translate_query_for_es_match,
 )
@@ -196,7 +198,7 @@ class TestAcquireReferenceDraft:
                    AsyncMock(return_value="/templates/Notice 138 NI.csv")), \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="UNEXPECTED-WEB-CALL")) as web_mock:
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft a demand notice under section 138 NI act",
                 self._silent_progress,
             ))
@@ -217,7 +219,7 @@ class TestAcquireReferenceDraft:
                    AsyncMock(return_value=None)), \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="WEB-SYNTHESISED REFERENCE")) as web_mock:
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft an RTI application to the PIO", self._silent_progress,
             ))
         assert kind == "web"
@@ -235,7 +237,7 @@ class TestAcquireReferenceDraft:
                    AsyncMock()) as picker_mock, \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="WEB-SYNTHESISED REFERENCE")):
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft a niche-format submission", self._silent_progress,
             ))
         assert kind == "web"
@@ -259,12 +261,74 @@ class TestAcquireReferenceDraft:
                    AsyncMock(return_value="/templates/Stale Path.csv")), \
              patch("agents.drafting._acquire_reference_via_web",
                    AsyncMock(return_value="WEB-SYNTHESISED REFERENCE")) as web_mock:
-            text, source, kind = _run(_acquire_reference_draft(
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
                 "draft a notice", self._silent_progress,
             ))
         assert kind == "web"
         assert source == "<web:fetch-failed>"
         web_mock.assert_called_once()
+
+    def test_english_query_returned_for_regional_language(self):
+        """A regional-language request returns the ENGLISH translation as the
+        4th tuple element, so `_generate_draft` can plan against English.
+
+        Regression guard for the depth-collapse bug: fed a regional-script
+        query the fan-out judge planned 6 sections where English planned 8,
+        silently dropping ~a quarter of the document.
+        """
+        fake_es = MagicMock()
+        fake_es.search = MagicMock(side_effect=[
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv"}},
+            ]}},
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv",
+                             "page_content": "REFERENCE BAIL BODY ..."}},
+            ]}},
+        ])
+
+        with patch("agents.drafting.get_es_client", return_value=fake_es), \
+             patch("agents.drafting._translate_query_for_es_match",
+                   AsyncMock(return_value="Prepare a regular bail application")), \
+             patch("agents.drafting._pick_reference_source",
+                   AsyncMock(return_value="/templates/Bail Application.csv")):
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
+                "નિયમિત જામીન અરજી તૈયાર કરો",
+                self._silent_progress,
+                user_language="gu",
+            ))
+
+        assert kind == "es"
+        assert eng_q == "Prepare a regular bail application"
+
+    def test_english_query_is_original_when_already_english(self):
+        """English requests get the original query back — no translation call,
+        so `english_query or query` in the dispatcher is a no-op for English.
+        """
+        fake_es = MagicMock()
+        fake_es.search = MagicMock(side_effect=[
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv"}},
+            ]}},
+            {"hits": {"hits": [
+                {"_source": {"source": "/templates/Bail Application.csv",
+                             "page_content": "REFERENCE BAIL BODY ..."}},
+            ]}},
+        ])
+
+        with patch("agents.drafting.get_es_client", return_value=fake_es), \
+             patch("agents.drafting._translate_query_for_es_match",
+                   AsyncMock()) as translate_mock, \
+             patch("agents.drafting._pick_reference_source",
+                   AsyncMock(return_value="/templates/Bail Application.csv")):
+            text, source, kind, eng_q = _run(_acquire_reference_draft(
+                "draft a regular bail application",
+                self._silent_progress,
+                user_language="en",
+            ))
+
+        assert eng_q == "draft a regular bail application"
+        translate_mock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +441,123 @@ class TestJudgeFanout:
         assert got.should_fanout is True
         assert len(got.sections) == 4
         assert got.sections[0].id == "cause_title"
+
+    def _capture_planner_wiring(self) -> dict:
+        """Run the judge against a mocked chain, returning how it was configured."""
+        seen: dict = {}
+
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = AsyncMock(return_value={
+            "raw": MagicMock(usage_metadata={"total_tokens": 10}),
+            "parsed": _FanoutStrategy(should_fanout=False, reasoning=""),
+        })
+
+        async def _capture_bounded(awaitable, *, local_timeout=None, **kw):
+            seen["local_timeout"] = local_timeout
+            return await awaitable
+
+        def _capture_init(name, **kwargs):
+            seen["model"] = name
+            seen.update(kwargs)
+            llm = MagicMock()
+            llm.with_structured_output.return_value = llm
+            return llm
+
+        import core.deadline as _deadline
+        with patch("langchain.chat_models.init_chat_model",
+                   side_effect=_capture_init), \
+             patch.object(_deadline, "bounded_wait_for",
+                          side_effect=_capture_bounded), \
+             patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+            mock_prompt.from_template.return_value.__or__ = MagicMock(
+                return_value=mock_chain)
+            _run(_judge_fanout(
+                query="Draft a writ petition",
+                reference_draft="REFERENCE",
+                user_language="en",
+                user_intent=None,
+            ))
+        return seen
+
+    def test_planner_call_timeout_is_25s(self):
+        # Sized from measured Flash latency (healthy calls 5.6-14.8s). At 15s
+        # slower-but-healthy calls were being abandoned into the single-pass
+        # fallback.
+        seen = self._capture_planner_wiring()
+
+        assert seen["local_timeout"] == 25
+
+    def test_planner_timeout_degrades_to_single_pass_with_no_sections(self):
+        """A planner timeout must not produce a partial plan.
+
+        Returning a short section list here would be the dangerous outcome —
+        the writer would build a document from it and the trim would have a
+        list to cut. `sections == []` routes to single-pass instead, which
+        writes the whole document (closing block included) in one call.
+        """
+        async def _timeout(awaitable, *, local_timeout=None, **kw):
+            awaitable.close()
+            raise asyncio.TimeoutError("planner call exceeded its bound")
+
+        import core.deadline as _deadline
+        mock_chain = MagicMock()
+        mock_chain.ainvoke = MagicMock()
+        with patch("langchain.chat_models.init_chat_model") as mock_init, \
+             patch.object(_deadline, "bounded_wait_for", side_effect=_timeout), \
+             patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_init.return_value = mock_llm
+            mock_prompt.from_template.return_value.__or__ = MagicMock(
+                return_value=mock_chain)
+            got = _run(_judge_fanout(
+                query="Draft a commercial MOU",
+                reference_draft="REFERENCE",
+                user_language="en",
+                user_intent=None,
+            ))
+
+        assert got.should_fanout is False
+        assert got.sections == []          # never a truncated plan
+        assert "failed" in got.reasoning.lower()
+
+    def test_timed_out_planner_never_reaches_the_section_trim(self):
+        """The trim only runs on a real plan, so a timeout cannot drop a closer."""
+        single_called: list[bool] = []
+        section_called: list[bool] = []
+
+        async def _fake_single_pass(**kwargs):
+            single_called.append(True)
+            return "COMPLETE SINGLE PASS DOCUMENT"
+
+        async def _fake_sectionwise(**kwargs):
+            section_called.append(True)
+            return "SECTIONWISE"
+
+        async def _timed_out_judge(**kwargs):
+            return _FanoutStrategy(
+                should_fanout=False,
+                sections=[],
+                reasoning="judge call failed; defaulted to single-pass",
+            )
+
+        with patch("agents.drafting._judge_fanout", side_effect=_timed_out_judge), \
+             patch("agents.drafting._generate_single_pass",
+                   side_effect=_fake_single_pass), \
+             patch("agents.drafting._generate_sectionwise",
+                   side_effect=_fake_sectionwise):
+            out = _run(_generate_draft(
+                query="Draft a commercial MOU",
+                user_facts="",
+                reference_draft="REFERENCE",
+                user_intent=None,
+                user_language="en",
+                progress_emit=lambda *a, **k: None,
+            ))
+
+        assert single_called == [True]
+        assert section_called == []        # no per-section path, no trim
+        assert out == "COMPLETE SINGLE PASS DOCUMENT"
 
     def test_llm_failure_defaults_to_single_pass(self):
         with patch("langchain.chat_models.init_chat_model",
@@ -1710,3 +1891,131 @@ class TestEndToEndSmokes:
             f"expected the router to fire on a {len(user_facts)}-char "
             f"upload with flag ON; got 0 invocations."
         )
+
+
+class TestSectionCeiling:
+    """The cap trims the MIDDLE, never the closing section."""
+
+    @staticmethod
+    def _silent_progress(*args, **kwargs):
+        pass
+
+    def _plan(self, n: int) -> _FanoutStrategy:
+        """An n-section plan whose last section is the execution block."""
+        sections = [
+            _Section(id=f"clause_{i}", heading=f"CLAUSE {i}", summary="")
+            for i in range(1, n)
+        ]
+        sections.append(
+            _Section(id="signatures", heading="SIGNATURES", summary="execution block")
+        )
+        return _FanoutStrategy(should_fanout=True, sections=sections, reasoning="")
+
+    def _sections_reaching_the_writer(self, planned: int) -> list:
+        captured: dict = {}
+
+        async def _fake_sectionwise(*, sections, **kwargs):
+            captured["sections"] = list(sections)
+            return "draft"
+
+        with patch("agents.drafting._judge_fanout",
+                   AsyncMock(return_value=self._plan(planned))),              patch("agents.drafting._generate_sectionwise",
+                   side_effect=_fake_sectionwise):
+            _run(_generate_draft(
+                query="Draft an MOU",
+                user_facts="",
+                reference_draft="REF",
+                user_intent=None,
+                user_language="en",
+                progress_emit=self._silent_progress,
+            ))
+        return captured["sections"]
+
+    def test_product_ceiling_is_twenty(self):
+        # The product requirement. Asserted explicitly so a silent edit of the
+        # constant fails here rather than in a client's draft.
+        assert MAX_SECTIONS == 20
+
+    def test_plan_sizes_below_the_ceiling_pass_through_untouched(self):
+        # The planner sizes each plan to its request; the code must not
+        # normalise that to any fixed number. 5, 10 and 18 all survive intact.
+        for n in (5, 10, 18, MAX_SECTIONS):
+            kept = self._sections_reaching_the_writer(planned=n)
+
+            assert len(kept) == n, f"a {n}-section plan must reach the writer intact"
+            assert kept[-1].id == "signatures"
+            assert [s.id for s in kept[:-1]] == [
+                f"clause_{i}" for i in range(1, n)
+            ]
+
+    def test_over_ceiling_plan_keeps_the_closing_section(self):
+        kept = self._sections_reaching_the_writer(planned=MAX_SECTIONS + 1)
+
+        assert len(kept) == MAX_SECTIONS
+        # The closer survives — this is the whole point of the fix.
+        assert kept[-1].id == "signatures"
+        # ...and the section sacrificed for it is a middle one.
+        assert f"clause_{MAX_SECTIONS}" not in [s.id for s in kept]
+        assert [s.id for s in kept[:MAX_SECTIONS - 1]] == [
+            f"clause_{i}" for i in range(1, MAX_SECTIONS)
+        ]
+
+    def test_far_over_ceiling_still_keeps_the_closing_section(self):
+        kept = self._sections_reaching_the_writer(planned=40)
+
+        assert len(kept) == MAX_SECTIONS
+        assert kept[-1].id == "signatures"
+
+    def test_no_plan_size_is_ever_delivered_above_the_ceiling(self):
+        for n in (1, 5, 12, 19, 20, 21, 25, 40, 100):
+            kept = self._sections_reaching_the_writer(planned=n)
+
+            assert len(kept) <= MAX_SECTIONS
+            assert len(kept) == min(n, MAX_SECTIONS)
+
+
+class TestMandatorySectionsCoverContractClosers:
+    """The repair pass must recognise an execution block, not just a prayer.
+
+    `_MANDATORY_SECTION_HINTS` was pleading-shaped — title / cause / fact /
+    ground / prayer / relief / verif — so a transactional instrument that lost
+    its signature section read as complete to the repair pass and shipped as an
+    unsigned fragment. That is the defect reported on a commercial MOU.
+    """
+
+    def _sec(self, slug: str, heading: str) -> _Section:
+        return _Section(id=slug, heading=heading, summary="")
+
+    def test_contract_closers_are_mandatory(self):
+        for slug, heading in [
+            ("execution", "Execution"),
+            ("signatures_execution", "SIGNATURES AND EXECUTION"),
+            ("execution_block", "IN WITNESS WHEREOF"),
+            ("attestation", "Attestation"),
+        ]:
+            assert _is_mandatory_section(self._sec(slug, heading)), (
+                f"{slug!r} must be treated as mandatory — a contract without it "
+                f"cannot be executed"
+            )
+
+    def test_pleading_closers_remain_mandatory(self):
+        for slug, heading in [
+            ("prayer", "PRAYER"),
+            ("verification", "VERIFICATION"),
+            ("cause_title", "CAUSE TITLE"),
+        ]:
+            assert _is_mandatory_section(self._sec(slug, heading))
+
+    def test_conditional_sections_are_still_not_mandatory(self):
+        # These are legitimately omitted when the facts are silent; repairing
+        # them would re-insert parity grounds into a case with no co-accused.
+        for slug, heading in [
+            ("parity_grounds", "PARITY WITH CO-ACCUSED"),
+            ("medical_grounds", "MEDICAL GROUNDS"),
+            ("schedule_of_property", "SCHEDULE OF PROPERTY"),
+            ("index_of_annexures", "INDEX OF ANNEXURES"),
+            ("advocate_details", "ADVOCATE DETAILS"),
+        ]:
+            assert not _is_mandatory_section(self._sec(slug, heading)), (
+                f"{slug!r} must stay conditional"
+            )

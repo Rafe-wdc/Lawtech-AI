@@ -62,7 +62,10 @@ from core.clients import (
     record_gemini_flash_success,
 )
 from core.settings import ES_INDICES
-from core.language import localize_prompt, detect_source_languages
+from core.language import (
+    localize_prompt, detect_source_languages, language_name,
+    is_off_target_language, output_script_ratio,
+)
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
 from core.self_refine import self_refine
@@ -416,6 +419,27 @@ def validate_draft(
             f"Removed {len(empty_para_hits)} empty numbered paragraph(s)."
         )
 
+    # Fabricated citation provenance. Mechanical and unambiguous — a `DB ID`
+    # is an internal row identifier, a placeholder marker is unresolved work,
+    # and a filing cites the reporter or the court rather than a blog. None
+    # has a legitimate place in a document that goes before a judge, so this
+    # belongs with the other mechanical repairs rather than in CRITIQUE_PROMPT
+    # (invariant 4: bug-fixes here, substantive critique there).
+    #
+    # Measured need: a draft asking for supporting case law produced 7 case
+    # citations, 0 of them present in anything the pipeline retrieved, 2
+    # carrying invented "DB ID" identifiers and a judgment dated in the
+    # future. Whether a given case is REAL still needs the retrieved-source
+    # whitelist and is tracked separately — this only removes provenance that
+    # was manufactured to make a citation look verified.
+    from core.fabricated_provenance import strip_fabricated_provenance
+    cleaned, provenance_warnings = strip_fabricated_provenance(cleaned)
+    if provenance_warnings:
+        warnings.extend(provenance_warnings)
+        log.warning("Validator stripped fabricated citation provenance",
+                    findings=len(provenance_warnings),
+                    sample=provenance_warnings[0][:140])
+
     if warnings:
         log.warning("Validator surfaced issues",
                     count=len(warnings),
@@ -612,7 +636,7 @@ async def _acquire_reference_draft(
     user_language: str = "en",
     intent=None,
     original_query: str = "",
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     """Stage 1 of the simplified drafting pipeline (v1 DraftRetriever pattern).
 
     Flow:
@@ -624,8 +648,13 @@ async def _acquire_reference_draft(
          a draft, not an essay — v1's gap)
 
     Returns:
-      (reference_text, source_attribution, source_kind)
+      (reference_text, source_attribution, source_kind, search_query)
         source_kind is 'es' (from drafting corpus) or 'web' (synthesized).
+        search_query is the ENGLISH form of the user's request — the
+        translation we already computed for the corpus lookup, or the
+        original query when the user wrote in English. Returned so the
+        fan-out judge can plan against English instead of regional script;
+        see the depth-collapse note on `_judge_fanout`.
     """
     es = get_es_client()
     index = ES_INDICES["drafting"]
@@ -683,7 +712,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:no-corpus-hit>", "web"
+        return web_text, "<web:no-corpus-hit>", "web", search_query
 
     # Use the (possibly translated) English `search_query` for the picker so
     # the LLM reasons about English file names against English intent —
@@ -702,7 +731,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:picker-rejected>", "web"
+        return web_text, "<web:picker-rejected>", "web", search_query
 
     fetch_body = {
         "size": 1,
@@ -732,7 +761,7 @@ async def _acquire_reference_draft(
             query, user_language=user_language, intent=intent,
             original_query=original_query,
         )
-        return web_text, "<web:fetch-failed>", "web"
+        return web_text, "<web:fetch-failed>", "web", search_query
 
     reference_text = fetch_hits[0]["_source"].get("page_content", "") or ""
     display_name = os.path.basename(picked)
@@ -743,7 +772,7 @@ async def _acquire_reference_draft(
     )
     log.info("Reference draft acquired from corpus",
              source=picked, length=len(reference_text))
-    return reference_text, picked, "es"
+    return reference_text, picked, "es", search_query
 
 
 async def _acquire_reference_via_web(
@@ -796,6 +825,143 @@ async def _acquire_reference_via_web(
 # real grounding instead of begging the model not to hallucinate.
 # ---------------------------------------------------------------------------
 
+# Drafting instructions are imperative and long ("Draft a detailed regular
+# bail application for my client charged under Sections … Include relevant
+# Supreme Court case law with citations supporting the grounds for bail").
+# The instruction words carry no retrieval signal and push the clause count
+# past Elasticsearch's 1024 cap. Keep the legal content, drop the command.
+_DRAFTING_STOPWORDS = frozenset("""
+draft drafting prepare create write generate compose make give me my client
+please kindly detailed detail include including relevant with supporting
+supporting grounds application for the a an and or of in on under as per
+that this these those is are was were be been being to from into it its
+""".split())
+
+_SCI_QUERY_MAX_WORDS = 14
+
+
+def _topical_query(query: str) -> str:
+    """Shorten a drafting instruction into a topical query for SCI search.
+
+    Measured: 41 words -> "maxClauseCount is set to 1024" error; 8-10 words ->
+    hits or a clean empty. Keeps ordering so the phrase still reads naturally
+    to a semantic search, and falls back to a plain truncation when filtering
+    removes too much.
+    """
+    if not query:
+        return query
+    words = re.findall(r"[\w()\-/.]+", query)
+    kept = [w for w in words if w.lower() not in _DRAFTING_STOPWORDS]
+    if len(kept) < 4:
+        kept = words
+    return " ".join(kept[:_SCI_QUERY_MAX_WORDS])
+
+
+class _ContextBlocks(dict):
+    """Prompt blocks, carrying the SourceRegistry built from the same hits.
+
+    A dict subclass rather than a tuple return so every existing caller and
+    test that treats this as a plain `dict[str, str]` keeps working; consumers
+    that want the registry read `getattr(ctx, "registry", None)`.
+    """
+    registry = None
+
+
+def _registry_from_hits(newacts_t, legis_t, judg_t):
+    """Build a SourceRegistry from the raw ES hits behind the context blocks.
+
+    Only statutes and High Court judgments are lifted. The SCI tool returns a
+    pre-formatted string rather than structured hits, so there is nothing
+    reliable to key on — better an incomplete whitelist than one padded with
+    guessed citations, since the critic treats the whitelist as the set of
+    things the draft is ALLOWED to cite.
+    """
+    try:
+        from core.source_registry import RetrievedSource, SourceRegistry
+    except Exception:
+        return None
+    registry = SourceRegistry()
+
+    def _act_from_source(src: str) -> str:
+        """Recover an Act name from the corpus filename.
+
+        These indices carry no act_name field — the Act is only in the path,
+        e.g. ".../The Bharatiya Nyaya Sanhita,2023.csv". A whitelist of raw
+        paths would be worse than no whitelist: the critic treats it as the
+        set of citations the draft is ALLOWED to use, so every properly
+        formatted citation would be flagged as unretrieved.
+        """
+        if not src:
+            return ""
+        name = os.path.basename(src).rsplit(".", 1)[0]
+        name = re.sub(r"^\d{6,}_", "", name)          # judgment date prefixes
+        name = re.sub(r"_\d+$", "", name)             # trailing doc ids
+        name = re.sub(r",(?=\d)", ", ", name)         # "Sanhita,2023" -> "Sanhita, 2023"
+        return name.replace("_", " ").strip()
+
+    def _lift_statute(result, source_type: str, agent: str, prefix: str) -> None:
+        """Statutes enter the whitelist at ACT level, never section level.
+
+        The `section_number` on a hit is whichever CHUNK matched — in practice
+        "Section 1" or "Section 10" — not the section the draft is about. A
+        whitelist naming those exact sections would be actively harmful: the
+        critic flags any "quoted statutory provision" not present, so a draft
+        correctly citing Section 316(2) BNS (the section the USER named) would
+        be reported as a hallucination, and the refiner would then strip or
+        replace the user's own statute. That is precisely the doc-type-flip
+        failure — a wrong signal the refiner faithfully acts on.
+
+        Act-level is the honest claim: we retrieved this Act, not this
+        section. It preserves the valuable half of the check — a fabricated
+        CASE has no entry at all — without inventing precision we do not have.
+        """
+        for h in (result or {}).get("hits", [])[:8]:
+            act = _act_from_source(h.get("source") or "")
+            if not act:
+                continue
+            registry.add(RetrievedSource(
+                id=f"{prefix}-{abs(hash(act)) % 1000000}",
+                agent=agent, type=source_type,
+                canonical_citation=act, title=act,
+                snippet=(h.get("content") or "")[:200],
+            ))
+
+    def _lift_judgments(result) -> None:
+        """Judgment hits carry parties and court as top-level fields."""
+        for h in (result or {}).get("hits", [])[:8]:
+            pet = h.get("petitioner_names") or ""
+            res = h.get("respondent_names") or ""
+            if isinstance(pet, list):
+                pet = ", ".join(str(x) for x in pet)
+            if isinstance(res, list):
+                res = ", ".join(str(x) for x in res)
+            court = h.get("court_name") or ""
+            if pet and res:
+                citation = f"{pet} v. {res}"
+            else:
+                citation = _act_from_source(h.get("source") or "")
+            if not citation:
+                continue
+            if court:
+                citation = f"{citation} ({court})"
+            registry.add(RetrievedSource(
+                id=f"hc-{abs(hash(citation)) % 1000000}",
+                agent="Judgment", type="judgment",
+                canonical_citation=citation, title=citation,
+                snippet=(h.get("content") or "")[:200],
+            ))
+
+    try:
+        _lift_statute(newacts_t, "newacts", "Newacts", "na")
+        _lift_statute(legis_t, "legislation", "Legislation", "leg")
+        _lift_judgments(judg_t)
+    except Exception as e:
+        log.warning("Source registry build failed; critic will skip "
+                    "unretrieved_citation for this request", error=short_err(e))
+        return None
+    return registry
+
+
 async def _gather_relevant_context(query: str) -> dict[str, str]:
     """Run the domain retrievers in parallel; return labelled blocks.
 
@@ -824,7 +990,14 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
         _run(search_newacts, {"query": query}),
         _run(search_legislation, {"query": query}),
         _run(search_judgments, {"query": query}),
-        _run(sci_judgment_tools.search_by_topic, {"query": query, "top_k": 3}),
+        # SCI gets a SHORTENED query. Its semantic search builds one boolean
+        # clause per term and Elasticsearch caps that at 1024, so a full
+        # drafting instruction (41 words in the measured case) fails with
+        # "maxClauseCount is set to 1024" while an 8-word topical query
+        # succeeds. Drafting was passing the whole instruction, so SCI failed
+        # on precisely the requests that ask for case law.
+        _run(sci_judgment_tools.search_by_topic,
+             {"query": _topical_query(query), "top_k": 3}),
         return_exceptions=False,
     )
 
@@ -849,16 +1022,55 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
         return f"## {label}\n{body}\n"
 
     def _format_sci(result, max_chars: int = 2400) -> str:
-        """SCI tool returns a JSON-stringified result. Trim to a sane size."""
+        """Format the SCI tool's output, or nothing when it did not succeed.
+
+        The tool has FOUR observed modes, not two:
+
+            HITS          "Found 3 relevant judgment(s):\\n\\n**PARTIES** (DB ID: n)…"
+            EMPTY         "No matching judgments found."
+            ERROR-STRING  "Semantic search error: TransportError(500, …)"
+            (exception)   raised, handled by _safe_invoke
+
+        Only EMPTY was filtered. An error string does not start with "No ", so
+        it was injected into the writer's prompt underneath a heading reading
+        "## RELEVANT SUPREME COURT JUDGMENTS" — the writer saw a promise of
+        Supreme Court authority followed by a stack trace, had none, was asked
+        for case law, and supplied it from memory in the tool's own
+        "(DB ID: n)" format.
+
+        That is the mechanism behind the ungrounded citations: retrieval
+        failed and the failure was formatted as content.
+        """
         if not result:
             return ""
         text = result if isinstance(result, str) else str(result)
         text = text.strip()
         if not text or text.startswith("No "):
             return ""
+        if not text.startswith("Found "):
+            # Anything that is not a hit block is a failure, however it is
+            # worded. Fail closed: no block beats a block that lies.
+            log.warning("SCI search did not return hits; omitting the block",
+                        preview=text[:160])
+            return ""
         return f"## RELEVANT SUPREME COURT JUDGMENTS\n{text[:max_chars]}\n"
 
-    blocks: dict[str, str] = {}
+    # Build a SourceRegistry from the SAME hits, before they are flattened
+    # into prompt strings.
+    #
+    # Why this exists: self_refine's `unretrieved_citation` category — the
+    # rule that catches fabricated case citations — is skipped whenever the
+    # caller passes no source_registry. Drafting never passed one, so that
+    # check has never run on a single drafting request. For a legal drafting
+    # product a hallucinated authority in a filed document is the most costly
+    # defect the system can produce, and it was the one category guaranteed
+    # not to fire.
+    #
+    # The records were always here; `_gather_relevant_context` retrieved them
+    # and threw the structure away, keeping only the formatted text. Same
+    # shape as the discarded English translation: the data existed, nothing
+    # carried it to the stage that needed it.
+    blocks = _ContextBlocks()
     n = _format_es_hits(newacts_t, "RELEVANT BNS / BNSS / BSA SECTIONS")
     if n: blocks["newacts"] = n
     l = _format_es_hits(legis_t, "RELEVANT LEGISLATION SECTIONS")
@@ -867,6 +1079,9 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
     if j: blocks["judgments"] = j
     s = _format_sci(sci_t)
     if s: blocks["sci"] = s
+    blocks.registry = _registry_from_hits(newacts_t, legis_t, judg_t)
+    log.info("Drafting source registry built",
+             records=len(blocks.registry) if blocks.registry else 0)
 
     log.info("Context gather completed",
              blocks=list(blocks.keys()),
@@ -1202,6 +1417,19 @@ class _Section(BaseModel):
     )
 
 
+# Safety ceiling on the fan-out section list. NOT a target and NOT a default:
+# the planner sizes each plan to the request in front of it — a short
+# undertaking may need 5 sections, a writ petition with synopsis, grounds,
+# affidavit, schedule and index 18 — and this number only bounds the worst
+# case so a mis-behaving judge cannot blow the request budget.
+#
+# Interpolated into DRAFTING_FANOUT_JUDGE_PROMPT as `{max_sections}` rather
+# than restated there. Stating a ceiling in two places is what produced the
+# bug this constant replaces: the prompt allowed 15, the code kept 12, and
+# every plan of 13+ silently lost its closing section.
+MAX_SECTIONS = 20
+
+
 class _FanoutStrategy(BaseModel):
     """Structured output from `_judge_fanout`."""
     should_fanout: bool = Field(
@@ -1215,7 +1443,10 @@ class _FanoutStrategy(BaseModel):
         default_factory=list,
         description=(
             "Ordered section list — only meaningful when should_fanout=True. "
-            "Soft-capped at 15 by the prompt; no code-level cap."
+            "Size it to what THIS document needs — no target count, no "
+            "default shape — and never more than the ceiling stated in "
+            "the prompt. The LAST entry must be the block the document "
+            "ends with (prayer / verification / signature / execution)."
         ),
     )
     reasoning: str = Field(
@@ -1515,9 +1746,34 @@ async def _judge_fanout(
                 "Apply the default fan-out rules above."
             )
 
+        # Planner model: Gemini 2.5 Flash (full) with a thinking budget,
+        # upgraded from flash-lite.
+        #
+        # This is a deliberate TRADE, measured on hi/gu/ta/te + en, 3 runs
+        # each, reference held constant per language:
+        #
+        #   PAYS FOR ITSELF — heading script correctness
+        #     Gujarati headings, flash-lite : script match 0.00, 3/3
+        #                                     (emitted Devanagari, i.e. Hindi)
+        #     Gujarati headings, flash full : script match 1.00, 3/3
+        #     A Gujarati draft whose section headings are in Hindi is the
+        #     "not appropriate" half of the client complaint, and flash-lite
+        #     got it wrong every single time.
+        #
+        #   COSTS — planned section count drops
+        #     en  7,7,7 -> 4,4,4      hi  7,7,7 -> 6,6,6
+        #     gu  8,8,8 -> 6,6,7      ta  5,5,5 -> 5,5,5
+        #                             te  6,6,6 -> 6,6,7
+        #
+        # The section-count drop is real and must be watched: this is ONE
+        # call per request, so cost is not the issue, but a shorter plan
+        # means a shorter document. If drafts regress in length, revisit
+        # this before touching the writer — the writer honours whatever plan
+        # it is given (instrumentation shows planned == emitted).
         llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
+            "google_genai:gemini-2.5-flash",
             temperature=0.0,
+            thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)
@@ -1544,8 +1800,16 @@ async def _judge_fanout(
                     "user_language_name": lang_name,
                     "depth_directive": depth_directive,
                     "chat_history_hint": chat_history_hint,
+                    "max_sections": MAX_SECTIONS,
                 }),
-                local_timeout=15,
+                # 25s, up from 15s, sized from measured Flash latency: healthy
+                # calls run 5.6-14.8s, so 15s sat inside the observed spread and
+                # clipped slower-but-healthy calls into the single-pass
+                # fallback — which is a shorter one-call document, i.e. a
+                # quieter version of the same complaint. `bounded_wait_for`
+                # still clamps to whatever is left of the request deadline, so
+                # the wider bound cannot push a request past its budget.
+                local_timeout=25,
             )
         from core.token_tracker import record as _record_tokens
         _record_tokens("Drafting", "fanout_judge", raw_and_parsed.get("raw"))
@@ -1657,6 +1921,24 @@ async def _generate_section_pair(
         # party names, court, case number, etc.
         system_prompt = _REVIEW_AND_REDRAFT_MODE_OVERRIDE + "\n\n---\n\n" + system_prompt
 
+    # Per-section depth anchor for regional-language drafts.
+    #
+    # The SUBSTANTIVE DEPTH policy in core/language.py already says "same
+    # depth as English", but it lands ~96% of the way through a ~43,000-
+    # character system prompt and measurably does not move the output —
+    # regional-language sections still came back at 61% of the English word
+    # count with it in place. Restating the expectation HERE, inside the
+    # task list the model is actually executing, puts it where it cannot be
+    # missed. English is unaffected (empty string).
+    depth_anchor = ""
+    if user_language and user_language != "en":
+        depth_anchor = (
+            "\n   (DEPTH: write this section at full English depth — each "
+            "numbered paragraph is 3-5 complete sentences carrying its own "
+            "legal reasoning. Do NOT abbreviate because the output language "
+            "is not English.)"
+        )
+
     section_lines: list[str] = []
     for offset, sec in enumerate(sections_to_write):
         position = section_position_start + offset
@@ -1664,6 +1946,7 @@ async def _generate_section_pair(
             f"{offset + 1}. **{sec.heading}** — {sec.summary or '(see structure in reference)'}\n"
             f"   (Section {position} of {total_sections} in the full document; "
             f"slug: `{sec.id}`)"
+            f"{depth_anchor}"
         )
     sections_block = "\n\n".join(section_lines)
 
@@ -1800,7 +2083,22 @@ async def _generate_section_pair(
     #      GPT-4o instead of dropping the section. Every generation path in
     #      this service is Gemini-only; this is the first path with a real
     #      second provider behind it.
-    _SECTION_PAIR_LOCAL_TIMEOUT = 120
+    #
+    # Timeout chosen from 124 measured healthy calls:
+    #   min 9.3s | median 21.8s | p90 32.2s | max 56.0s
+    # 60s sits above the observed maximum, so healthy traffic is not pushed
+    # onto the fallback. Measured end-to-end against a fully hung Gemini
+    # (5 section pairs, 300s request budget):
+    #   120s -> 477 words,  2/5 pairs recovered, draft flagged incomplete
+    #    60s -> 1168 words, 4/5 pairs recovered, draft flagged incomplete
+    #    45s -> 1240 words, 5/5 pairs recovered, draft COMPLETE
+    # 45s recovers more during an outage but would divert ~3% of healthy
+    # pairs (~15% of drafts) to GPT-4o during normal operation. Outages are
+    # rare and normal traffic is constant, so this favours the common case
+    # and lets the `draft_incomplete` flag tell the user when a section was
+    # lost. Lower it if outage-time completeness matters more than provider
+    # consistency day to day.
+    _SECTION_PAIR_LOCAL_TIMEOUT = 60
 
     def _messages(extra_instruction: str) -> list:
         final_user_block = (
@@ -1929,6 +2227,121 @@ async def _generate_section_pair(
         section_label=section_label, length=len(text),
     )
     return text
+
+
+# Repair budget. A section pair costs ~25s against a 300s request ceiling, so
+# repair is capped at two pairs and only runs with real budget left — a draft
+# missing its Prayer is worth 25s, but not a gateway timeout.
+_MAX_REPAIR_SECTIONS = 4
+_REPAIR_MIN_BUDGET_S = 40
+
+
+# Not every planned section that fails to appear is a defect.
+#
+# The planner works from a canonical checklist and lists what a document of
+# this family CAN carry; the section prompt then tells the writer to "OMIT
+# ONLY FOR A FACTUAL REASON" — drop parity when there are no co-accused, drop
+# medical grounds when none are pleaded. That omission is CORRECT, and the
+# test scenario (one accused, no co-accused) triggers it constantly.
+#
+# Measured over 20 drafts: planned-vs-emitted disagreed in half of them, but
+# almost every gap was a conditional section the writer was right to drop.
+# Exactly ONE draft was genuinely defective — a Bengali filing missing its
+# Verification. Repairing indiscriminately would have re-inserted parity
+# sections into cases with no co-accused, i.e. made the drafts worse while
+# spending ~25s per call to do it.
+#
+# So repair is limited to the sections a filing cannot be without. Matching is
+# on the planner's English `id` slug rather than the localized heading, so it
+# works identically for Odia and Kannada without a per-language word list —
+# an earlier keyword-based attempt produced five false positives on Kannada
+# because it used the wrong word for "facts".
+_MANDATORY_SECTION_HINTS = (
+    "title", "cause", "fact", "ground", "prayer", "relief", "verif",
+    # Transactional instruments (MOU, agreement, deed, lease) end in an
+    # execution block, not a prayer. Without these a contract that lost its
+    # signature section reads as complete to the repair pass and ships as an
+    # unsigned fragment — the exact defect reported on a commercial MOU.
+    "execut", "signat", "attest", "witness",
+)
+_CONDITIONAL_SECTION_HINTS = (
+    "parity", "co_accused", "coaccused", "medical", "family", "undertak",
+    "advocate", "document", "annexure", "schedule", "index",
+)
+
+
+def _is_mandatory_section(sec: "_Section") -> bool:
+    """Is this a section the document is invalid without?
+
+    Conditional hints are checked FIRST: "medical_family_grounds" contains
+    "ground" and would otherwise read as mandatory when it is exactly the
+    kind of section the writer is supposed to drop when the facts are silent.
+    """
+    slug = f"{getattr(sec, 'id', '')} {getattr(sec, 'heading', '')}".lower()
+    if any(h in slug for h in _CONDITIONAL_SECTION_HINTS):
+        return False
+    return any(h in slug for h in _MANDATORY_SECTION_HINTS)
+
+# A full redraft costs about as much as the first pass (~150s measured), and
+# the request ceiling is 300s. Only retry with real budget left.
+_OFF_TARGET_RETRY_MIN_BUDGET_S = 150
+
+
+def _normalise_heading(text: str) -> str:
+    """Fold a heading for comparison: strip markdown, punctuation, case, space.
+
+    Deliberately script-agnostic — `str.lower()` is a no-op on Indic scripts,
+    and the comparison must work identically for Odia and English.
+    """
+    t = re.sub(r"[#*_`>]", " ", text or "")
+    t = re.sub(r"[\s ]+", " ", t)
+    t = t.strip(" :.-—–\t").lower()
+    return t
+
+
+def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
+    """Planned sections whose heading never made it into the draft.
+
+    A section counts as present when its normalised heading appears anywhere
+    in the draft's own headings, in either direction — the writer is allowed
+    to lengthen a heading ("Prayer" -> "Prayer for Bail") or trim a long one,
+    but not to drop the section or rename it into something unrelated.
+
+    Substring matching in both directions is deliberately permissive: the goal
+    is catching a DROPPED section, not policing wording. A false "missing"
+    triggers a wasted 25s repair call, so the bar is set to avoid that.
+    """
+    if not draft or not sections:
+        return []
+    draft_headings: list[str] = []
+    for line in draft.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # `## Heading`, and also `**Heading**` alone on a line — some drafts
+        # mark sections in bold rather than with hashes, and treating those as
+        # "no heading" would flag a complete document as entirely missing.
+        if s.startswith("#") or (s.startswith("**") and s.endswith("**") and len(s) < 120):
+            h = _normalise_heading(s)
+            if h:
+                draft_headings.append(h)
+
+    # No headings recognised at all: the writer is not marking sections in a
+    # form we can read, so we cannot tell a dropped section from a differently
+    # formatted one. Repairing here would burn ~25s per pair to append
+    # duplicates of content that may already be present. Judge nothing.
+    if not draft_headings:
+        return []
+
+    missing: list["_Section"] = []
+    for sec in sections:
+        want = _normalise_heading(sec.heading)
+        if not want:
+            continue
+        if any(want in got or got in want for got in draft_headings):
+            continue
+        missing.append(sec)
+    return missing
 
 
 async def _generate_sectionwise(
@@ -2207,6 +2620,79 @@ async def _generate_sectionwise(
 
     draft = "\n\n".join(completed)
 
+    # --- Plan adherence -----------------------------------------------------
+    #
+    # `failed_pairs` above only catches a pair that threw or returned nothing.
+    # It does NOT catch the more damaging failure: a pair that returns fluent
+    # text while ignoring the section list it was given.
+    #
+    # Observed on Odia (3/3 runs planned correctly, the writer still deviated):
+    # the plan was cause title / facts / grounds / family / undertakings /
+    # PRAYER / VERIFICATION, and the writer emitted "An analysis regarding a
+    # regular bail application", silently dropped Prayer and Verification, and
+    # invented a "Relevant legal provisions" section into which it dumped the
+    # retrieved statutes verbatim in English. The result reads well and is not
+    # a filing — no cause title, no prayer, no verification.
+    #
+    # Section-pair rule 2 already says "USE THE EXACT HEADING TEXT GIVEN".
+    # Bug 1 established that a prompt rule alone does not hold, so this is a
+    # deterministic check with a bounded repair rather than more prompt text.
+    _all_missing = _missing_planned_sections(draft, sections)
+    missing = [s for s in _all_missing if _is_mandatory_section(s)]
+    _conditional = [s for s in _all_missing if s not in missing]
+    if _conditional:
+        # Expected and correct — the facts gave these nothing to say. Logged
+        # at info so the planned-vs-emitted gap is explainable in the logs
+        # without looking like a defect.
+        log.info(
+            "Conditional sections omitted (expected)",
+            omitted=[s.id for s in _conditional],
+        )
+    if missing:
+        log.warning(
+            "Writer dropped MANDATORY sections",
+            missing=[s.id for s in missing],
+            planned=total, emitted=total - len(_all_missing),
+        )
+        # Repair in pairs, cheapest-first, and only while the request budget
+        # allows. A full regeneration would cost another ~150s against a 300s
+        # ceiling, so repair is capped rather than unbounded.
+        from core.deadline import remaining as _remaining
+        repaired: list[str] = []
+        for j in range(0, min(len(missing), _MAX_REPAIR_SECTIONS), 2):
+            if _remaining() is not None and _remaining() < _REPAIR_MIN_BUDGET_S:
+                log.warning("Skipping section repair — request budget exhausted",
+                            remaining_s=_remaining())
+                break
+            chunk = missing[j:j + 2]
+            try:
+                text = await _generate_section_pair(
+                    sections_to_write=chunk,
+                    section_position_start=total - len(missing) + j + 1,
+                    total_sections=total,
+                    query=query,
+                    user_facts=user_facts,
+                    reference_draft=reference_draft,
+                    prior_text=draft,
+                    gathered_context=gathered_context,
+                    user_intent=user_intent,
+                    user_language=user_language,
+                    review_and_redraft_mode=review_and_redraft_mode,
+                )
+                if text.strip():
+                    repaired.append(text.strip())
+                    log.info("Section repair succeeded",
+                             headings=[s.heading[:40] for s in chunk])
+            except Exception as e:
+                log.warning("Section repair failed", error=short_err(e),
+                            headings=[s.heading[:40] for s in chunk])
+        if repaired:
+            draft = draft + "\n\n" + "\n\n".join(repaired)
+            still_missing = _missing_planned_sections(draft, sections)
+            log.info("Plan adherence after repair",
+                     recovered=len(missing) - len(still_missing),
+                     still_missing=[s.heading[:40] for s in still_missing])
+
     # G-24: emit draft_incomplete SSE + prepend a banner when any pair
     # failed. The frontend already listens for draft_incomplete (see
     # chat_runner.py handler); the banner is belt-and-suspenders so
@@ -2359,6 +2845,7 @@ async def _generate_draft(
     gathered_context: dict[str, str] | None = None,
     review_and_redraft_mode: bool = False,
     chat_history=None,
+    english_query: str = "",
 ) -> str:
     """Thin dispatcher: judge call decides single-pass vs section-wise.
 
@@ -2447,25 +2934,83 @@ async def _generate_draft(
             "properly."
         )
 
+    # Plan against ENGLISH when the user wrote in a regional language.
+    #
+    # The judge decides how many sections the document gets. Fed a
+    # regional-script query it consistently plans FEWER sections than the
+    # same request in English — measured 6 vs 8 for an identical bail
+    # request, deterministic across runs — which is roughly a quarter of
+    # the document silently dropped (Undertakings, advocate block, parity
+    # and medical grounds collapsed into one).
+    #
+    # `english_query` is the translation `_acquire_reference_draft` already
+    # computed for the English-only corpus lookup, so this costs no extra
+    # LLM call. `user_language` is still passed through unchanged, so the
+    # judge continues to emit headings in the user's script — only the
+    # PLANNING becomes language-invariant.
     strategy = await _judge_fanout(
-        query=query,
+        query=english_query or query,
         reference_draft=reference_draft,
         user_language=user_language,
         user_intent=user_intent,
         chat_history=chat_history,
     )
 
-    # Hard code-level cap: prompt says "at most 15" but the LLM sometimes
-    # emits more, and 15 sequential Pro calls × ~25s ≈ 375s — over the
-    # 300s gunicorn timeout. Bug #9 in the prod inventory. Trim to 12
-    # deterministically so a mis-behaving judge can't blow the envelope.
-    _FANOUT_HARD_CAP = 12
-    if strategy.sections and len(strategy.sections) > _FANOUT_HARD_CAP:
+    # Diagnostic: splits the regional-language section deficit into its three
+    # possible causes. Some languages deliver 4-6 sections where English
+    # reliably delivers 9, and the fix differs per cause:
+    #   english_query_is_ascii False -> translation failed for this language
+    #   is_ascii True but planned low -> the judge is biased even in English
+    #   planned high but emitted low  -> sections dropped during writing
+    # Pair this with the `draft_done` line at the end of drafting_node.
+    _plan_q = english_query or query
+    # The judge mirrors the REFERENCE TEMPLATE's structure, and each language
+    # retrieves a different template (translation wording differs, so ES
+    # returns different documents). Log the template's own section count so a
+    # low plan can be attributed to the template rather than the language or
+    # the model. `ref_*` counts several conventions because corpus templates
+    # are CSV-derived and do not use markdown headings.
+    _ref = reference_draft or ""
+    log.info(
+        "draft_plan",
+        user_language=user_language,
+        english_query_head=_plan_q[:60],
+        english_query_is_ascii=_plan_q.isascii(),
+        planned_sections=len(strategy.sections),
+        ref_chars=len(_ref),
+        ref_numbered=len(re.findall(r"^\s*\d{1,2}[\.\)]\s+\S", _ref, re.M)),
+        ref_allcaps_lines=len(re.findall(r"^[A-Z][A-Z \-:/,\.]{6,}$", _ref, re.M)),
+        planned_headings=[s.heading[:24] for s in strategy.sections],
+    )
+
+    # Code-level safety ceiling. The plan SIZE is the judge's decision and must
+    # not be normalised to a fixed number, but a mis-behaving judge emitting 40
+    # sections would blow the request budget, so the count is bounded here as
+    # well as in the prompt. Both read MAX_SECTIONS.
+    #
+    # KEEP THE FIRST N-1 AND THE LAST, never a plain `[:N]` head slice. Every
+    # document this pipeline drafts ends with a structurally required closing
+    # block — prayer, verification, signature / execution, schedule — and it is
+    # always LAST in the plan, so a head slice deletes precisely the section the
+    # document cannot be delivered without.
+    #
+    # Measured on a commercial-MOU request (2026-09-02): the judge planned 13
+    # sections, `[:12]` dropped `SIGNATURES`, and the draft was delivered ending
+    # after its governing-law clause with no execution block, no banner and no
+    # error — silent on every run. The section-repair pass below does not cover
+    # this case either: its mandatory list is pleading-shaped, so a missing
+    # `Execution` is never restored. Middle sections are the safe thing to drop.
+    if strategy.sections and len(strategy.sections) > MAX_SECTIONS:
+        _dropped = strategy.sections[MAX_SECTIONS - 1:-1]
         log.warning(
-            "Fan-out judge emitted more sections than the hard cap — trimming",
-            emitted=len(strategy.sections), cap=_FANOUT_HARD_CAP,
+            "Fan-out judge emitted more sections than the ceiling — trimming",
+            emitted=len(strategy.sections), max_sections=MAX_SECTIONS,
+            kept_last=strategy.sections[-1].heading[:40],
+            dropped=[s.heading[:32] for s in _dropped],
         )
-        strategy.sections = strategy.sections[:_FANOUT_HARD_CAP]
+        strategy.sections = (
+            strategy.sections[:MAX_SECTIONS - 1] + strategy.sections[-1:]
+        )
 
     if not strategy.should_fanout or not strategy.sections:
         log.info(
@@ -2496,7 +3041,7 @@ async def _generate_draft(
         f"Drafting {len(strategy.sections)} sections one by one...",
         step="generate",
     )
-    return await _generate_sectionwise(
+    draft = await _generate_sectionwise(
         sections=strategy.sections,
         query=query,
         user_facts=user_facts,
@@ -2508,6 +3053,69 @@ async def _generate_draft(
         review_and_redraft_mode=review_and_redraft_mode,
         niche_overlay=niche_overlay,
     )
+
+    # --- Off-target language gate ------------------------------------------
+    #
+    # 4 of 42 regional drafts came back wholly or largely in English despite a
+    # regional request — two at a script ratio of 0.00, not one character of
+    # the requested script. A client who asks in Kannada and receives English
+    # is the same complaint that started this work.
+    #
+    # Deterministic, not routed through the critic: the critic was measured
+    # defaulting to "pass" on exactly these drafts. Recorded as an explicit
+    # exception under CLAUDE.md drafting invariant 2.
+    #
+    # Regeneration is budget-gated. A full redraft costs roughly as much as
+    # the first, and the request ceiling is 300s — so we retry only when the
+    # budget genuinely allows, and otherwise ship the draft with a visible
+    # banner. A banner is a bad outcome; a gateway timeout returning nothing
+    # is a worse one.
+    if user_language and user_language != "en" and is_off_target_language(draft, user_language):
+        ratio = output_script_ratio(draft, user_language)
+        from core.deadline import remaining as _remaining
+        budget = _remaining()
+        log.warning(
+            "Draft came back off-target language",
+            user_language=user_language, script_ratio=round(ratio, 2),
+            remaining_s=budget,
+        )
+        if budget is None or budget > _OFF_TARGET_RETRY_MIN_BUDGET_S:
+            progress_emit(
+                "drafting",
+                "Draft came back in the wrong language — regenerating...",
+                substep=True, step="generate",
+            )
+            retry = await _generate_sectionwise(
+                sections=strategy.sections,
+                query=query,
+                user_facts=user_facts,
+                reference_draft=reference_draft,
+                user_intent=user_intent,
+                user_language=user_language,
+                progress_emit=progress_emit,
+                gathered_context=gathered_context,
+                review_and_redraft_mode=review_and_redraft_mode,
+            )
+            retry_ratio = output_script_ratio(retry, user_language)
+            log.info("Off-target regeneration finished",
+                     before=round(ratio, 2), after=round(retry_ratio, 2),
+                     accepted=retry_ratio > ratio)
+            # Keep whichever is closer to the requested language. A retry that
+            # comes back English too is no improvement, and the first draft at
+            # least had the sections.
+            if retry.strip() and retry_ratio > ratio:
+                return retry
+            draft = retry if retry_ratio > ratio else draft
+            ratio = max(ratio, retry_ratio)
+
+        if is_off_target_language(draft, user_language):
+            lang_name = language_name(user_language)
+            draft = (
+                f"> ⚠ **This draft came back in English rather than {lang_name}.** "
+                "Please re-send your prompt to retry.\n\n"
+            ) + draft
+
+    return draft
 
 
 # ---------------------------------------------------------------------------
@@ -2833,6 +3441,9 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = user_facts
             reference_source = "<uploaded:review_and_redraft>"
             reference_kind = "uploaded"
+            # No corpus lookup happened on this path, so there is no English
+            # translation to plan against; the judge falls back to `query`.
+            english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         elif _INLINED_PRIOR_DRAFT_MARKER in query:
             # (c) Directive follow-up whose query already carries the full
@@ -2854,11 +3465,13 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_text = ""
             reference_source = "<prior_turn:inlined>"
             reference_kind = "prior_turn"
+            english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         else:
             progress("drafting", "Searching templates and relevant law...",
                      step="reference")
-            (reference_text, reference_source, reference_kind), gathered_ctx = \
+            (reference_text, reference_source, reference_kind,
+             english_query), gathered_ctx = \
                 await asyncio.gather(
                     _acquire_reference_draft(
                         query,
@@ -2897,11 +3510,49 @@ async def drafting_node(state: LegalAgentState) -> dict:
             gathered_context=gathered_ctx,
             review_and_redraft_mode=use_upload_as_ref,
             chat_history=_judge_chat_history,
+            english_query=english_query,
         )
 
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
         progress("drafting", "Cleaning up draft...", step="cleanup")
         draft, draft_warnings = validate_draft(draft)
+
+        # A citation the pipeline cannot vouch for has to be visible IN the
+        # document, not only in response metadata the UI may never render.
+        # The advocate is the last check before filing; a judgment dated in
+        # the future is one they must see. Stripped signals (DB IDs,
+        # placeholder markers) need no banner — removing them is the whole
+        # fix — but a suspect authority that REMAINS in the text does.
+        # Strict citation whitelisting — SHADOW BY DEFAULT. Computes and logs
+        # which citations are not traceable to retrieval, and changes nothing
+        # unless CITATION_STRIP_MODE=enforce. Enforce must not be switched on
+        # until advocate review of production shadow logs classifies the
+        # would-be strips as fabrication rather than retrieval gaps; the SCI
+        # index is already known to return no hits for most bail queries, so
+        # enforcing today would delete real authorities.
+        try:
+            from core.citation_whitelist import apply_citation_policy
+            draft, _cite_audit = apply_citation_policy(draft, gathered_ctx)
+            if _cite_audit.get("ungrounded"):
+                draft_warnings.append(
+                    f"[{_cite_audit['mode']}] "
+                    f"{len(_cite_audit['ungrounded'])} case citation(s) not "
+                    f"traceable to retrieved sources"
+                )
+        except Exception as _cite_err:
+            log.warning("Citation whitelist audit failed; draft unchanged",
+                        error=short_err(_cite_err))
+
+        _unverifiable = [w for w in draft_warnings
+                         if w.startswith("UNVERIFIABLE CITATION")]
+        if _unverifiable:
+            draft = (
+                "> ⚠ **Verify the case law before filing.** "
+                + _unverifiable[0].replace("UNVERIFIABLE CITATION: ", "")
+                + "\n\n"
+            ) + draft
+            log.warning("Draft carries an unverifiable citation",
+                        detail=_unverifiable[0][:160])
 
         # --- 7. self_refine — the scope critic + audit pass against UserIntent ---
         #
@@ -2929,11 +3580,46 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     step="self_refine",
                 )
                 source_langs = detect_source_languages(user_facts)
+                # Thread the retrieved sources through. Without this the
+                # critic's `unretrieved_citation` category — the one that
+                # catches fabricated case citations — is skipped outright,
+                # because self_refine substitutes "(none — the caller passed
+                # no source registry; skip ... for this call)". Drafting has
+                # never passed one, so hallucinated authorities in generated
+                # filings have never been checked.
+                # SHADOW-MODE SAFETY. Handing the registry to self_refine
+                # arms the critic's `unretrieved_citation` category, and the
+                # REFINER acts on whatever the critic raises — so passing it
+                # here would strip citations through a second code path even
+                # with CITATION_STRIP_MODE=shadow. Shadow must mean shadow on
+                # every path, not just the one that says "shadow" in its name.
+                #
+                # In shadow/off the registry is withheld, self_refine
+                # substitutes its "(none — skip unretrieved_citation)" marker,
+                # and behaviour is byte-identical to before this work.
+                from core.citation_whitelist import ENFORCE as _CITE_ENFORCE
+                from core.citation_whitelist import strip_mode as _cite_mode
+                _registry = (getattr(gathered_ctx, "registry", None)
+                             if _cite_mode() == _CITE_ENFORCE else None)
+                if _registry is None:
+                    log.info("Citation whitelist withheld from self_refine "
+                             "(shadow/off) — critic cannot strip citations",
+                             citation_strip_mode=_cite_mode())
                 refined_draft, refine_history = await self_refine(
                     draft,
                     user_query=query,
                     intent=intent_obj,
                     source_languages=source_langs,
+                    source_registry=_registry,
+                    # A finished draft has no business getting materially
+                    # shorter. The shared default (0.7) exists for
+                    # conversational answers that can legitimately compress on
+                    # a format fix; applied to a filing it let a 13% loss ship
+                    # silently. 0.90 still leaves room for the shrink that IS
+                    # correct — stripping a fabricated citation or a duplicated
+                    # paragraph costs 1-2% of a 20K draft, not 13%.
+                    shrink_floor=0.90,
+                    cumulative_shrink_floor=0.85,
                 )
                 if refined_draft != draft:
                     log.info(
@@ -2942,7 +3628,36 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         original_len=len(draft),
                         refined_len=len(refined_draft),
                     )
-                    draft = refined_draft
+                    # The refiner must never change the LANGUAGE of a draft.
+                    #
+                    # Measured (Odia, req 65f6dfd1): the generator produced a
+                    # 9,740-char draft in Odia — the generation-time script
+                    # gate passed it — and self-refine then rewrote it to
+                    # 12,411 chars of English across 2 iterations. The final
+                    # output contained not one Odia character. This is the
+                    # same failure class as the doc-type flip: the critic
+                    # raises violations and the refiner "fixes" them by
+                    # producing a document the user did not ask for.
+                    #
+                    # Reverting is the right remedy rather than regenerating:
+                    # we already hold a correct draft in the requested
+                    # language, and it cost ~150s to make. The refinement's
+                    # improvements are forfeited, which is the cheaper loss.
+                    if (
+                        user_language
+                        and user_language != "en"
+                        and is_off_target_language(refined_draft, user_language)
+                        and not is_off_target_language(draft, user_language)
+                    ):
+                        log.warning(
+                            "Self-refine changed the draft language — reverting",
+                            user_language=user_language,
+                            before=round(output_script_ratio(draft, user_language), 2),
+                            after=round(output_script_ratio(refined_draft, user_language), 2),
+                            iterations=len(refine_history),
+                        )
+                    else:
+                        draft = refined_draft
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))
@@ -2981,6 +3696,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 agent_name="Drafting",
                 template_type="web-synthesized",
             )]
+
+        # Pairs with the `draft_plan` line above. `emitted_h2` counts SECTION
+        # headings only (`##`); `###` is a sub-heading inside a section and
+        # inflated an earlier version of this measurement.
+        log.info(
+            "draft_done",
+            user_language=user_language,
+            emitted_h2=len(re.findall(r"^##\s+\S", draft, re.M)),
+            emitted_h3=len(re.findall(r"^###\s+\S", draft, re.M)),
+            draft_words=len(draft.split()),
+        )
 
         log.info(
             "Agent completed -- simplified pipeline",

@@ -315,12 +315,44 @@ class TestRateLimitBackoff:
 # ---------------------------------------------------------------------------
 
 class TestFanoutCap:
-    def test_hard_cap_present_in_generate_draft(self):
+    def test_section_ceiling_is_defined_once(self):
+        """G-18's cap, renamed to MAX_SECTIONS and raised to the product limit.
+
+        The old assertion pinned `_FANOUT_HARD_CAP = 12` as source text. The
+        ceiling now lives in ONE place and is interpolated into the judge
+        prompt, so assert the constant rather than a literal — stating it twice
+        is what let prompt and code drift apart and silently delete closing
+        sections.
+        """
+        from agents.drafting import MAX_SECTIONS
+
+        assert MAX_SECTIONS == 20
+
         with open("agents/drafting.py", encoding="utf-8") as f:
             source = f.read()
-        assert "_FANOUT_HARD_CAP" in source
-        # The cap should be 12 (see audit G-18 rationale)
-        assert "_FANOUT_HARD_CAP = 12" in source
+        assert "MAX_SECTIONS = 20" in source
+        assert "_FANOUT_HARD_CAP" not in source, "old constant should be gone"
+
+    def test_over_ceiling_trim_preserves_the_closing_section(self):
+        """The ceiling must never be applied as a plain head slice.
+
+        `sections[:N]` drops the LAST planned section, which is always the
+        prayer / verification / signature / execution block.
+        """
+        with open("agents/drafting.py", encoding="utf-8") as f:
+            source = f.read()
+        assert "strategy.sections[:MAX_SECTIONS - 1] + strategy.sections[-1:]" in source
+        assert "strategy.sections[:MAX_SECTIONS]" not in source
+
+    def test_judge_prompt_takes_the_ceiling_as_a_variable(self):
+        with open("config/prompts.py", encoding="utf-8") as f:
+            source = f.read()
+        idx = source.index("DRAFTING_FANOUT_JUDGE_PROMPT")
+        end = source.find("DRAFTING_CHUNK_ROUTER_PROMPT", idx)
+        judge_prompt = source[idx:end]
+        assert "{max_sections}" in judge_prompt
+        for stale in ("AT MOST 12 sections", "AT MOST 15 sections", "at or below 12"):
+            assert stale not in judge_prompt, f"competing hard-coded ceiling: {stale}"
 
     def test_judge_prompt_has_chat_history_hint_slot(self):
         with open("config/prompts.py", encoding="utf-8") as f:

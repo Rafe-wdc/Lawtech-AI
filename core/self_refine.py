@@ -1388,6 +1388,8 @@ Violations to fix (each has a suggested_fix the auditor wrote):
 Previous response (the draft to revise):
 {response}
 
+{language_directive}
+
 Produce the revised response now.
 """
 
@@ -1482,6 +1484,66 @@ def _format_violations(violations: list[Violation]) -> str:
     return "\n\n".join(lines)
 
 
+CRITIQUE_REPAIR_PROMPT = """The text below was meant to be a JSON object matching this schema:
+
+{{
+  "passes": bool,
+  "confidence": float between 0 and 1,
+  "violations": [
+    {{"field": str, "issue": str, "severity": "critical"|"major"|"minor", "suggested_fix": str}}
+  ]
+}}
+
+It did not parse — most often because the output was cut off mid-object and
+the JSON is unterminated.
+
+Recover it. Rules:
+- Keep every COMPLETE violation exactly as written. Do not reword, re-rank,
+  or re-severity them.
+- DISCARD any trailing violation that was cut off mid-way. A partial
+  violation is not evidence; inventing an ending for it would put words in
+  the auditor's mouth.
+- Do not add violations that are not present in the text.
+- If no complete violation survives, return passes=true with an empty list.
+
+Malformed output:
+{raw_content}
+
+Return the repaired JSON object now."""
+
+
+async def _repair_critique(raw_content: str, critic_llm=None):
+    """Recover a Critique from malformed model output. None if unrecoverable.
+
+    Exists because a failed parse used to discard the entire audit silently.
+    The common cause is truncation at max_output_tokens on a long violations
+    list, which leaves most violations intact and only the last one severed —
+    so a repair pass recovers real findings rather than guessing at them.
+
+    Deliberately conservative: it salvages what is complete and drops what is
+    partial. A critique that invents its own findings would be worse than no
+    critique at all.
+    """
+    if not raw_content or not raw_content.strip():
+        return None
+    try:
+        llm = (critic_llm or get_gemini_flash_lite(
+            temperature=0.0, max_output_tokens=8192, thinking_budget=0,
+        )).with_structured_output(Critique, include_raw=True)
+        prompt = ChatPromptTemplate.from_template(CRITIQUE_REPAIR_PROMPT)
+        chain = prompt | llm
+        from core.deadline import bounded_wait_for
+        out = await bounded_wait_for(
+            asyncio.to_thread(chain.invoke, {"raw_content": raw_content[:20000]}),
+            local_timeout=30,
+        )
+        _record_tokens("SelfRefine", "critique_repair", out.get("raw"))
+        return out.get("parsed")
+    except Exception as e:
+        log.warning("Critique schema repair failed", error=short_err(e))
+        return None
+
+
 async def _critique(
     user_query: str,
     intent: UserIntent,
@@ -1552,20 +1614,52 @@ async def _critique(
         result: Critique = raw_and_parsed["parsed"]
         record_gemini_flash_success()  # Flash answered (raw present); parse is separate
         if result is None:
-            # `parsed` is None when structured-output parsing failed. With the
-            # quality-notes truncation validator in place this is no longer
-            # Q-20 (string_too_long); any remaining None means a genuinely
-            # empty/blocked response or a different schema violation. Log the
-            # REAL reason (parsing_error) instead of letting `result.passes`
-            # below raise an AttributeError that collapses into the generic
-            # "call failed" branch and hides the cause. Fail safe (pass) so the
-            # user still gets a draft.
+            # A `parsed` of None means the model answered but its output did
+            # not satisfy the Critique schema — most often a violations list
+            # long enough to be truncated at max_output_tokens, leaving
+            # unterminated JSON.
+            #
+            # This used to return passes=True immediately. That is how the
+            # regional-language critic bug went unnoticed: on those drafts the
+            # critique failed to parse, the whole audit was discarded, and the
+            # log said WARN "treating as pass" — indistinguishable from a
+            # genuinely clean draft. 15 occurrences in a single server log,
+            # every critic category unenforced on those requests, and nothing
+            # in the output made that visible.
+            #
+            # So: repair once, and if that fails, say so at ERROR with the raw
+            # output attached. Shipping unaudited is sometimes the right
+            # trade — shipping unaudited *quietly* never is.
             perr = raw_and_parsed.get("parsing_error")
-            log.warning(
-                "Critique produced no parsed object; treating as pass",
-                parsing_error=short_err(perr) if perr else None,
+            raw_msg = raw_and_parsed.get("raw")
+            raw_content = str(getattr(raw_msg, "content", "") or "")
+            finish_reason = (
+                (getattr(raw_msg, "response_metadata", {}) or {}).get("finish_reason")
+                if raw_msg is not None else None
             )
-            return Critique(passes=True, confidence=0.0)
+            log.warning(
+                "Critique failed to parse; attempting schema repair",
+                parsing_error=short_err(perr) if perr else None,
+                finish_reason=finish_reason,
+                raw_content_len=len(raw_content),
+            )
+            repaired = await _repair_critique(raw_content, critic_llm)
+            if repaired is not None:
+                log.info(
+                    "Critique schema repair succeeded",
+                    violation_count=len(repaired.violations),
+                    passes=repaired.passes,
+                )
+                result = repaired
+            else:
+                log.error(
+                    "Critique unparseable after repair — DRAFT SHIPS UNAUDITED",
+                    parsing_error=short_err(perr) if perr else None,
+                    finish_reason=finish_reason,
+                    raw_content_len=len(raw_content),
+                    raw_content=raw_content[:2000],
+                )
+                return Critique(passes=True, confidence=0.0)
         log.info(
             "Critique result",
             passes=result.passes,
@@ -1621,6 +1715,31 @@ async def _refine(
             )
             intent_json = intent.model_dump_json(indent=2)
             violations_block = _format_violations(critique.violations)
+            # WHY this exists: REFINE_PROMPT had no instruction to write in
+            # the user's language. Its ONLY language content was Rule 6,
+            # "FIXED-ENGLISH ANCHOR ENFORCEMENT" — a long, detailed passage
+            # about what must be kept in ENGLISH inside a regional draft
+            # (statutory references, case citations, Latin digits). Nothing
+            # anywhere told it to keep the rest in the target language.
+            #
+            # So a refiner handed an Odia draft read a page about producing
+            # English and inferred the target from `intent_json`'s
+            # "language": "or" field — a data field, not an instruction. It
+            # rewrote the document into English (measured: 9,740 Odia chars
+            # in, 12,411 English chars out).
+            #
+            # The generator never had this problem because it goes through
+            # localize_prompt(); the refiner never called it. Passed as a
+            # template VARIABLE rather than concatenated so any braces in the
+            # localized text are not parsed as placeholders, and positioned
+            # immediately before "Produce the revised response now" — the
+            # depth-parity work showed an instruction buried far from the
+            # task does not move the output.
+            _lang = getattr(intent, "language", "en") or "en"
+            language_directive = ""
+            if _lang != "en":
+                from core.language import localize_prompt as _localize
+                language_directive = _localize("", _lang, intent).strip()
             prompt = ChatPromptTemplate.from_template(REFINE_PROMPT)
             chain = prompt | llm
             # Bound the refiner too — same reasoning as the critic above,
@@ -1634,6 +1753,7 @@ async def _refine(
                         "intent_json":     intent_json,
                         "violations_block": violations_block,
                         "response":        response,
+                        "language_directive": language_directive,
                         "retrieved_sources_whitelist": (
                             retrieved_sources_whitelist
                             or "(none — restrict yourself to fixing non-citation "
@@ -1648,11 +1768,32 @@ async def _refine(
         text = getattr(result, "content", None)
         if text is None:
             text = str(result)
+
+        # A rewrite that ran out of output budget is a TRUNCATED document, not
+        # a refinement. The refiner re-emits the whole response, so hitting the
+        # cap means the tail is simply missing — and the length guards below
+        # cannot tell that apart from a legitimately tighter draft. Only the
+        # provider's own finish reason can, and until now nothing read it: the
+        # critic checks `finish_reason`, the refiner never did.
+        _finish = str(
+            (getattr(result, "response_metadata", None) or {}).get("finish_reason") or ""
+        ).upper()
+        if _finish in ("MAX_TOKENS", "LENGTH"):
+            log.warning(
+                "Refinement hit the output cap — discarding the truncated "
+                "rewrite and keeping the original response",
+                finish_reason=_finish,
+                original_len=len(response),
+                truncated_len=len(text),
+            )
+            return response
+
         log.info(
             "Refinement done",
             original_len=len(response),
             refined_len=len(text),
             len_diff=len(text) - len(response),
+            finish_reason=_finish or "unknown",
         )
         return text
     except Exception as e:
@@ -1681,6 +1822,8 @@ async def self_refine(
     source_languages: tuple[str, ...] = (),
     source_registry: object = None,
     placeholder_mode: bool = False,
+    shrink_floor: float = 0.7,
+    cumulative_shrink_floor: float = 0.65,
 ) -> tuple[str, list[Critique]]:
     """Generate-critique-refine loop over an existing response.
 
@@ -1768,10 +1911,38 @@ async def self_refine(
                 })
         history.append(critique)
         if critique.passes:
+            # Distinguish a real pass from a FAIL-SAFE pass. Every error path in
+            # `_critique` returns exactly `Critique(passes=True, confidence=0.0)`
+            # with no violations — an unparseable critique, a blocked call, or
+            # "Request deadline already exceeded; refusing to start work". A
+            # genuine pass carries the model's own confidence (measured: 0.9-1.0).
+            #
+            # That distinction matters because the loop returns `current`, which
+            # may already be a REFINED and shortened draft from an earlier
+            # iteration. Observed in production: iteration 1 shrank a draft 13%,
+            # iteration 2's refinement timed out, the critic then refused to
+            # start, and the loop logged `passed | confidence=0.0 |
+            # cumulative_violations=8` — shipping the shrunken intermediate as
+            # though it had been audited. Nothing verified that draft; fall back
+            # to what the caller gave us rather than keep an unaudited loss.
+            _unverified = critique.confidence == 0.0 and not critique.violations
+            if _unverified and len(current) < original_response_len:
+                log.warning(
+                    "Self-refine ended on an unverified pass with the response "
+                    "already shortened; reverting to the caller's original",
+                    iteration=iteration,
+                    original_len=original_response_len,
+                    current_len=len(current),
+                    drop_pct=round(
+                        100 * (1 - len(current) / max(original_response_len, 1)), 1),
+                    cumulative_violations=sum(len(c.violations) for c in history),
+                )
+                return response, history
             log.info(
                 "Self-refine passed",
                 iteration=iteration,
                 confidence=round(critique.confidence, 2),
+                verified=not _unverified,
                 cumulative_violations=sum(len(c.violations) for c in history),
             )
             return current, history
@@ -1808,12 +1979,23 @@ async def self_refine(
         # to under 70% of the input signals a runaway rewrite, not a fix.
         # Guard applies to responses >2K chars (short responses can
         # legitimately shrink after e.g. a table format fix).
-        if len(current) > 2000 and len(refined) < len(current) * 0.7:
+        #
+        # The floor is per-caller. 0.7 suits conversational answers, where a
+        # format fix can legitimately compress prose. It is far too loose for a
+        # finished DRAFT: a 13% loss measured on a real MOU (26,048 -> 22,626
+        # chars) sailed through and shipped, and a lawyer reading the result
+        # cannot tell that clauses were deleted after generation. Drafting
+        # therefore passes a much tighter floor — see agents/drafting.py.
+        # It is not set to ~1.0 because some shrink is CORRECT: stripping a
+        # fabricated citation or a duplicated paragraph makes the draft
+        # shorter and better.
+        if len(current) > 2000 and len(refined) < len(current) * shrink_floor:
             log.warning(
                 "Refinement destructively shortened response; keeping original",
                 original_len=len(current),
                 refined_len=len(refined),
                 drop_pct=round(100 * (1 - len(refined) / max(len(current), 1)), 1),
+                floor_pct=round(100 * shrink_floor),
                 iteration=iteration,
                 violation_count=len(critique.violations),
             )
@@ -1830,7 +2012,7 @@ async def self_refine(
         # partially-shrunk `current`) because both mid-states were also
         # unwanted shrinks.
         if (original_response_len > 2000
-                and len(refined) < original_response_len * 0.65):
+                and len(refined) < original_response_len * cumulative_shrink_floor):
             log.warning(
                 "Refinement cumulative-shrink exceeded budget; reverting to original",
                 original_response_len=original_response_len,

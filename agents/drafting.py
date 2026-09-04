@@ -50,7 +50,7 @@ from core.state import (
     IntegrationContextData, FileContextData,
 )
 from core.clients import (
-    get_es_client, get_gemini_pro,
+    get_es_client, get_gemini_pro, get_gemini_flash_lite,
     # Circuit-breaker helpers referenced from `try/except` blocks in
     # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
     # at module scope so the `except:` handler can still call
@@ -509,13 +509,9 @@ async def _translate_query_for_es_match(
     if not user_language or user_language == "en":
         return ""
     try:
-        from langchain.chat_models import init_chat_model
         from core.language import language_name
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        )
+        llm = get_gemini_flash_lite(temperature=0.0)
         source_lang = language_name(user_language)
         prompt = (
             f"Translate the following legal-drafting query from {source_lang} "
@@ -577,13 +573,9 @@ async def _pick_reference_source(
     if not file_paths:
         return None
     try:
-        from langchain.chat_models import init_chat_model
         from config.prompts import DRAFTING_PICKER_PROMPT
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        ).with_structured_output(_PickerChoice, include_raw=True)
+        llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_PickerChoice, include_raw=True)
 
         candidates_block = "\n".join(f"- {p}" for p in file_paths)
         prompt = ChatPromptTemplate.from_template(DRAFTING_PICKER_PROMPT)
@@ -1589,7 +1581,6 @@ async def _pick_relevant_chunk_indices(
     if not user_facts_chunks:
         return []
     try:
-        from langchain.chat_models import init_chat_model
         from config.prompts import DRAFTING_CHUNK_ROUTER_PROMPT
 
         preview_lines: list[str] = []
@@ -1600,10 +1591,7 @@ async def _pick_relevant_chunk_indices(
             preview_lines.append(f"[{i}] {preview}")
         catalog = "\n".join(preview_lines)
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        ).with_structured_output(_SelectedChunks, include_raw=True)
+        llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_SelectedChunks, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_CHUNK_ROUTER_PROMPT)
         chain = prompt | llm
@@ -1779,7 +1767,6 @@ async def _judge_fanout(
     single-pass on any error so traffic never breaks.
     """
     try:
-        from langchain.chat_models import init_chat_model
         from core.language import language_name
         from config.prompts import DRAFTING_FANOUT_JUDGE_PROMPT
 
@@ -1812,7 +1799,7 @@ async def _judge_fanout(
                 "Apply the default fan-out rules above."
             )
 
-        # Planner model: Gemini 2.5 Flash (full) with a thinking budget,
+        # Planner model: Flash (full) tier with a thinking budget,
         # upgraded from flash-lite.
         #
         # This is a deliberate TRADE, measured on hi/gu/ta/te + en, 3 runs
@@ -1836,11 +1823,13 @@ async def _judge_fanout(
         # means a shorter document. If drafts regress in length, revisit
         # this before touching the writer — the writer honours whatever plan
         # it is given (instrumentation shows planned == emitted).
-        from core.clients import GEMINI_FLASH_MODEL_ID
-        llm = init_chat_model(
-            f"google_genai:{GEMINI_FLASH_MODEL_ID}",
-            temperature=0.0,
-            thinking_budget=2048,
+        # Routed through get_gemini_flash_full (2026-09-07 merge) instead of
+        # a direct init_chat_model: the factory translates thinking_budget ->
+        # thinking_level per model generation. Passing thinking_budget raw
+        # works on 3.6/3.8 but 400s on 3.x Flash-Lite, so the direct call was
+        # only safe while GEMINI_FLASH_MODEL stayed on a Flash id.
+        llm = get_gemini_flash_full(
+            temperature=0.0, thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)

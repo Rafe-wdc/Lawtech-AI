@@ -29,7 +29,7 @@ import asyncio
 import os
 from dataclasses import dataclass
 
-from langchain.chat_models import init_chat_model
+from core.clients import get_gemini_flash_lite
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -109,8 +109,7 @@ async def check_injection(
     if not chat_history_sample and not source_sample:
         return Verdict(is_injection=False, confidence=0.0, reason="empty input")
 
-    llm = init_chat_model(
-        "google_genai:gemini-2.5-flash-lite",
+    llm = get_gemini_flash_lite(
         temperature=0.0,
         max_output_tokens=512,
     ).with_structured_output(_StructuredVerdict, include_raw=True)

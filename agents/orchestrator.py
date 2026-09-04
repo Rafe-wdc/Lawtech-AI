@@ -651,7 +651,15 @@ def _extract_user_intent(
     """
     try:
         with log_time(log, "Intent extraction (v2)"):
-            llm = get_gemini_flash(temperature=0.0).with_structured_output(
+            # Full Flash tier, NOT Lite. Measured 2026-09-04: on
+            # "Draft a legal notice ... and cite the relevant case law",
+            # every Lite-tier model (2.5 and 3.5 alike) returned
+            # response_format=prose 0/5, producing an explanation ABOUT the
+            # notice instead of the notice. gemini-3.8-flash returns
+            # `draft` 5/5. This prompt is ~6,500 tokens; the Lite tier does
+            # not hold a spec that long — the same conclusion the language
+            # critic reached at line ~966.
+            llm = get_gemini_flash_full(temperature=0.0).with_structured_output(
                 QueryAnalysisV2, include_raw=True,
             )
             prompt = ChatPromptTemplate.from_template(USER_INTENT_EXTRACTION_PROMPT)

@@ -43,17 +43,34 @@ _MODEL_PRICES_USD_PER_M: dict[str, tuple[float, float]] = {
     "gpt-4o-mini":                  (0.15,   0.60),
     "openai:gpt-4o":                (2.50,  10.00),
     "openai:gpt-4o-mini":           (0.15,   0.60),
+    # Gemini 2.5 (legacy — retained so a GEMINI_*_MODEL rollback still costs)
     "gemini-2.5-flash":             (0.30,   2.50),
     "gemini-2.5-flash-lite":        (0.10,   0.40),
     "gemini-2.5-pro":               (1.25,  10.00),
-    # gemini-3.6-flash: default Flash from 2026-09-06. Placeholder pricing
-    # copied from 2.5-flash pending confirmation from Google's rate card;
-    # cost line-items may be slightly off until this is verified.
-    "gemini-3.6-flash":             (0.30,   2.50),
     "google_genai:gemini-2.5-flash":      (0.30,  2.50),
     "google_genai:gemini-2.5-flash-lite": (0.10,  0.40),
     "google_genai:gemini-2.5-pro":        (1.25, 10.00),
-    "google_genai:gemini-3.6-flash":      (0.30,  2.50),
+    # Gemini 3.x — official list prices read from
+    # https://ai.google.dev/gemini-api/docs/pricing on 2026-09-04.
+    # Note gemini-3.8-flash is both NEWER and CHEAPER than 3.5-flash.
+    # Pro tiers are tiered by context length; the >200k rate is used here so
+    # long-document work is never under-reported.
+    "gemini-3.8-flash":             (0.75,   3.75),
+    "gemini-3.7-flash":             (0.75,   3.75),
+    "gemini-3.6-flash":             (0.75,   3.75),
+    "gemini-3.5-flash":             (1.50,   9.00),
+    "gemini-3.5-flash-lite":        (0.30,   2.50),
+    "gemini-3.1-flash-lite":        (0.25,   1.50),
+    "gemini-3.1-pro-preview":       (4.00,  18.00),
+    "gemini-pro-latest":            (4.00,  18.00),
+    "google_genai:gemini-3.8-flash":       (0.75,  3.75),
+    "google_genai:gemini-3.7-flash":       (0.75,  3.75),
+    "google_genai:gemini-3.6-flash":       (0.75,  3.75),
+    "google_genai:gemini-3.5-flash":       (1.50,  9.00),
+    "google_genai:gemini-3.5-flash-lite":  (0.30,  2.50),
+    "google_genai:gemini-3.1-flash-lite":  (0.25,  1.50),
+    "google_genai:gemini-3.1-pro-preview": (4.00, 18.00),
+    "google_genai:gemini-pro-latest":      (4.00, 18.00),
 }
 
 
@@ -66,9 +83,15 @@ def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> flo
         # Try a fuzzy match on substring (e.g. "gemini-2.5-flash-lite-001"
         # should match "gemini-2.5-flash-lite"). Both sides must be non-empty
         # — `"" in "anything"` is always True and would match arbitrarily.
-        for k, v in _MODEL_PRICES_USD_PER_M.items():
+        #
+        # Candidates are tried LONGEST-KEY-FIRST so the most specific price
+        # wins. Without this, dict order decides: an unlisted variant such as
+        # "gemini-3.5-flash-lite-preview" would match the shorter
+        # "gemini-3.5-flash" ($1.50/$9.00) instead of "gemini-3.5-flash-lite"
+        # ($0.30/$2.50) — a 5x cost over-report on the highest-volume tier.
+        for k in sorted(_MODEL_PRICES_USD_PER_M, key=len, reverse=True):
             if k and (k in model or model in k):
-                rates = v
+                rates = _MODEL_PRICES_USD_PER_M[k]
                 break
     if not rates:
         return 0.0

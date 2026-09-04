@@ -43,21 +43,56 @@ TIMEOUT_ES_PARALLEL_SEC: float = 22.0      # Parallel ES search (per-agent)
 TIMEOUT_CHROMADB_SEC: float = 90.0         # ChromaDB retrieval + PDF Q&A
 TIMEOUT_NEARBY_SECTIONS_SEC: float = 5.0   # Newacts nearby-section lookup
 
-# --- Model IDs ---
+# --- Gemini model tiers (2026-09-04 upgrade: 2.5 series -> 3.x) ---
+#
+# Single source of truth for which Gemini model backs each tier. Every
+# factory in core/clients.py reads these, so a model swap or rollback is an
+# env change, not a code change. Previously each factory hardcoded its own
+# model string and the MODELS dict below had drifted out of sync with them.
+#
+# Tier -> model rationale (measured 2026-09-04, see MODEL_UPGRADE_PLAN.md §3):
+#   flash_lite  gemini-3.5-flash-lite  routing/classification. 14/15 vs 12/15
+#                                      for 2.5-flash-lite at identical latency.
+#   flash       gemini-3.8-flash       generation + intent extraction. Note
+#                                      3.8 is both NEWER and CHEAPER than
+#                                      3.5-flash ($0.75/$3.75 vs $1.50/$9.00).
+#   pro         gemini-pro-latest      drafting, OCR, long-doc Q&A.
+#
+# `gemini-pro-latest` is a FLOATING alias — it follows Google's current Pro
+# model. There is no GA `gemini-3.x-pro` to pin to yet (only
+# `gemini-3.1-pro-preview`). Pin GEMINI_PRO_MODEL explicitly if alias drift
+# is unacceptable for your deployment.
+GEMINI_MODELS = {
+    "flash_lite": os.getenv("GEMINI_FLASH_LITE_MODEL", "gemini-3.5-flash-lite"),
+    "flash":      os.getenv("GEMINI_FLASH_MODEL",      "gemini-3.8-flash"),
+    "pro":        os.getenv("GEMINI_PRO_MODEL",        "gemini-pro-latest"),
+}
+
+# Default thinking level for Gemini 3.x when a caller does not specify one.
+# Valid: minimal | low | medium | high. NEVER use "minimal" — measured
+# regression (3/5 vs 5/5 for "low" on drafting format detection). Gemini 3's
+# own default is "high", which would be a large latency/cost jump over the
+# 2.5-era `thinking_budget=0` this codebase used, so we pin "low".
+GEMINI_THINKING_DEFAULT = os.getenv("GEMINI_THINKING_LEVEL", "low")
+
+# --- Model IDs (per-stage; resolved from the tiers above) ---
+# OpenAI entries are retained for the stages that may move to GPT later.
+# NOTE: nothing in the runtime currently calls an OpenAI model — get_gpt4o /
+# get_gpt4o_mini in core/clients.py have zero callers.
 MODELS = {
-    "orchestrator": "gpt-4o",
-    "task_classifier": "gpt-4o",
-    "drafting": "gemini-2.5-flash",
-    "judgment_metadata": "gpt-4o",
-    "newacts_metadata": "gpt-4o",
-    "draft_selector": "gpt-4o-mini",
-    "legislation_match": "gpt-4o-mini",
-    "scenario_web_grounded": "gemini-2.5-flash",
-    "legal_concepts": "gemini-2.5-flash-lite",
-    "query_rewrite": "gemini-2.5-flash-lite",
-    "guardrail_injection": "gemini-2.5-flash-lite",
-    "pdf_chat": "gemini-2.5-pro",
-    "pdf_vision_ocr": "gemini-2.5-flash-lite",
+    "orchestrator": GEMINI_MODELS["flash_lite"],
+    "task_classifier": GEMINI_MODELS["flash_lite"],
+    "drafting": GEMINI_MODELS["pro"],
+    "judgment_metadata": GEMINI_MODELS["flash_lite"],
+    "newacts_metadata": GEMINI_MODELS["flash_lite"],
+    "draft_selector": GEMINI_MODELS["flash_lite"],
+    "legislation_match": GEMINI_MODELS["flash_lite"],
+    "scenario_web_grounded": GEMINI_MODELS["flash"],
+    "legal_concepts": GEMINI_MODELS["flash"],
+    "query_rewrite": GEMINI_MODELS["flash_lite"],
+    "guardrail_injection": GEMINI_MODELS["flash_lite"],
+    "pdf_chat": GEMINI_MODELS["pro"],
+    "pdf_vision_ocr": GEMINI_MODELS["pro"],
 }
 
 # --- Elasticsearch / OpenSearch ---

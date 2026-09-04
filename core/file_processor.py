@@ -30,6 +30,7 @@ from typing import Callable, Optional
 
 from core.logger import get_logger, log_time
 from core.settings import (
+    MODELS,
     CHROMA_STORE_ROOT,
     UPLOADS_ROOT,
     MAX_FILES_PER_REQUEST,
@@ -886,7 +887,7 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
                 "FileProcessor",
                 f"ocr_pdf_pages_{batch_start + 1}_{batch_start + len(batch_b64)}",
                 resp,
-                model="gemini-2.5-flash",
+                model=MODELS["pdf_vision_ocr"],
             )
             text = _extract_ai_text(resp).strip()
             return (
@@ -943,7 +944,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
     2026-07-22 upgraded model + prompt + added retry + quality gate to
     match the PDF path.
     """
-    from core.clients import get_gemini_flash_full
+    from core.clients import get_gemini_pro
     import base64
 
     img_hash = _file_hash(file_path)
@@ -968,7 +969,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
             ".bmp": "image/bmp",
         }.get(ext, "image/jpeg")
 
-        llm = get_gemini_flash_full(temperature=0.0)
+        llm = get_gemini_pro(temperature=0.0)
         content = [{
             "role": "user",
             "content": [
@@ -993,7 +994,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
                     "FileProcessor",
                     f"ocr_image_{filename or os.path.basename(file_path)}",
                     resp,
-                    model="gemini-2.5-flash",
+                    model=MODELS["pdf_vision_ocr"],
                 )
                 text = _extract_ai_text(resp).strip()
                 last_exc = None
@@ -1067,17 +1068,17 @@ def _ocr_pdf_at_dpi(
     SSE channel — useful for 100+ page scanned PDFs where OCR alone takes
     1-3 minutes and the user would otherwise see dead silence.
     """
-    from core.clients import get_gemini_flash_full, GEMINI_FLASH_MODEL_ID
-    llm = get_gemini_flash_full(temperature=0.0)
+    from core.clients import get_gemini_pro
 
     with log_time(log, "PDF page rendering", pages=page_count, dpi=dpi):
         batches = _render_pdf_pages(file_path, page_count, dpi=dpi)
 
     total = len(batches)
+    llm = get_gemini_pro(temperature=0.0)
     log.info("Starting parallel OCR",
              batches=total, pages=page_count, dpi=dpi,
              batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT,
-             model=GEMINI_FLASH_MODEL_ID)
+             model=MODELS["pdf_vision_ocr"])
 
     if emit and total:
         emit({

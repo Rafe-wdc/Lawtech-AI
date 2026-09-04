@@ -127,7 +127,9 @@ def _generate_from_docs(
     # Tune based on observed quality; log both signals to inform tuning.
     _FLASH_ROUTING_THRESHOLD_CHARS = 60_000
     use_flash = len(docs_text) < _FLASH_ROUTING_THRESHOLD_CHARS
-    picked_model = "gemini-2.5-flash" if use_flash else "gemini-2.5-pro"
+    from core.settings import GEMINI_MODELS
+    picked_model = (GEMINI_MODELS["flash"] if use_flash
+                    else GEMINI_MODELS["pro"])
     log.info(
         "PDF chat model routing",
         docs_chars=len(docs_text),

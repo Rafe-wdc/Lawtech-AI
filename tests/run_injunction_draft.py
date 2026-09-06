@@ -15,10 +15,7 @@ from pathlib import Path
 import httpx
 
 BASE = os.environ.get("LAWTECH_TEST_BASE", "https://tool.lawttorney.com/pyapiv2")
-API_KEY = os.environ.get(
-    "LAWTECH_TEST_API_KEY",
-    "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51",
-)
+API_KEY = os.environ["LAWTECH_TEST_API_KEY"]
 
 PROMPT = (
     "You are a Senior Civil Advocate having expertise in Civil Litigation, CPC, "

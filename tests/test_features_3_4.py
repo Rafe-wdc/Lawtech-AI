@@ -14,7 +14,8 @@ import time
 import sys
 
 API = "http://localhost:5000/pyapi"
-KEY = "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+import os
+KEY = os.environ["LAWTECH_API_KEY"]
 HEADERS = {"Content-Type": "application/json", "X-API-Key": KEY}
 
 results = []

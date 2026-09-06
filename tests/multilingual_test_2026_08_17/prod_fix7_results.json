@@ -1,0 +1,432 @@
+{
+  "endpoint": "prod",
+  "url": "https://api.lawttorney.com/pyapi/search",
+  "thread_id": "e4491fa3-1fe8-4d0b-8436-0b5cae644031",
+  "run_started_at": "2026-08-17T18:25:03.326005+00:00",
+  "turns": [
+    {
+      "id": 1,
+      "label": "prompt-1-mega",
+      "started_at": "2026-08-17T18:25:03.326046+00:00",
+      "elapsed_s": 96.34,
+      "status": 200,
+      "request": {
+        "url": "https://api.lawttorney.com/pyapi/search",
+        "method": "POST",
+        "headers": {
+          "X-API-Key": "***",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "Promptquery": "prompt 1: Research Prompt: Section 125 of CrPC\n \nScenario:\n \nDraft a civil suit for partition along with a prayer for temporary injunction. Facts: Rupa is an adopted daughter of the deceased owner. She has no siblings. Her father died 5 years ago, leaving behind two flats in Pune. The only legal heirs are Rupa and her mother. Her name is not yet on the property documents. Her mother is attempting to dispossess her and has expressed intent to transfer the properties to her cousin. The suit should include legal provisions for partition of the properties, declaration of her share, and a temporary injunction restraining the mother or any third party from selling, transferring, or creating third-party rights in the properties until disposal of the suit.\n \nDraft a civil suit for damages arising from medical negligence, incorporating detailed legal reasoning and relevant case laws. Scenario: My client, Mrs. Anjali Deshmukh, aged 42, and a resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the procedure, the attending surgeon, Dr. Rakesh Nair, negligently caused damage to her bile duct. Following the surgery, she experienced severe abdominal pain and had to be admitted to another hospital for corrective surgery. As a result, she incurred additional medical expenses amounting to ₹3.5 lakhs and endured significant physical pain and mental agony. Despite repeated follow-ups, both the hospital and the doctor have refused to acknowledge their negligence or offer any compensation. Mrs. Deshmukh now seeks damages of ₹25 lakhs, covering medical expenses, mental harassment, pain and suffering, and anticipated costs of future treatment.\n \nCitations:\n \n1. Rupa is a adopted child. She doesnt have any siblings. her father passed away 5 years ago. She and her mothers are only legal heirs. Her father had 2 flats in pune. Her mother told her to leave the house and her mother says that she'll transfer the property to her cousins name. now rupa is scared that she won't get any share in the properties (her name is still not on the legal papers of the properties). Give me 5 plus Case law or Citations According to the Scenario.\n \n2. Provide case laws on the admissibility of electronic evidence under Section 65B of the Indian Evidence Act.\n \n3. Provide citations or case laws related to anticipatory bail\n \nArgument Generation:\n \nMy client, Mrs. Anjali Deshmukh, aged 42, resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the surgery, due to the negligence of the attending surgeon, Dr. Rakesh Nair, her bile duct was damaged. Post-surgery, she suffered from severe abdominal pain and had to be admitted again for corrective surgery at another hospital. She incurred additional medical expenses of ₹3.5 lakhs and suffered immense mental agony and physical pain. Despite repeated follow-ups, the hospital and the doctor refused to acknowledge their mistake or compensate her. She now seeks compensation of ₹25 lakhs for medical expenses, mental harassment, pain and suffering, and future treatment costs. give me arguments on behalf of plaintiff and defendant.\n \nमाझ्या क्लायंट, श्रीमती अंजली देशमुख, वय ४२, पुण्यातील रहिवासी, यांची १२ मार्च २०२४ रोजी XYZ मल्टीस्पेशालिटी हॉस्पिटलमध्ये पित्ताशयाची शस्त्रक्रिया झाली. शस्त्रक्रियेदरम्यान, उपस्थित सर्जन डॉ. राकेश नायर यांच्या निष्काळजीपणामुळे, त्यांच्या पित्तनलिकेचे नुकसान झाले. शस्त्रक्रियेनंतर, त्यांना तीव्र पोटदुखीचा त्रास झाला आणि त्यांना दुसऱ्या रुग्णालयात सुधारात्मक शस्त्रक्रियेसाठी पुन्हा दाखल करावे लागले. त्यांना ३.५ लाख रुपयांचा अतिरिक्त वैद्यकीय खर्च आला आणि प्रचंड मानसिक त्रास आणि शारीरिक वेदना सहन कराव्या लागल्या. वारंवार पाठपुरावा करूनही, रुग्णालय आणि डॉक्टरांनी त्यांची चूक मान्य करण्यास किंवा तिला भरपाई देण्यास नकार दिला. आता त्या वैद्यकीय खर्च, मानसिक छळ, वेदना आणि त्रास आणि भविष्यातील उपचार खर्चासाठी २५ लाख रुपयांची भरपाई मागत आहेत. मला युक्तिवाद द्या.\n \nMy client is facing a criminal case under Section 420 IPC for alleged cheating. However, there was no fraudulent intention from the beginning, and it was purely a civil dispute arising from a failed business agreement. Give me arguments to defend the client and emphasize that this is a case of civil liability, not criminal cheating.\n \nConsumer Laws:\n \nScenario 1: Defective Product Liability Prompt: Priya purchases a brand-new refrigerator from a well-known electronics store. After a week, it stops working, and the manufacturer refuses to repair or replace it, claiming that the issue was caused by improper installation. What legal options does Priya have under the Consumer Protection Act, 2019, to address this defect?\n \nPdf : Review this draft and suggest changes, if any.",
+          "globalThreadId": "e4491fa3-1fe8-4d0b-8436-0b5cae644031"
+        }
+      },
+      "response": {
+        "globalThreadId": "e4491fa3-1fe8-4d0b-8436-0b5cae644031",
+        "result": "## Cause Title\n\nIN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, PUNE\n\nCIVIL SUIT NO. ______ OF 2024\n\nRupa [Father's Surname]\nDaughter of Late [Father's Name],\nAge: [Age],\nOccupation: [Occupation],\nResiding at: [Rupa's Current Address], Pune.\n\n.....Plaintiff\n\n**vs**\n\n[Mother's Name]\nWife of Late [Father's Name],\nAge: [Age],\nOccupation: [Occupation],\nResiding at: [Address of one of the flats], Pune.\n\n.....Defendant\n\n## Suit for Partition and Temporary Injunction\n\nSUIT FOR PARTITION, DECLARATION, AND PERMANENT AND TEMPORARY INJUNCTION\n\nThe Plaintiff respectfully states as under:\n\n1. That the Plaintiff files the present suit for partition of the suit properties, for a declaration that she is\nentitled to a one-half (1/2) share in the suit properties, and for a permanent and temporary injunction restraining the\nDefendant, her agents, or any person acting on her behalf from alienating, transferring, selling, or creating any\nthird-party rights in the suit properties. The suit is filed under the provisions of the Hindu Succession Act, 1956, the\nSpecific Relief Act, 1963, and the Code of Civil Procedure, 1908.\n\n## Facts of the Case\n\n2. That the Plaintiff, Rupa, is the legally adopted daughter of the late [Father's Name] and the Defendant, [Mother's Name]. The Plaintiff has no biological or adopted siblings.\n\n3. That the Plaintiff's adoptive father, the late [Father's Name], passed away intestate approximately five years ago. At the time of his demise, he was the absolute owner and was seized and possessed of two residential flats situated in Pune, the details of which are more particularly described in the Schedule of Properties annexed hereto and hereinafter referred to as the \"suit properties\".\n\n4. That upon the death of the Plaintiff's father, the Plaintiff and the Defendant, being his daughter and widow respectively, are the only surviving Class I legal heirs as per the provisions of the Hindu Succession Act, 1956.\n\n5. That by virtue of the laws of intestate succession, the Plaintiff and the Defendant are each entitled to an equal, undivided one-half (1/2) share in the suit properties and are in joint possession of the same.\n\n6. That despite the Plaintiff's clear and indefeasible right, her name has not yet been mutated or entered into the official records pertaining to the suit properties. The Plaintiff has made several requests to the Defendant to cooperate in completing the necessary legal formalities and to effect an amicable partition of the suit properties by metes and bounds.\n\n7. That the cause of action for the present suit arose recently when the Defendant began acting in a manner detrimental to the Plaintiff's interest. The Defendant has threatened to dispossess the Plaintiff from the residential property and has explicitly stated her intention to illegally alienate and transfer the suit properties to her cousin, thereby depriving the Plaintiff of her rightful share. This has created an immediate and urgent need for the intervention of this Hon'ble Court.\n\n## Legal Provisions\n\n8. That the present suit is maintainable under law. The Plaintiff, as an adopted daughter, is conferred with the same rights and status as a natural-born daughter under the Hindu Adoptions and Maintenance Act, 1956.\n\n9. That under Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule. The Plaintiff (daughter) and the Defendant (widow) are both Class I heirs and are entitled to succeed to the property of the deceased simultaneously and to the exclusion of all other heirs.\n\n10. That the Plaintiff is entitled to seek a declaration of her one-half (1/2) share and a decree for partition and separate possession of the suit properties.\n\n11. That in light of the Defendant's attempts to alienate the suit properties and create third-party rights, it is just and necessary to grant a temporary injunction under Order XXXIX, Rules 1 and 2 of the Code of Civil Procedure, 1908, restraining the Defendant from doing so during the pendency of this suit, to prevent irreparable loss and injury to the Plaintiff.\n\n12. That the reliefs of declaration and permanent injunction are sought under the relevant provisions of the Specific Relief Act, 1963.\n\n## Plaintiff's Entitlement and Share\n\n13. That the Plaintiff submits that as the legally adopted daughter of the deceased, Late [Father's Name], she is entitled to all the rights and privileges of a natural-born daughter. Upon the intestate demise of her father, his self-acquired properties, being the suit properties, devolved upon his Class I legal heirs as per the rules of succession laid down in the Hindu Succession Act, 1956.\n\n14. That according to Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule to the said Act. The Plaintiff, being the daughter, and the Defendant, being the widow, are the only two surviving Class I heirs of the deceased.\n\n15. That as per the rules of distribution of property among Class I heirs, the Plaintiff and the Defendant are each entitled to an equal, undivided one-half (1/2) share in the suit properties. The Plaintiff's right, title, and interest in the suit properties are absolute and indefeasible, having vested in her immediately upon the death of her father.\n\n## Grounds for Temporary Injunction\n\n16. That the Plaintiff has a strong prima facie case in her favour. Her status as a Class I legal heir and her consequent entitlement to a one-half (1/2) share in the suit properties is established by law. The suit properties are joint family properties in which the Plaintiff has a vested, undivided interest.\n\n17. That the balance of convenience is overwhelmingly in favour of the Plaintiff. Granting an injunction would merely\nrequire the Defendant to maintain the status quo of the properties, causing her no prejudice. Conversely, refusing the\ninjunction would allow the Defendant to act upon her threats to alienate the properties. This would create irreversible\nthird-party rights, leading to a multiplicity of legal proceedings and rendering the present suit for partition\ninfructuous. The Plaintiff would be forced into protracted litigation against bona fide purchasers, causing immense\nhardship.\n\n18. That the Plaintiff will suffer irreparable loss and injury if the temporary injunction is not granted. The Defendant\nhas explicitly threatened to sell and transfer the suit properties to her cousin with the mala fide intention of\ndefeating the Plaintiff's legitimate claim. If the Defendant succeeds, the Plaintiff will be wrongfully deprived of her\nrightful inheritance and may be dispossessed from her residence. Such a loss of immovable property cannot be adequately\ncompensated in monetary terms. The very subject matter of the suit would be lost, causing grave injustice to the\nPlaintiff. Therefore, it is imperative to restrain the Defendant by an order of temporary injunction under Order XXXIX,\nRules 1 and 2 of the Code of Civil Procedure, 1908.\n\n## Jurisdiction and Valuation\n\n19. That the suit properties are situated in Pune, which is within the territorial jurisdiction of this Hon'ble Court. Therefore, this Hon'ble Court has the jurisdiction to try, entertain, and dispose of the present suit.\n\n20. That for the purpose of court fees and jurisdiction, the suit is valued as follows:\na. For the relief of partition and separate possession of the Plaintiff's one-half (1/2) share in the suit properties, the suit is valued at Rs. [Value of Plaintiff's 1/2 Share], and the requisite court fee as prescribed under the Maharashtra Court Fees Act, 1959, has been paid thereon.\nb. For the reliefs of declaration and permanent injunction, which are consequential to the main relief of partition, a fixed court fee has been paid as per the said Act.\n\n21. That the total valuation of the suit for the purposes of jurisdiction is Rs. [Value of Plaintiff's 1/2 Share], and the appropriate court fee has been affixed to this plaint.\n\n## Prayer\n\nIt is, therefore, most humbly and respectfully prayed that this Hon'ble Court may be pleased to:\n\na. Pass a preliminary decree for partition, declaring that the Plaintiff is the owner of and is entitled to a one-half (1/2) undivided share in the suit properties, more particularly described in the Schedule of Properties annexed hereto.\n\nb. Pass a final decree for partition of the suit properties by metes and bounds and put the Plaintiff in separate, vacant, and peaceful possession of her one-half (1/2) share.\n\nc. Grant a temporary injunction under Order XXXIX, Rules 1 and 2 of the Code of Civil Procedure, 1908, restraining the Defendant, her agents, servants, or any person claiming through her, from selling, alienating, transferring, mortgaging, or creating any third-party rights, title, or interest in the suit properties during the pendency of this suit.\n\nd. Pass a decree for permanent injunction restraining the Defendant and anyone acting on her behalf from interfering with the Plaintiff's right, title, interest, and possession in respect of her share in the suit properties.\n\ne. Award the costs of this suit to the Plaintiff from the Defendant.\n\nf. Grant any other and further reliefs as this Hon'ble Court may deem fit and proper in the facts and circumstances of the case.\n\n## Verification\n\nI, Rupa [Father's Surname], the Plaintiff abovenamed, do hereby solemnly state and verify that the contents of paragraphs 1 to 21 of the foregoing plaint are true and correct to the best of my knowledge, information, and belief, and that nothing material has been concealed therefrom.\n\nVerified at Pune on this ___ day of __________, 2024.\n\nPlaintiff\n(Rupa [Father's Surname])\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "token_usage": {
+          "input_tokens": 82741,
+          "output_tokens": 12180,
+          "total_tokens": 94921,
+          "cache_read_tokens": 42589,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 6312,
+          "cost_usd": 0.230291,
+          "by_agent": {
+            "Orchestrator": {
+              "input": 11076,
+              "output": 3132,
+              "total": 14208,
+              "cache_read": 5803,
+              "calls": 3,
+              "cost_usd": 0.002361
+            },
+            "Drafting": {
+              "input": 71665,
+              "output": 9048,
+              "total": 80713,
+              "cache_read": 36786,
+              "calls": 7,
+              "cost_usd": 0.227931
+            }
+          },
+          "calls": [
+            {
+              "agent": "Orchestrator",
+              "step": "classify_and_plan",
+              "input": 2430,
+              "output": 79,
+              "total": 2509,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000275
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "extract_user_intent",
+              "input": 6803,
+              "output": 1437,
+              "total": 8240,
+              "cache_read": 5803,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.001255
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "rewrite_per_agent_queries",
+              "input": 1843,
+              "output": 1616,
+              "total": 3459,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000831
+            },
+            {
+              "agent": "Drafting",
+              "step": "pick_reference",
+              "input": 4740,
+              "output": 71,
+              "total": 4811,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000502
+            },
+            {
+              "agent": "Drafting",
+              "step": "fanout_judge",
+              "input": 3596,
+              "output": 519,
+              "total": 4115,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000567
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 11697,
+              "output": 1731,
+              "total": 13428,
+              "cache_read": 4086,
+              "cache_creation": 0,
+              "reasoning": 1434,
+              "cost_usd": 0.046271
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 12006,
+              "output": 2195,
+              "total": 14201,
+              "cache_read": 8174,
+              "cache_creation": 0,
+              "reasoning": 1522,
+              "cost_usd": 0.052178
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 12683,
+              "output": 1747,
+              "total": 14430,
+              "cache_read": 8175,
+              "cache_creation": 0,
+              "reasoning": 1178,
+              "cost_usd": 0.045104
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 13244,
+              "output": 1924,
+              "total": 15168,
+              "cache_read": 8175,
+              "cache_creation": 0,
+              "reasoning": 1411,
+              "cost_usd": 0.049905
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 13699,
+              "output": 861,
+              "total": 14560,
+              "cache_read": 8176,
+              "cache_creation": 0,
+              "reasoning": 767,
+              "cost_usd": 0.033404
+            }
+          ]
+        },
+        "source": [
+          {
+            "source_type": "drafting",
+            "title": "SUIT FOR PARTITION AND SEPARATE POSSESSION",
+            "content": [
+              "Draft Heading: Specimen/Draft/Format of SUIT FOR PARTITION AND SEPARATE POSSESSION.\nDraft Content: IN THE COURT OF THE PRINCIPAL CIVIL JUDGE, (City Name), (District Name), (State Name)\n                                                                                SUIT NO. _________ OF 2023\n\n(Plaint"
+            ],
+            "doc_link": null,
+            "file_name": "/content/formats_and_all_drafts/SUIT FOR PARTITION AND SEPARATE POSSESSION.csv",
+            "agent_name": "Drafting",
+            "relevance_score": null,
+            "template_type": "SUIT FOR PARTITION AND SEPARATE POSSESSION"
+          }
+        ],
+        "agents_used": [
+          "Drafting",
+          "Legal_Concepts"
+        ],
+        "effective_query": "prompt 1: Research Prompt: Section 125 of Code of Criminal Procedure 1973\n \nScenario:\n \nDraft a civil suit for partition along with a prayer for temporary injunction. Facts: Rupa is an adopted daughter of the deceased owner. She has no siblings. Her father died 5 years ago, leaving behind two flats in Pune. The only legal heirs are Rupa and her mother. Her name is not yet on the property documents. Her mother is attempting to dispossess her and has expressed intent to transfer the properties to her cousin. The suit should include legal provisions for partition of the properties, declaration of her share, and a temporary injunction restraining the mother or any third party from selling, transferring, or creating third-party rights in the properties until disposal of the suit.\n \nDraft a civil suit for damages arising from medical negligence, incorporating detailed legal reasoning and relevant case laws. Scenario: My client, Mrs. Anjali Deshmukh, aged 42, and a resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the procedure, the attending surgeon, Dr. Rakesh Nair, negligently caused damage to her bile duct. Following the surgery, she experienced severe abdominal pain and had to be admitted to another hospital for corrective surgery. As a result, she incurred additional medical expenses amounting to ₹3.5 lakhs and endured significant physical pain and mental agony. Despite repeated follow-ups, both the hospital and the doctor have refused to acknowledge their negligence or offer any compensation. Mrs. Deshmukh now seeks damages of ₹25 lakhs, covering medical expenses, mental harassment, pain and suffering, and anticipated costs of future treatment.\n \nCitations:\n \n1. Rupa is a adopted child. She doesnt have any siblings. her father passed away 5 years ago. She and her mothers are only legal heirs. Her father had 2 flats in pune. Her mother told her to leave the house and her mother says that she'll transfer the property to her cousins name. now rupa is scared that she won't get any share in the properties (her name is still not on the legal papers of the properties). Give me 5 plus Case law or Citations According to the Scenario.\n \n2. Provide case laws on the admissibility of electronic evidence under Section 65B of the Indian Evidence Act.\n \n3. Provide citations or case laws related to anticipatory bail\n \nArgument Generation:\n \nMy client, Mrs. Anjali Deshmukh, aged 42, resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the surgery, due to the negligence of the attending surgeon, Dr. Rakesh Nair, her bile duct was damaged. Post-surgery, she suffered from severe abdominal pain and had to be admitted again for corrective surgery at another hospital. She incurred additional medical expenses of ₹3.5 lakhs and suffered immense mental agony and physical pain. Despite repeated follow-ups, the hospital and the doctor refused to acknowledge their mistake or compensate her. She now seeks compensation of ₹25 lakhs for medical expenses, mental harassment, pain and suffering, and future treatment costs. give me arguments on behalf of plaintiff and defendant.\n \nमाझ्या क्लायंट, श्रीमती अंजली देशमुख, वय ४२, पुण्यातील रहिवासी, यांची १२ मार्च २०२४ रोजी XYZ मल्टीस्पेशालिटी हॉस्पिटलमध्ये पित्ताशयाची शस्त्रक्रिया झाली. शस्त्रक्रियेदरम्यान, उपस्थित सर्जन डॉ. राकेश नायर यांच्या निष्काळजीपणामुळे, त्यांच्या पित्तनलिकेचे नुकसान झाले. शस्त्रक्रियेनंतर, त्यांना तीव्र पोटदुखीचा त्रास झाला आणि त्यांना दुसऱ्या रुग्णालयात सुधारात्मक शस्त्रक्रियेसाठी पुन्हा दाखल करावे लागले. त्यांना ३.५ लाख रुपयांचा अतिरिक्त वैद्यकीय खर्च आला आणि प्रचंड मानसिक त्रास आणि शारीरिक वेदना सहन कराव्या लागल्या. वारंवार पाठपुरावा करूनही, रुग्णालय आणि डॉक्टरांनी त्यांची चूक मान्य करण्यास किंवा तिला भरपाई देण्यास नकार दिला. आता त्या वैद्यकीय खर्च, मानसिक छळ, वेदना आणि त्रास आणि भविष्यातील उपचार खर्चासाठी २५ लाख रुपयांची भरपाई मागत आहेत. मला युक्तिवाद द्या.\n \nMy client is facing a criminal case under Section 420 Indian Penal Code 1860 for alleged cheating. However, there was no fraudulent intention from the beginning, and it was purely a civil dispute arising from a failed business agreement. Give me arguments to defend the client and emphasize that this is a case of civil liability, not criminal cheating.\n \nConsumer Laws:\n \nScenario 1: Defective Product Liability Prompt: Priya purchases a brand-new refrigerator from a well-known electronics store. After a week, it stops working, and the manufacturer refuses to repair or replace it, claiming that the issue was caused by improper installation. What legal options does Priya have under the Consumer Protection Act, 2019, to address this defect?\n \nPdf : Review this draft and suggest changes, if any.",
+        "query_rewritten": true,
+        "conversation_turn": 1,
+        "followup_suggestions": [
+          "What documents prove adoption?",
+          "How to prove mother's intent?",
+          "What is the timeframe for injunction?"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "label": "prompt-2-convert-to-marathi",
+      "started_at": "2026-08-17T18:26:39.671453+00:00",
+      "elapsed_s": 139.2,
+      "status": 200,
+      "request": {
+        "url": "https://api.lawttorney.com/pyapi/search",
+        "method": "POST",
+        "headers": {
+          "X-API-Key": "***",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "Promptquery": "Convert above text into marathi",
+          "globalThreadId": "e4491fa3-1fe8-4d0b-8436-0b5cae644031"
+        }
+      },
+      "response": {
+        "globalThreadId": "e4491fa3-1fe8-4d0b-8436-0b5cae644031",
+        "result": "## दावा शीर्षक\n\nवरिष्ठ स्तर दिवाणी न्यायाधीश, पुणे यांच्या न्यायालयात\n\nदिवाणी दावा क्र. ______ / 2024\n\nरूपा [वडिलांचे आडनाव]\nकै. [वडिलांचे नाव] यांची कन्या,\nवय: [वय],\nव्यवसाय: [व्यवसाय],\nरा. [रूपाचा सध्याचा पत्ता], पुणे.\n\n.....वादी\n\n**विरुद्ध**\n\n[आईचे नाव]\nकै. [वडिलांचे नाव] यांची पत्नी,\nवय: [वय],\nव्यवसाय: [व्यवसाय],\nरा. [एका फ्लॅटचा पत्ता], पुणे.\n\n.....प्रतिवादी\n\n## वाटणी आणि तात्पुरत्या मनाई हुकुमासाठीचा दावा\n\nवाटणी, घोषणा आणि कायमस्वरूपी व तात्पुरत्या मनाई हुकुमासाठीचा दावा\n\nवादी विनंतीपूर्वक खालीलप्रमाणे कथन करते:\n\n1. वादी, दाव्यातील मालमत्तेच्या वाटणीसाठी, दाव्यातील मालमत्तेत तिला अर्धा (1/2) हिस्सा मिळण्याचा हक्क आहे अशी घोषणा\nकरण्यासाठी, आणि प्रतिवादी, तिचे प्रतिनिधी किंवा तिच्या वतीने कार्य करणारी कोणतीही व्यक्ती यांना दाव्यातील मालमत्तेची\nविक्री, हस्तांतरण, किंवा कोणत्याही तृतीय-पक्ष हक्कांची निर्मिती करण्यापासून कायमस्वरूपी व तात्पुरता मनाई हुकूम\nदेण्यासाठी हा दावा दाखल करत आहे. हा दावा Hindu Succession Act, 1956, Specific Relief Act, 1963, आणि Code of Civil\nProcedure, 1908 च्या तरतुदींनुसार दाखल करण्यात आला आहे.\n\n## प्रकरणाची तथ्ये\n\n2. वादी, रूपा, ही कै. [वडिलांचे नाव] आणि प्रतिवादी, [आईचे नाव] यांची कायदेशीररित्या दत्तक घेतलेली मुलगी आहे. वादीला कोणतेही जैविक किंवा दत्तक भावंड नाही.\n\n3. वादीचे दत्तक वडील, कै. [वडिलांचे नाव], यांचे सुमारे पाच वर्षांपूर्वी मृत्युपत्राशिवाय निधन झाले. त्यांच्या निधनाच्या वेळी, ते पुणे येथे असलेल्या दोन निवासी सदनिकांचे पूर्ण मालक होते आणि त्यांच्या ताब्यात होत्या, ज्यांचे तपशील सोबत जोडलेल्या मालमत्तांच्या सूचीमध्ये अधिक विशेषतः वर्णन केले आहेत आणि यानंतर त्यांना \"दाव्यातील मालमत्ता\" असे संबोधले जाईल.\n\n4. वादीच्या वडिलांच्या निधनानंतर, वादी आणि प्रतिवादी, अनुक्रमे त्यांची मुलगी आणि विधवा असल्याने, Hindu Succession Act, 1956 च्या तरतुदींनुसार एकमेव हयात असलेले वर्ग I चे कायदेशीर वारस आहेत.\n\n5. मृत्युपत्राशिवाय वारसाहक्काच्या कायद्यानुसार, वादी आणि प्रतिवादी या प्रत्येकी दाव्यातील मालमत्तेत समान, अविभाजित अर्धा (1/2) हिस्सा मिळण्यास पात्र आहेत आणि त्या मालमत्तांच्या संयुक्त ताब्यात आहेत.\n\n6. वादीचा स्पष्ट आणि अबाधित हक्क असूनही, तिचे नाव अद्याप दाव्यातील मालमत्तेशी संबंधित अधिकृत नोंदींमध्ये समाविष्ट किंवा नोंदवले गेलेले नाही. वादीने प्रतिवादीला आवश्यक कायदेशीर औपचारिकता पूर्ण करण्यासाठी आणि सीमारेषा निश्चित करून दाव्यातील मालमत्तेची सलोख्याने वाटणी करण्यासाठी सहकार्य करण्याची अनेक वेळा विनंती केली आहे.\n\n7. या दाव्याचे कारण नुकतेच उद्भवले, जेव्हा प्रतिवादीने वादीच्या हितास बाधा आणणारे कृत्य करण्यास सुरुवात केली. प्रतिवादीने वादीला निवासी मालमत्तेतून बेदखल करण्याची धमकी दिली आहे आणि दाव्यातील मालमत्ता तिच्या चुलत भावाला बेकायदेशीरपणे हस्तांतरित करण्याचा तिचा इरादा स्पष्टपणे सांगितला आहे, ज्यामुळे वादीला तिच्या हक्काच्या हिश्शापासून वंचित ठेवले जाईल. यामुळे या माननीय न्यायालयाच्या हस्तक्षेपाची त्वरित आणि तातडीची गरज निर्माण झाली आहे.\n\n## कायदेशीर तरतुदी\n\n8. सध्याचा दावा कायद्यानुसार दाखलपात्र आहे. वादीला, दत्तक कन्या म्हणून, Hindu Adoptions and Maintenance Act, 1956 अंतर्गत नैसर्गिकरित्या जन्मलेल्या कन्येप्रमाणे समान अधिकार आणि दर्जा प्राप्त आहे.\n\n9. Hindu Succession Act, 1956 च्या Section 8 नुसार, मृत्युपत्राशिवाय निधन झालेल्या हिंदू पुरुषाची मालमत्ता अनुसूचीच्या वर्ग I मध्ये नमूद केलेल्या वारसांना मिळते. वादी (कन्या) आणि प्रतिवादी (विधवा) या दोघेही वर्ग I वारस आहेत आणि त्यांना मृत व्यक्तीच्या मालमत्तेचा वारसा इतर सर्व वारसांना वगळून एकाच वेळी मिळण्याचा हक्क आहे.\n\n10. वादीला तिच्या अर्ध्या (1/2) हिश्श्याची घोषणा आणि दाव्यातील मालमत्तेची वाटणी व स्वतंत्र ताब्यासाठी डिक्री मिळण्याचा हक्क आहे.\n\n11. प्रतिवादीने दाव्यातील मालमत्ता हस्तांतरित करण्याचा आणि तृतीय-पक्ष हक्क निर्माण करण्याचा प्रयत्न केल्यामुळे, वादीला भरून न येणारे नुकसान आणि इजा होण्यापासून वाचवण्यासाठी, या दाव्याच्या प्रलंबित कालावधीत प्रतिवादीला असे करण्यापासून रोखण्यासाठी Code of Civil Procedure, 1908 च्या Order XXXIX, Rules 1 and 2 अंतर्गत तात्पुरता मनाई हुकूम मंजूर करणे न्याय्य आणि आवश्यक आहे.\n\n12. घोषणा आणि कायमस्वरूपी मनाई हुकुमाचे दावे Specific Relief Act, 1963 च्या संबंधित तरतुदींनुसार मागण्यात आले आहेत.\n\n## तात्पुरती दाद\n\nम्हणून, वादी अत्यंत नम्रपणे आणि विनंतीपूर्वक प्रार्थना करते की या माननीय न्यायालयाने कृपा करून:\n\n(अ) Code of Civil Procedure, 1908 च्या Order XXXIX, Rules 1 and 2 अन्वये तात्पुरता मनाई हुकूम मंजूर करावा, आणि प्रतिवादी, तिचे एजंट, नोकर किंवा तिच्याद्वारे हक्क सांगणाऱ्या कोणत्याही व्यक्तीस, या दाव्याच्या सुनावणीदरम्यान दाव्यातील मालमत्ता विकण्यास, हस्तांतरित करण्यास, गहाण ठेवण्यास किंवा त्यावर कोणताही तृतीय-पक्ष हक्क, शीर्षक किंवा हितसंबंध निर्माण करण्यास मनाई करावी.\n\n## अंतिम दाद\n\nवादी पुढे प्रार्थना करते की या माननीय न्यायालयाने कृपा करून:\n\n(अ) वाटणीसाठी एक प्राथमिक हुकूमनामा पारित करावा, ज्याद्वारे वादी ही सोबत जोडलेल्या मालमत्तांच्या तपशीलपत्रात अधिक विशेषतः वर्णन केलेल्या दाव्यातील मालमत्तेची मालक आहे आणि तिला अर्धा (1/2) अविभाजित हिस्सा मिळण्याचा हक्क आहे, असे घोषित करावे.\n\n(ब) दाव्यातील मालमत्तेची मोजमाप करून वाटणीसाठी अंतिम हुकूमनामा पारित करावा आणि वादीला तिच्या अर्ध्या (1/2) हिश्श्याचा स्वतंत्र, रिकामा आणि शांततापूर्ण ताबा द्यावा.\n\n(क) प्रतिवादी आणि तिच्या वतीने कार्य करणाऱ्या कोणालाही दाव्यातील मालमत्तेतील वादीच्या हिश्श्याच्या संदर्भात तिच्या हक्क, शीर्षक, हितसंबंध आणि ताब्यात हस्तक्षेप करण्यापासून कायमस्वरूपी मनाईचा हुकूमनामा पारित करावा.\n\n(ड) या दाव्याचा खर्च प्रतिवादीकडून वादीला मिळवून द्यावा.\n\n(इ) या प्रकरणातील तथ्ये आणि परिस्थितीनुसार हे माननीय न्यायालय योग्य आणि उचित वाटेल असे इतर आणि पुढील दावे मंजूर करावेत.\n\n## खर्च\n\nया दाव्याचा खर्च प्रतिवादीकडून वादीला मिळवून द्यावा.\n\n## इतर दाद\n\nया प्रकरणातील तथ्ये आणि परिस्थितीनुसार हे माननीय न्यायालय योग्य आणि उचित वाटेल असे इतर आणि पुढील दावे मंजूर करावेत.\n\n## पडताळणी\n\nमी, रूपा [वडिलांचे आडनाव], वरील नमूद वादी, याद्वारे गंभीरपणे कथन आणि पडताळणी करते की, वरील दाव्याच्या 1 ते 21 पर्यंतच्या परिच्छेदातील मजकूर माझ्या माहितीनुसार, विश्वासानुसार आणि सर्वोत्तम ज्ञानानुसार सत्य आणि अचूक आहे आणि त्यातून कोणतीही महत्त्वाची बाब लपवलेली नाही.\n\nपुणे येथे या ___ रोजी, __________, 2024 रोजी पडताळणी केली.\n\nवादी\n(रूपा [वडिलांचे आडनाव])\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "token_usage": {
+          "input_tokens": 124027,
+          "output_tokens": 19373,
+          "total_tokens": 145179,
+          "cache_read_tokens": 56283,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 9659,
+          "cost_usd": 0.326912,
+          "by_agent": {
+            "Memory": {
+              "input": 5047,
+              "output": 2168,
+              "total": 7215,
+              "cache_read": 0,
+              "calls": 1,
+              "cost_usd": 0.001372
+            },
+            "Orchestrator": {
+              "input": 9322,
+              "output": 326,
+              "total": 9648,
+              "cache_read": 5394,
+              "calls": 2,
+              "cost_usd": 0.001063
+            },
+            "Drafting": {
+              "input": 91170,
+              "output": 14439,
+              "total": 107388,
+              "cache_read": 36771,
+              "calls": 9,
+              "cost_usd": 0.312831
+            },
+            "SelfRefine": {
+              "input": 18488,
+              "output": 2440,
+              "total": 20928,
+              "cache_read": 14118,
+              "calls": 1,
+              "cost_usd": 0.011646
+            }
+          },
+          "calls": [
+            {
+              "agent": "Memory",
+              "step": "rewrite_query",
+              "input": 5047,
+              "output": 2168,
+              "total": 7215,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.001372
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "classify_and_plan",
+              "input": 3531,
+              "output": 59,
+              "total": 3590,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000377
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "extract_user_intent",
+              "input": 5791,
+              "output": 267,
+              "total": 6058,
+              "cache_read": 5394,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000686
+            },
+            {
+              "agent": "Drafting",
+              "step": "translate_query",
+              "input": 2278,
+              "output": 7,
+              "total": 2285,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000231
+            },
+            {
+              "agent": "Drafting",
+              "step": "pick_reference",
+              "input": 3391,
+              "output": 53,
+              "total": 3444,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.00036
+            },
+            {
+              "agent": "Drafting",
+              "step": "web_grounded",
+              "input": 6800,
+              "output": 2538,
+              "total": 11117,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.008385
+            },
+            {
+              "agent": "Drafting",
+              "step": "fanout_judge",
+              "input": 4147,
+              "output": 495,
+              "total": 4642,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000613
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 14013,
+              "output": 1449,
+              "total": 15462,
+              "cache_read": 4085,
+              "cache_creation": 0,
+              "reasoning": 1119,
+              "cost_usd": 0.043196
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 14349,
+              "output": 2780,
+              "total": 17129,
+              "cache_read": 8170,
+              "cache_creation": 0,
+              "reasoning": 1980,
+              "cost_usd": 0.065536
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 15148,
+              "output": 4096,
+              "total": 19244,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 3715,
+              "cost_usd": 0.097045
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 15511,
+              "output": 2136,
+              "total": 17647,
+              "cache_read": 12258,
+              "cache_creation": 0,
+              "reasoning": 2085,
+              "cost_usd": 0.061599
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 15533,
+              "output": 885,
+              "total": 16418,
+              "cache_read": 12258,
+              "cache_creation": 0,
+              "reasoning": 760,
+              "cost_usd": 0.035866
+            },
+            {
+              "agent": "SelfRefine",
+              "step": "critique",
+              "input": 18488,
+              "output": 2440,
+              "total": 20928,
+              "cache_read": 14118,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.011646
+            }
+          ]
+        },
+        "source": [
+          {
+            "source_type": "drafting",
+            "title": "Reference draft (web-synthesised: <web:picker-rejected>)",
+            "content": [
+              "## दावा शीर्षक\n\nवरिष्ठ स्तर दिवाणी न्यायाधीश, पुणे यांच्या न्यायालयात\n\nदिवाणी दावा क्र. ______ / 2024\n\nरूपा [Father's Surname]\nकै. [Father's Name] यांची कन्या,\nवय: [Age],\nव्यवसाय: [Occupation],\nरा. [Rupa's Current Address], पुणे.\n\n.....वादी\n\n**विरुद्ध**\n\n[Mother's Name]\nकै. [Father's Name] यांची पत्"
+            ],
+            "doc_link": null,
+            "file_name": "<web:picker-rejected>",
+            "agent_name": "Drafting",
+            "relevance_score": null,
+            "template_type": "web-synthesized"
+          }
+        ],
+        "agents_used": [
+          "Drafting"
+        ],
+        "effective_query": "Convert the following text into Marathi:\n## Cause Title\n\nIN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, PUNE\n\nCIVIL SUIT NO. ______ OF 2024\n\nRupa [Father's Surname]\nDaughter of Late [Father's Name],\nAge: [Age],\nOccupation: [Occupation],\nResiding at: [Rupa's Current Address], Pune.\n\n.....Plaintiff\n\n**vs**\n\n[Mother's Name]\nWife of Late [Father's Name],\nAge: [Age],\nOccupation: [Occupation],\nResiding at: [Address of one of the flats], Pune.\n\n.....Defendant\n\n## Suit for Partition and Temporary Injunction\n\nSUIT FOR PARTITION, DECLARATION, AND PERMANENT AND TEMPORARY INJUNCTION\n\nThe Plaintiff respectfully states as under:\n\n1. That the Plaintiff files the present suit for partition of the suit properties, for a declaration that she is\nentitled to a one-half (1/2) share in the suit properties, and for a permanent and temporary injunction restraining the\nDefendant, her agents, or any person acting on her behalf from alienating, transferring, selling, or creating any\nthird-party rights in the suit properties. The suit is filed under the provisions of the Hindu Succession Act, 1956, the\nSpecific Relief Act, 1963, and the Code of Civil Procedure, 1908.\n\n## Facts of the Case\n\n2. That the Plaintiff, Rupa, is the legally adopted daughter of the late [Father's Name] and the Defendant, [Mother's Name]. The Plaintiff has no biological or adopted siblings.\n\n3. That the Plaintiff's adoptive father, the late [Father's Name], passed away intestate approximately five years ago. At the time of his demise, he was the absolute owner and was seized and possessed of two residential flats situated in Pune, the details of which are more particularly described in the Schedule of Properties annexed hereto and hereinafter referred to as the \"suit properties\".\n\n4. That upon the death of the Plaintiff's father, the Plaintiff and the Defendant, being his daughter and widow respectively, are the only surviving Class I legal heirs as per the provisions of the Hindu Succession Act, 1956.\n\n5. That by virtue of the laws of intestate succession, the Plaintiff and the Defendant are each entitled to an equal, undivided one-half (1/2) share in the suit properties and are in joint possession of the same.\n\n6. That despite the Plaintiff's clear and indefeasible right, her name has not yet been mutated or entered into the official records pertaining to the suit properties. The Plaintiff has made several requests to the Defendant to cooperate in completing the necessary legal formalities and to effect an amicable partition of the suit properties by metes and bounds.\n\n7. That the cause of action for the present suit arose recently when the Defendant began acting in a manner detrimental to the Plaintiff's interest. The Defendant has threatened to dispossess the Plaintiff from the residential property and has explicitly stated her intention to illegally alienate and transfer the suit properties to her cousin, thereby depriving the Plaintiff of her rightful share. This has created an immediate and urgent need for the intervention of this Hon'ble Court.\n\n## Legal Provisions\n\n8. That the present suit is maintainable under law. The Plaintiff, as an adopted daughter, is conferred with the same rights and status as a natural-born daughter under the Hindu Adoptions and Maintenance Act, 1956.\n\n9. That under Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule. The Plaintiff (daughter) and the Defendant (widow) are both Class I heirs and are entitled to succeed to the property of the deceased simultaneously and to the exclusion of all other heirs.\n\n10. That the Plaintiff is entitled to seek a declaration of her one-half (1/2) share and a decree for partition and separate possession of the suit properties.\n\n11. That in light of the Defendant's attempts to alienate the suit properties and create third-party rights, it is just and necessary to grant a temporary injunction under Order XXXIX, Rules 1 and 2 of the Code of Civil Procedure, 1908, restraining the Defendant from doing so during the pendency of this suit, to prevent irreparable loss and injury to the Plaintiff.\n\n12. That the reliefs of declaration and permanent injunction are sought under the relevant provisions of the Specific Relief Act, 1963.\n\n## Plaintiff's Entitlement and Share\n\n13. That the Plaintiff submits that as the legally adopted daughter of the deceased, Late [Father's Name], she is entitled to all the rights and privileges of a natural-born daughter. Upon the intestate demise of her father, his self-acquired properties, being the suit properties, devolved upon his Class I legal heirs as per the rules of succession laid down in the Hindu Succession Act, 1956.\n\n14. That according to Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule to the said Act. The Plaintiff, being the daughter, and the Defendant, being the widow, are the only two surviving Class I heirs of the deceased.\n\n15. That as per the rules of distribution of property among Class I heirs, the Plaintiff and the Defendant are each entitled to an equal, undivided one-half (1/2) share in the suit properties. The Plaintiff's right, title, and interest in the suit properties are absolute and indefeasible, having vested in her immediately upon the death of her father.\n\n## Grounds for Temporary Injunction\n\n16. That the Plaintiff has a strong prima facie case in her favour. Her status as a Class I legal heir and her consequent entitlement to a one-half (1/2) share in the suit properties is established by law. The suit properties are joint family properties in which the Plaintiff has a vested, undivided interest.\n\n17. That the balance of convenience is overwhelmingly in favour of the Plaintiff. Granting an injunction would merely\nrequire the Defendant to maintain the status quo of the properties, causing her no prejudice. Conversely, refusing the\ninjunction would allow the Defendant to act upon her threats to alienate the properties. This would create irreversible\nthird-party rights, leading to a multiplicity of legal proceedings and rendering the present suit for partition\ninfructuous. The Plaintiff would be forced into protracted litigation against bona fide purchasers, causing immense\nhardship.\n\n18. That the Plaintiff will suffer irreparable loss and injury if the temporary injunction is not granted. The Defendant\nhas explicitly threatened to sell and transfer the suit properties to her cousin with the mala fide intention of\ndefeating the Plaintiff's legitimate claim. If the Defendant succeeds, the Plaintiff will be wrongfully deprived of her\nrightful inheritance and may be dispossessed from her residence. Such a loss of immovable property cannot be adequately\ncompensated in monetary terms. The very subject matter of the suit would be lost, causing grave injustice to the\nPlaintiff. Therefore, it is imperative to restrain the Defendant by an order of temporary injunction under Order XXXIX,\nRules 1 and 2 of the Code of Civil Procedure, 1908.\n\n## Jurisdiction and Valuation\n\n19. That the suit properties are situated in Pune, which is within the territorial jurisdiction of this Hon'ble Court. Therefore, this Hon'ble Court has the jurisdiction to try, entertain, and dispose of the present suit.\n\n20. That for the purpose of court fees and jurisdiction, the suit is valued as follows:\na. For the relief of partition and separate possession of the Plaintiff's one-half (1/2) share in the suit properties, the suit is valued at Rs. [Value of Plaintiff's 1/2 Share], and the requisite court fee as prescribed under the Maharashtra Court Fees Act, 1959, has been paid thereon.\nb. For the reliefs of declaration and permanent injunction, which are consequential to the main relief of partition, a fixed court fee has been paid as per the said Act.\n\n21. That the total valuation of the suit for the purposes of jurisdiction is Rs. [Value of Plaintiff's 1/2 Share], and the appropriate court fee has been affixed to this plaint.\n\n## Prayer\n\nIt is, therefore, most humbly and respectfully prayed that this Hon'ble Court may be pleased to:\n\na. Pass a preliminary decree for partition, declaring that the Plaintiff is the owner of and is entitled to a one-half (1/2) undivided share in the suit properties, more particularly described in the Schedule of Properties annexed hereto.\n\nb. Pass a final decree for partition of the suit properties by metes and bounds and put the Plaintiff in separate, vacant, and peaceful possession of her one-half (1/2) share.\n\nc. Grant a temporary injunction under Order XXXIX, Rules 1 and 2 of the Code of Civil Procedure, 1908, restraining the Defendant, her agents, servants, or any person claiming through her, from selling, alienating, transferring, mortgaging, or creating any third-party rights, title, or interest in the suit properties during the pendency of this suit.\n\nd. Pass a decree for permanent injunction restraining the Defendant and anyone acting on her behalf from interfering with the Plaintiff's right, title, interest, and possession in respect of her share in the suit properties.\n\ne. Award the costs of this suit to the Plaintiff from the Defendant.\n\nf. Grant any other and further reliefs as this Hon'ble Court may deem fit and proper in the facts and circumstances of the case.\n\n## Verification\n\nI, Rupa [Father's Surname], the Plaintiff abovenamed, do hereby solemnly state and verify that the contents of paragraphs 1 to 21 of the foregoing plaint are true and correct to the best of my knowledge, information, and belief, and that nothing material has been concealed therefrom.\n\nVerified at Pune on this ___ day of __________, 2024.\n\nPlaintiff\n(Rupa [Father's Surname])",
+        "query_rewritten": true,
+        "conversation_turn": 2,
+        "followup_suggestions": [
+          "वाद कशाबद्दल आहे?",
+          "कायदेशीर नोटीस पाठवली?",
+          "पुढील तारीख कधी?"
+        ]
+      }
+    }
+  ]
+}

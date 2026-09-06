@@ -219,6 +219,73 @@ def get_full_attachment(collection_id: str) -> dict:
     }
 
 
+def retrieve_attachment_context_impl(
+    query: str,
+    collection_ids: list[str],
+    per_collection_k: int = 5,
+    total_k: int = 5,
+) -> dict:
+    """Plain-Python impl behind the `retrieve_attachment_context` @tool.
+
+    Callable directly from agent code with tunable k values. Used by the
+    Document agent's Gap #5 large-attachment router when
+    len(collections) exceeds `LARGE_ATTACHMENT_FILE_COUNT` or aggregate
+    text exceeds `LARGE_ATTACHMENT_CHAR_BUDGET`; the agent bumps k up
+    (per_col=8, total=30) so a 20-file evidence bundle still yields
+    enough per-question context to generate a substantive answer.
+
+    Args:
+        query: The question to search for.
+        collection_ids: List of ChromaDB collection identifiers.
+        per_collection_k: Per-collection similarity search k. Higher =
+            more per-file coverage before the global top-N filter.
+        total_k: Global cap on the returned merged list. Bounds prompt
+            size regardless of how many collections were queried.
+
+    Returns:
+        Dict with keys:
+            chunks (list of {content, source, chunk_id, score, collection}):
+                global top-`total_k` across all collections, sorted by
+                similarity (lower L2 score = more similar under
+                Chroma's default distance).
+            total (int): len(chunks)
+    """
+    if not collection_ids:
+        return {"chunks": [], "total": 0}
+    per_collection_k = max(1, per_collection_k)
+    total_k = max(1, total_k)
+    embeddings = get_qa_embeddings()
+    client = get_chroma_client()
+    all_hits: list[dict] = []
+    for cid in collection_ids:
+        try:
+            _validate_collection_name(cid)
+            vectordb = Chroma(
+                client=client,
+                collection_name=cid,
+                embedding_function=embeddings,
+            )
+            hits = vectordb.similarity_search_with_score(query, k=per_collection_k)
+            for doc, score in hits:
+                all_hits.append({
+                    "content": doc.page_content,
+                    "source": doc.metadata.get("source"),
+                    "chunk_id": _chunk_index(doc.metadata),
+                    "score": float(score),
+                    "collection": cid,
+                })
+        except Exception as e:
+            log.warning(
+                f"retrieve_attachment_context: collection {cid} failed: {e}"
+            )
+            continue
+
+    # Chroma default L2 distance: lower = more similar
+    all_hits.sort(key=lambda h: h["score"])
+    top = all_hits[:total_k]
+    return {"chunks": top, "total": len(top)}
+
+
 @tool
 def retrieve_attachment_context(query: str, collection_ids: list[str]) -> dict:
     """Top-K chunk retrieval across one or more attachments. OPTIONAL.
@@ -239,35 +306,4 @@ def retrieve_attachment_context(query: str, collection_ids: list[str]) -> dict:
                 global top-5 across all collections
             total (int): len(chunks)
     """
-    if not collection_ids:
-        return {"chunks": [], "total": 0}
-    embeddings = get_qa_embeddings()
-    client = get_chroma_client()
-    all_hits: list[dict] = []
-    for cid in collection_ids:
-        try:
-            _validate_collection_name(cid)
-            vectordb = Chroma(
-                client=client,
-                collection_name=cid,
-                embedding_function=embeddings,
-            )
-            hits = vectordb.similarity_search_with_score(query, k=5)
-            for doc, score in hits:
-                all_hits.append({
-                    "content": doc.page_content,
-                    "source": doc.metadata.get("source"),
-                    "chunk_id": _chunk_index(doc.metadata),
-                    "score": float(score),
-                    "collection": cid,
-                })
-        except Exception as e:
-            log.warning(
-                f"retrieve_attachment_context: collection {cid} failed: {e}"
-            )
-            continue
-
-    # Chroma default L2 distance: lower = more similar
-    all_hits.sort(key=lambda h: h["score"])
-    top = all_hits[:5]
-    return {"chunks": top, "total": len(top)}
+    return retrieve_attachment_context_impl(query, collection_ids)

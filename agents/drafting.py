@@ -1179,6 +1179,7 @@ async def _generate_single_pass(
     progress_emit,
     gathered_context: dict[str, str] | None = None,
     review_and_redraft_mode: bool = False,
+    niche_overlay: str = "",
 ) -> str:
     """Produce the full document in one Gemini 2.5 Pro call.
 
@@ -1192,11 +1193,20 @@ async def _generate_single_pass(
     window can consume multi-100K-char PDFs; a raw source is required for
     tasks like rejoinder / para-wise reply where the model must walk the
     source document paragraph-by-paragraph.
+
+    `niche_overlay` is the resolved ``## NICHE OVERLAY`` block from
+    ``config.drafting_niches``. When non-empty, it's appended to the
+    system prompt AFTER localisation so overlay heading anchors and
+    statutory citations survive the localiser (which does not translate
+    English legal terms of art). Empty string is a no-op — the base
+    prompt handles the matter on its own.
     """
     from config.prompts import DRAFTING_SYSTEM_PROMPT
     from langchain_core.messages import SystemMessage, HumanMessage
 
     system_prompt = localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language, user_intent)
+    if niche_overlay:
+        system_prompt = system_prompt + "\n\n" + niche_overlay
     if review_and_redraft_mode:
         # The default system prompt frames REFERENCE DRAFT as "from a
         # different matter — MUST NOT appear in your output". In
@@ -1207,8 +1217,18 @@ async def _generate_single_pass(
         # OVERRIDE that flips the framing at the system-prompt level.
         system_prompt = _REVIEW_AND_REDRAFT_MODE_OVERRIDE + "\n\n---\n\n" + system_prompt
 
+    # In review-and-redraft mode, `reference_draft` IS `user_facts` (the
+    # caller sets `reference_text = user_facts` in drafting_node when
+    # `_is_review_and_redraft_of_upload` fires). Emitting BOTH blocks
+    # duplicates the same content and blows the 1M-token ceiling on
+    # multi-MB uploads. Live 2026-09-03: 1.9M-char arbitration paperbook
+    # upload -> pair_user_facts + reference_draft = ~3.8M chars ≈ 1M+
+    # tokens → 400 INVALID_ARGUMENT on both Pro and Flash. The reference
+    # block's flipped wording ("PRESERVE these values verbatim") already
+    # tells the model to treat the block as authoritative source, so
+    # skipping source_docs_block here loses zero information.
     source_docs_block = ""
-    if user_facts and user_facts.strip():
+    if user_facts and user_facts.strip() and not review_and_redraft_mode:
         source_docs_block = (
             "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every "
             "party name, date, address, amount, statutory reference, and "
@@ -1226,19 +1246,26 @@ async def _generate_single_pass(
         # us to REVIEW-AND-REDRAFT their own document — every party name,
         # court name, case number, statutory citation, and case-specific
         # detail must be PRESERVED VERBATIM. Only the substantive legal
-        # errors and formatting are to be corrected.
+        # errors and formatting are to be corrected. This block is the
+        # ONLY carrier of the source content in review-and-redraft mode
+        # (source_docs_block is intentionally skipped above to avoid
+        # doubling the payload).
         reference_block = (
-            "## REFERENCE DRAFT (this is the SAME document the user uploaded — "
-            "the user is performing a REVIEW-AND-REDRAFT of THEIR OWN document. "
-            "PRESERVE every party name, court name, case number, forum, statutory "
-            "citation, address, date, monetary amount, and case-specific detail "
-            "in this block VERBATIM. Correct ONLY the substantive legal errors "
-            "(wrong statute, wrong Act name, missing procedural section, "
-            "misstated law, missing verification / prayer conventions) and the "
-            "formatting. Do NOT rewrite this as a generic template. Do NOT "
-            "replace real values with `[placeholders]`. Do NOT introduce a "
-            "contract-analysis / memorandum / MOU / lease-deed shape unless the "
-            "uploaded document itself is one of those.)\n"
+            "## REFERENCE DRAFT / UPLOADED SOURCE DOCUMENT (this is the "
+            "SAME document the user uploaded — the user is performing a "
+            "REVIEW-AND-REDRAFT of THEIR OWN document. PRESERVE every "
+            "party name, court name, case number, forum, statutory "
+            "citation, address, date, monetary amount, and case-specific "
+            "detail in this block VERBATIM. Every fact, paragraph number, "
+            "and stated assertion in your output MUST be sourced from "
+            "this block or the USER QUERY. Correct ONLY the substantive "
+            "legal errors (wrong statute, wrong Act name, missing "
+            "procedural section, misstated law, missing verification / "
+            "prayer conventions) and the formatting. Do NOT rewrite this "
+            "as a generic template. Do NOT replace real values with "
+            "`[placeholders]`. Do NOT introduce a contract-analysis / "
+            "memorandum / MOU / lease-deed shape unless the uploaded "
+            "document itself is one of those.)\n"
             f"{reference_draft.strip()}\n\n"
         )
     else:
@@ -1875,6 +1902,7 @@ async def _generate_section_pair(
     user_intent,
     user_language: str,
     review_and_redraft_mode: bool = False,
+    niche_overlay: str = "",
 ) -> str:
     """Produce 1 or 2 consecutive sections of the document in one Gemini
     2.5 Pro call. Mirrors the safety / retry pattern of single-pass.
@@ -1884,13 +1912,60 @@ async def _generate_section_pair(
     paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-
     affidavit response) has direct access to the source's paragraph
     structure and numbering.
+
+    `niche_overlay` is the resolved ``## NICHE OVERLAY`` block from
+    ``config.drafting_niches``. When non-empty, appended to the section-
+    pair system prompt AFTER localisation so overlay statutory anchors
+    and section headings survive the localiser.
     """
     from config.prompts import DRAFTING_SECTION_PAIR_PROMPT
     from langchain_core.messages import SystemMessage, HumanMessage
 
+    # In review-and-redraft mode, `reference_draft` is the entire uploaded
+    # source (drafting_node sets `reference_text = user_facts`). Multi-MB
+    # uploads will push the pair-call over Gemini's 1M-token ceiling even
+    # after skipping source_docs_block. Cap here to the same script-aware
+    # budget the caller uses for user_facts, with a truncation marker so
+    # counsel knows to split the upload.
+    if review_and_redraft_mode and reference_draft:
+        # Detect dense Indic scripts on the reference_draft sample.
+        _ref_indic_ranges = (
+            ("devanagari", "ऀ", "ॿ"), ("bengali", "ঀ", "৿"),
+            ("gurmukhi", "਀", "੿"), ("gujarati", "઀", "૿"),
+            ("oriya", "଀", "୿"),   ("tamil", "஀", "௿"),
+            ("telugu", "ఀ", "౿"),  ("kannada", "ಀ", "೿"),
+            ("malayalam", "ഀ", "ൿ"),
+        )
+        _ref_budget = 1_800_000  # Latin default — reference occupies the
+                                  # source slot; leaves ~200K chars headroom
+                                  # for system prompt + niche overlay +
+                                  # gathered context + prior_text.
+        _ref_sample = reference_draft[:20_000]
+        _ref_sample_len = max(len(_ref_sample), 1)
+        for _name, _lo, _hi in _ref_indic_ranges:
+            if sum(1 for c in _ref_sample if _lo <= c <= _hi) / _ref_sample_len > 0.3:
+                _ref_budget = 1_200_000  # Dense Indic scripts (~2.5 chars/token).
+                break
+        if len(reference_draft) > _ref_budget:
+            _orig_ref_len = len(reference_draft)
+            reference_draft = (
+                reference_draft[:_ref_budget]
+                + f"\n\n[…uploaded document truncated to fit model context: "
+                + f"showing first {_ref_budget:,} of {_orig_ref_len:,} chars. "
+                + f"Split the upload into smaller sections for full coverage.]"
+            )
+            log.warning(
+                "Review-and-redraft reference_draft exceeded budget — truncated with marker",
+                original_chars=_orig_ref_len,
+                truncated_chars=len(reference_draft),
+                budget=_ref_budget,
+            )
+
     system_prompt = localize_prompt(
         DRAFTING_SECTION_PAIR_PROMPT, user_language, user_intent,
     )
+    if niche_overlay:
+        system_prompt = system_prompt + "\n\n" + niche_overlay
     if review_and_redraft_mode:
         # See rationale in _generate_single_pass — the section-pair prompt
         # carries the same "REFERENCE DRAFT belongs to a DIFFERENT matter"
@@ -1929,6 +2004,15 @@ async def _generate_section_pair(
         )
     sections_block = "\n\n".join(section_lines)
 
+    # In review-and-redraft mode, `reference_draft` IS `user_facts`
+    # (drafting_node sets `reference_text = user_facts`). Emitting both
+    # blocks duplicates the same content and blows the 1M-token ceiling
+    # on multi-MB uploads. Live 2026-09-03: 1.9M-char arbitration
+    # paperbook -> pair_user_facts + reference_draft = ~3.8M chars
+    # ≈ 1M+ tokens → 400 INVALID_ARGUMENT on both Pro and Flash. The
+    # reference block below already tells the model to treat the block
+    # as the authoritative source in review-and-redraft mode, so
+    # skipping source_docs_block here loses zero information.
     source_docs_block = (
         "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every party "
         "name, date, address, amount, statutory reference, and paragraph-"
@@ -1939,7 +2023,7 @@ async def _generate_section_pair(
         "and numbering from this block directly, quoting or paraphrasing "
         "the specific assertions your section is responding to.)\n"
         f"{user_facts.strip()}\n\n"
-    ) if user_facts and user_facts.strip() else ""
+    ) if user_facts and user_facts.strip() and not review_and_redraft_mode else ""
 
     context_block = ""
     if gathered_context:
@@ -1959,18 +2043,28 @@ async def _generate_section_pair(
             )
 
     if review_and_redraft_mode:
+        # This block is the ONLY carrier of the source content in
+        # review-and-redraft mode (source_docs_block is intentionally
+        # skipped above to avoid doubling the payload past 1M tokens).
         reference_block = (
-            "## REFERENCE DRAFT (this is the SAME document the user uploaded — "
-            "the user is performing a REVIEW-AND-REDRAFT of THEIR OWN document. "
-            "PRESERVE every party name, court name, case number, forum, statutory "
-            "citation, address, date, monetary amount, and case-specific detail "
-            "VERBATIM. Correct ONLY the substantive legal errors (wrong statute, "
-            "wrong Act name, missing procedural section, misstated law, missing "
-            "verification / prayer conventions) and formatting. Do NOT rewrite "
-            "this as a generic template. Do NOT replace real values with "
-            "`[placeholders]`. Do NOT introduce a contract-analysis / "
-            "memorandum / MOU / lease-deed shape unless the uploaded document "
-            "itself is one of those.)\n"
+            "## REFERENCE DRAFT / UPLOADED SOURCE DOCUMENT (this is the "
+            "SAME document the user uploaded — the user is performing a "
+            "REVIEW-AND-REDRAFT of THEIR OWN document. PRESERVE every "
+            "party name, court name, case number, forum, statutory "
+            "citation, address, date, monetary amount, paragraph number, "
+            "and case-specific detail in this block VERBATIM. Every fact, "
+            "stated assertion, and paragraph reference in your output "
+            "MUST be sourced from this block or the USER QUERY. When "
+            "your section is a para-wise reply, rejoinder, or "
+            "counter-affidavit, mirror the paragraph numbering from this "
+            "block. Correct ONLY the substantive legal errors (wrong "
+            "statute, wrong Act name, missing procedural section, "
+            "misstated law, missing verification / prayer conventions) "
+            "and formatting. Do NOT rewrite this as a generic template. "
+            "Do NOT replace real values with `[placeholders]`. Do NOT "
+            "introduce a contract-analysis / memorandum / MOU / "
+            "lease-deed shape unless the uploaded document itself is "
+            "one of those.)\n"
             f"{reference_draft.strip()}\n\n"
         )
     else:
@@ -2077,29 +2171,41 @@ async def _generate_section_pair(
                 local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
             )
         except Exception as primary_err:
-            from core.clients import (
-                get_openai_drafting_fallback, is_openai_fallback_configured,
-            )
-            if not is_openai_fallback_configured():
-                log.warning(
-                    "Gemini section-pair failed and no OpenAI fallback is "
-                    "configured; set OPENAI_API_KEY to enable failover",
-                    error=short_err(primary_err),
-                )
-                raise
+            # 2026-09-02: fallback switched from OpenAI GPT-4o to Gemini
+            # 2.5 Flash. The old GPT-4o fallback had a 128 K token limit,
+            # which is smaller than legal source-document uploads
+            # routinely reach (a full arbitration paperbook can push
+            # 500 K-1 M tokens even after Gap #5's MMR router). Observed
+            # in a live test 2026-09-02: primary Gemini Pro hit its 1 M
+            # cap, failover to GPT-4o hit ITS 128 K cap ~immediately,
+            # both retries failed identically -- fallback added zero
+            # value while burning latency + OpenAI cost. Gemini Flash
+            # shares the 1 M context ceiling AND is markedly cheaper
+            # than either Gemini Pro or GPT-4o, so as a second-provider
+            # substitute for Pro's tool-planning / reasoning quirks it's
+            # an unambiguous win: same reach, lower cost, no cross-
+            # provider tokenizer surprise. Anything genuinely over 1 M
+            # tokens needs Gap #5's MMR router or per-section chunking
+            # (DRAFTING_PER_SECTION_CHUNKING=1); the fallback path was
+            # never the right lever for that class of overflow.
+            from core.clients import get_gemini_flash_full
             log.warning(
-                "Gemini section-pair failed — failing over to OpenAI GPT-4o",
+                "Gemini Pro section-pair failed — failing over to Gemini Flash",
                 error=short_err(primary_err),
-                provider_from="gemini-2.5-pro", provider_to="gpt-4o",
+                provider_from="gemini-2.5-pro", provider_to="gemini-2.5-flash",
             )
-            fb = get_openai_drafting_fallback()
+            fb = get_gemini_flash_full(
+                temperature=0.0,
+                max_output_tokens=12000,
+                thinking_budget=0,
+            )
             resp = await bounded_wait_for(
                 asyncio.to_thread(fb.invoke, msgs),
                 local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
             )
             log.info(
-                "OpenAI fallback produced the section pair",
-                provider="gpt-4o",
+                "Gemini Flash fallback produced the section pair",
+                provider="gemini-2.5-flash",
             )
             return resp
 
@@ -2303,6 +2409,7 @@ async def _generate_sectionwise(
     progress_emit,
     gathered_context: dict[str, str] | None,
     review_and_redraft_mode: bool = False,
+    niche_overlay: str = "",
 ) -> str:
     """Walk the section list in pairs of two (last is solo if odd).
 
@@ -2326,10 +2433,18 @@ async def _generate_sectionwise(
     # still see 3,4,5,7,8,9 in a single call. On router failure / empty
     # selection, the pair falls back to the raw user_facts unchanged —
     # this preserves CLAUDE.md invariant #6 whenever the router can't help.
+    #
+    # Skipped entirely in review-and-redraft mode: the section-pair prompt
+    # deliberately drops source_docs_block in that mode because the
+    # reference_block carries the same content (see 2026-09-03 fix in
+    # _generate_section_pair — double-loading blew the 1M-token ceiling).
+    # With source_docs_block skipped, routing over user_facts is dead
+    # work — every pick is discarded.
     chunking_enabled = (
         os.getenv("DRAFTING_PER_SECTION_CHUNKING", "0") == "1"
         and user_facts
         and len(user_facts) > _PER_SECTION_CHUNKING_MIN_CHARS
+        and not review_and_redraft_mode
     )
     all_chunks: list[str] = _chunk_user_facts(user_facts) if chunking_enabled else []
     # A single-chunk (no blank lines) or trivially-few-chunks blob has no
@@ -2340,6 +2455,41 @@ async def _generate_sectionwise(
             "Per-section chunking skipped — too few paragraph chunks to route",
             chunks=len(all_chunks),
         )
+
+    # Per-pair char budget — headroom below Gemini's 1M-token ceiling
+    # after accounting for system prompt (~20K tokens), reference draft
+    # (~50K), prior_text (~30K), section instructions (~5K), and gen
+    # output (~12K). Live 2026-09-02: an arbitration paperbook upload
+    # at 1.88M chars pushed a section-pair call to 1.03M tokens even
+    # after routing (router picked 99.2% of chunks) or fell back to raw
+    # source (Verification section legitimately needed no source docs
+    # but raw fallback still overflowed). This cap protects both paths.
+    # Latin ~4 chars/token -> 2.4M chars = ~600K tokens.
+    # Dense Indic scripts ~2.5 chars/token -> 1.6M chars = ~640K tokens.
+    _PAIR_USER_FACTS_BUDGET_LATIN = 2_400_000
+    _PAIR_USER_FACTS_BUDGET_INDIC = 1_600_000
+    # Same script detection as `_generate_draft`'s whole-request preflight.
+    _INDIC_RANGES = (
+        ("devanagari", "ऀ", "ॿ"),
+        ("bengali",    "ঀ", "৿"),
+        ("gurmukhi",   "਀", "੿"),
+        ("gujarati",   "઀", "૿"),
+        ("oriya",      "଀", "୿"),
+        ("tamil",      "஀", "௿"),
+        ("telugu",     "ఀ", "౿"),
+        ("kannada",    "ಀ", "೿"),
+        ("malayalam",  "ഀ", "ൿ"),
+    )
+    _detected_script = "latin"
+    _pair_budget = _PAIR_USER_FACTS_BUDGET_LATIN
+    if user_facts:
+        _sample = user_facts[:20_000]
+        _sample_len = max(len(_sample), 1)
+        for _name, _lo, _hi in _INDIC_RANGES:
+            if sum(1 for c in _sample if _lo <= c <= _hi) / _sample_len > 0.3:
+                _detected_script = _name
+                _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
+                break
 
     i = 0
     while i < total:
@@ -2400,10 +2550,47 @@ async def _generate_sectionwise(
                     ),
                 )
             else:
+                # 2026-09-02: router picked 0 chunks -> this section
+                # legitimately doesn't need source-document content
+                # (typical for Verification / signature / cause-title
+                # sections). Send EMPTY user_facts instead of falling
+                # back to raw source. The old raw-fallback overflowed
+                # the 1M-token ceiling on very large uploads and caused
+                # legitimate 0-pick sections to fail with a
+                # context_length error. Respecting the router's decision
+                # here means these sections generate cleanly from the
+                # system prompt + reference draft + prior_text alone.
+                pair_user_facts = ""
                 log.info(
-                    "Per-section chunking: no chunks picked — using raw source",
+                    "Per-section chunking: no chunks picked — sending empty "
+                    "user_facts (section doesn't need source docs)",
                     pair_start=position_start,
+                    section_headings=[s.heading[:60] for s in pair],
                 )
+
+        # 2026-09-02: post-router / raw-fallback safety cap. Even after
+        # routing (or with raw fallback when chunking is disabled), the
+        # blob may still exceed our safe per-pair budget on very large
+        # uploads. Truncate with a marker so the section produces output
+        # rather than failing on 1M-token overflow. Trade-off: partial-
+        # verbatim source vs a fully-failed section — the fully-failed
+        # section is unambiguously worse for the user.
+        if len(pair_user_facts) > _pair_budget:
+            _orig_chars = len(pair_user_facts)
+            pair_user_facts = (
+                pair_user_facts[:_pair_budget]
+                + f"\n\n[…source material truncated to fit model context: "
+                + f"showing first {_pair_budget:,} of {_orig_chars:,} chars. "
+                + f"Split the upload into smaller PDFs for full-verbatim access.]"
+            )
+            log.warning(
+                "Per-pair user_facts exceeded budget — truncated with marker",
+                pair_start=position_start,
+                original_chars=_orig_chars,
+                truncated_chars=len(pair_user_facts),
+                budget=_pair_budget,
+                script=_detected_script,
+            )
 
         # One retry per pair (Buglist Phase 2). The first attempt uses
         # the Gemini SDK's default timeout; the retry uses the SAME
@@ -2427,6 +2614,7 @@ async def _generate_sectionwise(
                     user_intent=user_intent,
                     user_language=user_language,
                     review_and_redraft_mode=review_and_redraft_mode,
+                    niche_overlay=niche_overlay,
                 )
                 _pair_err = None
                 if pair_text.strip():
@@ -2718,7 +2906,36 @@ async def _generate_draft(
     `user_facts` is the RAW extracted text of uploaded documents, passed
     verbatim through to whichever generation strategy runs. Returns a
     single assembled string regardless of the strategy.
+
+    Before dispatching, this fires the niche selector once (Gemini Flash
+    Lite) to identify the filing niche (bail, writ, plaint, rejoinder,
+    NI Act notice, etc.) — the resolved overlay is threaded into both
+    the single-pass and section-wise paths so overlay statutory anchors
+    and skeleton conventions travel with every generation call. Selector
+    failure returns no overlay; the base senior-counsel prompt still
+    produces a competent draft.
     """
+    # Niche selection — cheap, one Flash Lite call, no fallback cost.
+    # Run BEFORE the preflight so the selector's telemetry is captured
+    # even for oversized-upload rejections (helps analytics see niche
+    # distribution across attempted requests, not just successful ones).
+    niche_overlay = ""
+    try:
+        from agents.drafting_niche import pick_drafting_niche
+        from config.drafting_niches import get_niche_overlay
+        niche_key = await pick_drafting_niche(query, user_facts)
+        niche_overlay = get_niche_overlay(niche_key)
+        log.info(
+            "Drafting niche resolved",
+            niche_key=niche_key or "none",
+            overlay_chars=len(niche_overlay),
+        )
+    except Exception as e:
+        log.warning(
+            "Niche selection failed; proceeding with base prompt only",
+            error=short_err(e),
+        )
+
     # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens. English
     # text tokenises at ~4 chars/token so the raw-char ceiling is ~4M
     # chars, and 3.5M leaves room for system prompt + reference + context
@@ -2865,6 +3082,7 @@ async def _generate_draft(
             progress_emit=progress_emit,
             gathered_context=gathered_context,
             review_and_redraft_mode=review_and_redraft_mode,
+            niche_overlay=niche_overlay,
         )
 
     log.info(
@@ -2887,6 +3105,7 @@ async def _generate_draft(
         progress_emit=progress_emit,
         gathered_context=gathered_context,
         review_and_redraft_mode=review_and_redraft_mode,
+        niche_overlay=niche_overlay,
     )
 
     # --- Off-target language gate ------------------------------------------

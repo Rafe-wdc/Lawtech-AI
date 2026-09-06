@@ -1,0 +1,124 @@
+{
+  "base": "https://api.lawttorney.com/pyapi",
+  "prompt_1": "How to deal with a Criminal Case?",
+  "prompt_2": "When should I hire a lawyer?",
+  "thread_id": "c8ec3e63-b2d6-42da-8329-87f59f77d1f8",
+  "same_thread": true,
+  "turn_1": {
+    "turn": 1,
+    "prompt": "How to deal with a Criminal Case?",
+    "http_ok": true,
+    "http_status": 200,
+    "elapsed_s": 37.03,
+    "ttfb_ms": 193,
+    "thread_id": "c8ec3e63-b2d6-42da-8329-87f59f77d1f8",
+    "answer_len": 7945,
+    "answer_words": 1204,
+    "agents_planned": [
+      "Legal_Concepts"
+    ],
+    "progress_step_count": 12,
+    "unique_progress_steps": [
+      "classify",
+      "finalize",
+      "generate",
+      "history",
+      "language",
+      "research",
+      "rewrite",
+      "synthesize",
+      "validate"
+    ],
+    "event_type_counts": {
+      "thread_id": 1,
+      "progress": 12,
+      "status": 6,
+      "context": 1,
+      "agents_planned": 1,
+      "token": 386,
+      "response": 1,
+      "sources": 1,
+      "followup_suggestions": 1,
+      "done": 1
+    },
+    "raw_events_written": 411,
+    "errors": [],
+    "followup_suggestions": [
+      "What are my rights during investigation?",
+      "How does bail work in India?",
+      "What happens during a criminal trial?"
+    ],
+    "quality_score": null,
+    "done_event_keys": [
+      "type",
+      "agents_used",
+      "token_usage",
+      "thread_id",
+      "conversation_turn",
+      "query_rewritten",
+      "effective_query"
+    ]
+  },
+  "turn_2": {
+    "turn": 2,
+    "prompt": "When should I hire a lawyer?",
+    "http_ok": true,
+    "http_status": 200,
+    "elapsed_s": 107.25,
+    "ttfb_ms": 25,
+    "thread_id": "c8ec3e63-b2d6-42da-8329-87f59f77d1f8",
+    "answer_len": 98313,
+    "answer_words": 3024,
+    "agents_planned": [
+      "Legal_Concepts",
+      "Newacts"
+    ],
+    "progress_step_count": 19,
+    "unique_progress_steps": [
+      "classify",
+      "fallback",
+      "finalize",
+      "generate",
+      "history",
+      "language",
+      "parse",
+      "plan",
+      "relevance_check",
+      "research",
+      "rewrite",
+      "search",
+      "synthesize",
+      "validate"
+    ],
+    "event_type_counts": {
+      "thread_id": 1,
+      "progress": 19,
+      "status": 7,
+      "context": 1,
+      "agents_planned": 1,
+      "token": 4506,
+      "token_reset": 1,
+      "response": 1,
+      "sources": 1,
+      "followup_suggestions": 1,
+      "done": 1
+    },
+    "raw_events_written": 4540,
+    "errors": [],
+    "followup_suggestions": [
+      "What are BNSS rights?",
+      "When is legal aid provided?",
+      "What are lawyer's fees?"
+    ],
+    "quality_score": null,
+    "done_event_keys": [
+      "type",
+      "agents_used",
+      "token_usage",
+      "thread_id",
+      "conversation_turn",
+      "query_rewritten",
+      "effective_query"
+    ]
+  }
+}

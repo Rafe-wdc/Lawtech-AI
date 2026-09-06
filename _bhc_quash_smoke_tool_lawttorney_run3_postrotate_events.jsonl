@@ -1,0 +1,450 @@
+{"type": "thread_id", "data": "719761a6-f362-485c-ab59-9aa3070380b3"}
+{"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1788204892.8224857, "step": "validate"}
+{"type": "status", "agent": "guardrail_input", "message": "Validating query..."}
+{"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1788204892.825436, "step": "language"}
+{"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1788204893.387155, "step": "language", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1788204893.3882203, "step": "history"}
+{"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1788204893.4048228, "found": 0, "step": "history", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Rewriting follow-up query...", "ts": 1788204893.4073675, "step": "rewrite"}
+{"type": "status", "agent": "memory", "message": "Loading context..."}
+{"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}
+{"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1788204893.4096763, "step": "classify"}
+{"type": "progress", "agent": "orchestrator", "message": "Identified: Judgment, Legislation", "ts": 1788204895.1233885, "detail": "Judgment", "step": "classify", "substep": true}
+{"type": "progress", "agent": "orchestrator", "message": "Preparing search queries for 3 agents...", "ts": 1788204895.1236253, "found": 3, "step": "plan"}
+{"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}
+{"type": "agents_planned", "agents": ["Judgment", "Legislation", "SCI_Judgment"]}
+{"type": "progress", "agent": "judgment", "message": "Extracting case details from query...", "ts": 1788204895.9108188, "step": "metadata"}
+{"type": "progress", "agent": "judgment", "message": "Searching court judgments (2 strategies in parallel)...", "ts": 1788204895.9108303, "step": "search"}
+{"type": "progress", "agent": "legislation", "message": "Parsing query for section references...", "ts": 1788204895.9110374, "step": "parse"}
+{"type": "progress", "agent": "legislation", "message": "Detected sections: 482", "ts": 1788204895.9139192, "detail": "criminal procedure code section 482 quashing of criminal complaint", "step": "parse", "substep": true}
+{"type": "progress", "agent": "legislation", "message": "Searching legislation database...", "ts": 1788204895.913933, "step": "search"}
+{"type": "progress", "agent": "sci_judgment", "message": "Preparing Supreme Court search...", "ts": 1788204895.9141006, "step": "prepare"}
+{"type": "progress", "agent": "sci_judgment", "message": "Running multi-step research (ReAct agent)...", "ts": 1788204896.0188344, "step": "react"}
+{"type": "progress", "agent": "judgment", "message": "Found 5 judgments via case_type:quashing", "ts": 1788204896.8759718, "found": 5, "step": "search", "substep": true}
+{"type": "progress", "agent": "judgment", "message": "Top match: Prakash Piniomal Haswani vs State of Maharashtra", "ts": 1788204897.4113755, "found": 5, "step": "search", "substep": true}
+{"type": "progress", "agent": "judgment", "message": "Verifying retrieval relevance...", "ts": 1788204897.4113953, "step": "relevance_check"}
+{"type": "progress", "agent": "legislation", "message": "Found 5 matching provisions", "ts": 1788204897.5762153, "found": 5, "step": "search"}
+{"type": "progress", "agent": "legislation", "message": "Verifying retrieval relevance...", "ts": 1788204897.5762298, "step": "relevance_check"}
+{"type": "progress", "agent": "judgment", "message": "Generating response with citations...", "ts": 1788204898.902405, "step": "generate"}
+{"type": "progress", "agent": "legislation", "message": "Retrieved provisions don't match the query \u2014 searching the web...", "ts": 1788204898.996994, "step": "fallback", "substep": true}
+{"type": "token", "content": "The Bombay High Court"}
+{"type": "token", "content": " has the power to quash a criminal complaint under Article 226 of the Constitution of"}
+{"type": "token", "content": " India and Section 482 of the Code of Criminal Procedure, 1973. This power is not limited by the provisions of Section 320 of the Code of Criminal Procedure, which deals with the compounding of offences"}
+{"type": "token", "content": ". The High Court can exercise this inherent power even in cases of non-compoundable offences, especially when the parties have amicably settled their disputes.\n\nHowever, the High Court exercises this power with caution. It must be satisfied that qu"}
+{"type": "token", "content": "ashing the complaint is in the best interest of the parties, particularly the complainant and/or victim. The Court will consider factors such as whether the dispute is primarily personal, if the settlement was voluntary, and if the trial has progressed significantly. For"}
+{"type": "token", "content": " instance, in *Prakash Piniomal Haswani v. State of Maharashtra & Ors.*, the Bombay High Court dismissed a petition for quashing a criminal complaint, noting that the petitioner had unconditionally withdrawn an earlier application for dropping the proceedings"}
+{"type": "token", "content": " and the trial had reached its final stage. The Court also emphasized that an undertaking to consent to quashing does not automatically entitle the accused to have the complaint quashed, and the Court must be satisfied that it is in the interest of the complainant."}
+{"type": "token", "content": "\n\nI think this information will help you more to understand the case:\n\n### Key Legal Issues\n*   Whether the High Court can quash a criminal complaint under Article 226 of the Constitution of India and Section 48"}
+{"type": "token", "content": "2 of the Code of Criminal Procedure, 1973, even if the offence is non-compoundable under Section 320 of the Code.\n*   The circumstances under which the High Court should exercise its inherent powers"}
+{"type": "token", "content": " to quash a criminal complaint, particularly when a settlement has been reached between the parties.\n*   The effect of an undertaking given by a complainant to consent to the quashing of a criminal complaint.\n*   Whether the stage of the"}
+{"type": "token", "content": " trial (e.g., at the fag end) impacts the High Court's decision to quash a complaint.\n\n### Detailed Narrative\n\nIn *Prakash Piniomal Haswani v. State of Maharashtra & Ors.*, the petitioner"}
+{"type": "token", "content": " sought to quash a criminal complaint registered with Trombay police station for offences under Sections 232, 420, 406, 497, 498(A), 506(ii)"}
+{"type": "token", "content": " read with 34 of the Indian Penal Code. The petitioner and respondent No.2 (complainant) were married but divorced by a decree dated January 12, 2004. During an appeal related to the divorce,"}
+{"type": "token", "content": " consent terms were filed, agreeing that Rs. 10,00,000/- would be paid to the wife as full and final settlement, and she would give no objection for quashing the criminal complaint. The petitioner alleged"}
+{"type": "token", "content": " that the respondent-wife violated this undertaking by assisting the Public Prosecutor and giving evidence against him. The petitioner also cited reasons for his non-appearance in the trial court, including advocate's advice, spondylosis, and his brother's deat"}
+{"type": "token", "content": "h. The respondent-wife, appearing in person, contended that the petitioner had unconditionally withdrawn an application for dropping the proceedings based on the consent terms, causing her harassment. She claimed she was compelled to accept the settlement due to her financial circumstances as a"}
+{"type": "token", "content": " housewife. She further submitted that the case had proceeded for six years and was at its final stage, arguing against interference by the High Court.\n\nIn *Michelle M. Desai v. Shirin R. Majai & Anr.*, the petitioner"}
+{"type": "token", "content": ", the original complainant, lodged an FIR for offences under Sections 324, 341, 342, 506 (Part 2) and 114 of the Indian Penal Code against her paternal aunt."}
+{"type": "token", "content": " After the charge was framed, the parties settled two civil suits out of court by filing consent terms. An application to the Metropolitan Magistrate for compounding the offence was refused because Section 506 (Part 2) is not compoundable under Section 3"}
+{"type": "token", "content": "20 of the Code of Criminal Procedure. The petitioner then approached the High Court under Section 482 of the Code for quashing the criminal complaint.\n\nIn *Freddy Sunderdas Thomas v. The State of Maharashtra and others*, the petitioner"}
+{"type": "token", "content": ", original accused no. 1, had defaulted on loan instalments for two trucks financed by Respondent No. 2. An Arbitrator was appointed, and the dispute was settled, with the amount due being paid by Respondent No. 4,"}
+{"type": "token", "content": " who purchased the trucks. The complainant company filed an application before the Additional Chief Metropolitan Magistrate to withdraw the complaint, stating the matter was settled. However, the Magistrate dismissed the application and passed an order under Section 156(3) of the Code"}
+{"type": "token", "content": " of Criminal Procedure, leading to the registration of an FIR and the petitioner's arrest. The petitioner sought to quash this complaint.\n\nIn *Mrs. Dale Herman Nazareth & Ors. v. State of Maharashtra & Anr.*, the applicants"}
+{"type": "token", "content": " sought to quash a criminal complaint registered with Gorai Police Station for offences under Sections 465, 468, 471, 420 of the Indian Penal Code. The parties had amicably settled the dispute"}
+{"type": "token", "content": ", which was personal in nature.\n\nIn *Sagar Dnyandeo Patekar v. The Inspector General of Police and Ors.*, the original complainant filed a petition for quashing a complaint he had filed against Dattatray Ram"}
+{"type": "token", "content": "chandra Jadhav for offences under Sections 387 and 326 of the Indian Penal Code. The petitioner claimed the complaint was false and registered at the instance of the police, despite him never having filed it. The learned APP"}
+{"type": "token", "content": " contended that several complaints were pending against the accused, who appeared to be a history-sheeter, and there was no reason for the police to lodge a false case.\n\n### As per the Court\n\nThe Bombay High Court, in *"}
+{"type": "token", "content": "Prakash Piniomal Haswani v. State of Maharashtra & Ors.*, dismissed the writ petition seeking to quash the criminal complaint. The Court observed that the petitioner had unconditionally withdrawn an earlier application for dropping the proceedings based on consent"}
+{"type": "token", "content": " terms. Therefore, it was not open for him to approach the High Court under Article 226 of the Constitution of India read with Section 482 of the Code of Criminal Procedure, especially when the trial had commenced and reached its final stage"}
+{"type": "token", "content": ". The Court reiterated the well-settled position that once a trial commences, it should be concluded either in acquittal or conviction. The Court also held that a mere undertaking by a party in a former proceeding to consent to quashing does not automatically"}
+{"type": "token", "content": " entitle the accused to have the criminal complaint quashed. Relying on *B.S. Joshi v. State of Haryana, (2003) 4 SCC 675*, the Court emphasized that while the High Court has inherent"}
+{"type": "token", "content": " powers to quash a complaint, it must be satisfied that quashing is in the best interest of the wife, family, and children. The Court noted that an offence under Section 498(A) of the Indian Penal Code is"}
+{"type": "token", "content": " not merely a personal offence but is against society at large, and such complaints, especially those alleging harassment, cannot be taken lightly and quashed. The Court also considered the delay of six years in filing the petition after the undertaking was given, and"}
+{"type": "token", "content": " the fact that a contempt petition for breach of undertaking would be time-barred under Section 20 of the Contempt of Court Act, 1971.\n\nIn *Michelle M. Desai v. Shirin R. Majai & An"}
+{"type": "token", "content": "r.*, the Bombay High Court allowed the criminal writ petition and quashed the criminal complaint and FIR. The Court relied on the Supreme Court's decision in *B.S. Joshi v. State of Haryana, JT 200"}
+{"type": "token", "content": "3(3) SC 277*, which held that the High Court's inherent powers under Section 482 of the Code of Criminal Procedure are not limited by Section 320 of the Code. Since the parties"}
+{"type": "token", "content": " had amicably settled the matter and did not wish to proceed with the criminal litigation, the Court found it a fit case for quashing the complaint.\n\nIn *Freddy Sunderdas Thomas v. The State of Maharashtra and others*, the"}
+{"type": "token", "content": " Bombay High Court allowed the writ petition and quashed the criminal complaint and FIR. The Court found that the Magistrate clearly erred in passing an order under Section 156(3) of the Code of Criminal Procedure when the complainant had already applied for withdrawal"}
+{"type": "token", "content": ", stating that the matter was settled. The Court reiterated that while a Magistrate may not have the power to compound a non-compoundable offence under Section 320 of the Code, the High Court's powers under Section 4"}
+{"type": "token", "content": "82 are not curtailed. The Court, considering the peculiar facts and circumstances, deemed it appropriate to quash the complaint.\n\nIn *Mrs. Dale Herman Nazareth & Ors. v. State of Maharashtra & Anr.*, the Bombay"}
+{"type": "token", "content": " High Court allowed the application for quashing the criminal complaint. The Court noted that the parties had amicably settled the dispute, which was personal in nature. Relying on the judgments of the Apex Court in *Madan Mohan Abbot v."}
+{"type": "token", "content": " State of Punjab, AIR 2008 SC 1969* and *Jagdish Chanana v. State of Haryana, AIR 2008 SC 1968*, the Court found no impediment to qu"}
+{"type": "token", "content": "ashing the criminal complaint by exercising its inherent jurisdiction under Section 482 of the Code of Criminal Procedure.\n\nIn *Sagar Dnyandeo Patekar v. The Inspector General of Police and Ors.*, the Bombay Hig"}
+{"type": "token", "content": "h Court dismissed the writ petition. The Court observed that the accused appeared to be a history-sheeter with numerous pending cases. The Court was not inclined to quash the complaint, citing the possibility of the petitioner being pressurized by the accused to file"}
+{"type": "token", "content": " the petition. The Court found no reason for the police to file a false complaint through the petitioner or any other person and thus declined to exercise its jurisdiction under Article 226 of the Constitution of India or Section 482 of the"}
+{"type": "token", "content": " Code of Criminal Procedure.\n\n### Additional Observations\n\nThe judgments highlight that while the Bombay High Court possesses broad inherent powers to quash criminal complaints, the exercise of these powers is discretionary and depends heavily on the specific facts and circumstances of each case. The Court"}
+{"type": "token", "content": " considers the nature of the offence (personal vs. against society), the stage of the proceedings, the voluntariness of any settlement, and the potential for harassment or abuse of process. The Court also emphasizes that the power under Section 48"}
+{"type": "token", "content": "2 of the Code of Criminal Procedure is not limited by Section 320, allowing quashing even for non-compoundable offences in appropriate cases, particularly where a genuine settlement has been reached between the parties. However, this power is not to"}
+{"type": "token", "content": " be exercised as a matter of right, and the Court must be satisfied that it serves the ends of justice and is in the interest of the complainant/victim.\n\n### Step-by-Step Guide for Quashing a Criminal Complaint at Bombay"}
+{"type": "token", "content": " High Court:\n\n1.  **Identify the grounds for quashing:** Common grounds include:\n    *   Amicable settlement between parties (especially in matrimonial disputes or cases arising out of commercial transactions).\n    *   The allegations"}
+{"type": "token", "content": " in the FIR/complaint, even if taken at face value, do not constitute an offence.\n    *   The complaint is a clear abuse of the process of law.\n    *   The complaint is filed with malicious intent.\n    "}
+{"type": "token", "content": "*   Lack of evidence to support the charges.\n\n2.  **Gather necessary documents:**\n    *   Copy of the FIR/criminal complaint.\n    *   Charge-sheet (if filed).\n    *   All relevant court"}
+{"type": "token", "content": " orders from the trial court.\n    *   Proof of settlement (e.g., consent terms, settlement agreement, divorce decree, payment receipts).\n    *   Affidavits from the parties confirming the settlement and their desire to qu"}
+{"type": "token", "content": "ash the complaint.\n    *   Any other documents supporting the grounds for quashing.\n\n3.  **Draft the Criminal Writ Petition/Application under Section 482 Cr.P.C.:**\n    *   The petition"}
+{"type": "token", "content": " should be filed under Article 226 of the Constitution of India (for writ petitions) or Section 482 of the Code of Criminal Procedure, 1973 (for inherent powers).\n    *   Clearly state"}
+{"type": "token", "content": " the facts of the case, the registration of the FIR/complaint, and the current status of the proceedings.\n    *   Detail the grounds for quashing, supported by facts and legal arguments.\n    *   Specifically mention any"}
+{"type": "token", "content": " settlement reached between the parties and attach the consent terms/settlement agreement.\n    *   Include a prayer for quashing the FIR/complaint and any consequential proceedings.\n\n4.  **File the Petition/Application:**\n    "}
+{"type": "token", "content": "*   File the petition along with supporting affidavits and documents in the Criminal Appellate Jurisdiction of the Bombay High Court.\n    *   Ensure proper court fees are paid.\n\n5.  **Appearance and Arguments:**\n    *   The petitioner'"}
+{"type": "token", "content": "s counsel will present arguments before the High Court.\n    *   If a settlement has been reached, the complainant (Respondent No. 2) may be required to appear in person or through counsel to confirm the settlement and their no-objection to"}
+{"type": "progress", "agent": "sci_judgment", "message": "Completed 6 search steps", "ts": 1788204913.4402175, "found": 6, "step": "react", "substep": true}
+{"type": "progress", "agent": "sci_judgment", "message": "Found 5 Supreme Court judgments", "ts": 1788204913.4416137, "found": 5, "step": "results"}
+{"type": "progress", "agent": "sci_judgment", "message": "Generating response...", "ts": 1788204913.4416199, "step": "generate"}
+{"type": "status", "agent": "sci_judgment", "message": "Searching Supreme Court judgments..."}
+{"type": "token", "content": " quashing.\n    *   The Public Prosecutor (for the State) will also be heard.\n\n6.  **Court's Consideration:**\n    *   The High Court will examine the facts, the nature of the offence,"}
+{"type": "token", "content": " the genuineness of the settlement, and whether quashing would serve the ends of justice.\n    *   The Court will refer to precedents like *B.S. Joshi v. State of Haryana* to determine if the case is fit"}
+{"type": "token", "content": " for exercising its inherent powers.\n    *   The Court will also consider the stage of the trial; if the trial is at an advanced stage, the Court may be less inclined to quash, as seen in *Prakash Piniomal Haswani"}
+{"type": "token", "content": "*.\n\n7.  **Order of the Court:**\n    *   If the Court is satisfied, it will pass an order quashing the criminal complaint and any consequential proceedings.\n    *   If the Court is not satisfied, it"}
+{"type": "token", "content": " will dismiss the petition, and the criminal proceedings will continue.\n\n8.  **Follow-up:**\n    *   Obtain a certified copy of the High Court's order.\n    *   Submit the order to the trial court and"}
+{"type": "token", "content": " the police station concerned to ensure compliance and closure of the criminal case."}
+{"type": "status", "agent": "judgment", "message": "Searching court judgments..."}
+{"type": "token", "content": "The inherent powers "}
+{"type": "token", "content": "of the High Court to"}
+{"type": "token", "content": " quash a criminal co"}
+{"type": "token", "content": "mplaint are primaril"}
+{"type": "token", "content": "y exercised under Se"}
+{"type": "token", "content": "ction 482 of the Cod"}
+{"type": "token", "content": "e of Criminal Proced"}
+{"type": "token", "content": "ure, 1973. This prov"}
+{"type": "token", "content": "ision allows the Hig"}
+{"type": "token", "content": "h Court to make suc"}
+{"type": "token", "content": "h orders as may be ne"}
+{"type": "token", "content": "cessary to give effe"}
+{"type": "token", "content": "ct to any order unde"}
+{"type": "token", "content": "r the said Code, or "}
+{"type": "token", "content": "to prevent abuse of "}
+{"type": "token", "content": "the process of any C"}
+{"type": "token", "content": "ourt, or otherwise t"}
+{"type": "token", "content": "o secure the ends of"}
+{"type": "token", "content": " justice. Additional"}
+{"type": "token", "content": "ly, High Courts can "}
+{"type": "token", "content": "exercise this power "}
+{"type": "token", "content": "under Articles 226 a"}
+{"type": "token", "content": "nd 227 of the Consti"}
+{"type": "token", "content": "tution of India.\n\nIt"}
+{"type": "token", "content": " is important to not"}
+{"type": "token", "content": "e that with the enac"}
+{"type": "token", "content": "tment of the Bharati"}
+{"type": "token", "content": "ya Nagarik Suraksha "}
+{"type": "token", "content": "Sanhita (BNSS), 2023"}
+{"type": "token", "content": ", the Code of Crimin"}
+{"type": "token", "content": "al Procedure, 1973, "}
+{"type": "token", "content": "is replaced. Section"}
+{"type": "token", "content": " 482 of the Bharatiy"}
+{"type": "token", "content": "a Nagarik Suraksha S"}
+{"type": "token", "content": "anhita, 2023, corres"}
+{"type": "token", "content": "ponds to Section 438"}
+{"type": "token", "content": " of the Code of Crim"}
+{"type": "token", "content": "inal Procedure, 1973"}
+{"type": "token", "content": ", and deals with ant"}
+{"type": "token", "content": "icipatory bail. Whil"}
+{"type": "token", "content": "e the specific numer"}
+{"type": "token", "content": "ical provision for i"}
+{"type": "token", "content": "nherent powers to qu"}
+{"type": "token", "content": "ash criminal complai"}
+{"type": "token", "content": "nts may differ in t"}
+{"type": "token", "content": "he new Sanhita, the H"}
+{"type": "token", "content": "igh Courts' constitu"}
+{"type": "token", "content": "tional powers under "}
+{"type": "token", "content": "Articles 226 and 227"}
+{"type": "token", "content": " of the Constitution"}
+{"type": "token", "content": " of India to quash s"}
+{"type": "token", "content": "uch proceedings rema"}
+{"type": "token", "content": "in unaffected.\n\n### "}
+{"type": "token", "content": "Scope of High Court'"}
+{"type": "token", "content": "s Power\n\nThe power u"}
+{"type": "token", "content": "nder Section 482 of "}
+{"type": "token", "content": "the Code of Criminal"}
+{"type": "token", "content": " Procedure, 1973, is"}
+{"type": "token", "content": " discretionary and m"}
+{"type": "token", "content": "ust be exercised spa"}
+{"type": "token", "content": "ringly and with circ"}
+{"type": "token", "content": "umspection. The Hig"}
+{"type": "token", "content": "h Court does not emba"}
+{"type": "token", "content": "rk on an inquiry to "}
+{"type": "token", "content": "determine if the all"}
+{"type": "token", "content": "egations in the comp"}
+{"type": "token", "content": "laint are likely to "}
+{"type": "token", "content": "be established by ev"}
+{"type": "token", "content": "idence or conduct a "}
+{"type": "token", "content": "mini-trial at this s"}
+{"type": "token", "content": "tage. The primary ob"}
+{"type": "token", "content": "jective is to preven"}
+{"type": "token", "content": "t abuse of the court"}
+{"type": "token", "content": "'s process and to se"}
+{"type": "token", "content": "cure the ends of jus"}
+{"type": "token", "content": "tice.\n\n### Grounds f"}
+{"type": "token", "content": "or Quashing a Crimin"}
+{"type": "token", "content": "al Complaint\n\nThe Su"}
+{"type": "token", "content": "preme Court in *Stat"}
+{"type": "token", "content": "e of Haryana v. Bhaj"}
+{"type": "token", "content": "an Lal, AIR 1992 SC "}
+{"type": "token", "content": "604*, laid down illu"}
+{"type": "token", "content": "strative categories "}
+{"type": "token", "content": "where the High Court"}
+{"type": "token", "content": " may quash a crimina"}
+{"type": "token", "content": "l complaint or First"}
+{"type": "token", "content": " Information Report "}
+{"type": "token", "content": "(FIR). These grounds"}
+{"type": "token", "content": " include:\n\n*   Where"}
+{"type": "token", "content": " the allegations in "}
+{"type": "token", "content": "the FIR or complaint"}
+{"type": "token", "content": ", even if taken at t"}
+{"type": "token", "content": "heir face value and "}
+{"type": "token", "content": "accepted in their en"}
+{"type": "token", "content": "tirety, do not prima"}
+{"type": "token", "content": " facie constitute an"}
+{"type": "token", "content": "y offence or make ou"}
+{"type": "token", "content": "t a case against the"}
+{"type": "token", "content": " accused.\n*   Where "}
+{"type": "token", "content": "the allegations in t"}
+{"type": "token", "content": "he FIR and other mat"}
+{"type": "token", "content": "erials, if any, acco"}
+{"type": "token", "content": "mpanying the FIR do "}
+{"type": "token", "content": "not disclose a cogni"}
+{"type": "token", "content": "zable offence, justi"}
+{"type": "token", "content": "fying an investigati"}
+{"type": "token", "content": "on by police officer"}
+{"type": "token", "content": "s under Section 156("}
+{"type": "token", "content": "1) of the Code of Cr"}
+{"type": "token", "content": "iminal Procedure, 19"}
+{"type": "token", "content": "73 (corresponding to"}
+{"type": "token", "content": " Section 173 of the "}
+{"type": "token", "content": "Bharatiya Nagarik Su"}
+{"type": "token", "content": "raksha Sanhita, 2023"}
+{"type": "token", "content": "), except under an o"}
+{"type": "token", "content": "rder of a Magistrate"}
+{"type": "token", "content": " within the purview "}
+{"type": "token", "content": "of Section 155(2) of"}
+{"type": "token", "content": " the Code of Crimina"}
+{"type": "token", "content": "l Procedure, 1973 (c"}
+{"type": "token", "content": "orresponding to Sect"}
+{"type": "token", "content": "ion 172(2) of the B"}
+{"type": "token", "content": "haratiya Nagarik Sura"}
+{"type": "token", "content": "ksha Sanhita, 2023)."}
+{"type": "token", "content": "\n*   Where the alleg"}
+{"type": "token", "content": "ations made in the F"}
+{"type": "token", "content": "IR and the evidence "}
+{"type": "token", "content": "collected in support"}
+{"type": "token", "content": " of the same do not "}
+{"type": "token", "content": "disclose the commiss"}
+{"type": "token", "content": "ion of any offence a"}
+{"type": "token", "content": "nd make out a case a"}
+{"type": "token", "content": "gainst the accused.\n"}
+{"type": "token", "content": "*   Where the allega"}
+{"type": "token", "content": "tions in the FIR are"}
+{"type": "token", "content": " so absurd and inher"}
+{"type": "token", "content": "ently improbable on "}
+{"type": "token", "content": "the basis of which n"}
+{"type": "token", "content": "o prudent person can"}
+{"type": "token", "content": " ever reach a just c"}
+{"type": "token", "content": "onclusion that there"}
+{"type": "token", "content": " is sufficient groun"}
+{"type": "token", "content": "d for proceeding aga"}
+{"type": "token", "content": "inst the accused.\n* "}
+{"type": "token", "content": "  Where there is an "}
+{"type": "token", "content": "express legal bar en"}
+{"type": "token", "content": "grafted in any of t"}
+{"type": "token", "content": "he provisions of the "}
+{"type": "token", "content": "Code of Criminal Pro"}
+{"type": "token", "content": "cedure, 1973, or the"}
+{"type": "token", "content": " concerned Act, unde"}
+{"type": "token", "content": "r which the criminal"}
+{"type": "token", "content": " proceeding is insti"}
+{"type": "token", "content": "tuted, to the instit"}
+{"type": "token", "content": "ution and continuanc"}
+{"type": "token", "content": "e of the proceedings"}
+{"type": "token", "content": ".\n*   Where a crimin"}
+{"type": "token", "content": "al proceeding is man"}
+{"type": "token", "content": "ifestly attended wit"}
+{"type": "token", "content": "h mala fide and/or w"}
+{"type": "token", "content": "here the proceeding "}
+{"type": "token", "content": "is maliciously insti"}
+{"type": "token", "content": "tuted with an ulteri"}
+{"type": "token", "content": "or motive for wreaki"}
+{"type": "token", "content": "ng vengeance on the "}
+{"type": "token", "content": "accused and with a v"}
+{"type": "token", "content": "iew to spite him due"}
+{"type": "token", "content": " to private and pers"}
+{"type": "token", "content": "onal grudge.\n*   Whe"}
+{"type": "token", "content": "re there is a compro"}
+{"type": "token", "content": "mise between the par"}
+{"type": "token", "content": "ties, especially in "}
+{"type": "token", "content": "cases arising out of"}
+{"type": "token", "content": " matrimonial dispute"}
+{"type": "token", "content": "s, family disputes, "}
+{"type": "token", "content": "or other offences t"}
+{"type": "token", "content": "hat are predominantly"}
+{"type": "token", "content": " civil in nature, an"}
+{"type": "token", "content": "d the court is satis"}
+{"type": "token", "content": "fied that the settle"}
+{"type": "token", "content": "ment is genuine and "}
+{"type": "token", "content": "continuing the proce"}
+{"type": "token", "content": "edings would be an a"}
+{"type": "token", "content": "buse of the process "}
+{"type": "token", "content": "of law. However, thi"}
+{"type": "token", "content": "s power is exercised"}
+{"type": "token", "content": " cautiously in serio"}
+{"type": "token", "content": "us offences that hav"}
+{"type": "token", "content": "e a larger impact on"}
+{"type": "token", "content": " society.\n\n### Quas"}
+{"type": "token", "content": "hing of Criminal Comp"}
+{"type": "token", "content": "laint at Bombay Hig"}
+{"type": "token", "content": "h Court: Step-by-Step"}
+{"type": "token", "content": " Guide\n\nThe procedur"}
+{"type": "token", "content": "e for filing a petit"}
+{"type": "token", "content": "ion for quashing a c"}
+{"type": "token", "content": "riminal complaint be"}
+{"type": "token", "content": "fore the Bombay Hig"}
+{"type": "token", "content": "h Court under Section"}
+{"type": "token", "content": " 482 of the Code of "}
+{"type": "token", "content": "Criminal Procedure, "}
+{"type": "token", "content": "1973 (or under Artic"}
+{"type": "token", "content": "les 226/227 of the C"}
+{"type": "token", "content": "onstitution of India"}
+{"type": "token", "content": ") generally involves"}
+{"type": "token", "content": " the following steps"}
+{"type": "token", "content": ":\n\n1.  **Consultatio"}
+{"type": "token", "content": "n with a Lawyer:** I"}
+{"type": "token", "content": "t is essential to co"}
+{"type": "token", "content": "nsult a qualified an"}
+{"type": "token", "content": "d experienced crimin"}
+{"type": "token", "content": "al lawyer who can as"}
+{"type": "token", "content": "sess the merits of t"}
+{"type": "token", "content": "he case, identify ap"}
+{"type": "token", "content": "propriate grounds fo"}
+{"type": "token", "content": "r quashing, and prov"}
+{"type": "token", "content": "ide legal advice.\n2."}
+{"type": "token", "content": "  **Gathering Docume"}
+{"type": "token", "content": "nts:** Obtain all re"}
+{"type": "token", "content": "levant documents, in"}
+{"type": "token", "content": "cluding a copy of t"}
+{"type": "token", "content": "he FIR or the crimina"}
+{"type": "token", "content": "l complaint, the cha"}
+{"type": "token", "content": "rge sheet (if filed)"}
+{"type": "token", "content": ", and any other supp"}
+{"type": "token", "content": "orting evidence that"}
+{"type": "token", "content": " demonstrates the gr"}
+{"type": "token", "content": "ounds for quashing.\n"}
+{"type": "token", "content": "3.  **Drafting the P"}
+{"type": "token", "content": "etition:** The lawye"}
+{"type": "token", "content": "r will draft a detai"}
+{"type": "token", "content": "led quashing petitio"}
+{"type": "token", "content": "n (often referred to"}
+{"type": "token", "content": " as a Criminal Writ "}
+{"type": "token", "content": "Petition or Criminal"}
+{"type": "token", "content": " Application) addres"}
+{"type": "token", "content": "sed to the Bombay Hi"}
+{"type": "token", "content": "gh Court. The petiti"}
+{"type": "token", "content": "on will clearly stat"}
+{"type": "token", "content": "e the facts of the c"}
+{"type": "token", "content": "ase, cite the releva"}
+{"type": "token", "content": "nt legal provisions "}
+{"type": "token", "content": "(Section 482 CrPC an"}
+{"type": "token", "content": "d/or Articles 226/22"}
+{"type": "token", "content": "7 of the Constitutio"}
+{"type": "token", "content": "n), and articulate t"}
+{"type": "token", "content": "he specific grounds "}
+{"type": "token", "content": "on which the quashin"}
+{"type": "token", "content": "g is sought. The per"}
+{"type": "token", "content": "son named as an accu"}
+{"type": "token", "content": "sed in the FIR is t"}
+{"type": "token", "content": "he petitioner, and t"}
+{"type": "token", "content": "he State and the orig"}
+{"type": "token", "content": "inal complainant are"}
+{"type": "token", "content": " typically made resp"}
+{"type": "token", "content": "ondents.\n4.  **Prepa"}
+{"type": "token", "content": "ration of Affidavit:"}
+{"type": "token", "content": "** An affidavit supp"}
+{"type": "token", "content": "orting the quashing "}
+{"type": "token", "content": "petition must be pre"}
+{"type": "token", "content": "pared and sworn by t"}
+{"type": "token", "content": "he petitioner. This "}
+{"type": "token", "content": "affidavit typically "}
+{"type": "token", "content": "contains facts relat"}
+{"type": "token", "content": "ed to the case and r"}
+{"type": "token", "content": "eiterates the legal "}
+{"type": "token", "content": "grounds for seeking "}
+{"type": "token", "content": "quashing.\n5.  **Anne"}
+{"type": "token", "content": "xures:** All relevan"}
+{"type": "token", "content": "t documents, such as"}
+{"type": "token", "content": " the FIR, charge she"}
+{"type": "token", "content": "et, and any other ev"}
+{"type": "token", "content": "idence, are annexed "}
+{"type": "token", "content": "to the petition.\n6. "}
+{"type": "token", "content": " **Filing the Petiti"}
+{"type": "token", "content": "on:** The petition, "}
+{"type": "token", "content": "along with the affid"}
+{"type": "token", "content": "avit and annexures, "}
+{"type": "token", "content": "is filed before the "}
+{"type": "token", "content": "appropriate bench of"}
+{"type": "token", "content": " the Bombay High Cou"}
+{"type": "token", "content": "rt within whose terr"}
+{"type": "token", "content": "itorial jurisdiction"}
+{"type": "token", "content": " the FIR was registe"}
+{"type": "token", "content": "red.\n7.  **Hearing a"}
+{"type": "token", "content": "nd Arguments:** Duri"}
+{"type": "token", "content": "ng the hearing, the "}
+{"type": "token", "content": "High Court will hear"}
+{"type": "token", "content": " arguments from the "}
+{"type": "token", "content": "petitioner's counsel"}
+{"type": "token", "content": ", the public prosecu"}
+{"type": "token", "content": "tor representing the"}
+{"type": "token", "content": " State, and the coun"}
+{"type": "token", "content": "sel for the complain"}
+{"type": "token", "content": "ant (if they choose "}
+{"type": "token", "content": "to appear). The cour"}
+{"type": "token", "content": "t will consider the "}
+{"type": "token", "content": "allegations in the F"}
+{"type": "token", "content": "IR and the material "}
+{"type": "token", "content": "on record to determi"}
+{"type": "token", "content": "ne if a prima facie "}
+{"type": "token", "content": "case is made out or "}
+{"type": "token", "content": "if the proceedings c"}
+{"type": "token", "content": "onstitute an abuse o"}
+{"type": "token", "content": "f process.\n8.  **Int"}
+{"type": "token", "content": "erim Relief (Optiona"}
+{"type": "token", "content": "l):** In some cases,"}
+{"type": "token", "content": " the High Court may "}
+{"type": "token", "content": "grant interim relief"}
+{"type": "token", "content": ", such as a stay on "}
+{"type": "token", "content": "further proceedings "}
+{"type": "token", "content": "or protection from a"}
+{"type": "token", "content": "rrest, pending the f"}
+{"type": "token", "content": "inal disposal of the"}
+{"type": "token", "content": " quashing petition.\n"}
+{"type": "token", "content": "9.  **Court's Decisi"}
+{"type": "token", "content": "on:** After hearing "}
+{"type": "token", "content": "all parties and cons"}
+{"type": "token", "content": "idering the material"}
+{"type": "token", "content": ", the High Court wil"}
+{"type": "token", "content": "l pass an order. If "}
+{"type": "token", "content": "satisfied that the g"}
+{"type": "token", "content": "rounds for quashing "}
+{"type": "token", "content": "are met, it may quas"}
+{"type": "token", "content": "h the FIR, the crimi"}
+{"type": "token", "content": "nal complaint, or t"}
+{"type": "token", "content": "he entire criminal pr"}
+{"type": "token", "content": "oceedings. The Bomba"}
+{"type": "token", "content": "y High Court has exe"}
+{"type": "token", "content": "rcised this power, e"}
+{"type": "token", "content": "ven post-conviction,"}
+{"type": "token", "content": " when an appeal is p"}
+{"type": "token", "content": "ending and a genuine"}
+{"type": "token", "content": " settlement has been"}
+{"type": "token", "content": " reached, particular"}
+{"type": "token", "content": "ly in matrimonial di"}
+{"type": "token", "content": "sputes. However, it "}
+{"type": "token", "content": "has also refused to "}
+{"type": "token", "content": "quash serious offenc"}
+{"type": "token", "content": "es with societal imp"}
+{"type": "token", "content": "lications despite se"}
+{"type": "token", "content": "ttlement."}
+{"type": "status", "agent": "legislation", "message": "Searching legislation..."}
+{"type": "progress", "agent": "orchestrator", "message": "Merging results from 3 agents...", "ts": 1788204919.7067914, "found": 3, "step": "synthesize"}
+{"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}
+{"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1788204919.7108507, "step": "finalize"}
+{"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}
+{"type": "response", "content": "The Bombay High Court has the power to quash a criminal complaint under Article 226 of the Constitution of India and Section 482 of the Code of Criminal Procedure, 1973. This power is not limited by the provisions of Section 320 of the Code of Criminal Procedure, which deals with the compounding of offences. The High Court can exercise this inherent power even in cases of non-compoundable offences, especially when the parties have amicably settled their disputes.\n\nHowever, the High Court exercises this power with caution. It must be satisfied that quashing the complaint is in the\nbest interest of the parties, particularly the complainant and/or victim. The Court will consider factors such as\nwhether the dispute is primarily personal, if the settlement was voluntary, and if the trial has progressed\nsignificantly. For instance, in *Prakash Piniomal Haswani v. State of Maharashtra & Ors.*, the Bombay High Court\ndismissed a petition for quashing a criminal complaint, noting that the petitioner had unconditionally withdrawn an\nearlier application for dropping the proceedings and the trial had reached its final stage. The Court also emphasized\nthat an undertaking to consent to quashing does not automatically entitle the accused to have the complaint quashed, and\nthe Court must be satisfied that it is in the interest of the complainant.\n\nI think this information will help you more to understand the case:\n\n### Key Legal Issues\n- Whether the High Court can quash a criminal complaint under Article 226 of the Constitution of India and Section 482 of the Code of Criminal Procedure, 1973, even if the offence is non-compoundable under Section 320 of the Code.\n- The circumstances under which the High Court should exercise its inherent powers to quash a criminal complaint, particularly when a settlement has been reached between the parties.\n- The effect of an undertaking given by a complainant to consent to the quashing of a criminal complaint.\n- Whether the stage of the trial (e.g., at the fag end) impacts the High Court's decision to quash a complaint.\n\n### Detailed Narrative\n\nIn *Prakash Piniomal Haswani v. State of Maharashtra & Ors.*, the petitioner sought to quash a criminal complaint\nregistered with Trombay police station for offences under Sections 232, 420, 406, 497, 498(A), 506(ii) read with 34 of\nthe Indian Penal Code. The petitioner and respondent No.2 (complainant) were married but divorced by a decree dated\nJanuary 12, 2004. During an appeal related to the divorce, consent terms were filed, agreeing that Rs. 10,00,000/- would\nbe paid to the wife as full and final settlement, and she would give no objection for quashing the criminal complaint.\nThe petitioner alleged that the respondent-wife violated this undertaking by assisting the Public Prosecutor and giving\nevidence against him. The petitioner also cited reasons for his non-appearance in the trial court, including advocate's\nadvice, spondylosis, and his brother's death. The respondent-wife, appearing in person, contended that the petitioner\nhad unconditionally withdrawn an application for dropping the proceedings based on the consent terms, causing her\nharassment. She claimed she was compelled to accept the settlement due to her financial circumstances as a housewife.\nShe further submitted that the case had proceeded for six years and was at its final stage, arguing against interference\nby the High Court.\n\nIn *Michelle M. Desai v. Shirin R. Majai & Anr.*, the petitioner, the original complainant, lodged an FIR for offences\nunder Sections 324, 341, 342, 506 (Part 2) and 114 of the Indian Penal Code against her paternal aunt. After the charge\nwas framed, the parties settled two civil suits out of court by filing consent terms. An application to the Metropolitan\nMagistrate for compounding the offence was refused because Section 506 (Part 2) is not compoundable under Section 320 of\nthe Code of Criminal Procedure. The petitioner then approached the High Court under Section 482 of the Code for quashing\nthe criminal complaint.\n\nIn *Freddy Sunderdas Thomas v. The State of Maharashtra and others*, the petitioner, original accused no. 1, had\ndefaulted on loan instalments for two trucks financed by Respondent No. 2. An Arbitrator was appointed, and the dispute\nwas settled, with the amount due being paid by Respondent No. 4, who purchased the trucks. The complainant company filed\nan application before the Additional Chief Metropolitan Magistrate to withdraw the complaint, stating the matter was\nsettled. However, the Magistrate dismissed the application and passed an order under Section 156(3) of the Code of\nCriminal Procedure, leading to the registration of an FIR and the petitioner's arrest. The petitioner sought to quash\nthis complaint.\n\nIn *Mrs. Dale Herman Nazareth & Ors. v. State of Maharashtra & Anr.*, the applicants sought to quash a criminal complaint registered with Gorai Police Station for offences under Sections 465, 468, 471, 420 of the Indian Penal Code. The parties had amicably settled the dispute, which was personal in nature.\n\nIn *Sagar Dnyandeo Patekar v. The Inspector General of Police and Ors.*, the original complainant filed a petition for\nquashing a complaint he had filed against Dattatray Ramchandra Jadhav for offences under Sections 387 and 326 of the\nIndian Penal Code. The petitioner claimed the complaint was false and registered at the instance of the police, despite\nhim never having filed it. The learned APP contended that several complaints were pending against the accused, who\nappeared to be a history-sheeter, and there was no reason for the police to lodge a false case.\n\n### As per the Court\n\nThe Bombay High Court, in *Prakash Piniomal Haswani v. State of Maharashtra & Ors.*, dismissed the writ petition seeking\nto quash the criminal complaint. The Court observed that the petitioner had unconditionally withdrawn an earlier\napplication for dropping the proceedings based on consent terms. Therefore, it was not open for him to approach the High\nCourt under Article 226 of the Constitution of India read with Section 482 of the Code of Criminal Procedure, especially\nwhen the trial had commenced and reached its final stage. The Court reiterated the well-settled position that once a\ntrial commences, it should be concluded either in acquittal or conviction. The Court also held that a mere undertaking\nby a party in a former proceeding to consent to quashing does not automatically entitle the accused to have the criminal\ncomplaint quashed. Relying on *B.S. Joshi v. State of Haryana, (2003) 4 SCC 675*, the Court emphasized that while the\nHigh Court has inherent powers to quash a complaint, it must be satisfied that quashing is in the best interest of the\nwife, family, and children. The Court noted that an offence under Section 498(A) of the Indian Penal Code is not merely\na personal offence but is against society at large, and such complaints, especially those alleging harassment, cannot be\ntaken lightly and quashed. The Court also considered the delay of six years in filing the petition after the undertaking\nwas given, and the fact that a contempt petition for breach of undertaking would be time-barred under Section 20 of the\nContempt of Court Act, 1971.\n\nIn *Michelle M. Desai v. Shirin R. Majai & Anr.*, the Bombay High Court allowed the criminal writ petition and quashed\nthe criminal complaint and FIR. The Court relied on the Supreme Court's decision in *B.S. Joshi v. State of Haryana, JT\n2003(3) SC 277*, which held that the High Court's inherent powers under Section 482 of the Code of Criminal Procedure\nare not limited by Section 320 of the Code. Since the parties had amicably settled the matter and did not wish to\nproceed with the criminal litigation, the Court found it a fit case for quashing the complaint.\n\nIn *Freddy Sunderdas Thomas v. The State of Maharashtra and others*, the Bombay High Court allowed the writ petition and\nquashed the criminal complaint and FIR. The Court found that the Magistrate clearly erred in passing an order under\nSection 156(3) of the Code of Criminal Procedure when the complainant had already applied for withdrawal, stating that\nthe matter was settled. The Court reiterated that while a Magistrate may not have the power to compound a\nnon-compoundable offence under Section 320 of the Code, the High Court's powers under Section 482 are not curtailed. The\nCourt, considering the peculiar facts and circumstances, deemed it appropriate to quash the complaint.\n\nIn *Mrs. Dale Herman Nazareth & Ors. v. State of Maharashtra & Anr.*, the Bombay High Court allowed the application for\nquashing the criminal complaint. The Court noted that the parties had amicably settled the dispute, which was personal\nin nature. Relying on the judgments of the Apex Court in *Madan Mohan Abbot v. State of Punjab, AIR 2008 SC 1969* and\n*Jagdish Chanana v. State of Haryana, AIR 2008 SC 1968*, the Court found no impediment to quashing the criminal\ncomplaint by exercising its inherent jurisdiction under Section 482 of the Code of Criminal Procedure.\n\nIn *Sagar Dnyandeo Patekar v. The Inspector General of Police and Ors.*, the Bombay High Court dismissed the writ\npetition. The Court observed that the accused appeared to be a history-sheeter with numerous pending cases. The Court\nwas not inclined to quash the complaint, citing the possibility of the petitioner being pressurized by the accused to\nfile the petition. The Court found no reason for the police to file a false complaint through the petitioner or any\nother person and thus declined to exercise its jurisdiction under Article 226 of the Constitution of India or Section\n482 of the Code of Criminal Procedure.\n\n### Additional Observations\n\nThe judgments highlight that while the Bombay High Court possesses broad inherent powers to quash criminal complaints,\nthe exercise of these powers is discretionary and depends heavily on the specific facts and circumstances of each case.\nThe Court considers the nature of the offence (personal vs. against society), the stage of the proceedings, the\nvoluntariness of any settlement, and the potential for harassment or abuse of process. The Court also emphasizes that\nthe power under Section 482 of the Code of Criminal Procedure is not limited by Section 320, allowing quashing even for\nnon-compoundable offences in appropriate cases, particularly where a genuine settlement has been reached between the\nparties. However, this power is not to be exercised as a matter of right, and the Court must be satisfied that it serves\nthe ends of justice and is in the interest of the complainant/victim.\n\n### Step-by-Step Guide for Quashing a Criminal Complaint at Bombay High Court:\n\n1. **Identify the grounds for quashing:** Common grounds include:\n - Amicable settlement between parties (especially in matrimonial disputes or cases arising out of commercial transactions).\n - The allegations in the FIR/complaint, even if taken at face value, do not constitute an offence.\n - The complaint is a clear abuse of the process of law.\n - The complaint is filed with malicious intent.\n - Lack of evidence to support the charges.\n\n2. **Gather necessary documents:**\n - Copy of the FIR/criminal complaint.\n - Charge-sheet (if filed).\n - All relevant court orders from the trial court.\n - Proof of settlement (e.g., consent terms, settlement agreement, divorce decree, payment receipts).\n - Affidavits from the parties confirming the settlement and their desire to quash the complaint.\n - Any other documents supporting the grounds for quashing.\n\n3. **Draft the Criminal Writ Petition/Application under Section 482 Cr.P.C.:**\n - The petition should be filed under Article 226 of the Constitution of India (for writ petitions) or Section 482 of the Code of Criminal Procedure, 1973 (for inherent powers).\n - Clearly state the facts of the case, the registration of the FIR/complaint, and the current status of the proceedings.\n - Detail the grounds for quashing, supported by facts and legal arguments.\n - Specifically mention any settlement reached between the parties and attach the consent terms/settlement agreement.\n - Include a prayer for quashing the FIR/complaint and any consequential proceedings.\n\n4. **File the Petition/Application:**\n - File the petition along with supporting affidavits and documents in the Criminal Appellate Jurisdiction of the Bombay High Court.\n - Ensure proper court fees are paid.\n\n5. **Appearance and Arguments:**\n - The petitioner's counsel will present arguments before the High Court.\n - If a settlement has been reached, the complainant (Respondent No. 2) may be required to appear in person or through counsel to confirm the settlement and their no-objection to quashing.\n - The Public Prosecutor (for the State) will also be heard.\n\n6. **Court's Consideration:**\n - The High Court will examine the facts, the nature of the offence, the genuineness of the settlement, and whether quashing would serve the ends of justice.\n - The Court will refer to precedents like *B.S. Joshi v. State of Haryana* to determine if the case is fit for exercising its inherent powers.\n - The Court will also consider the stage of the trial; if the trial is at an advanced stage, the Court may be less inclined to quash, as seen in *Prakash Piniomal Haswani*.\n\n7. **Order of the Court:**\n - If the Court is satisfied, it will pass an order quashing the criminal complaint and any consequential proceedings.\n - If the Court is not satisfied, it will dismiss the petition, and the criminal proceedings will continue.\n\n8. **Follow-up:**\n - Obtain a certified copy of the High Court's order.\n - Submit the order to the trial court and the police station concerned to ensure compliance and closure of the criminal case.\n\n---\n\n## Statutory Provisions Referenced\n\nThe inherent powers of the High Court to quash a criminal complaint are primarily exercised under Section 482 of the Code of Criminal Procedure, 1973. This provision allows the High Court to make such orders as may be necessary to give effect to any order under the said Code, or to prevent abuse of the process of any Court, or otherwise to secure the ends of justice. Additionally, High Courts can exercise this power under Articles 226 and 227 of the Constitution of India.\n\nIt is important to note that with the enactment of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, the Code of\nCriminal Procedure, 1973, is replaced. Section 482 of the Bharatiya Nagarik Suraksha Sanhita, 2023, corresponds to\nSection 438 of the Code of Criminal Procedure, 1973, and deals with anticipatory bail. While the specific numerical\nprovision for inherent powers to quash criminal complaints may differ in the new Sanhita, the High Courts'\nconstitutional powers under Articles 226 and 227 of the Constitution of India to quash such proceedings remain\nunaffected.\n\n### Scope of High Court's Power\n\nThe power under Section 482 of the Code of Criminal Procedure, 1973, is discretionary and must be exercised sparingly and with circumspection. The High Court does not embark on an inquiry to determine if the allegations in the complaint are likely to be established by evidence or conduct a mini-trial at this stage. The primary objective is to prevent abuse of the court's process and to secure the ends of justice.\n\n### Grounds for Quashing a Criminal Complaint\n\nThe Supreme Court in *State of Haryana v. Bhajan Lal, AIR 1992 SC 604*, laid down illustrative categories where the High Court may quash a criminal complaint or First Information Report (FIR). These grounds include:\n\n- Where the allegations in the FIR or complaint, even if taken at their face value and accepted in their entirety, do not prima facie constitute any offence or make out a case against the accused.\n- Where the allegations in the FIR and other materials, if any, accompanying the FIR do not disclose a cognizable\noffence, justifying an investigation by police officers under Section 156(1) of the Code of Criminal Procedure, 1973\n(corresponding to Section 173 of the Bharatiya Nagarik Suraksha Sanhita, 2023), except under an order of a Magistrate\nwithin the purview of Section 155(2) of the Code of Criminal Procedure, 1973 (corresponding to Section 172(2) of the\nBharatiya Nagarik Suraksha Sanhita, 2023).\n- Where the allegations made in the FIR and the evidence collected in support of the same do not disclose the commission of any offence and make out a case against the accused.\n- Where the allegations in the FIR are so absurd and inherently improbable on the basis of which no prudent person can ever reach a just conclusion that there is sufficient ground for proceeding against the accused.\n- Where there is an express legal bar engrafted in any of the provisions of the Code of Criminal Procedure, 1973, or the concerned Act, under which the criminal proceeding is instituted, to the institution and continuance of the proceedings.\n- Where a criminal proceeding is manifestly attended with mala fide and/or where the proceeding is maliciously instituted with an ulterior motive for wreaking vengeance on the accused and with a view to spite him due to private and personal grudge.\n- Where there is a compromise between the parties, especially in cases arising out of matrimonial disputes, family disputes, or other offences that are predominantly civil in nature, and the court is satisfied that the settlement is genuine and continuing the proceedings would be an abuse of the process of law. However, this power is exercised cautiously in serious offences that have a larger impact on society.\n\n### Quashing of Criminal Complaint at Bombay High Court: Step-by-Step Guide\n\nThe procedure for filing a petition for quashing a criminal complaint before the Bombay High Court under Section 482 of the Code of Criminal Procedure, 1973 (or under Articles 226/227 of the Constitution of India) generally involves the following steps:\n\n1. **Consultation with a Lawyer:** It is essential to consult a qualified and experienced criminal lawyer who can assess the merits of the case, identify appropriate grounds for quashing, and provide legal advice.\n2. **Gathering Documents:** Obtain all relevant documents, including a copy of the FIR or the criminal complaint, the charge sheet (if filed), and any other supporting evidence that demonstrates the grounds for quashing.\n3. **Drafting the Petition:** The lawyer will draft a detailed quashing petition (often referred to as a Criminal Writ\nPetition or Criminal Application) addressed to the Bombay High Court. The petition will clearly state the facts of the\ncase, cite the relevant legal provisions (Section 482 CrPC and/or Articles 226/227 of the Constitution), and articulate\nthe specific grounds on which the quashing is sought. The person named as an accused in the FIR is the petitioner, and\nthe State and the original complainant are typically made respondents.\n4. **Preparation of Affidavit:** An affidavit supporting the quashing petition must be prepared and sworn by the petitioner. This affidavit typically contains facts related to the case and reiterates the legal grounds for seeking quashing.\n5. **Annexures:** All relevant documents, such as the FIR, charge sheet, and any other evidence, are annexed to the petition.\n6. **Filing the Petition:** The petition, along with the affidavit and annexures, is filed before the appropriate bench of the Bombay High Court within whose territorial jurisdiction the FIR was registered.\n7. **Hearing and Arguments:** During the hearing, the High Court will hear arguments from the petitioner's counsel, the public prosecutor representing the State, and the counsel for the complainant (if they choose to appear). The court will consider the allegations in the FIR and the material on record to determine if a prima facie case is made out or if the proceedings constitute an abuse of process.\n8. **Interim Relief (Optional):** In some cases, the High Court may grant interim relief, such as a stay on further proceedings or protection from arrest, pending the final disposal of the quashing petition.\n9. **Court's Decision:** After hearing all parties and considering the material, the High Court will pass an order. If\nsatisfied that the grounds for quashing are met, it may quash the FIR, the criminal complaint, or the entire criminal\nproceedings. The Bombay High Court has exercised this power, even post-conviction, when an appeal is pending and a\ngenuine settlement has been reached, particularly in matrimonial disputes. However, it has also refused to quash serious\noffences with societal implications despite settlement.\n\n---\n\n## Related Supreme Court Authority\n\nThe Supreme Court has delivered several landmark rulings on the quashing of criminal complaints, primarily under Section 482 of the Code of Criminal Procedure, 1973 (Cr.P.C.). These judgments outline the circumstances under which High Courts can exercise their inherent powers to prevent abuse of the process of any court or otherwise to secure the ends of justice.\n\nHere are two significant cases that discuss the principles for quashing criminal complaints:\n\n#### *Chanchalpati Das v. The State of West Bengal*, Criminal Appeal No. 1592 of 2023, decided on 18-05-2023\n\nThis case involved an appeal against the High Court's dismissal of applications seeking to quash a charge-sheet for offences under Sections 468, 471, 406, and 120-B of the Indian Penal Code (IPC). The Supreme Court allowed the appeal, quashing the criminal proceedings.\n\n### Key Legal Issues\n- Whether an inordinate and unexplained delay in filing a criminal complaint can be a ground for quashing the proceedings.\n- Whether the allegations in the complaint and charge-sheet, even if taken at face value, constitute a prima facie case.\n- The scope of inherent powers of the High Court under Section 482 Cr.P.C. for quashing criminal proceedings.\n\n### Facts\nThe case originated from a complaint filed in 2009 regarding the alleged theft of a bus in 2001. The complainant, ISKCON Kolkata, alleged that the bus was taken to Bengaluru by the appellants, who were the President and Vice-President of ISKCON Bengaluru. An FIR was registered in 2009, and a charge-sheet was filed in 2010. The appellants sought to quash these proceedings before the High Court, which was dismissed.\n\n### Detailed Narrative\nThe appellants argued that the prosecution was an attempt to harass them and settle personal scores, especially given\nthe significant delay of eight years in filing the complaint for an incident that occurred in 2001. They also contended\nthat the allegations were absurd and improbable, and no reasonable possibility of conviction existed. The\nrespondent-complainant argued that a prima facie case was made out and that the documents produced by the appellants\nregarding the bus transfer were new and should not be considered.\n\n### Court Observations\nThe Supreme Court, relying on its landmark decision in *State of Haryana and Ors. v. Bhajan Lal and Ors.*, (1992) Supp. (1) SCC 335, reiterated the guidelines for exercising powers of quashing under Section 482 Cr.P.C. The Court emphasized that such powers should be exercised sparingly but must be used if a clear case of abuse of the process of law is made out.\n\nThe Court found that:\n- There was an inordinate and unexplained delay of eight years in filing the complaint, which itself was a sufficient ground to quash the proceedings.\n- The allegations in the complaint and charge-sheet, even if taken at face value, did not prima facie constitute any of the alleged offences.\n- There was no cogent or substantive evidence collected by the investigating officer to prosecute the appellants.\n- Allowing the prosecution to continue would be an abuse of the process of law and a gross wastage of the court's precious time.\n- The Court also made observations on the proliferation of frivolous litigation and the need to deter litigants from misusing the judicial process.\n\n### Judgment & Direction\nThe Supreme Court allowed the appeals, quashing the criminal proceedings pending against the appellants in the Court of Chief Judicial Magistrate, Alipore, arising out of FIR No. 33 of 2009. The Court also imposed a cost of Rs. 1,00,000/- on the respondent-complainant, to be deposited in the office of the Supreme Court Advocates-on-Record Association.\n\n#### *Kahkashan Kausar @ Sonam v. The State of Bihar*, Criminal Appeal No. 195 of 2022, decided on 08-02-2022\n\nThis case dealt with the quashing of an FIR under Section 498A IPC and other sections, where general and omnibus allegations were made against the husband's relatives. The Supreme Court allowed the appeal, quashing the FIR against the appellants (in-laws).\n\n### Key Legal Issues\n- Whether general and omnibus allegations against in-laws in a matrimonial dispute warrant quashing of the criminal complaint.\n- The misuse of Section 498A IPC and the need for courts to be cautious in proceeding against distant relatives.\n- The application of principles laid down in *Lalita Kumari v. Government of U.P. & Ors.* regarding preliminary inquiry.\n\n### Facts\nThe complainant wife filed an FIR against her husband and in-laws, alleging dowry demand and harassment. Previously, a similar complaint was filed where the Magistrate found no prima facie case against the in-laws due to omnibus allegations. The High Court dismissed the petition for quashing the subsequent FIR, leading to the appeal before the Supreme Court.\n\n### Detailed Narrative\nThe appellants (in-laws) contended that the FIR was filed with a revengeful intent to harass them and that the allegations were omnibus in nature, similar to a previous complaint where no case was made out against them. The State and the complainant argued that the present FIR pertained to fresh offences and a fresh cause of action, and that investigation had found the case true against all accused.\n\n### Court Observations\nThe Supreme Court expressed concern over the misuse of Section 498A IPC and the increasing tendency to implicate relatives of the husband in matrimonial disputes without specific allegations. The Court reiterated that false implication by way of general omnibus allegations, if unchecked, would result in misuse of the process of law.\n\nThe Court observed that:\n- The allegations made in the FIR were general and omnibus, with no specific role attributed to the appellants (in-laws).\n- Allowing prosecution in the absence of clear allegations against the in-laws would be an abuse of the process of law.\n- A criminal trial leading to eventual acquittal inflicts severe scars upon the accused, and such an exercise must be discouraged when allegations are general and omnibus.\n- The Court referred to its previous judgments in *Rajesh Sharma and Ors. v. State of U.P. & Anr.*, (2018) 10 SCC 472, and *Arnesh Kumar v. State of Bihar and Anr.*, (2014) 8 SCC 273, highlighting the need to prevent misuse of Section 498A IPC.\n\n### Judgment & Direction\nThe Supreme Court set aside the impugned order of the High Court and quashed the FIR No. 248 of 2019 against the appellants (in-laws) under Sections 341, 323, 379, 354, 498A read with Section 34 IPC. The appeal was allowed.\n\n### Broader Significance\nThese judgments underscore the Supreme Court's consistent stance on preventing the abuse of the criminal justice system.\nThey provide crucial guidance to High Courts on exercising their inherent powers under Section 482 Cr.P.C. to quash\ncriminal complaints in cases of inordinate and unexplained delay, general and omnibus allegations, or when the\nallegations, even if taken at face value, do not constitute a prima facie offence. The rulings emphasize the need for\ncourts to scrutinize complaints carefully, especially in matrimonial disputes, to ensure that the process of law is not\nused to settle personal scores or for harassment.\n\n**PDF Links:**\n- *CHANCHALPATI DAS VS THE STATE OF WEST BENGAL*: [Judgment PDF](https://api.sci.gov.in/supremecourt/2017/17824/17824_2017_4_1502_44572_Judgement_18-May-2023.pdf)\n- *KAHKASHAN KAUSAR @ SONAM VS THE STATE OF BIHAR*: [Judgment PDF](https://api.sci.gov.in/supremecourt/2020/25575/25575_2020_37_1501_33195_Judgement_08-Feb-2022.pdf)\n"}
+{"type": "sources", "data": [{"source_type": "judgment", "title": "Prakash Piniomal Haswani vs State of Maharashtra", "content": ["16-wp-2676-2014\nIN THE HIGH COURT OF JUDICATURE AT BOMBAY\nCRIMINAL APPELLATE JURISDICTION\nCRIMINAL WRIT PETITION NO.2676 OF 2014\nPrakash Piniomal Haswani Petitioner\nvs.\nState of Maharashtra & Ors. Respondents\nMr. Vivek Kantawalla, for the Petitioner\nMrs. P.H. Kantharia, APP for the State.\nRespondent"], "doc_link": "https://lawttorney.s3.ap-south-1.amazonaws.com/bombay high court/3becbc5d41dc45be93e2d5906a3a2b57fde90c340bcec3bbc82bc4bc9bb5ab8c1754497136.pdf", "file_name": "Bombay_High_Court_2001-3000\\3becbc5d41dc45be93e2d5906a3a2b57fde90c340bcec3bbc82bc4bc9bb5ab8c1754497136.pdf", "agent_name": "Judgment", "relevance_score": 168.48311, "court_name": "bombay high court", "year": 2014, "petitioner_names": ["Prakash Piniomal Haswani"], "respondent_names": ["State of Maharashtra", "Ors."], "keywords": ["quashing criminal complaint", "divorce", "consent terms", "undertaking", "contempt of court", "Article 226", "Section 482 CrPC"], "acts_or_sections_invoked": ["Article 226 of the Constitution of India", "Sections 232, 420, 406, 497, 498(A), 506(ii) read with 34 of Indian Penal Code", "Section 482 of Code of Criminal Procedure", "Section 320 of the Code of Criminal Procedure", "Section 498(A) of Indian Penal Code", "Section 20 of the Contempt of Court Act"]}, {"source_type": "judgment", "title": "Michelle M. Desai vs Shirin R. Majai & Anr.", "content": ["IN THE HIGH COURT OF JUDICATURE AT BOMBAY\nCRIMINAL APPELLATE JURISDICTION\nCRIMINAL WRIT PETITION NO. 1279 OF 2005\nMichelle M. Desai Petitioner\nV/s\n1 Shirin R. Majai & Anr. Respondents\n ----\nMr. P.M. Havnur for petitioner\n ----\n Coram : V.M. Kanade, J. \n Dated : 05/05/2005.\nP.C. :-\n1 The parties have"], "doc_link": "https://lawttorney.s3.ap-south-1.amazonaws.com/bombay high court/fb70dead8d9af222108b46e8876fe4ce4da3ca44bc18659979d9bf8fe9818e231754545012.pdf", "file_name": "Bombay High Court 1001-1300\\fb70dead8d9af222108b46e8876fe4ce4da3ca44bc18659979d9bf8fe9818e231754545012.pdf", "agent_name": "Judgment", "relevance_score": 164.52005, "court_name": "bombay high court", "year": 2005, "petitioner_names": ["Michelle M. Desai"], "respondent_names": ["Shirin R. Majai & Anr."], "keywords": ["compounding of offence", "quashing of criminal complaint", "inherent powers of High Court"], "acts_or_sections_invoked": ["324", "341", "342", "506 (Part 2)", "114", "34", "482", "320"]}, {"source_type": "judgment", "title": "Sagar Dnyandeo Patekar vs The Inspector General of Police", "content": ["WP. 4386-14\nVPH\nIN THE HIGH COURT OF JUDICATURE AT BOMBAY\nCRIMINAL APPELLATE JURISDICTION\nWRIT PETITION No. 4386 OF 2014\nSagar Dnyandeo Patekar Petitioner\nVs.\nThe Inspector General of Police\nand Ors. Respondents\n\nMr. V . V . Purwant, for the Petitioner.\nMrs. P. H. Kantharia, APP for the Respondents."], "doc_link": "https://lawttorney.s3.ap-south-1.amazonaws.com/bombay high court/ee82dee5babeec843a4288cd3653bdf447b13736c076f3463820595b43c2d0571754545389.pdf", "file_name": "Bombay High Court 4001-5000\\ee82dee5babeec843a4288cd3653bdf447b13736c076f3463820595b43c2d0571754545389.pdf", "agent_name": "Judgment", "relevance_score": 153.33157, "court_name": "bombay high court", "year": 2014, "petitioner_names": ["Sagar Dnyandeo Patekar"], "respondent_names": ["The Inspector General of Police", "and Ors."], "keywords": ["quashing of complaint", "false complaint", "history sheeter", "Article 226", "Section 482 Cr. P. C."], "acts_or_sections_invoked": ["Section 387", "Section 326", "Article 226", "Section 482 Cr. P. C."]}, {"source_type": "judgment", "title": "Mr. Freddy Sunderdas Thomas vs The State of Maharashtra", "content": ["IN THE HIGH COURT OF JUDICATURE AT BOMBAY IN THE HIGH COURT OF JUDICATURE AT BOMBAY IN THE HIGH COURT OF JUDICATURE AT BOMBAY\n CRIMINAL APPELLATE JURISDICTIONCRIMINAL APPELLATE JURISDICTIONCRIMINAL APPELLATE JURISDICTION\n CRIMINAL WRIT PETITION NO. 1080 OF 2005\n Mr. Freddy Sunderdas Thomas Petitione"], "doc_link": "https://lawttorney.s3.ap-south-1.amazonaws.com/bombay high court/bce04a9f077b670c185319927d7e4ca4b213c720cd69f567fa2cf8ed51e4de891754021802.pdf", "file_name": "Bombay High Court 1001-1300\\bce04a9f077b670c185319927d7e4ca4b213c720cd69f567fa2cf8ed51e4de891754021802.pdf", "agent_name": "Judgment", "relevance_score": 147.63464, "court_name": "bombay high court", "year": 2005, "petitioner_names": ["Mr. Freddy Sunderdas Thomas"], "respondent_names": ["The State of Maharashtra", "M/s. Ashok Leyland Finance Company", "Respondent No. 3", "Respondent No. 4"], "keywords": ["quashing of complaint", "settlement", "withdrawal of complaint", "inherent powers of High Court"], "acts_or_sections_invoked": ["156(3) of the Code of Criminal Procedure", "320 of the Code of Criminal Procedure", "482 of the Code of Criminal Procedure", "379", "409", "420 of the Indian Penal Code"]}, {"source_type": "judgment", "title": "Mrs. Dale Herman Nazareth vs State of Maharashtra", "content": ["spb/- 1 6-8-2689-10.sxw\nIN THE HIGH COURT OF JUDICATURE AT BOMBAY\nCRIMINAL APPELLATE JURISDICTION\nCRIMINAL APPLICATION NO. 2689 OF 2010\nMrs. Dale Herman Nazareth & Ors. Applicants. \nVs.\nState of Maharashtra & Anr. Respondents. \n \u00ad\u00ad\u00ad\nMr. Prakash Naik for the Applicants. \nMr. A.S.Shitole, APP for the "], "doc_link": "https://lawttorney.s3.ap-south-1.amazonaws.com/bombay high court/db433a6d2e0a46857eb5bbcb98c226750a598fb4f1ab394535d4412c326d9bd51754508373.pdf", "file_name": "Bombay_High_Court_2001-3000\\db433a6d2e0a46857eb5bbcb98c226750a598fb4f1ab394535d4412c326d9bd51754508373.pdf", "agent_name": "Judgment", "relevance_score": 146.6356, "court_name": "bombay high court", "year": 2010, "petitioner_names": ["Mrs. Dale Herman Nazareth", "Ors."], "respondent_names": ["State of Maharashtra", "Anr."], "keywords": ["quashing criminal complaint", "amicably settled", "quash the said criminal complaint", "inherent jurisdiction"], "acts_or_sections_invoked": ["465", "468", "471", "420 of the IPC", "482 of the Cr. P.C."]}, {"source_type": "sci_judgment", "title": "CHANCHALPATI DAS VS THE STATE OF WEST BENGAL", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2017/17824/17824_2017_4_1502_44572_Judgement_18-May-2023.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "Crl.A. No.-001592-001592 - 2023", "judgment_date": "18-05-2023", "bench": "HON'BLE MR. JUSTICE AJAY RASTOGI HON'BLE MS. JUSTICE BELA M. TRIVEDI", "judgment_by": "HON'BLE MS. JUSTICE BELA M. TRIVEDI", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2017/17824/17824_2017_4_1502_44572_Judgement_18-May-2023.pdf"}], "parties": "CHANCHALPATI DAS VS THE STATE OF WEST BENGAL", "db_id": "42738"}, {"source_type": "sci_judgment", "title": "KAHKASHAN KAUSAR @ SONAM VS THE STATE OF BIHAR", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2020/25575/25575_2020_37_1501_33195_Judgement_08-Feb-2022.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "Crl.A. No.-000195-000195 - 2022", "judgment_date": "08-02-2022", "bench": "HON'BLE MR. JUSTICE S. ABDUL NAZEER HON'BLE MR. JUSTICE KRISHNA MURARI", "judgment_by": "HON'BLE MR. JUSTICE KRISHNA MURARI", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2020/25575/25575_2020_37_1501_33195_Judgement_08-Feb-2022.pdf"}], "parties": "KAHKASHAN KAUSAR @ SONAM VS THE STATE OF BIHAR", "db_id": "41136"}, {"source_type": "sci_judgment", "title": "DINESH KUMAR MATHUR VS THE STATE OF MADHYA PRADESH", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2017/19719/19719_2017_17_1502_58238_Judgement_02-Jan-2025.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "Crl.A. No.-004915-004915 - 2024", "judgment_date": "02-01-2025", "bench": "HON'BLE MR. JUSTICE C.T. RAVIKUMAR HON'BLE MR. JUSTICE SANJAY KAROL", "judgment_by": "HON'BLE MR. JUSTICE SANJAY KAROL", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2017/19719/19719_2017_17_1502_58238_Judgement_02-Jan-2025.pdf"}], "parties": "DINESH KUMAR MATHUR VS THE STATE OF MADHYA PRADESH", "db_id": "44332"}, {"source_type": "sci_judgment", "title": "PADAL VENKATA RAMA REDDY @ RAMU VS KOVVURI SATYANARAYANA REDDY .", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/38295.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "Crl.A. No.-001499-001499 - 2011", "judgment_date": "29-07-2011", "bench": "P. SATHASIVAMH.L. GOKHALE", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/38295.pdf"}], "parties": "PADAL VENKATA RAMA REDDY @ RAMU VS KOVVURI SATYANARAYANA REDDY .", "db_id": "30060"}, {"source_type": "sci_judgment", "title": "MITESH KUMAR J SHA VS THE STATE OF KARNATAKA", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2019/35046/35046_2019_7_1501_30903_Judgement_26-Oct-2021.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "Crl.A. No.-001285-001285 - 2021", "judgment_date": "26-10-2021", "bench": "HON'BLE MR. JUSTICE S. ABDUL NAZEER HON'BLE MR. JUSTICE KRISHNA MURARI", "judgment_by": "HON'BLE MR. JUSTICE KRISHNA MURARI", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2019/35046/35046_2019_7_1501_30903_Judgement_26-Oct-2021.pdf"}], "parties": "MITESH KUMAR J SHA VS THE STATE OF KARNATAKA", "db_id": "40692"}]}
+{"type": "followup_suggestions", "data": ["What are grounds for quashing?", "What is the cost involved?", "How long does it take?"]}
+{"type": "done", "agents_used": ["Judgment", "Legislation", "SCI_Judgment"], "token_usage": {"input_tokens": 154447, "output_tokens": 4153, "total_tokens": 168661, "cache_read_tokens": 85415, "cache_creation_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.053472, "by_agent": {"Orchestrator": {"input": 9602, "output": 423, "total": 10025, "cache_read": 7126, "calls": 3, "cost_usd": 0.001129}, "Judgment": {"input": 6888, "output": 152, "total": 7040, "cache_read": 0, "calls": 3, "cost_usd": 0.002011}, "Legislation": {"input": 11546, "output": 1584, "total": 23191, "cache_read": 0, "calls": 2, "cost_usd": 0.007423}, "SCI_Judgment": {"input": 126411, "output": 1994, "total": 128405, "cache_read": 78289, "calls": 7, "cost_usd": 0.042907}}, "calls": [{"agent": "Orchestrator", "step": "classify_and_plan", "input": 2640, "output": 67, "total": 2707, "cache_read": 1715, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000291}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5828, "output": 294, "total": 6122, "cache_read": 5411, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.0007}, {"agent": "Orchestrator", "step": "rewrite_per_agent_queries", "input": 1134, "output": 62, "total": 1196, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000138}, {"agent": "Judgment", "step": "extract_metadata", "input": 995, "output": 96, "total": 1091, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000138}, {"agent": "Judgment", "step": "relevance_judge", "input": 5893, "output": 42, "total": 5935, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.001873}, {"agent": "Legislation", "step": "relevance_judge", "input": 3896, "output": 37, "total": 3933, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.001261}, {"agent": "SCI_Judgment", "step": "react_msg_1", "input": 9199, "output": 27, "total": 9226, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.002827}, {"agent": "SCI_Judgment", "step": "react_msg_3", "input": 10854, "output": 23, "total": 10877, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.003314}, {"agent": "SCI_Judgment", "step": "react_msg_5", "input": 15365, "output": 32, "total": 15397, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.00469}, {"agent": "SCI_Judgment", "step": "react_msg_7", "input": 19377, "output": 32, "total": 19409, "cache_read": 15017, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.005893}, {"agent": "SCI_Judgment", "step": "react_msg_9", "input": 20203, "output": 23, "total": 20226, "cache_read": 19028, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.006118}, {"agent": "SCI_Judgment", "step": "react_msg_11", "input": 24204, "output": 32, "total": 24236, "cache_read": 20093, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.007341}, {"agent": "SCI_Judgment", "step": "react_msg_13", "input": 27209, "output": 1825, "total": 29034, "cache_read": 24151, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.012725}, {"agent": "Judgment", "step": "generate", "input": 0, "output": 14, "total": 14, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.0}, {"agent": "Legislation", "step": "web_grounded", "input": 7650, "output": 1547, "total": 19258, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.006162}]}, "thread_id": "719761a6-f362-485c-ab59-9aa3070380b3", "conversation_turn": 1, "query_rewritten": false, "effective_query": null}

@@ -1,0 +1,482 @@
+{"type": "thread_id", "data": "8ecde631-da84-4e3e-8a05-016e372a2fac"}
+{"type": "file_processing", "message": "Processing uploaded files..."}
+{"type": "file_processing", "stage": "pdf_compress_start", "message": "Compressing Written_Notes_of_Argument_Speciality_1.pdf...", "file": "Written_Notes_of_Argument_Speciality_1.pdf"}
+{"type": "file_processing", "stage": "pdf_extract_start", "message": "Extracting text from Written_Notes_of_Argument_Speciality_1.pdf...", "file": "Written_Notes_of_Argument_Speciality_1.pdf"}
+{"type": "file_processing", "stage": "pdf_extract_done", "message": "Written_Notes_of_Argument_Speciality_1.pdf: 15 pages", "file": "Written_Notes_of_Argument_Speciality_1.pdf", "pages": 15}
+{"type": "file_processing", "stage": "chroma_store_start", "message": "Embedding Written_Notes_of_Argument_Speciality_1.pdf into vector store...", "file": "Written_Notes_of_Argument_Speciality_1.pdf"}
+{"type": "file_processing", "stage": "docx_extract_start", "message": "Extracting text from SPECIALITY-Workman_Arguments_Section_33_2b-2.docx...", "file": "SPECIALITY-Workman_Arguments_Section_33_2b-2.docx"}
+{"type": "file_processing", "stage": "all_files_done", "message": "Processed 1 pdf, 1 docx", "files": ["Written_Notes_of_Argument_Speciality_1.pdf", "SPECIALITY-Workman_Arguments_Section_33_2b-2.docx"], "errors": []}
+{"type": "file_processing", "message": "Processed 1 pdf, 1 docx", "files": ["Written_Notes_of_Argument_Speciality_1.pdf", "SPECIALITY-Workman_Arguments_Section_33_2b-2.docx"]}
+{"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1784983036.19123, "step": "validate"}
+{"type": "status", "agent": "guardrail_input", "message": "Validating query..."}
+{"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1784983036.1941562, "step": "language"}
+{"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1784983036.1969056, "step": "language", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1784983036.1973524, "step": "history"}
+{"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1784983036.2004418, "found": 0, "step": "history", "substep": true}
+{"type": "status", "agent": "memory", "message": "Loading context..."}
+{"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}
+{"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1784983036.2033136, "step": "classify"}
+{"type": "progress", "agent": "orchestrator", "message": "Identified: Scenario, Judgment, SCI_Judgment, Document", "ts": 1784983038.856878, "detail": "Scenario", "step": "classify", "substep": true}
+{"type": "progress", "agent": "orchestrator", "message": "Preparing search queries for 4 agents...", "ts": 1784983038.8568919, "found": 4, "step": "plan"}
+{"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}
+{"type": "agents_planned", "agents": ["Scenario", "Judgment", "SCI_Judgment", "Document"]}
+{"type": "progress", "agent": "scenario", "message": "Analyzing legal scenario...", "ts": 1784983041.455816, "step": "analyze"}
+{"type": "progress", "agent": "scenario", "message": "Searching the web for current information...", "ts": 1784983041.4562016, "step": "web_search"}
+{"type": "progress", "agent": "judgment", "message": "Extracting case details from query...", "ts": 1784983041.4596179, "step": "metadata"}
+{"type": "progress", "agent": "judgment", "message": "Searching court judgments (2 strategies in parallel)...", "ts": 1784983041.459626, "step": "search"}
+{"type": "progress", "agent": "sci_judgment", "message": "Preparing Supreme Court search...", "ts": 1784983041.459802, "step": "prepare"}
+{"type": "progress", "agent": "sci_judgment", "message": "Running multi-step research (ReAct agent)...", "ts": 1784983041.4792013, "step": "react"}
+{"type": "progress", "agent": "document", "message": "Loading uploaded documents...", "ts": 1784983041.4798312, "step": "load"}
+{"type": "progress", "agent": "document", "message": "Loading 2 document collection(s)...", "ts": 1784983041.480062, "found": 2, "step": "search"}
+{"type": "progress", "agent": "judgment", "message": "Found 10 judgments via multi_tier", "ts": 1784983042.9563968, "found": 10, "step": "search", "substep": true}
+{"type": "progress", "agent": "judgment", "message": "Top match: RITAMBEN MADHUSUDAN THAKKAR vs SECRETARY,NORTH GUJARAT YUVAK MANDAL", "ts": 1784983042.9649196, "found": 10, "step": "search", "substep": true}
+{"type": "progress", "agent": "judgment", "message": "Verifying retrieval relevance...", "ts": 1784983042.9649544, "step": "relevance_check"}
+{"type": "progress", "agent": "sci_judgment", "message": "Completed 2 search steps", "ts": 1784983048.3702393, "found": 2, "step": "react", "substep": true}
+{"type": "progress", "agent": "sci_judgment", "message": "Found 5 Supreme Court judgments", "ts": 1784983048.370833, "found": 5, "step": "results"}
+{"type": "progress", "agent": "sci_judgment", "message": "Generating response...", "ts": 1784983048.370845, "step": "generate"}
+{"type": "status", "agent": "sci_judgment", "message": "Searching Supreme Court judgments..."}
+{"type": "progress", "agent": "judgment", "message": "Retrieved cases don't match the query (labor dispute proceedings, not specifically addressing Secti) \u2014 searching the web...", "ts": 1784983051.3846455, "step": "fallback", "substep": true}
+{"type": "progress", "agent": "scenario", "message": "Generating scenario analysis...", "ts": 1784983058.9838572, "step": "generate"}
+{"type": "status", "agent": "scenario", "message": "Analyzing legal scenario..."}
+{"type": "token", "content": "In a labor dispute c"}
+{"type": "token", "content": "oncerning an applica"}
+{"type": "token", "content": "tion for approval of"}
+{"type": "token", "content": " dismissal under Sec"}
+{"type": "token", "content": "tion 33(2)(b) of the"}
+{"type": "token", "content": " Industrial Disputes"}
+{"type": "token", "content": " Act, 1947, counter-"}
+{"type": "token", "content": "arguments by a workm"}
+{"type": "token", "content": "an can primarily rev"}
+{"type": "token", "content": "olve around the empl"}
+{"type": "token", "content": "oyer's failure to co"}
+{"type": "token", "content": "mply with the mandat"}
+{"type": "token", "content": "ory conditions of th"}
+{"type": "token", "content": "e proviso to the sai"}
+{"type": "token", "content": "d section, or by dem"}
+{"type": "token", "content": "onstrating that the "}
+{"type": "token", "content": "employer's action co"}
+{"type": "token", "content": "nstitutes victimizat"}
+{"type": "token", "content": "ion, unfair labor pr"}
+{"type": "token", "content": "actice, or is based "}
+{"type": "token", "content": "on a defective domes"}
+{"type": "token", "content": "tic inquiry. Specifi"}
+{"type": "token", "content": "cally, non-payment o"}
+{"type": "token", "content": "f one month's wages,"}
+{"type": "token", "content": " improper deductions"}
+{"type": "token", "content": " from such wages, ev"}
+{"type": "token", "content": "idence of victimizat"}
+{"type": "token", "content": "ion due to union act"}
+{"type": "token", "content": "ivities, and an unfa"}
+{"type": "token", "content": "ir assessment of the"}
+{"type": "token", "content": " past service record"}
+{"type": "token", "content": " can be strong groun"}
+{"type": "token", "content": "ds for the Labour Co"}
+{"type": "token", "content": "urt or Tribunal to r"}
+{"type": "token", "content": "efuse approval. The "}
+{"type": "token", "content": "objective of Section"}
+{"type": "token", "content": " 33 is to protect wo"}
+{"type": "token", "content": "rkmen from arbitrary"}
+{"type": "token", "content": " termination and vic"}
+{"type": "token", "content": "timization during th"}
+{"type": "token", "content": "e pendency of indust"}
+{"type": "token", "content": "rial disputes.\n\nThe "}
+{"type": "token", "content": "employer's action of"}
+{"type": "token", "content": " dismissal or discha"}
+{"type": "token", "content": "rge under Section 33"}
+{"type": "token", "content": "(2)(b) is not absolu"}
+{"type": "token", "content": "te and is subject to"}
+{"type": "token", "content": " the fulfillment of "}
+{"type": "token", "content": "three mandatory cond"}
+{"type": "token", "content": "itions: (i) the work"}
+{"type": "token", "content": "man must be discharg"}
+{"type": "token", "content": "ed or dismissed for "}
+{"type": "token", "content": "misconduct not conne"}
+{"type": "token", "content": "cted with the pendin"}
+{"type": "token", "content": "g dispute, (ii) one "}
+{"type": "token", "content": "month's wages must b"}
+{"type": "token", "content": "e paid to the workma"}
+{"type": "token", "content": "n, and (iii) an appl"}
+{"type": "token", "content": "ication for approval"}
+{"type": "token", "content": " of the action taken"}
+{"type": "token", "content": " must be made to the"}
+{"type": "token", "content": " authority before wh"}
+{"type": "token", "content": "ich the proceeding i"}
+{"type": "token", "content": "s pending. Failure t"}
+{"type": "token", "content": "o satisfy these cond"}
+{"type": "token", "content": "itions renders the d"}
+{"type": "token", "content": "ismissal order inope"}
+{"type": "token", "content": "rative or void from "}
+{"type": "token", "content": "the date it was pass"}
+{"type": "token", "content": "ed, entitling the em"}
+{"type": "token", "content": "ployee to wages from"}
+{"type": "token", "content": " that date until dis"}
+{"type": "token", "content": "approval.\n\nI think t"}
+{"type": "token", "content": "his information will"}
+{"type": "token", "content": " help you more to un"}
+{"type": "token", "content": "derstand the case:\n\n"}
+{"type": "token", "content": "### Key Legal Issues"}
+{"type": "token", "content": "\n*   The scope of en"}
+{"type": "token", "content": "quiry by the Labour "}
+{"type": "token", "content": "Court or Tribunal wh"}
+{"type": "token", "content": "en considering an ap"}
+{"type": "token", "content": "plication for approv"}
+{"type": "token", "content": "al under Section 33("}
+{"type": "token", "content": "2)(b) of the Industr"}
+{"type": "token", "content": "ial Disputes Act, 19"}
+{"type": "token", "content": "47.\n*   The mandator"}
+{"type": "token", "content": "y nature of paying o"}
+{"type": "token", "content": "ne month's wages and"}
+{"type": "token", "content": " making a simultaneo"}
+{"type": "token", "content": "us application for a"}
+{"type": "token", "content": "pproval under the pr"}
+{"type": "token", "content": "oviso to Section 33("}
+{"type": "token", "content": "2)(b).\n*   The prote"}
+{"type": "token", "content": "ction of workmen aga"}
+{"type": "token", "content": "inst victimization, "}
+{"type": "token", "content": "harassment, or mala "}
+{"type": "token", "content": "fide action by the e"}
+{"type": "token", "content": "mployer, especially "}
+{"type": "token", "content": "in connection with u"}
+{"type": "token", "content": "nion activities or p"}
+{"type": "token", "content": "ending industrial di"}
+{"type": "token", "content": "sputes.\n*   The impa"}
+{"type": "token", "content": "ct of non-compliance"}
+{"type": "token", "content": " with the conditions"}
+{"type": "token", "content": " of Section 33(2)(b)"}
+{"type": "token", "content": " on the validity and"}
+{"type": "token", "content": " effectiveness of a "}
+{"type": "token", "content": "dismissal order.\n*  "}
+{"type": "token", "content": " The standard of rev"}
+{"type": "token", "content": "iew for the fairness"}
+{"type": "token", "content": " and propriety of th"}
+{"type": "token", "content": "e domestic inquiry c"}
+{"type": "token", "content": "onducted by the empl"}
+{"type": "token", "content": "oyer.\n\n### Detailed "}
+{"type": "token", "content": "Narrative\nSection 33"}
+{"type": "token", "content": " of the Industrial D"}
+{"type": "token", "content": "isputes Act, 1947, p"}
+{"type": "token", "content": "laces restrictions o"}
+{"type": "token", "content": "n employers from alt"}
+{"type": "token", "content": "ering conditions of "}
+{"type": "token", "content": "service or dismissin"}
+{"type": "token", "content": "g workmen during the"}
+{"type": "token", "content": " pendency of industr"}
+{"type": "token", "content": "ial disputes. Sectio"}
+{"type": "token", "content": "n 33(2)(b) specifica"}
+{"type": "token", "content": "lly allows an employ"}
+{"type": "token", "content": "er to discharge or p"}
+{"type": "token", "content": "unish a workman for "}
+{"type": "token", "content": "any misconduct not c"}
+{"type": "token", "content": "onnected with the pe"}
+{"type": "token", "content": "nding dispute, provi"}
+{"type": "token", "content": "ded certain conditio"}
+{"type": "token", "content": "ns are met. These co"}
+{"type": "token", "content": "nditions are that th"}
+{"type": "token", "content": "e workman must be pa"}
+{"type": "token", "content": "id one month's wages"}
+{"type": "token", "content": " and an application "}
+{"type": "token", "content": "must be made to the "}
+{"type": "token", "content": "appropriate authorit"}
+{"type": "token", "content": "y for approval of th"}
+{"type": "token", "content": "e action taken. The "}
+{"type": "token", "content": "employer's action ta"}
+{"type": "token", "content": "kes effect *de facto"}
+{"type": "token", "content": "* upon dismissal, bu"}
+{"type": "token", "content": "t the *de jure* rela"}
+{"type": "token", "content": "tionship only ends u"}
+{"type": "token", "content": "pon the Tribunal's a"}
+{"type": "token", "content": "pproval. The purpose"}
+{"type": "token", "content": " of this provision i"}
+{"type": "token", "content": "s two-fold: to prote"}
+{"type": "token", "content": "ct workmen against v"}
+{"type": "token", "content": "ictimization for rai"}
+{"type": "token", "content": "sing industrial disp"}
+{"type": "token", "content": "utes and to ensure i"}
+{"type": "token", "content": "ndustrial peace duri"}
+{"type": "token", "content": "ng the pendency of p"}
+{"type": "token", "content": "roceedings.\n\n### As "}
+{"type": "token", "content": "per the Court\nThe co"}
+{"type": "token", "content": "urts have consistent"}
+{"type": "token", "content": "ly held that the con"}
+{"type": "token", "content": "ditions stipulated i"}
+{"type": "token", "content": "n the proviso to Sec"}
+{"type": "token", "content": "tion 33(2)(b) are ma"}
+{"type": "token", "content": "ndatory and must be "}
+{"type": "token", "content": "fulfilled simultaneo"}
+{"type": "token", "content": "usly with the dismis"}
+{"type": "token", "content": "sal or discharge.\n\n*"}
+{"type": "token", "content": "   **Non-payment of "}
+{"type": "token", "content": "Wages and Deductions"}
+{"type": "token", "content": ":** The payment of o"}
+{"type": "token", "content": "ne month's wages is "}
+{"type": "token", "content": "a crucial condition."}
+{"type": "token", "content": " In *Prabhakar H. Ma"}
+{"type": "token", "content": "njare v. Indian Tele"}
+{"type": "token", "content": "phone Industries Ltd"}
+{"type": "token", "content": "., 1998*, the applic"}
+{"type": "token", "content": "ation for approval w"}
+{"type": "token", "content": "as denied and held i"}
+{"type": "token", "content": "llegal because one m"}
+{"type": "token", "content": "onth's back wages we"}
+{"type": "token", "content": "re not paid. The Bom"}
+{"type": "token", "content": "bay High Court, in *"}
+{"type": "token", "content": "Dr. Satish Bhide v. "}
+{"type": "token", "content": "Ravindra M. Pande*, "}
+{"type": "token", "content": "clarified that the p"}
+{"type": "token", "content": "ayment referred to i"}
+{"type": "token", "content": "n the proviso to Sec"}
+{"type": "token", "content": "tion 33(2)(b) requir"}
+{"type": "token", "content": "es one more month's "}
+{"type": "token", "content": "wage to be paid apar"}
+{"type": "token", "content": "t from the regular r"}
+{"type": "token", "content": "emuneration; wages n"}
+{"type": "token", "content": "ormally received by "}
+{"type": "token", "content": "the worker in the mo"}
+{"type": "token", "content": "nth of dismissal can"}
+{"type": "token", "content": "not be considered th"}
+{"type": "token", "content": "is payment. While pr"}
+{"type": "token", "content": "ocedural requirement"}
+{"type": "token", "content": "s must be adhered to"}
+{"type": "token", "content": ", the Bombay High Co"}
+{"type": "token", "content": "urt also observed th"}
+{"type": "token", "content": "at technical procedu"}
+{"type": "token", "content": "ral lapses regarding"}
+{"type": "token", "content": " the payment of one "}
+{"type": "token", "content": "month's wages, such "}
+{"type": "token", "content": "as minor deductions "}
+{"type": "token", "content": "for profession tax a"}
+{"type": "token", "content": "nd provident fund, c"}
+{"type": "token", "content": "annot be \"weaponized"}
+{"type": "token", "content": "\" by employees to es"}
+{"type": "token", "content": "cape the consequence"}
+{"type": "token", "content": "s of proven corrupt "}
+{"type": "token", "content": "practices, particula"}
+{"type": "token", "content": "rly in cases of grav"}
+{"type": "token", "content": "e misconduct. Howeve"}
+{"type": "token", "content": "r, if there is a gen"}
+{"type": "token", "content": "uine shortfall in th"}
+{"type": "token", "content": "e remuneration, the "}
+{"type": "token", "content": "employer might be di"}
+{"type": "token", "content": "rected to pay the di"}
+{"type": "token", "content": "fference. The Suprem"}
+{"type": "token", "content": "e Court in *Jaipur Z"}
+{"type": "token", "content": "ila Sahakari Bhoomi "}
+{"type": "token", "content": "Vikas Bank Ltd. v. R"}
+{"type": "token", "content": "am Gopal Sharma, (20"}
+{"type": "token", "content": "02) 2 SCC 244* ([Jud"}
+{"type": "token", "content": "gment PDF](https://a"}
+{"type": "token", "content": "pi.sci.gov.in/suprem"}
+{"type": "token", "content": "ecourt/2000/2281_200"}
+{"type": "token", "content": "0_Judgement_17-Jan-2"}
+{"type": "token", "content": "002.pdf)) emphasized"}
+{"type": "token", "content": " that non-compliance"}
+{"type": "token", "content": " with the mandatory "}
+{"type": "token", "content": "conditions, includin"}
+{"type": "token", "content": "g payment of one mon"}
+{"type": "token", "content": "th's wages, renders "}
+{"type": "token", "content": "the dismissal order "}
+{"type": "token", "content": "ineffective from the"}
+{"type": "token", "content": " date it was passed."}
+{"type": "token", "content": "\n\n*   **Victimizatio"}
+{"type": "token", "content": "n and Union Activiti"}
+{"type": "token", "content": "es:** Section 33 of "}
+{"type": "token", "content": "the Industrial Dispu"}
+{"type": "token", "content": "tes Act, 1947, aims "}
+{"type": "token", "content": "to protect workmen f"}
+{"type": "token", "content": "rom victimization. T"}
+{"type": "token", "content": "he provision is desi"}
+{"type": "token", "content": "gned to shield workm"}
+{"type": "token", "content": "en against harassmen"}
+{"type": "token", "content": "t, victimization, or"}
+{"type": "token", "content": " mala fide action by"}
+{"type": "token", "content": " the employer on acc"}
+{"type": "token", "content": "ount of their having"}
+{"type": "token", "content": " raised industrial d"}
+{"type": "token", "content": "isputes. The Kerala "}
+{"type": "token", "content": "High Court observed "}
+{"type": "token", "content": "that the object of a"}
+{"type": "token", "content": "n enquiry under Sect"}
+{"type": "token", "content": "ion 33(2)(b) is to \""}
+{"type": "token", "content": "lift the veil\" to fi"}
+{"type": "token", "content": "nd out any hidden mo"}
+{"type": "token", "content": "tive in punishing th"}
+{"type": "token", "content": "e workman, and it ac"}
+{"type": "token", "content": "ts as a shield again"}
+{"type": "token", "content": "st victimization or "}
+{"type": "token", "content": "unfair practice by t"}
+{"type": "token", "content": "he employer during t"}
+{"type": "token", "content": "he pendency of an in"}
+{"type": "token", "content": "dustrial dispute. If"}
+{"type": "token", "content": " the workman can dem"}
+{"type": "token", "content": "onstrate that the di"}
+{"type": "token", "content": "smissal, despite bei"}
+{"type": "token", "content": "ng for an unconnecte"}
+{"type": "token", "content": "d misconduct, is a p"}
+{"type": "token", "content": "retext for victimiza"}
+{"type": "token", "content": "tion due to their un"}
+{"type": "token", "content": "ion activities or in"}
+{"type": "token", "content": "volvement in a pendi"}
+{"type": "token", "content": "ng dispute, the Trib"}
+{"type": "token", "content": "unal may refuse appr"}
+{"type": "token", "content": "oval. Unfair labor p"}
+{"type": "token", "content": "ractices, as defined"}
+{"type": "token", "content": " under Section 2(ra)"}
+{"type": "token", "content": " and the Fifth Sched"}
+{"type": "token", "content": "ule of the Industria"}
+{"type": "token", "content": "l Disputes Act, 1947"}
+{"type": "token", "content": ", include interferin"}
+{"type": "token", "content": "g with, restraining,"}
+{"type": "token", "content": " or coercing workmen"}
+{"type": "token", "content": " in the exercise of "}
+{"type": "token", "content": "their right to organ"}
+{"type": "token", "content": "ize, form, join, or "}
+{"type": "token", "content": "assist a trade union"}
+{"type": "token", "content": ".\n\n*   **Past Servic"}
+{"type": "token", "content": "e Record:** The scop"}
+{"type": "token", "content": "e of the Tribunal's "}
+{"type": "token", "content": "enquiry under Sectio"}
+{"type": "token", "content": "n 33(2)(b) is summar"}
+{"type": "token", "content": "y in nature. The Tri"}
+{"type": "token", "content": "bunal primarily exam"}
+{"type": "token", "content": "ines whether a prima"}
+{"type": "token", "content": " facie case of misco"}
+{"type": "token", "content": "nduct is made out an"}
+{"type": "token", "content": "d whether the domest"}
+{"type": "token", "content": "ic inquiry conducted"}
+{"type": "token", "content": " by the employer was"}
+{"type": "token", "content": " fair and proper, af"}
+{"type": "token", "content": "fording the employee"}
+{"type": "token", "content": " a reasonable opport"}
+{"type": "token", "content": "unity in compliance "}
+{"type": "token", "content": "with the principles "}
+{"type": "token", "content": "of natural justice. "}
+{"type": "token", "content": "It is not an appella"}
+{"type": "token", "content": "te authority to re-e"}
+{"type": "token", "content": "xamine the factual b"}
+{"type": "token", "content": "asis or sufficiency "}
+{"type": "token", "content": "of evidence, nor can"}
+{"type": "token", "content": " it delve into the p"}
+{"type": "token", "content": "roportionality of pu"}
+{"type": "token", "content": "nishment. However, i"}
+{"type": "token", "content": "f the domestic inqui"}
+{"type": "token", "content": "ry is found to be de"}
+{"type": "token", "content": "fective, the authori"}
+{"type": "token", "content": "ty can assess eviden"}
+{"type": "token", "content": "ce adduced by the pa"}
+{"type": "token", "content": "rties to reach its o"}
+{"type": "token", "content": "wn conclusion. While"}
+{"type": "token", "content": " a past service reco"}
+{"type": "token", "content": "rd might be consider"}
+{"type": "token", "content": "ed by the employer d"}
+{"type": "token", "content": "uring the disciplina"}
+{"type": "token", "content": "ry process, the Trib"}
+{"type": "token", "content": "unal's role is to en"}
+{"type": "token", "content": "sure the inquiry's f"}
+{"type": "token", "content": "airness and that the"}
+{"type": "token", "content": " dismissal is not a "}
+{"type": "token", "content": "result of unfair lab"}
+{"type": "token", "content": "or practices or vict"}
+{"type": "token", "content": "imization, rather th"}
+{"type": "token", "content": "an re-evaluating the"}
+{"type": "token", "content": " merits of the misco"}
+{"type": "token", "content": "nduct itself, unless"}
+{"type": "token", "content": " the inquiry is flaw"}
+{"type": "token", "content": "ed.\n\n### Additional "}
+{"type": "token", "content": "Observations\nThe dis"}
+{"type": "token", "content": "missal order passed "}
+{"type": "token", "content": "without obtaining th"}
+{"type": "token", "content": "e required approval "}
+{"type": "token", "content": "under Section 33(2)("}
+{"type": "token", "content": "b) remains \"inchoate"}
+{"type": "token", "content": "\" and ineffective in"}
+{"type": "token", "content": " law. Consequently, "}
+{"type": "token", "content": "the employee is deem"}
+{"type": "token", "content": "ed to have continued"}
+{"type": "token", "content": " in service as if th"}
+{"type": "token", "content": "e dismissal had neve"}
+{"type": "token", "content": "r taken effect, and "}
+{"type": "token", "content": "reinstatement must o"}
+{"type": "token", "content": "rdinarily follow. Co"}
+{"type": "token", "content": "mpensation cannot su"}
+{"type": "token", "content": "bstitute reinstateme"}
+{"type": "token", "content": "nt where the termina"}
+{"type": "token", "content": "tion itself is rende"}
+{"type": "token", "content": "red void due to stat"}
+{"type": "token", "content": "utory non-compliance"}
+{"type": "token", "content": ".\n\n### PDF Links\n*  "}
+{"type": "token", "content": " *Jaipur Zila Sahaka"}
+{"type": "token", "content": "ri Bhoomi Vikas Bank"}
+{"type": "token", "content": " Ltd. v. Ram Gopal S"}
+{"type": "token", "content": "harma, (2002) 2 SCC "}
+{"type": "token", "content": "244* ([Judgment PDF]"}
+{"type": "token", "content": "(https://api.sci.gov"}
+{"type": "token", "content": ".in/supremecourt/200"}
+{"type": "token", "content": "0/2281_2000_Judgemen"}
+{"type": "token", "content": "t_17-Jan-2002.pdf))"}
+{"type": "status", "agent": "judgment", "message": "Searching court judgments..."}
+{"type": "progress", "agent": "document", "message": "Found 2 relevant passages", "ts": 1784983084.9569108, "found": 2, "step": "search", "substep": true}
+{"type": "progress", "agent": "document", "message": "Generating answer from documents...", "ts": 1784983084.956924, "step": "generate"}
+{"type": "status", "agent": "document", "message": "Searching uploaded documents..."}
+{"type": "progress", "agent": "orchestrator", "message": "Merging results from 4 agents...", "ts": 1784983084.9598267, "found": 4, "step": "synthesize"}
+{"type": "token_reset"}
+{"type": "token", "content": "###"}
+{"type": "token", "content": " Counter-Arguments on Behalf of the Opponent\n\nThe following counter-arguments can"}
+{"type": "token", "content": " be advanced on behalf of the Opponent in the labor dispute, challenging the employer's application for approval of dismissal under Section 33(2)(b) of the Industrial Disputes Act, 1947:\n\n#### I"}
+{"type": "token", "content": ". Fatal Non-Compliance with the Mandatory Proviso to Section 33(2)(b) of the Industrial Disputes Act, 1947\n\nThe employer's application for approval of dismissal is liable to be dismissed due to non"}
+{"type": "token", "content": "-compliance with the mandatory condition of paying one month's wages as stipulated in the proviso to Section 33(2)(b) of the Industrial Disputes Act, 1947 (hereinafter \"the Act\"). The conditions in"}
+{"type": "token", "content": " the proviso to Section 33(2)(b) are mandatory, and non-compliance renders the dismissal order ineffective from the date it was passed.\n\n*   **A. Deficient Payment of Wages:**\n    The employer's admission"}
+{"type": "token", "content": " of paying Rs. 9750/- as one month's wages, calculated for 26 working days, is a clear violation. The term \"one month's wages\" in Section 33(2)(b"}
+{"type": "token", "content": ") refers to wages for a full calendar month, not merely the working days. The legislative intent is to provide immediate financial support to the dismissed workman. Calculating wages for fewer than 30 or 31 days defeats this purpose. The"}
+{"type": "token", "content": " payment of one month's wages must be the full amount without any deductions.\n\n*   **B. Payment Not Unconditional and Potentially Included Deductions:**\n    The employer's action of bundling the one month's wages"}
+{"type": "token", "content": " of Rs. 9750/- with the full and final settlement dues of Rs. 18482/- in a single cheque makes the payment conditional and ambiguous. The law requires a distinct and unconditional payment of one month's"}
+{"type": "token", "content": " wages. Any deductions from this amount, such as for advances or taxes, are impermissible for the specific payment under Section 33(2)(b), which should be of gross wages. The employer has not provided evidence that the Rs"}
+{"type": "token", "content": ". 9750/- was the gross amount.\n\n*   **C. Consequence of Non-Compliance:**\n    The payment of one full month's wages is a mandatory, jurisdictional condition. Even a minor shortfall renders the entire application"}
+{"type": "token", "content": " invalid and non-maintainable from its inception. This defect cannot be cured by a subsequent offer to pay the difference. The dismissal order and the application for its approval are void *ab initio*. The Supreme Court in *Jaipur Zila Sahakari"}
+{"type": "token", "content": " Bhoomi Vikas Bank Ltd. v. Ram Gopal Sharma, (2002) 2 SCC 244* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2000"}
+{"type": "token", "content": "/2281_2000_Judgement_17-Jan-2002.pdf)) emphasized that non-compliance with the mandatory conditions, including payment of one month's wages, renders the dismissal"}
+{"type": "token", "content": " order ineffective from the date it was passed.\n\n#### II. Victimization and Unfair Labour Practice\n\nThe dismissal constitutes a clear act of victimization, intended to punish the Opponent for his legitimate union activities and to suppress the ongoing industrial dispute. Section"}
+{"type": "token", "content": " 33 of the Act aims to protect workmen from victimization, harassment, or *mala fide* action by the employer, especially in connection with union activities or pending industrial disputes.\n\n*   **A. Context of Industrial Dispute:**\n"}
+{"type": "token", "content": "    The disciplinary action, including the issuance of charge sheets and the dismissal, occurred during the pendency of Reference (IT) No. 04 of 2011, which arose from a Charter of Demands raised by the Bhart"}
+{"type": "token", "content": "iya Kamgar Union. This timing is not coincidental but a calculated move to target active union members.\n\n*   **B. Targeted Action and Motive:**\n    The employer's allegations of the Opponent having \"instigated,"}
+{"type": "token", "content": " supported, and actively participated in the strike/stoppage of work\" are an admission that the action is connected to activities related to the industrial dispute. This demonstrates a *mala fide* intent to eliminate a workman actively involved in asserting workers' rights,"}
+{"type": "token", "content": " which falls under the definition of unfair labor practices as per Section 2(ra) and the Fifth Schedule of the Industrial Disputes Act, 1947. The Kerala High Court has observed that the object of an enquiry under Section 33"}
+{"type": "token", "content": "(2)(b) is to \"lift the veil\" to find out any hidden motive in punishing the workman, acting as a shield against victimization or unfair practice.\n\n#### III. Denial of Natural Justice at the Punishing Stage\n\nEven"}
+{"type": "token", "content": " if the domestic enquiry were deemed procedurally fair, the final dismissal order is vitiated by a complete denial of natural justice by the punishing authority.\n\n*   **A. No Personal Hearing by Punishing Authority:**\n    The employer admits"}
+{"type": "token", "content": " that the final decision to dismiss was taken without providing a personal hearing to the workman on the quantum of punishment. The punishing authority has a non-delegable duty to apply its own mind to the findings and, crucially, to give the workman an opportunity"}
+{"type": "token", "content": " to be heard on the proposed punishment. The Opponent was never given a chance to present mitigating circumstances or argue against dismissal before the authority that passed the order. This violates the principles established in *Managing Director, ECIL, Hyderabad v. B."}
+{"type": "token", "content": " Karunakar, (1993) 4 SCC 727*, which underscores the employee's right to make a representation against the enquiry findings before the disciplinary authority takes a final decision.\n\n#### IV. Punishment is Shockingly Dis"}
+{"type": "token", "content": "proportionate\n\nThe punishment of dismissal is the economic death penalty and is shockingly disproportionate to the alleged misconduct, especially when viewed in the proper context.\n\n*   **A. Past Service Record Ignored:**\n    The employer's"}
+{"type": "token", "content": " arguments are silent on the Opponent's past service record, which is a crucial mitigating factor. The failure to consider a clean past service record before imposing the harshest punishment is a serious flaw. While the gravity of current misconduct may be"}
+{"type": "token", "content": " considered, the quantum of punishment must be proportionate. Labour Courts and Industrial Tribunals should interfere if the punishment is shockingly disproportionate.\n\n*   **B. Context of Industrial Unrest:**\n    The alleged acts of misconduct occurred during a period of industrial"}
+{"type": "token", "content": " strife, where emotions naturally run high. This context must be considered when determining the proportionality of the punishment.\n\n*   **C. Flawed Basis for Punishment:**\n    The Hon'ble Tribunal itself found the Enquiry Officer's findings"}
+{"type": "token", "content": " on a significant number of charges to be perverse. A decision to impose the ultimate penalty, when based on findings that were later proven to be unsustainable, cannot be considered a fair or proportionate exercise of power.\n\n#### V. Perverse Findings and Failure"}
+{"type": "token", "content": " of *De Novo* Evidence\n\nThe employer's case is fundamentally weak, as evidenced by the Tribunal's own preliminary findings.\n\n*   The Hon'ble Tribunal, by its order dated 01.07.2024"}
+{"type": "token", "content": ", declared the Enquiry Officer's findings on several charges (Charge Nos. 02, 03, 06, 07, 08 from the first charge sheet and Charge Nos. 02, "}
+{"type": "token", "content": "09, 10 from the second) to be **perverse**. This indicates that the initial enquiry was flawed, and the decision to dismiss the Opponent was based on grounds that could not be sustained by evidence. The fact that the management"}
+{"type": "token", "content": " needed a second opportunity to prove these charges before the Tribunal shows that the original dismissal was baseless and premature.\n\n### Relevant Case Laws\n\n1.  ***Jaipur Zila Sahakari Bhoomi Vikas Bank Ltd. v. Ram Gopal Sharma, ("}
+{"type": "token", "content": "2002) 2 SCC 244*** ([Judgment PDF](https://api.sci.gov.in/supremecourt/2000/2281_2000_Judgement"}
+{"type": "token", "content": "_17-Jan-2002.pdf)): The Supreme Court held that the conditions in the proviso to Section 33(2)(b) are mandatory. An application for approval filed without payment of one month's"}
+{"type": "token", "content": " wages is not maintainable and is void *ab initio*.\n2.  ***Managing Director, ECIL, Hyderabad v. B. Karunakar, (1993) 4 SCC 727***: Est"}
+{"type": "token", "content": "ablishes the right of an employee to be heard by the disciplinary authority on the findings of the enquiry officer before a final punishment is imposed.\n3.  ***DMAI, C.A. No.-003969"}
+{"type": "token", "content": "-003970 - 1990, 16-08-1996*** ([Judgment PDF](https://api.sci.gov.in/jonew/judis/15"}
+{"type": "token", "content": "286.pdf)): This case deals with allegations of unfair labor practices by the employer under Schedule II, Item 1(a) to (b) of the Industrial Disputes Act, 1947, specifically in relation to"}
+{"type": "token", "content": " trade union activities and termination of services, which is highly relevant to the claim of victimization.\n4.  ***RAJNEESH KHAJURIA VS WOCKHARDT LTD., C.A. No.-008989-"}
+{"type": "token", "content": "008989 - 2019, 15-01-2020*** ([Judgment PDF](https://api.sci.gov.in/supremecourt/2015"}
+{"type": "token", "content": "/2033/2033_2015_11_1502_19663_Judgement_15-Jan-2020.pdf)): This case addresses"}
+{"type": "token", "content": " complaints relating to unfair labor practices falling under Item 1 of Schedule IV of the Industrial Disputes Act, 1947.\n\n### Prayer\n\nIt is respectfully prayed that this Hon'ble Court be pleased to:\n\n1.  **"}
+{"type": "token", "content": "Reject** the present Application (IT) No. 01 of 2012 as it is non-maintainable due to non-compliance with the mandatory proviso to Section 33(2)(b) of the Act"}
+{"type": "token", "content": ".\n2.  **Disapprove** the order of dismissal dated 21.01.2012 as it is an act of victimization, is based on a flawed enquiry, and is shockingly disproportionate.\n3"}
+{"type": "token", "content": ".  Direct the reinstatement of the Opponent with full back wages and continuity of service.\n\n### PDF Links\n\n*   *Jaipur Zila Sahakari Bhoomi Vikas Bank Ltd. v. Ram Gopal Sharma, (2002)"}
+{"type": "token", "content": " 2 SCC 244* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2000/2281_2000_Judgement_17-"}
+{"type": "token", "content": "Jan-2002.pdf))\n*   *DMAI, C.A. No.-003969-003970 - 1990, 16-08"}
+{"type": "token", "content": "-1996* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/15286.pdf))\n*   *RAJNEESH KHAJURIA VS W"}
+{"type": "token", "content": "OCKHARDT LTD., C.A. No.-008989-008989 - 2019, 15-01-2020* ([Judgment PDF](https"}
+{"type": "token", "content": "://api.sci.gov.in/supremecourt/2015/2033/2033_2015_11_1502_19663_Judgement_"}
+{"type": "token", "content": "15-Jan-2020.pdf))"}
+{"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}
+{"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1784983100.0992455, "step": "finalize"}
+{"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}
+{"type": "response", "content": "### Counter-Arguments on Behalf of the Opponent\n\nThe following counter-arguments can be advanced on behalf of the Opponent in the labor dispute, challenging the employer's application for approval of dismissal under Section 33(2)(b) of the Industrial Disputes Act, 1947:\n\n#### I. Fatal Non-Compliance with the Mandatory Proviso to Section 33(2)(b) of the Industrial Disputes Act, 1947\n\nThe employer's application for approval of dismissal is liable to be dismissed due to non-compliance with the mandatory condition of paying one month's wages as stipulated in the proviso to Section 33(2)(b) of the Industrial Disputes Act, 1947 (hereinafter \"the Act\"). The conditions in the proviso to Section 33(2)(b) are mandatory, and non-compliance renders the dismissal order ineffective from the date it was passed.\n\n-   **A. Deficient Payment of Wages:**\n    The employer's admission of paying Rs. 9750/- as one month's wages, calculated for 26 working days, is a clear violation. The term \"one month's wages\" in Section 33(2)(b) refers to wages for a full calendar month, not merely the working days. The legislative intent is to provide immediate financial support to the dismissed workman. Calculating wages for fewer than 30 or 31 days defeats this purpose. The payment of one month's wages must be the full amount without any deductions.\n\n-   **B. Payment Not Unconditional and Potentially Included Deductions:**\nThe employer's action of bundling the one month's wages of Rs. 9750/- with the full and final settlement dues of Rs.\n18482/- in a single cheque makes the payment conditional and ambiguous. The law requires a distinct and unconditional\npayment of one month's wages. Any deductions from this amount, such as for advances or taxes, are impermissible for the\nspecific payment under Section 33(2)(b), which should be of gross wages. The employer has not provided evidence that the\nRs. 9750/- was the gross amount.\n\n-   **C. Consequence of Non-Compliance:**\nThe payment of one full month's wages is a mandatory, jurisdictional condition. Even a minor shortfall renders the\nentire application invalid and non-maintainable from its inception. This defect cannot be cured by a subsequent offer to\npay the difference. The dismissal order and the application for its approval are void *ab initio*. The Supreme Court in\n*Jaipur Zila Sahakari Bhoomi Vikas Bank Ltd. v. Ram Gopal Sharma, (2002) 2 SCC 244* ([Judgment\nPDF](https://api.sci.gov.in/supremecourt/2000/2281_2000_Judgement_17-Jan-2002.pdf)) emphasized that non-compliance with\nthe mandatory conditions, including payment of one month's wages, renders the dismissal order ineffective from the date\nit was passed.\n\n#### II. Victimization and Unfair Labour Practice\n\nThe dismissal constitutes a clear act of victimization, intended to punish the Opponent for his legitimate union activities and to suppress the ongoing industrial dispute. Section 33 of the Act aims to protect workmen from victimization, harassment, or *mala fide* action by the employer, especially in connection with union activities or pending industrial disputes.\n\n-   **A. Context of Industrial Dispute:**\n    The disciplinary action, including the issuance of charge sheets and the dismissal, occurred during the pendency of Reference (IT) No. 04 of 2011, which arose from a Charter of Demands raised by the Bhartiya Kamgar Union. This timing is not coincidental but a calculated move to target active union members.\n\n-   **B. Targeted Action and Motive:**\nThe employer's allegations of the Opponent having \"instigated, supported, and actively participated in the\nstrike/stoppage of work\" are an admission that the action is connected to activities related to the industrial dispute.\nThis demonstrates a *mala fide* intent to eliminate a workman actively involved in asserting workers' rights, which\nfalls under the definition of unfair labor practices as per Section 2(ra) and the Fifth Schedule of the Industrial\nDisputes Act, 1947. The Kerala High Court has observed that the object of an enquiry under Section 33(2)(b) is to \"lift\nthe veil\" to find out any hidden motive in punishing the workman, acting as a shield against victimization or unfair\npractice.\n\n#### III. Denial of Natural Justice at the Punishing Stage\n\nEven if the domestic enquiry were deemed procedurally fair, the final dismissal order is vitiated by a complete denial of natural justice by the punishing authority.\n\n-   **A. No Personal Hearing by Punishing Authority:**\nThe employer admits that the final decision to dismiss was taken without providing a personal hearing to the workman on\nthe quantum of punishment. The punishing authority has a non-delegable duty to apply its own mind to the findings and,\ncrucially, to give the workman an opportunity to be heard on the proposed punishment. The Opponent was never given a\nchance to present mitigating circumstances or argue against dismissal before the authority that passed the order. This\nviolates the principles established in *Managing Director, ECIL, Hyderabad v. B. Karunakar, (1993) 4 SCC 727*, which\nunderscores the employee's right to make a representation against the enquiry findings before the disciplinary authority\ntakes a final decision.\n\n#### IV. Punishment is Shockingly Disproportionate\n\nThe punishment of dismissal is the economic death penalty and is shockingly disproportionate to the alleged misconduct, especially when viewed in the proper context.\n\n-   **A. Past Service Record Ignored:**\n    The employer's arguments are silent on the Opponent's past service record, which is a crucial mitigating factor. The failure to consider a clean past service record before imposing the harshest punishment is a serious flaw. While the gravity of current misconduct may be considered, the quantum of punishment must be proportionate. Labour Courts and Industrial Tribunals should interfere if the punishment is shockingly disproportionate.\n\n-   **B. Context of Industrial Unrest:**\n    The alleged acts of misconduct occurred during a period of industrial strife, where emotions naturally run high. This context must be considered when determining the proportionality of the punishment.\n\n-   **C. Flawed Basis for Punishment:**\n    The Hon'ble Tribunal itself found the Enquiry Officer's findings on a significant number of charges to be perverse. A decision to impose the ultimate penalty, when based on findings that were later proven to be unsustainable, cannot be considered a fair or proportionate exercise of power.\n\n#### V. Perverse Findings and Failure of *De Novo* Evidence\n\nThe employer's case is fundamentally weak, as evidenced by the Tribunal's own preliminary findings.\n\n-   The Hon'ble Tribunal, by its order dated 01.07.2024, declared the Enquiry Officer's findings on several charges\n(Charge Nos. 02, 03, 06, 07, 08 from the first charge sheet and Charge Nos. 02, 09, 10 from the second) to be\n**perverse**. This indicates that the initial enquiry was flawed, and the decision to dismiss the Opponent was based on\ngrounds that could not be sustained by evidence. The fact that the management needed a second opportunity to prove these\ncharges before the Tribunal shows that the original dismissal was baseless and premature.\n\n### Relevant Case Laws\n\n1.  ***Jaipur Zila Sahakari Bhoomi Vikas Bank Ltd. v. Ram Gopal Sharma, (2002) 2 SCC 244*** ([Judgment PDF](https://api.sci.gov.in/supremecourt/2000/2281_2000_Judgement_17-Jan-2002.pdf)): The Supreme Court held that the conditions in the proviso to Section 33(2)(b) are mandatory. An application for approval filed without payment of one month's wages is not maintainable and is void *ab initio*.\n2.  ***Managing Director, ECIL, Hyderabad v. B. Karunakar, (1993) 4 SCC 727***: Establishes the right of an employee to be heard by the disciplinary authority on the findings of the enquiry officer before a final punishment is imposed.\n3.  ***DMAI, C.A. No.-003969-003970 - 1990, 16-08-1996*** ([Judgment PDF](https://api.sci.gov.in/jonew/judis/15286.pdf)): This case deals with allegations of unfair labor practices by the employer under Schedule II, Item 1(a) to (b) of the Industrial Disputes Act, 1947, specifically in relation to trade union activities and termination of services, which is highly relevant to the claim of victimization.\n4.  ***RAJNEESH KHAJURIA VS WOCKHARDT LTD., C.A. No.-008989-008989 - 2019, 15-01-2020*** ([Judgment PDF](https://api.sci.gov.in/supremecourt/2015/2033/2033_2015_11_1502_19663_Judgement_15-Jan-2020.pdf)): This case addresses complaints relating to unfair labor practices falling under Item 1 of Schedule IV of the Industrial Disputes Act, 1947.\n\n### Prayer\n\nIt is respectfully prayed that this Hon'ble Court be pleased to:\n\n1.  **Reject** the present Application (IT) No. 01 of 2012 as it is non-maintainable due to non-compliance with the mandatory proviso to Section 33(2)(b) of the Act.\n2.  **Disapprove** the order of dismissal dated 21.01.2012 as it is an act of victimization, is based on a flawed enquiry, and is shockingly disproportionate.\n3.  Direct the reinstatement of the Opponent with full back wages and continuity of service.\n\n### PDF Links\n\n-   *Jaipur Zila Sahakari Bhoomi Vikas Bank Ltd. v. Ram Gopal Sharma, (2002) 2 SCC 244* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2000/2281_2000_Judgement_17-Jan-2002.pdf))\n-   *DMAI, C.A. No.-003969-003970 - 1990, 16-08-1996* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/15286.pdf))\n-   *RAJNEESH KHAJURIA VS WOCKHARDT LTD., C.A. No.-008989-008989 - 2019, 15-01-2020* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2015/2033/2033_2015_11_1502_19663_Judgement_15-Jan-2020.pdf))\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."}
+{"type": "sources", "data": [{"source_type": "scenario", "title": "casemine.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHHVCXcDrV-eGGHctyNR4VRuT04IZ4LKG4vMSkl5Xw2QIMw20EtQhMwiqkBBz66sEp5pMuiLMnZLB34t6XHJHxklQFzQx8NNx4oTZI07ud33BdTbkXZFsRpwMAq1pEIF9xbsK1L4UD3REQ2-NIQcKW_jRWYIdu3Oe-MCrCUR6mXx7aKpuQ60uMECzEYtWCYWa-fOr1xI2A3GCO8XYatelA56ha93b2yncfVw4wRIs3F0PHPSJ16SQrjRLeZk4R0kBarWx6EoYXDhB3G", "web_title": "casemine.com"}, {"source_type": "scenario", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEbrJtamPLt952LJt9YS_xoaDb-2NE7D1ay_MEucxrl189efXuxN2lv5MQBjcJjyoHsNtrypXZ4B1hCoJOVWq3KkB5TMNy5yucTHau1Y2wIo5lxLESeqlpnfUIA0zLXdcr_yc015XrLXAJ6YzZSYd6oHilHgdOZ7VXrxUHklU3FQINHtAQ=", "web_title": "ipleaders.in"}, {"source_type": "scenario", "title": "amlegals.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGCNss5rB56ZWdJiCBy-LgnnjFHo35ZwVSkyTHrXRHpryZ6swivZ1ZZ0wF_Rli7lX2nka8jR4WURcnLRl2c7ycD5FTh_SNF0lofaiefa_pd4Szr_ZzZyED7xnMzrGx_FowRpdxBeEiMluMRpEcRwVQ6mvO6PUUqVy9JfwW58WzGInp8sPP9SDyWErg62kwnEy1fpm4L1l3GCBo6y7cB10TTDKdA1uzHkWt6f137p3BzesOf1tnkK8guaX4ck1u7d7dV8f04yfJQTYhRstk=", "web_title": "amlegals.com"}, {"source_type": "scenario", "title": "uslegalforms.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG9yjurdw5eJlK8OpdLWxPCNMfl0BImfWPuEAjYAU9AFmrmLno0i7FskoU1dfCIcFLcUyUun4vsIRWgCZ6aZTrx6dFt038GHFyLWSvdKIZ8ygOW_mWRdLDWksmVc_YT5HJzdWmjHZWhn2RpXe9okyUNKGCGQ2fmKD37wDKblgPodw==", "web_title": "uslegalforms.com"}, {"source_type": "scenario", "title": "laborlaw.ph", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHQQidhssgXy_eSrW_kZVphbunZWD7iN8mAngRiuOf4GuQyoAs7f7d3U0Rud7gjzCtVTPxV4hd5U_-MwHti66ToyaesSV5SzlXuwM418UfShjWPdJ1dMOFCE9N3PPM4an-ZshYABV4=", "web_title": "laborlaw.ph"}, {"source_type": "scenario", "title": "anarnalaw.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFcqivBR0QRlSVdP2_zTfcAjRoaUievgYYDNf9verkqb6iJ-nhw6ihOYS888lk8Rrc65O4hs0_3f7sBiTHSmfoU5NB3VpJJkam10Pr_TPnKHEQBkjghQBDZArOtFYC94wI6Z_WLgS2ffLJmG044MuNPx2dnxDufnSoZQt_sb7qQ9TwB-pCan9M=", "web_title": "anarnalaw.com"}, {"source_type": "scenario", "title": "blackstonepc.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFMuXkm5rnDr8z2UTWjYC9SlNwYWPrvew7pNNZ5jlMBNfxSTT-JUnw9P5U_IlKk-Pdop_DYAdmL4vsJjsjo-YQD1JHudwd_ngolU3w8Dr-09fEg1upS37FzY94IVCNKF62D9SrXAhliviof2B8JBtT6KuHR7yyOXKDq45h-1q4wla2FqEgVKipd8nUY8QuUY5d_89INh0aJIjvGvj8C", "web_title": "blackstonepc.com"}, {"source_type": "scenario", "title": "didlaw.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHO7ciKnWcY50oWy4QW5EXbD0bfZrYFTuusaSWeX_JnpLhCL0ZBJel5wnZI6W4HDd7z1DhY9Z4V9W_uCPTMsiBCv5dnixfXxqSn580ctjH7KMoCQJ2y5IMyTNlMCdNvqmH3C5GEJyv_aQQKoD-Fz9Z5a8MDxaNFytJEFQ==", "web_title": "didlaw.com"}, {"source_type": "scenario", "title": "bradgagelaw.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFAv5haJykcTVMoG-8epwZtQEy2AV0ZzXBstZfgJpBZI1YWtOLMpffv00pd3Y-4_6JtSzn0bHtbCJk1GLtMZdc_T8Bs1YUdZBzgq1QjxR9UFY7WOg5k2yfSU_MkqStVzsZZKLKX9-CX9zfjFbBQAUbqz6mnVGXTi0D9WPtzGbJejisiye2WIqQAZDsHWuPsQNm391K9FQ-Nq8HLn2TiN-M1wp4=", "web_title": "bradgagelaw.com"}, {"source_type": "scenario", "title": "mondaq.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHekB_gKgwxFpuYl7qwjPGRqHfangWoJ0pBL-5t8s3K1yvDCuoWhZYEhfKO0fODy1EDkXV8RizLAtXdCfOJP1Mp28ZqcVlTQ_8voGXPeLw0qxsd_vAYkuOaWjlBMrmWdXXF9Nn-DDc178ChhwaLyLu_GFcWpU6UkSKv8U7kbnf2XwGdbaU-C-tr7y8p6ucXS8mKV_jSsKxZafJ4fJJz1X3LtTe6OGX8gGCNaaRsZDK7ZhSQbyGIzOL3Kc7-slnquyQITQ_VSTZqn64q3at-OstqDOf7DxF2xZiCOfr0PVo=", "web_title": "mondaq.com"}, {"source_type": "scenario", "title": "mondaq.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHnCaAmU9JsOxEPc0dAVIgh1IrbTx3r8dGVomchLlSgVQ3Q2p-taxH_30luc21J835L9sCnmgVakRXokbrcYD42ZkWvcmvti3GaZq0-2UODUV7dRloPC2C_Fmnf0LhR7XHWHFTEJRHHjIF80SCdMchtE_X8GBVW20i32V0H1fI4x3kP9anNzwJAZ83kj4vq9S2b2pc0-6WfdM52V-akskCy12Vcts8afSchmRsHLLOkAw8717_ZNBw4MRNlnVIr65j1XwmUBG2GYQLVr5GidUUpo1UP-Qgdl1qOX9tpplr69UUFAk-8vuK6ZPqCGDQ6_vwOiN6laO6Vuuf60xewoWcwgMejbnj5bN-dW9qBKkeh6UxfewE=", "web_title": "mondaq.com"}, {"source_type": "scenario", "title": "supremetoday.ai", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGwY73RkB7btM6mS7iF-jAECVCJ1mC_nOUgktw567mY5xNerlKOFDDLc69V1IArohZ2VxK5Fl26NsnpyL3vrbkxsPu6nvXA7xAhyweEt1UmaMhvyxKDtqw2FnF7k9vG6q2GMY6YtpE4-F5P1sv3v-XDYWWHGe1osYbkSQ4t0axAhMB1sizolGXmYBfY0PaIroRa-CnwahnslJKDQ==", "web_title": "supremetoday.ai"}, {"source_type": "scenario", "title": "verdictum.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHS19YVlm5XGVhK0eCF6q3Ct6g7ObjIVyPLGYQAmaiLqBCHPHMOM5_xrkm8qbN_5wcWriVXqVF81wM5sgFCbg-Mlsp2VKXSpruqpDm4Ox7Q5injadkk8GBrCUp-V2Nfrj-GnA3cSa7nvv5lbL6FDpFuqaJYhXtMnxFhBPWPj_JDaz9AZV-7aAt5Hh2fErzG7Mt8aNevPtnqkNXkMprbA6q8s1kp4U8MBdGjaTF0KPNfLSDaUerJtL9ZR-E9tkFuHQ6jnXcHNt67X5y8eoCXSCYN9pn_eboHqdP11mz48oOlOsHNykUH1pmAFQ==", "web_title": "verdictum.in"}, {"source_type": "scenario", "title": "chattertons.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHnwH7ogYPkzMxeXjkFTo4xVw6toKbd5OozkxjgvuVkAYscQuAz0bL3dSnFs85TW46izG0qtA1bP6l9LuCn83V0t3ARku4_ne6n3WSu-NFfzFqLzY78DJaxI3S-nIP0uvmWozpYPvMu1pOOA-Ffp4QYSkDozX_-IRGsJnAybbkNkOCedJI5lcWy2fNtvQ5i7HSFTk29Cxc1zaK4LvxZeV7xeQb7t9Eigg==", "web_title": "chattertons.com"}, {"source_type": "scenario", "title": "mypeopleos.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE1XHV_O3HpguAAiNragEaJTscq-OXezldhS_eYepUJ-KBUp8f8dE1Qfb7G_h64GRIKyW-u6m4giIEnfP-GFNiyXhlp1K1d5PfzDKHESWlgnOz0qTJNKu4kzwUh070GOzlcjyabkQqHY-n_LyjLMQ==", "web_title": "mypeopleos.com"}, {"source_type": "scenario", "title": "casemine.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHnX6Vko6GPZEsaoEhIOKKOh_VN9uGPAu6tFyyerhQUJxWPbrPhz8tGY5RCRvbEwmKnQ48DOG5s8bOoCKlGKl9LprscQh_r_Na_PlWS85x9Uy-1QzSY9cNvljgOlIqeyxjGUMlJFXwy5iSPLVvACPomOD3pHSembRGmVnl_2j2-w0IqeVBofxZ8nuB0BmGj2dMl9DAVuDc3UyD3Toboj9sSUZMO5unyMvYCBJLmiE7QZd0fqRO2hHWm1nLf8UwqNBGOY06p43y4UNP43C44vjU293kc8Xyj42yiRCzw6xs4p0sCeFkUfMv6uRd-nmfbNm1jKzk27vcljQ0XPaVR6_4sP_n5IAK9SbQ=", "web_title": "casemine.com"}, {"source_type": "scenario", "title": "casemine.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Scenario", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGMQRZFXv9smrNienasNocOKWcDB3br1ZZg-Fsfn5sm8PinHID8jyUO_7URQqURi-W-aqDWoXdKCA36XR093xz24RzoS5P33Yla_Mmp1QQvGvu7EuTfXlSiVCpcRZ0wg3mmxslyDcTy5rADyk9UX0jGRSOZy-feurtGBrxIZy05Pzn2KCXeJPvb-FRdIV7AnGv5myMHNxmA8VAac9KLLRbix_Rtx_v1s18R_veiRV56ootxhz8uUHlqd1mWwvyRjULGe99n2suXc874mZrRzsXrP-RpS5xupa9KxG2UUKrKJgik2y_sbUAWkwtFnct2", "web_title": "casemine.com"}, {"source_type": "judgment", "title": "rfmlr.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFo7UCL776QMiCAEfVrlZ0XBk4mG_gGCAeVI1kxiM6zM7TRNIZvjiGF3hse8D_fpT2ZGE09smmAUMP0fmzU67zlSn5_gXoerG1H7ZP-kptNo-8b8DpADzdR2EIjcH4FftTgJZNbiEvBTzdKny1LJjplIUHq5Hbd3FlMmcuesbA39VyPPvziQowuxhujjyJguN5TFeCPkJk4wJnufe6TM4-UDzyp-mLUikdPfwnfmFObpyAz", "web_title": "rfmlr.com"}, {"source_type": "judgment", "title": "draftbotpro.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQExPnBsO06Uu70GElT_-oGyXnKmE56odkX123H2UcJTIiiUfMecQd25KmE9S-JunuwZjVQQw34t7Hajy2tGyu25dmYKXKxSuw12yboxJxaWVEQ9O3f9HAEgqanlTOVeErOp", "web_title": "draftbotpro.com"}, {"source_type": "judgment", "title": "scconline.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqGNz1JYCEHfRK1s_bOa-AXvR_rUrUZ4Jr45mGK2q2W8IvTAlVO8pQd2qVyh6Ps_kyvP59Cuvfj2WfCyAqFuNoMM2_uINN9UdYpZqDQfeZLnu_J_Pc8tJkzs1rbtEXb_H-XOA8f9Ee62p8HZRgMmkH03wpcORLspN9xeyrwp79JHAvi5zYJdqGxU2HpPO7pEVPE5LndyRZeQvpB3gsJbbwD45dPF-ke5EukhreTTBE8cz_hUcC7JZW6FdEyOjqO3g_P83kiZkSRvCPQMUzIzmw7TWGD9FUQJRdzWZcb1VeD-lefezxH-Hyn--lTMD_AdDxHzD6g2X9joTNNj-9awyFBuIbp7mBk6X93Zpgx0gEWLH05og=", "web_title": "scconline.com"}, {"source_type": "judgment", "title": "ipleaders.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHQAPIjbhPvQSJj1JaZJTQaciG6CqU25xwFRKevQPRUvs1_5OIqX4dCKr4qKEgtdgQfB_QLaMj7_MGxmQ9G8nsFjTOWoQ8Iotj1TJhFqUiHoLX9fKcGPS2dl2gfQXgc5qDUdIt_Jw_YV7R60o8AOeaj8HLevtK8g5GVMXCUxm0N-eEQcqU=", "web_title": "ipleaders.in"}, {"source_type": "judgment", "title": "indiankanoon.org", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG2n4397HoLny-45blK0elNwdyS1PJC7ShY7yzxxYFK9MglyEUPaAeSLFMGQ39rHhH1LxE6UOTx3pm9DOdimDxiVan261aL0XSU0UhOvc02wxyS-CQ6nEZm7GhK4mOkrQ==", "web_title": "indiankanoon.org"}, {"source_type": "judgment", "title": "casemine.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGHjMTSP4Yr_hHGlsKwWJoADdqYdIzhSu1VCM1gDYywCupFILUzJzUcG9WLjN_lfiZ-8M1FRUTGfiJ4Gt9k2HfEHabUHafgy_V95BnH_kC8DSMO9Brz6yxL_qKxMENJRPESG3h2aabIAmfbIfAi2gQF4-7M09bGk4MMCXkNJzQeEZGEYe7iNVGBLBxmOLB9Eqj8ZoxrZTvFBQSj8RWAtK02jBJ_X7d7qnqdeo9XgO7UhV4Ve8pBlDZYS35ZvnGVm_kGSIt3m_jgMQsAftJwdGf_6hTDx3ToPpKWdzAx9VAXiOYcoWG2pGAcQIgQtyKteyBjOGQVxvsswcOUk3AWfAim", "web_title": "casemine.com"}, {"source_type": "judgment", "title": "bmhrmagazine.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF_hFh4NuziCEPb_mC3lajK35eT5XL-HEeMssJ6E2-1hkgbGvZctnOcva6vqULFG_JBFuYM_pmjAciBWYlTY6Iq5nTipPl3QrjRKmRV7sAD02zTIFM_kM87Wlu1jpbNycnrDtIZv4BkzSuLaQMpYZLNv7JuAsv6ZdsfS-ZwHPUZoCxynUYAqe___pSAoxiB3sYRN4cxTmDKtHMnP580c4wMYiBkQ4KC3g==", "web_title": "bmhrmagazine.com"}, {"source_type": "judgment", "title": "supremetoday.ai", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQESWTGTNRWc8Ddvy4HFhEtj2T8dCj-a8mhPokISJ0VKvRU3o16M8nQQADMn2NmXU-gAvIylJ1C-xMkKwfu9MZRg3LS-Hq0Ds4GACneKMRcfidi-7oHxlHjrP9VpD8sWnV76axYUh-Mpkr2csUPoM5Eyo_2hghoKSVDTfSfO4TQewPMXQGodIrXjpyK41uOOlzBTYmgasHXQ8R0odeYBnYg0ibU=", "web_title": "supremetoday.ai"}, {"source_type": "judgment", "title": "casemine.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFJAIPQInQpH_B2XJ0h4CEce2CBGRs0ZHHxl_JXy5-nIITZZROcCiGhGG3BUlDesSH5goB_rAiBBl4_bc53dGda1eS8Wt3hdnxtgi-jMyaLSt56vZ8EP1EXF-KRvHF8erMogBav3JszvnCfBbYJ8tmLTg4PmEWzeS3aUoV95RL-WUyw5tuggf1A283ffYYdKsrABZ-vA39ByjKLg7g3RNSIkX1OS4trdNEW4toyrkeUGlUu6Lkurq3AXvic6ohJBEGd4iEqZiOXjLGF", "web_title": "casemine.com"}, {"source_type": "judgment", "title": "livelaw.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH1coV5El-TS9J1ZlIcm1tRh5yJetsL0SwlkjQzH1aNsoM5aRf6SNVQb_DhJUa2O7goLx7MtUpNA-E_6qGno5UFlA5bC-8DcDSuCKVVO3D10_Hha5v3eaTLkkIVFy-eawkrdY0YDJEWu_9PQI7SMDib4CMz5yXX1fPi-39TIwNJc5KPMSE2cdlg", "web_title": "livelaw.in"}, {"source_type": "judgment", "title": "amlegals.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEb8BRRdDyWaLqXqYxL8j1NDynPtqREvEZaCh8nF_W_z0VCQChqxwhaxq0dkRcLmGxWJueITc5sO86h--L4om-bovHTjqwk0zdbcTEh-lCbQxOOPStxVAiw9kpKmzFrhGg9JKn-T0TBAjVNSMgj2ej4866GxHNLfbMKOKcsoVWkH-p3y5ouPvx0P5hrKTk7YXji391QPRacu7CxRX9dJz1OW0i48HIW2kzqCB6aU-fh8VT9wcVWP3mHD4VmR-ecugBcScVLv_xZkDionco=", "web_title": "amlegals.com"}, {"source_type": "judgment", "title": "supremetoday.ai", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHhcmemICy0OPfvn_8wdx_lx7RXOV_coHrcWL8JFkjJ9d7GMlqSsOEL6w1YMqCndKaLnMq_bckeIkmUerxXpFE7ppeqicH-13pWTTfaGaBzfHkSIIsHIy1BrWwB3pwqt1C6tj4NDu-Q039jP5-a8mwI6ZOUZVlkT5E2foycrFYdFCdmvmypsU_Mf4oizohyHAnzy46HMQV2mAwa", "web_title": "supremetoday.ai"}, {"source_type": "judgment", "title": "casemine.com", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEM3I9oYcIOmx64DUnVIodq5xJs8dO6Njkx3qu0b5EO1zDJCI0wEsdfL93_WTljYryXFZvfagDX8nIxj713EXoqVc459IjyuujVvfKvQmfroe1BCP7l2fyH7KYWV-ynxpc_MdIfz0NFOG6B2Bv-yFwWk085StCUlYQkA74AFnxP_Owke5e2NJ8C0BTNcjmzM4hIeMxp6qP5ZH7vTJ9iDdbhGwsNpUymtpbHX4U3bctugIWCKINcGJMkfIFM5gwExfMqEVVDsW_kNpb6f1O3u4d8I4CZPtigGWfF7LB7duis3Ca3lJLrYx9V-PYD6fOA", "web_title": "casemine.com"}, {"source_type": "judgment", "title": "whiteblacklegal.co.in", "content": [], "doc_link": null, "file_name": null, "agent_name": "Judgment", "relevance_score": null, "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF4PovUpTOfW_eK3EvVdyfEMV8KI6hv8Fm9WGTuC1WPNhCX65cEIKzknZi9qCW_R6ZpMi0RYqpURnz4RNUPX8d0AtIzFMHL5EpIEa2UT1X2Oj8MoWcWbQocKVIOmsXweH-SQNNobo6q1S5gfut5ZgZeOllaNWWZUp8nu3h8mNKVm3hUjxVqvJFmyEzen9Ca-P50kdNQ0ZNS8ScNfR0=", "web_title": "whiteblacklegal.co.in"}, {"source_type": "sci_judgment", "title": "THE PUNJAB NATIONAL BANK, LTD. VS ITS WORKMEN", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/311.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "- 0", "judgment_date": "24-09-1959", "bench": "N/A", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/311.pdf"}], "parties": "THE PUNJAB NATIONAL BANK, LTD. VS ITS WORKMEN", "db_id": "924"}, {"source_type": "sci_judgment", "title": "THE WORKMEN OF THE FOOD CORPN.OF INDIA VS M/S. FOOD CORPN. OF INDIA", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/9358.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-001055-001055 - 1981", "judgment_date": "28-02-1985", "bench": "DESAID.A.", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/9358.pdf"}], "parties": "THE WORKMEN OF THE FOOD CORPN.OF INDIA VS M/S. FOOD CORPN. OF INDIA", "db_id": "7940"}, {"source_type": "sci_judgment", "title": "DMAI", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/15286.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-003969-003970 - 1990", "judgment_date": "16-08-1996", "bench": "KIRPAL B.N. (J)", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/15286.pdf"}], "parties": "DMAI", "db_id": "13359"}, {"source_type": "sci_judgment", "title": "SHRIPAL VS NAGAR NIGAM, GHAZIABAD", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2019/22593/22593_2019_5_1502_58996_Judgement_31-Jan-2025.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-008157-008157 - 2024", "judgment_date": "31-01-2025", "bench": "HON'BLE MR. JUSTICE VIKRAM NATH HON'BLE  MR. JUSTICE PRASANNA B. VARALE", "judgment_by": "HON'BLE MR. JUSTICE VIKRAM NATH", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2019/22593/22593_2019_5_1502_58996_Judgement_31-Jan-2025.pdf"}], "parties": "SHRIPAL VS NAGAR NIGAM, GHAZIABAD", "db_id": "44347"}, {"source_type": "sci_judgment", "title": "RAJNEESH KHAJURIA VS WOCKHARDT LTD.", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2015/2033/2033_2015_11_1502_19663_Judgement_15-Jan-2020.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-008989-008989 - 2019", "judgment_date": "15-01-2020", "bench": "HON'BLE MR. JUSTICE L. NAGESWARA RAO HON'BLE MR. JUSTICE HEMANT GUPTA", "judgment_by": "HON'BLE MR. JUSTICE HEMANT GUPTA", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2015/2033/2033_2015_11_1502_19663_Judgement_15-Jan-2020.pdf"}], "parties": "RAJNEESH KHAJURIA VS WOCKHARDT LTD.", "db_id": "39332"}, {"source_type": "document", "title": "Uploaded: Written_Notes_of_Argument_Speciality_1.pdf", "content": ["--- Page 1 ---\nQory 1o OP Ponay- \nBEFORE THE HON\u2019BLE INDUSTRIAL COURT, AT AURANGABAD \nApplication (IT) No. 01 of 2012 \nM/s. Specialty Polyfilms India Pvt Ltd \nApplicant \nPlot No. F-89 & 102, MIDC Walu"], "doc_link": null, "file_name": "Written_Notes_of_Argument_Speciality_1.pdf", "agent_name": "Document", "relevance_score": null}, {"source_type": "document", "title": "Uploaded: SPECIALITY-Workman_Arguments_Section_33_2b-2.docx", "content": ["BEFORE THE INDUSTRIAL TRIBUNAL, AURANGABAD.\n\nSPECIALITY V. WORKMEN\n\nWRITTEN ARGUMENTS ON BEHALF OF THE RESPONDENTS (SIX WORKMEN)\n\nI. INTRODUCTION\n\nThe present application has been filed by the Employe"], "doc_link": null, "file_name": "SPECIALITY-Workman_Arguments_Section_33_2b-2.docx", "agent_name": "Document", "relevance_score": null}]}
+{"type": "followup_suggestions", "data": ["What constitutes 'lesser wages'?", "How to prove union activity victimization?", "What are precedents on Section 33(2)(b)?"]}
+{"type": "done", "agents_used": ["Scenario", "Judgment", "SCI_Judgment", "Document"], "token_usage": {"input_tokens": 67840, "output_tokens": 8107, "total_tokens": 75947, "cache_read_tokens": 6057, "cache_creation_tokens": 0, "reasoning_tokens": 2744, "cost_usd": 0.114867, "by_agent": {"Orchestrator": {"input": 7922, "output": 808, "total": 8730, "cache_read": 6057, "calls": 4, "cost_usd": 0.001111}, "Judgment": {"input": 6261, "output": 303, "total": 6564, "cache_read": 0, "calls": 2, "cost_usd": 0.000747}, "SCI_Judgment": {"input": 17360, "output": 1161, "total": 18521, "cache_read": 0, "calls": 2, "cost_usd": 0.008111}, "Document": {"input": 13768, "output": 5187, "total": 18955, "cache_read": 0, "calls": 1, "cost_usd": 0.09652}, "SelfRefine": {"input": 22529, "output": 648, "total": 23177, "cache_read": 0, "calls": 1, "cost_usd": 0.008379}}, "calls": [{"agent": "Orchestrator", "step": "classify_and_plan", "input": 1492, "output": 79, "total": 1571, "cache_read": 762, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000181}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5570, "output": 425, "total": 5995, "cache_read": 5295, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000727}, {"agent": "Orchestrator", "step": "rewrite_per_agent_queries", "input": 860, "output": 292, "total": 1152, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000203}, {"agent": "Judgment", "step": "extract_metadata", "input": 1022, "output": 180, "total": 1202, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000174}, {"agent": "SCI_Judgment", "step": "react_msg_1", "input": 7772, "output": 108, "total": 7880, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.002602}, {"agent": "SCI_Judgment", "step": "react_msg_4", "input": 9588, "output": 1053, "total": 10641, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.005509}, {"agent": "Judgment", "step": "relevance_judge", "input": 5239, "output": 123, "total": 5362, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000573}, {"agent": "Document", "step": "qa_chromadb", "input": 13768, "output": 5187, "total": 18955, "cache_read": 0, "cache_creation": 0, "reasoning": 2744, "cost_usd": 0.09652}, {"agent": "Orchestrator", "step": "merge_synthesis", "input": 0, "output": 12, "total": 12, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.0}, {"agent": "SelfRefine", "step": "critique", "input": 22529, "output": 648, "total": 23177, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.008379}]}, "thread_id": "8ecde631-da84-4e3e-8a05-016e372a2fac", "conversation_turn": 1, "query_rewritten": false, "effective_query": null}

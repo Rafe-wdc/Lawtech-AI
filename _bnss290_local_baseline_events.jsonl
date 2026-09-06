@@ -1,0 +1,374 @@
+{"type": "thread_id", "data": "350ae7fc-936a-4d20-bf3e-f440207cd41f"}
+{"type": "file_processing", "message": "Processing uploaded files..."}
+{"type": "file_processing", "stage": "docx_extract_start", "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...", "file": "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"}
+{"type": "file_processing", "stage": "all_files_done", "message": "Processed 1 docx", "files": ["APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"], "errors": []}
+{"type": "file_processing", "message": "Processed 1 docx", "files": ["APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"]}
+{"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1785056212.22863, "step": "validate"}
+{"type": "status", "agent": "guardrail_input", "message": "Validating query..."}
+{"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1785056212.2320628, "step": "language"}
+{"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1785056213.8619833, "step": "language", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1785056213.8672516, "step": "history"}
+{"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1785056213.8840847, "found": 0, "step": "history", "substep": true}
+{"type": "status", "agent": "memory", "message": "Loading context..."}
+{"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}
+{"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1785056213.8920593, "step": "classify"}
+{"type": "progress", "agent": "orchestrator", "message": "Identified: Drafting, SCI_Judgment, Judgment, Document", "ts": 1785056218.215914, "detail": "Drafting", "step": "classify", "substep": true}
+{"type": "progress", "agent": "orchestrator", "message": "Preparing search queries for 3 agents...", "ts": 1785056218.2165067, "found": 3, "step": "plan"}
+{"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}
+{"type": "agents_planned", "agents": ["Drafting", "Document", "SCI_Judgment"]}
+{"type": "progress", "agent": "drafting", "message": "Searching templates and relevant law...", "ts": 1785056219.4950852, "step": "reference"}
+{"type": "progress", "agent": "document", "message": "Loading uploaded documents...", "ts": 1785056219.495548, "step": "load"}
+{"type": "progress", "agent": "document", "message": "Loading 1 document collection(s)...", "ts": 1785056219.4957874, "found": 1, "step": "search"}
+{"type": "progress", "agent": "sci_judgment", "message": "Preparing Supreme Court search...", "ts": 1785056219.4977026, "step": "prepare"}
+{"type": "progress", "agent": "sci_judgment", "message": "Running multi-step research (ReAct agent)...", "ts": 1785056221.0353022, "step": "react"}
+{"type": "progress", "agent": "drafting", "message": "Found 100 candidate templates", "ts": 1785056221.1035697, "found": 100, "step": "reference", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "No close template in corpus, searching the web...", "ts": 1785056224.947682, "step": "reference", "substep": true}
+{"type": "progress", "agent": "sci_judgment", "message": "Completed 5 search steps", "ts": 1785056236.5602212, "found": 5, "step": "react", "substep": true}
+{"type": "progress", "agent": "sci_judgment", "message": "Found 5 Supreme Court judgments", "ts": 1785056236.5627701, "found": 5, "step": "results"}
+{"type": "progress", "agent": "sci_judgment", "message": "Generating response...", "ts": 1785056236.5628743, "step": "generate"}
+{"type": "status", "agent": "sci_judgment", "message": "Searching Supreme Court judgments..."}
+{"type": "token", "content": "**BEFORE THE HON'BLE"}
+{"type": "token", "content": " [NAME OF COURT, e.g"}
+{"type": "token", "content": "., DISTRICT COURT / "}
+{"type": "token", "content": "HIGH COURT OF JUDICA"}
+{"type": "token", "content": "TURE AT [STATE]] AT "}
+{"type": "token", "content": "[CITY]**\n\n**[CIVIL S"}
+{"type": "token", "content": "UIT NO./APPEAL NO./R"}
+{"type": "token", "content": "EVISION PETITION NO."}
+{"type": "token", "content": "] OF [YEAR]**\n\n**IN "}
+{"type": "token", "content": "THE MATTER OF:**\n\n[N"}
+{"type": "token", "content": "AME OF APPLICANT/APP"}
+{"type": "token", "content": "ELLANT/PETITIONER]\nS"}
+{"type": "token", "content": "/o / D/o / W/o [Fath"}
+{"type": "token", "content": "er's/Husband's Name]"}
+{"type": "token", "content": ",\nAged about [Age] y"}
+{"type": "token", "content": "ears,\nResiding at [A"}
+{"type": "token", "content": "ddress].\n... **APPLI"}
+{"type": "token", "content": "CANT/APPELLANT/PETIT"}
+{"type": "token", "content": "IONER**\n\n**VERSUS**\n"}
+{"type": "token", "content": "\n[NAME OF RESPONDENT"}
+{"type": "token", "content": "]\nS/o / D/o / W/o [F"}
+{"type": "token", "content": "ather's/Husband's Na"}
+{"type": "token", "content": "me],\nAged about [Age"}
+{"type": "token", "content": "] years,\nResiding at"}
+{"type": "token", "content": " [Address].\n... **RE"}
+{"type": "token", "content": "SPONDENT**\n\n---\n\n**A"}
+{"type": "token", "content": "PPLICATION UNDER SEC"}
+{"type": "token", "content": "TION 5 OF THE LIMITA"}
+{"type": "token", "content": "TION ACT, 1963 FOR C"}
+{"type": "token", "content": "ONDONATION OF DELAY "}
+{"type": "token", "content": "IN FILING THE ACCOMP"}
+{"type": "token", "content": "ANYING [APPEAL/REVIS"}
+{"type": "token", "content": "ION/APPLICATION]**\n\n"}
+{"type": "token", "content": "**MOST RESPECTFULLY "}
+{"type": "token", "content": "SHOWETH:**\n\n1.  That"}
+{"type": "token", "content": " the Applicant herei"}
+{"type": "token", "content": "n has filed the acco"}
+{"type": "token", "content": "mpanying [Appeal/Rev"}
+{"type": "token", "content": "ision/Application] a"}
+{"type": "token", "content": "gainst the impugned "}
+{"type": "token", "content": "Judgment and Order d"}
+{"type": "token", "content": "ated [Date of Impugn"}
+{"type": "token", "content": "ed Order] passed by "}
+{"type": "token", "content": "the Hon'ble [Name of"}
+{"type": "token", "content": " Lower Court/Tribuna"}
+{"type": "token", "content": "l] in [Case/Proceedi"}
+{"type": "token", "content": "ng Number], a copy o"}
+{"type": "token", "content": "f which is annexed h"}
+{"type": "token", "content": "erewith as Annexure "}
+{"type": "token", "content": "A.\n\n2.  That the pre"}
+{"type": "token", "content": "scribed period of li"}
+{"type": "token", "content": "mitation for filing "}
+{"type": "token", "content": "the aforesaid [Appea"}
+{"type": "token", "content": "l/Revision/Applicati"}
+{"type": "token", "content": "on] expired on [Date"}
+{"type": "token", "content": " of Expiry of Limita"}
+{"type": "token", "content": "tion Period]. Howeve"}
+{"type": "token", "content": "r, due to the reason"}
+{"type": "token", "content": "s stated hereinafter"}
+{"type": "token", "content": ", the Applicant was "}
+{"type": "token", "content": "prevented by suffici"}
+{"type": "token", "content": "ent cause from filin"}
+{"type": "token", "content": "g the same within th"}
+{"type": "token", "content": "e stipulated period."}
+{"type": "token", "content": " There has been a de"}
+{"type": "token", "content": "lay of approximately"}
+{"type": "token", "content": " [Number] days in fi"}
+{"type": "token", "content": "ling the accompanyin"}
+{"type": "token", "content": "g [Appeal/Revision/A"}
+{"type": "token", "content": "pplication].\n\n3.  Th"}
+{"type": "token", "content": "at the delay in fili"}
+{"type": "token", "content": "ng the aforesaid [Ap"}
+{"type": "token", "content": "peal/Revision/Applic"}
+{"type": "token", "content": "ation] was neither i"}
+{"type": "token", "content": "ntentional nor delib"}
+{"type": "token", "content": "erate, but occurred "}
+{"type": "token", "content": "due to circumstances"}
+{"type": "token", "content": " beyond the control "}
+{"type": "token", "content": "of the Applicant. Th"}
+{"type": "token", "content": "e details of the \"su"}
+{"type": "token", "content": "fficient cause\" prev"}
+{"type": "token", "content": "enting the timely fi"}
+{"type": "token", "content": "ling are as follows:"}
+{"type": "token", "content": "\n    *   [**SPECIFIC"}
+{"type": "token", "content": " REASON 1 (e.g., Ill"}
+{"type": "token", "content": "ness):** That immedi"}
+{"type": "token", "content": "ately after the pron"}
+{"type": "token", "content": "ouncement of the imp"}
+{"type": "token", "content": "ugned order, the App"}
+{"type": "token", "content": "licant suffered from"}
+{"type": "token", "content": " a severe illness, n"}
+{"type": "token", "content": "amely [Nature of Ill"}
+{"type": "token", "content": "ness], which require"}
+{"type": "token", "content": "d prolonged hospital"}
+{"type": "token", "content": "ization and rest fro"}
+{"type": "token", "content": "m [Start Date] to [E"}
+{"type": "token", "content": "nd Date]. During thi"}
+{"type": "token", "content": "s period, the Applic"}
+{"type": "token", "content": "ant was completely i"}
+{"type": "token", "content": "ncapacitated and una"}
+{"type": "token", "content": "ble to attend to leg"}
+{"type": "token", "content": "al matters or instru"}
+{"type": "token", "content": "ct counsel for filin"}
+{"type": "token", "content": "g the present [Appea"}
+{"type": "token", "content": "l/Revision/Applicati"}
+{"type": "token", "content": "on]. A medical certi"}
+{"type": "token", "content": "ficate/discharge sum"}
+{"type": "token", "content": "mary is annexed here"}
+{"type": "token", "content": "with as Annexure B.]"}
+{"type": "token", "content": "\n    *   [**SPECIFIC"}
+{"type": "token", "content": " REASON 2 (e.g., Mis"}
+{"type": "token", "content": "guidance by previous"}
+{"type": "token", "content": " counsel/document co"}
+{"type": "token", "content": "llection):** That th"}
+{"type": "token", "content": "e Applicant was dili"}
+{"type": "token", "content": "gently pursuing the "}
+{"type": "token", "content": "matter and had entru"}
+{"type": "token", "content": "sted the preparation"}
+{"type": "token", "content": " and filing of the ["}
+{"type": "token", "content": "Appeal/Revision/Appl"}
+{"type": "token", "content": "ication] to their pr"}
+{"type": "token", "content": "evious counsel, [Nam"}
+{"type": "token", "content": "e of Previous Counse"}
+{"type": "token", "content": "l]. However, due to "}
+{"type": "token", "content": "[Reason, e.g., misco"}
+{"type": "token", "content": "mmunication/unforese"}
+{"type": "token", "content": "en circumstances in "}
+{"type": "token", "content": "counsel's office/dif"}
+{"type": "token", "content": "ficulty in obtaining"}
+{"type": "token", "content": " certified copies of"}
+{"type": "token", "content": " documents], the nec"}
+{"type": "token", "content": "essary steps for fil"}
+{"type": "token", "content": "ing could not be com"}
+{"type": "token", "content": "pleted within the li"}
+{"type": "token", "content": "mitation period. The"}
+{"type": "token", "content": " Applicant only beca"}
+{"type": "token", "content": "me aware of the dela"}
+{"type": "token", "content": "y on [Date] and imme"}
+{"type": "token", "content": "diately took steps t"}
+{"type": "token", "content": "o engage new counsel"}
+{"type": "token", "content": " and expedite the fi"}
+{"type": "token", "content": "ling.]\n    *   [**SP"}
+{"type": "token", "content": "ECIFIC REASON 3 (e.g"}
+{"type": "token", "content": "., Financial hardshi"}
+{"type": "token", "content": "p/Family exigency):*"}
+{"type": "token", "content": "* That the Applicant"}
+{"type": "token", "content": " faced severe financ"}
+{"type": "token", "content": "ial hardship/a grave"}
+{"type": "token", "content": " family exigency, na"}
+{"type": "token", "content": "mely [Details of har"}
+{"type": "token", "content": "dship/exigency], dur"}
+{"type": "token", "content": "ing the critical per"}
+{"type": "token", "content": "iod for filing, whic"}
+{"type": "token", "content": "h diverted their att"}
+{"type": "token", "content": "ention and resources"}
+{"type": "token", "content": ", making it impossib"}
+{"type": "token", "content": "le to focus on legal"}
+{"type": "token", "content": " proceedings.]\n\n4.  "}
+{"type": "token", "content": "That Section 5 of th"}
+{"type": "token", "content": "e Limitation Act, 19"}
+{"type": "token", "content": "63, empowers this Ho"}
+{"type": "token", "content": "n'ble Court to admit"}
+{"type": "token", "content": " any appeal or appli"}
+{"type": "token", "content": "cation after the pre"}
+{"type": "token", "content": "scribed period if th"}
+{"type": "token", "content": "e appellant or appli"}
+{"type": "token", "content": "cant satisfies the C"}
+{"type": "token", "content": "ourt that they had \""}
+{"type": "token", "content": "sufficient cause\" fo"}
+{"type": "token", "content": "r not preferring the"}
+{"type": "token", "content": " appeal or making th"}
+{"type": "token", "content": "e application within"}
+{"type": "token", "content": " such period.\n\n5.  T"}
+{"type": "token", "content": "hat the Hon'ble Supr"}
+{"type": "token", "content": "eme Court of India, "}
+{"type": "token", "content": "in a catena of judgm"}
+{"type": "token", "content": "ents, has consistent"}
+{"type": "token", "content": "ly held that the exp"}
+{"type": "token", "content": "ression \"sufficient "}
+{"type": "token", "content": "cause\" should be int"}
+{"type": "token", "content": "erpreted liberally t"}
+{"type": "token", "content": "o advance substantia"}
+{"type": "token", "content": "l justice, rather th"}
+{"type": "token", "content": "an adopting a pedant"}
+{"type": "token", "content": "ic or hyper-technica"}
+{"type": "token", "content": "l approach that woul"}
+{"type": "token", "content": "d defeat a decision "}
+{"type": "token", "content": "on merits. In the la"}
+{"type": "token", "content": "ndmark case of *Coll"}
+{"type": "token", "content": "ector, Land Acquisit"}
+{"type": "token", "content": "ion, Anantnag v. Mst"}
+{"type": "token", "content": ". Katiji, AIR 1987 S"}
+{"type": "token", "content": "C 1353*, it was emph"}
+{"type": "token", "content": "asized that ordinari"}
+{"type": "token", "content": "ly, a litigant does "}
+{"type": "token", "content": "not stand to benefit"}
+{"type": "token", "content": " by lodging an appea"}
+{"type": "token", "content": "l late, and refusing"}
+{"type": "token", "content": " to condone delay ca"}
+{"type": "token", "content": "n result in a merito"}
+{"type": "token", "content": "rious matter being t"}
+{"type": "token", "content": "hrown out at the ver"}
+{"type": "token", "content": "y threshold, thereby"}
+{"type": "token", "content": " defeating the cause"}
+{"type": "token", "content": " of justice.\n\n6.  Th"}
+{"type": "token", "content": "at the Hon'ble Supre"}
+{"type": "token", "content": "me Court has further"}
+{"type": "token", "content": " reiterated that the"}
+{"type": "token", "content": " length of the delay"}
+{"type": "token", "content": " is not the decisive"}
+{"type": "token", "content": " factor, but rather "}
+{"type": "token", "content": "the acceptability of"}
+{"type": "token", "content": " the explanation is "}
+{"type": "token", "content": "the only criterion. "}
+{"type": "token", "content": "A short delay may be"}
+{"type": "token", "content": " uncondonable withou"}
+{"type": "token", "content": "t an acceptable expl"}
+{"type": "token", "content": "anation, while a lon"}
+{"type": "token", "content": "g delay can be condo"}
+{"type": "token", "content": "ned if the explanati"}
+{"type": "token", "content": "on is satisfactory a"}
+{"type": "token", "content": "nd demonstrates bona"}
+{"type": "token", "content": " fides. The Court's "}
+{"type": "token", "content": "discretion to condon"}
+{"type": "token", "content": "e delay must be exer"}
+{"type": "token", "content": "cised judiciously an"}
+{"type": "token", "content": "d not in cases of gr"}
+{"type": "token", "content": "oss negligence or wa"}
+{"type": "token", "content": "nt of due diligence."}
+{"type": "token", "content": " The Applicant submi"}
+{"type": "token", "content": "ts that the delay in"}
+{"type": "token", "content": " the present case is"}
+{"type": "token", "content": " bona fide and not a"}
+{"type": "token", "content": "ttributable to any n"}
+{"type": "token", "content": "egligence or lack of"}
+{"type": "token", "content": " due diligence on th"}
+{"type": "token", "content": "eir part.\n\n7.  That "}
+{"type": "token", "content": "the Applicant has a "}
+{"type": "token", "content": "good prima facie cas"}
+{"type": "token", "content": "e on merits and if t"}
+{"type": "token", "content": "he delay is not cond"}
+{"type": "token", "content": "oned, the Applicant "}
+{"type": "token", "content": "will suffer irrepara"}
+{"type": "token", "content": "ble loss and prejudi"}
+{"type": "token", "content": "ce, and a meritoriou"}
+{"type": "token", "content": "s matter will be dis"}
+{"type": "token", "content": "missed on technical "}
+{"type": "token", "content": "grounds without an a"}
+{"type": "token", "content": "djudication on its m"}
+{"type": "token", "content": "erits. The Responden"}
+{"type": "token", "content": "t, on the other hand"}
+{"type": "token", "content": ", will not suffer an"}
+{"type": "token", "content": "y prejudice if the d"}
+{"type": "token", "content": "elay is condoned, as"}
+{"type": "token", "content": " the matter can then"}
+{"type": "token", "content": " be heard and decide"}
+{"type": "token", "content": "d on its merits.\n\n8."}
+{"type": "token", "content": "  That the Applicant"}
+{"type": "token", "content": " undertakes to abide"}
+{"type": "token", "content": " by any terms or con"}
+{"type": "token", "content": "ditions that this Ho"}
+{"type": "token", "content": "n'ble Court may deem"}
+{"type": "token", "content": " fit to impose while"}
+{"type": "token", "content": " condoning the delay"}
+{"type": "token", "content": ".\n\n**PRAYER:**\n\nWHER"}
+{"type": "token", "content": "EFORE, it is most hu"}
+{"type": "token", "content": "mbly prayed that thi"}
+{"type": "token", "content": "s Hon'ble Court may "}
+{"type": "token", "content": "be pleased to:\n\na.  "}
+{"type": "token", "content": "Condon the delay of "}
+{"type": "token", "content": "[Number] days in fil"}
+{"type": "token", "content": "ing the accompanying"}
+{"type": "token", "content": " [Appeal/Revision/Ap"}
+{"type": "token", "content": "plication]; and\nb.  "}
+{"type": "token", "content": "Pass such other and "}
+{"type": "token", "content": "further order or ord"}
+{"type": "token", "content": "ers as this Hon'ble "}
+{"type": "token", "content": "Court may deem fit a"}
+{"type": "token", "content": "nd proper in the fac"}
+{"type": "token", "content": "ts and circumstances"}
+{"type": "token", "content": " of the case.\n\n**AND"}
+{"type": "token", "content": " FOR THIS ACT OF KIN"}
+{"type": "token", "content": "DNESS, THE APPLICANT"}
+{"type": "token", "content": " AS IN DUTY BOUND SH"}
+{"type": "token", "content": "ALL EVER PRAY.**\n\n**"}
+{"type": "token", "content": "DATED THIS [Day] DAY"}
+{"type": "token", "content": " OF [Month], [Year]*"}
+{"type": "token", "content": "*\n\n**[SIGNATURE OF A"}
+{"type": "token", "content": "PPLICANT/COUNSEL FOR"}
+{"type": "token", "content": " APPLICANT]**\n[Name "}
+{"type": "token", "content": "of Counsel]\n[Enrollm"}
+{"type": "token", "content": "ent Number]\n[Address"}
+{"type": "token", "content": " of Counsel]\n\n---\n\n*"}
+{"type": "token", "content": "*VERIFICATION**\n\nI, "}
+{"type": "token", "content": "[Name of Applicant],"}
+{"type": "token", "content": " S/o / D/o / W/o [Fa"}
+{"type": "token", "content": "ther's/Husband's Nam"}
+{"type": "token", "content": "e], aged about [Age]"}
+{"type": "token", "content": " years, residing at "}
+{"type": "token", "content": "[Address], the above"}
+{"type": "token", "content": "-named Applicant, do"}
+{"type": "token", "content": " hereby solemnly aff"}
+{"type": "token", "content": "irm and state on oat"}
+{"type": "token", "content": "h that the contents "}
+{"type": "token", "content": "of paragraphs 1 to 8"}
+{"type": "token", "content": " of the foregoing Ap"}
+{"type": "token", "content": "plication are true a"}
+{"type": "token", "content": "nd correct to my kno"}
+{"type": "token", "content": "wledge and belief, a"}
+{"type": "token", "content": "nd no part of it is "}
+{"type": "token", "content": "false and nothing ma"}
+{"type": "token", "content": "terial has been conc"}
+{"type": "token", "content": "ealed therefrom.\n\nVe"}
+{"type": "token", "content": "rified at [City] on "}
+{"type": "token", "content": "this the [Day] day o"}
+{"type": "token", "content": "f [Month], [Year].\n\n"}
+{"type": "token", "content": "**DEPONENT**\n\n**Note"}
+{"type": "token", "content": ":** This application"}
+{"type": "token", "content": " must be supported b"}
+{"type": "token", "content": "y a duly sworn affid"}
+{"type": "token", "content": "avit from the Applic"}
+{"type": "token", "content": "ant, reiterating the"}
+{"type": "token", "content": " facts stated herein"}
+{"type": "token", "content": "."}
+{"type": "progress", "agent": "drafting", "message": "Gathered legal context: newacts, legislation, judgments", "ts": 1785056245.509168, "found": 3, "step": "reference", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting 5 sections one by one...", "ts": 1785056249.51811, "step": "generate"}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 1 of 5: BEFORE THE HON'BLE [NAME OF COURT] AT [CITY]", "ts": 1785056249.518246, "step": "section:1", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 2 of 5: APPLICATION UNDER SECTION 5 OF THE LIMITATION ACT, 1963 FOR CONDONATION OF DELAY IN FILING THE ACCOMPANYING [APPEAL/REVISION/APPLICATION]", "ts": 1785056249.5182962, "step": "section:2", "substep": true}
+{"type": "progress", "agent": "document", "message": "Found 1 relevant passages", "ts": 1785056259.5439885, "found": 1, "step": "search", "substep": true}
+{"type": "progress", "agent": "document", "message": "Generating answer from documents...", "ts": 1785056259.5441406, "step": "generate"}
+{"type": "status", "agent": "document", "message": "Searching uploaded documents..."}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 3 of 5: MOST RESPECTFULLY SHOWETH", "ts": 1785056306.978694, "step": "section:3", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 4 of 5: PRAYER", "ts": 1785056306.9788098, "step": "section:4", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 5 of 5: VERIFICATION", "ts": 1785056332.3276596, "step": "section:5", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Cleaning up draft...", "ts": 1785056341.3579297, "step": "cleanup"}
+{"type": "progress", "agent": "drafting", "message": "Auditing draft against your directives...", "ts": 1785056341.3582895, "step": "self_refine"}
+{"type": "status", "agent": "drafting", "message": "Generating legal draft..."}
+{"type": "progress", "agent": "orchestrator", "message": "Merging results from 3 agents...", "ts": 1785056399.3590152, "found": 3, "step": "synthesize"}
+{"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}
+{"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1785056399.3633358, "step": "finalize"}
+{"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}
+{"type": "response", "content": "**CONTRACT ANALYSIS OF [AGREEMENT NAME]**\n\n**1. Identification of the Agreement**\n- **Type of Agreement**: [e.g., Master Services Agreement, Software Licensing Agreement, Lease Deed]\n- **Date of Execution**: [Date]\n- **Effective Date**: [Date]\n\n**2. Parties to the Agreement**\n- **Party A**: [Full Legal Name], a company incorporated under the Companies Act, [Year], with its registered office at [Address] (hereinafter referred to as \"[Defined Term]\").\n- **Party B**: [Full Legal Name], with its principal place of business at [Address] (hereinafter referred to as \"[Defined Term]\").\n\n**3. Key Commercial Terms**\n- **Scope of Work/Services**: [Brief description of the services, goods, or obligations].\n- **Term**: The Agreement is valid for a period of [Number] years, commencing from the Effective Date, unless terminated earlier.\n- **Consideration/Payment**: [Payment structure, e.g., fixed fee of INR [Amount], milestone-based payments, revenue share model]. Payment is due within [Number] days of invoice receipt.\n- **Renewal**: [e.g., Automatic renewal for successive one-year periods unless notice of non-renewal is given, or no renewal clause].\n\n**4. Critical Clauses (issue-by-issue)**\n- **Indemnity (Clause [Number])**:\n- **Analysis**: Party A provides a broad indemnity to Party B for breaches, third-party claims, and intellectual property infringement. The scope is [reciprocal/one-sided]. The procedure for claims is [defined/undefined].\n- **Principle**: The Supreme Court in *Grasim Industries Ltd. v. Aggarwal Steel, (2010) 1 SCC 83* has clarified that an indemnity holder must act reasonably and is not entitled to claim indemnity for losses arising from their own negligence unless the contract expressly provides for it.\n- **Limitation of Liability (Clause [Number])**:\n- **Analysis**: Liability for both parties is capped at [e.g., the total fees paid in the preceding 12 months]. Exclusions for consequential, indirect, and punitive damages are present. Carve-outs for breach of confidentiality, IPR infringement, and indemnity obligations are [present/absent].\n- **Principle**: While parties are free to limit liability, such clauses must be reasonable and not unconscionable. The Supreme Court in *Central Inland Water Transport Corpn. Ltd. v. Brojo Nath Ganguly, (1986) 3 SCC 156*, held that courts can strike down unconscionable terms in a contract where parties have unequal bargaining power.\n- **Termination (Clause [Number])**:\n- **Analysis**: The clause provides for termination for cause (material breach) with a [Number]-day cure period, and termination for convenience with [Number] days' notice. Consequences of termination, such as data return and final payment, are [clearly defined/vague].\n- **Governing Law and Jurisdiction (Clause [Number])**:\n- **Analysis**: The Agreement is governed by the laws of India. The clause confers [exclusive/non-exclusive] jurisdiction upon the courts at [City, State]. The dispute resolution mechanism is [litigation/arbitration].\n- **Confidentiality (Clause [Number])**:\n- **Analysis**: The definition of \"Confidential Information\" is [broad/narrow]. The obligation of confidentiality survives the termination of the Agreement for a period of [Number] years. Standard exceptions for legally mandated disclosures are included.\n\n**5. Risk Flags (HIGH/MEDIUM/LOW)**\n- **HIGH: Uncapped Indemnity**: The indemnity obligation is not capped, creating unlimited potential liability for our client.\n- **HIGH: One-Sided Clauses**: The indemnity and liability clauses appear to be heavily skewed in favour of [Party A/Party B], exposing our client to disproportionate risk.\n- **MEDIUM: Ambiguous Scope of Work**: The definition of services lacks specificity, which could lead to future disputes regarding deliverables and scope creep.\n- **MEDIUM: No Termination for Convenience**: The absence of a \"termination for convenience\" clause for our client results in a lack of flexibility and a difficult exit strategy.\n\n**6. Compliance Hooks**\n- **Data Protection**: If the services involve processing personal data, the Agreement must incorporate clauses compliant with the Digital Personal Data Protection Act, 2023. The current draft [lacks/includes] these provisions.\n- **Taxation**: The payment clause should clearly specify the responsibility for GST, TDS, and other applicable taxes to avoid future disputes.\n- **Intellectual Property**: The IPR clause must clearly delineate ownership of pre-existing IP versus newly developed IP. The current clause is [clear/unclear] on this distinction.\n\n**7. Recommended Amendments**\n- **Indemnity**: Introduce reciprocity in the indemnity clause. Further, cap the total indemnity liability to the value of the contract or a fixed, reasonable amount.\n- **Limitation of Liability**: Ensure the liability cap is reasonable and reciprocal. Carve out exceptions for gross negligence and willful misconduct from the exclusion of liability.\n- **Governing Law and Jurisdiction**: If our client's place of business is different, propose a more convenient jurisdiction or a neutral venue for arbitration.\n- **Scope of Work**: Attach a detailed Statement of Work (SOW) as an annexure to the Agreement, clearly defining deliverables, timelines, and acceptance criteria.\n- **Termination**: Introduce a \"termination for convenience\" right for our client with a reasonable notice period (e.g., 30 or 60 days).\n\n**Disclaimer**: This analysis is based solely on the provided text of the Agreement and does not constitute a final legal opinion. It is intended to highlight key issues for negotiation purposes.\n\n---\n\n## REFERENCES & CITATIONS\n\n\n### SCI_JUDGMENT CITATIONS:\nThe Supreme Court has addressed the concept of \"legal errors\" in applications, particularly in the context of review petitions and arbitration awards. The Court distinguishes between errors of fact and errors of law, emphasizing that only certain types of errors are amenable to correction in specific legal proceedings.\n\nI think this information will help you more to understand the case:\n\n### ASHARAFI DEVI (D) THR. LRS. VS STATE OF U.P. THROUGH COLLECTOR/DISTRICT MAGISTRATE, 01-02-2019\n\n### Key Legal Issues\n- Whether a review application can be entertained for every factual or legal error.\n- The scope of \"error apparent on the face of the record\" under Order 47 Rule 1 of the Code of Civil Procedure, 1908.\n- The power of the Supreme Court to invoke Article 142 of the Constitution to permit a challenge to a main order when only a review order was appealed.\n\n### Detailed Narrative\nThe original appellant was the owner of lands subjected to ceiling proceedings under the Urban Land (Ceiling and\nRegulation) Act, 1976, which resulted in some lands being declared surplus. The State claimed possession of the surplus\nland in 1982. After the Ceiling Act was repealed for Uttar Pradesh in 1999, the appellant filed a writ petition in 2002,\nclaiming that the ceiling proceedings lapsed as she remained in possession. The High Court dismissed the writ petition\non March 14, 2008, finding that the appellant failed to prove possession. The appellant then filed a review application,\nwhich the High Court dismissed on December 16, 2008. The present appeal was filed against this review order.\n\n### Court Observations\nThe Supreme Court observed that the appellant had only challenged the review order and not the main order dismissing the writ petition. The Court declined to invoke its extraordinary powers under Article 142 of the Constitution to allow a challenge to the main order, citing the appellant's delay and lack of legal impediment in filing a separate Special Leave Petition against the main order.\n\nRegarding the review application, the Court reiterated that every factual or legal error cannot be the subject matter of\nreview under Order 47 Rule 1 of the Code of Civil Procedure, 1908. For a review to be permissible, the error or mistake\nmust be \"apparent on the face of the record.\" The High Court, in its review order, had correctly held that the main\norder did not contain any such apparent factual or legal error. The Supreme Court affirmed that a finding of fact, such\nas the failure to prove possession, could not be re-examined de novo in review jurisdiction like an appellate court.\n\n### Judgment & Direction\nThe Supreme Court concurred with the High Court's reasoning and conclusion, dismissing the appeal. The Court held that the review order was passed in conformity with the requirements of Order 47 Rule 1 of the Code of Civil Procedure, 1908, and that the main order did not contain any factual or legal error apparent on the face of the record to warrant a review.\n\n### COIMBATORE DISTRICT PODU THOZILLAR SAMGAMREPRESENTED BY ITS VS BALA SUBRAMANIA FOUNDRY AND ORS., 11-08-1987\n\n### Key Legal Issues\n- The grounds for interference with an arbitrator's award under the Arbitration Act, 1940.\n- Distinction between errors of fact and errors of law in an arbitration award.\n- What constitutes an \"error apparent on the face of the record\" in an arbitration award.\n\n### Detailed Narrative\nDisputes arose between the partners of Bala Subramania Foundry, leading to legal proceedings that were eventually\nreferred to an Arbitrator by the Supreme Court. The Arbitrator filed an award. The petitioner in the special leave\npetitions alleged legal misconduct by the Arbitrator and claimed there were errors amenable to correction by the Supreme\nCourt, arguing the award was inconsistent and should be set aside. Separately, workers contended their claims were not\nfully protected, citing an erroneous estimation of gratuity.\n\n### Court Observations\nThe Supreme Court clarified the settled law regarding interference with arbitration awards. Relying on precedents like\n*Union of India v. A.L. Rallia Ram, [1964] 3 S.C.R. 164* and *Champsey Bhara and Company v. Jivraj Balloo Spinning and\nWeaving Company Ltd., [1932] L.R. 50 I.A. 324*, the Court reiterated that civil courts cannot exercise appellate powers\nover an arbitrator's decision. An award can only be set aside if there is an \"error of law on the face of it,\" meaning a\nlegal proposition that is the basis of the award and is erroneous, found within the award itself or a document\nincorporated into it. Mistakes of fact, even if true, do not amount to an error apparent on the face of the record. The\nCourt found no erroneous legal proposition in the award or annexed documents.\n\n### Judgment & Direction\nThe Supreme Court dismissed the objections to the award, finding no error of law apparent on the face of the record. The Court held that the alleged mistakes were, at best, errors of fact, which are not justiciable in an application before the court. The award was made a rule of the Court, and judgment was passed in terms of the award, with interest on the judgment at 9%.\n\n**PDF Links:**\n- *ASHARAFI DEVI (D) THR. LRS. VS STATE OF U.P. THROUGH COLLECTOR/DISTRICT MAGISTRATE, 01-02-2019* ([Judgment PDF](https://api.sci.gov.in/supremecourt/2009/4192/4192_2009_Judgement_01-Feb-2019.pdf))\n- *COIMBATORE DISTRICT PODU THOZILLAR SAMGAMREPRESENTED BY ITS VS BALA SUBRAMANIA FOUNDRY AND ORS., 11-08-1987* ([Judgment PDF](https://api.sci.gov.in/jonew/judis/8648.pdf))\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation."}
+{"type": "sources", "data": [{"source_type": "drafting", "title": "Reference draft (web-synthesised: <web:picker-rejected>)", "content": ["**BEFORE THE HON'BLE [NAME OF COURT, e.g., DISTRICT COURT / HIGH COURT OF JUDICATURE AT [STATE]] AT [CITY]**\n\n**[CIVIL SUIT NO./APPEAL NO./REVISION PETITION NO.] OF [YEAR]**\n\n**IN THE MATTER OF:**\n\n[NAME OF APPLICANT/APPELLANT/PETITIONER]\nS/o / D/o / W/o [Father's/Husband's Name],\nAged about [Age] y"], "doc_link": null, "file_name": "<web:picker-rejected>", "agent_name": "Drafting", "relevance_score": null, "template_type": "web-synthesized"}, {"source_type": "sci_judgment", "title": "COIMBATORE DISTRICT PODU THOZILLAR SAMGAMREPRESENTED BY ITS VS BALA SUBRAMANIA FOUNDRY AND ORS.", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/8648.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "- 0", "judgment_date": "11-08-1987", "bench": "MUKHARJISABYASACHI (J)", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/8648.pdf"}], "parties": "COIMBATORE DISTRICT PODU THOZILLAR SAMGAMREPRESENTED BY ITS VS BALA SUBRAMANIA FOUNDRY AND ORS.", "db_id": "8661"}, {"source_type": "sci_judgment", "title": "ASHARAFI DEVI (D) THR. LRS. VS STATE OF U.P. THROUGH COLLECTOR/DISTRICT MAGISTRATE", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2009/4192/4192_2009_Judgement_01-Feb-2019.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-005217-005217 - 2010", "judgment_date": "01-02-2019", "bench": "HON'BLE MR. JUSTICE ABHAY MANOHAR SAPRE HON'BLE MR. JUSTICE DINESH MAHESHWARI", "judgment_by": "HON'BLE MR. JUSTICE ABHAY MANOHAR SAPRE", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2009/4192/4192_2009_Judgement_01-Feb-2019.pdf"}], "parties": "ASHARAFI DEVI (D) THR. LRS. VS STATE OF U.P. THROUGH COLLECTOR/DISTRICT MAGISTRATE", "db_id": "38076"}, {"source_type": "sci_judgment", "title": "S. MADHUSUDHAN REDDY VS V. NARAYANA REDDY", "content": [], "doc_link": "https://api.sci.gov.in/supremecourt/2022/15522/15522_2022_1_1501_37390_Judgement_18-Aug-2022.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-005503-005504 - 2022", "judgment_date": "18-08-2022", "bench": "HON'BLE THE CHIEF JUSTICE HON'BLE MS. JUSTICE HIMA KOHLI HON'BLE MR. JUSTICE C.T. RAVIKUMAR", "judgment_by": "HON'BLE MS. JUSTICE HIMA KOHLI", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/supremecourt/2022/15522/15522_2022_1_1501_37390_Judgement_18-Aug-2022.pdf"}], "parties": "S. MADHUSUDHAN REDDY VS V. NARAYANA REDDY", "db_id": "41767"}, {"source_type": "sci_judgment", "title": "ASSISTANT COMMNR., INCOME TAX, RAJKOT VS SAURASHTRA KUTCH STOCK EXCHANGE LTD", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/32458.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-001171-001171 - 2004", "judgment_date": "15-09-2008", "bench": "C.K. THAKKERLOKESHWAR SINGH PANTA", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/32458.pdf"}], "parties": "ASSISTANT COMMNR., INCOME TAX, RAJKOT VS SAURASHTRA KUTCH STOCK EXCHANGE LTD", "db_id": "25399"}, {"source_type": "sci_judgment", "title": "SUTNA STONE & LIME CO.LTD., M.P. VS U.O.I.", "content": [], "doc_link": "https://api.sci.gov.in/jonew/judis/31455.pdf", "file_name": null, "agent_name": "SCI_Judgment", "relevance_score": null, "case_no": "C.A. No.-005456-005457 - 2000", "judgment_date": "08-05-2008", "bench": "N/A", "judgment_by": "N/A", "pdf_links": [{"label": "Judgment PDF", "url": "https://api.sci.gov.in/jonew/judis/31455.pdf"}], "parties": "SUTNA STONE & LIME CO.LTD., M.P. VS U.O.I.", "db_id": "24656"}]}
+{"type": "followup_suggestions", "data": ["What are the specific errors found?", "Can you cite the landmark cases?", "What are the suggested redrafting changes?"]}
+{"type": "done", "agents_used": ["Drafting", "Document", "SCI_Judgment"], "token_usage": {"input_tokens": 187274, "output_tokens": 25619, "total_tokens": 212893, "cache_read_tokens": 83007, "cache_creation_tokens": 0, "reasoning_tokens": 16028, "cost_usd": 0.485729, "by_agent": {"Orchestrator": {"input": 7767, "output": 440, "total": 8207, "cache_read": 6027, "calls": 3, "cost_usd": 0.000953}, "Drafting": {"input": 43137, "output": 11617, "total": 54754, "cache_read": 20417, "calls": 5, "cost_usd": 0.25559}, "SCI_Judgment": {"input": 80946, "output": 1457, "total": 82403, "cache_read": 15876, "calls": 6, "cost_usd": 0.027927}, "Document": {"input": 1009, "output": 4690, "total": 5699, "cache_read": 0, "calls": 1, "cost_usd": 0.075491}, "SelfRefine": {"input": 54415, "output": 7415, "total": 61830, "cache_read": 40687, "calls": 5, "cost_usd": 0.125769}}, "calls": [{"agent": "Orchestrator", "step": "classify_and_plan", "input": 1429, "output": 72, "total": 1501, "cache_read": 753, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000172}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5525, "output": 297, "total": 5822, "cache_read": 5274, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000671}, {"agent": "Orchestrator", "step": "rewrite_per_agent_queries", "input": 813, "output": 71, "total": 884, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.00011}, {"agent": "Drafting", "step": "pick_reference", "input": 3570, "output": 60, "total": 3630, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000381}, {"agent": "SCI_Judgment", "step": "react_msg_1", "input": 7778, "output": 33, "total": 7811, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.002416}, {"agent": "SCI_Judgment", "step": "react_msg_3", "input": 7832, "output": 27, "total": 7859, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.002417}, {"agent": "SCI_Judgment", "step": "react_msg_5", "input": 9715, "output": 23, "total": 9738, "cache_read": 6864, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.002972}, {"agent": "SCI_Judgment", "step": "react_msg_7", "input": 15525, "output": 22, "total": 15547, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.004712}, {"agent": "SCI_Judgment", "step": "react_msg_9", "input": 19457, "output": 31, "total": 19488, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.005915}, {"agent": "SCI_Judgment", "step": "react_msg_11", "input": 20639, "output": 1321, "total": 21960, "cache_read": 9012, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.009494}, {"agent": "Drafting", "step": "fanout_judge", "input": 2732, "output": 357, "total": 3089, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000416}, {"agent": "Document", "step": "qa_chromadb", "input": 1009, "output": 4690, "total": 5699, "cache_read": 0, "cache_creation": 0, "reasoning": 2733, "cost_usd": 0.075491}, {"agent": "Drafting", "step": "generate_section_pair", "input": 11597, "output": 7156, "total": 18753, "cache_read": 4082, "cache_creation": 0, "reasoning": 6404, "cost_usd": 0.150096}, {"agent": "Drafting", "step": "generate_section_pair", "input": 12302, "output": 3142, "total": 15444, "cache_read": 8167, "cache_creation": 0, "reasoning": 2458, "cost_usd": 0.071377}, {"agent": "Drafting", "step": "generate_section_pair", "input": 12936, "output": 902, "total": 13838, "cache_read": 8168, "cache_creation": 0, "reasoning": 813, "cost_usd": 0.03332}, {"agent": "SelfRefine", "step": "critique", "input": 15325, "output": 602, "total": 15927, "cache_read": 12960, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.006103}, {"agent": "SelfRefine", "step": "refine", "input": 4665, "output": 3081, "total": 7746, "cache_read": 0, "cache_creation": 0, "reasoning": 1817, "cost_usd": 0.054811}, {"agent": "SelfRefine", "step": "critique", "input": 15062, "output": 454, "total": 15516, "cache_read": 13863, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.005654}, {"agent": "SelfRefine", "step": "refine", "input": 4289, "output": 3079, "total": 7368, "cache_read": 0, "cache_creation": 0, "reasoning": 1803, "cost_usd": 0.054181}, {"agent": "SelfRefine", "step": "critique", "input": 15074, "output": 199, "total": 15273, "cache_read": 13864, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.00502}]}, "thread_id": "350ae7fc-936a-4d20-bf3e-f440207cd41f", "conversation_turn": 1, "query_rewritten": false, "effective_query": null}

@@ -29,7 +29,8 @@ PDF_PATH = "test_pdfs/0156 Publish FIR.pdf"
 
 LOCAL_URL = "http://localhost:5000/pyapi"
 SERVER_URL = "https://tool.lawttorney.com/pyapiv2"
-API_KEY = "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+import os
+API_KEY = os.environ["LAWTECH_API_KEY"]
 
 
 def send_request(api_url, prompt, pdf_path, timeout=300):

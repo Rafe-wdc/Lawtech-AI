@@ -122,8 +122,15 @@ def _retrieve_from_es(task: str, query: str) -> list[Document]:
 
 async def _handle_legal_concepts(query: str, chat_history: list,
                                    user_language: str = "en",
-                                   user_intent=None) -> AgentResult:
-    """Handle Legal_Concepts task — web-grounded AI response for comprehensive coverage."""
+                                   user_intent=None,
+                                   file_prefix: str = "") -> AgentResult:
+    """Handle Legal_Concepts task — web-grounded AI response for comprehensive coverage.
+
+    `file_prefix` (Gap #1): pre-rendered `## UPLOADED SOURCE DOCUMENTS`
+    block. Empty when no files. Passed through to `web_search_fallback`
+    which appends it after its localized system prompt and before the
+    user query.
+    """
     from core.agent_fallback import web_search_fallback
     progress("legal_concepts", "Researching legal concept...", step="research")
     log.info("Legal concepts using web search for comprehensive response")
@@ -137,6 +144,7 @@ async def _handle_legal_concepts(query: str, chat_history: list,
     result = await web_search_fallback(
         query, "Legal_Concepts", LEGAL_CONCEPTS_PROMPT,
         user_language=user_language, intent=user_intent,
+        file_context_prefix=file_prefix,
     )
     progress("legal_concepts", "Generating explanation...", step="generate")
     return result
@@ -144,8 +152,18 @@ async def _handle_legal_concepts(query: str, chat_history: list,
 
 async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list,
                                          user_language: str = "en",
-                                         user_intent=None) -> AgentResult:
-    """Handle Constitution or Maxim task — ES retrieval + web enrichment + LLM generation."""
+                                         user_intent=None,
+                                         file_prefix: str = "") -> AgentResult:
+    """Handle Constitution or Maxim task — ES retrieval + web enrichment + LLM generation.
+
+    `file_prefix` (Gap #1): pre-rendered `## UPLOADED SOURCE DOCUMENTS`
+    block from `core.file_context.format_file_context_prefix`. Empty when
+    no files attached. Appended to the ES-grounded system prompt so the
+    LLM sees the user's uploaded matter alongside the retrieved Article
+    / maxim text. NOT passed to the web fallback (which uses `base_prompt`
+    directly) — the fallback path already runs on a synthesized web
+    reasoning basis; injecting file text there is Phase B of Gap #1.
+    """
     # `base_prompt` (un-localized) is what the web fallback receives — it
     # localizes internally, and doing it here too would bury the directive
     # under the fallback's grounding block. `system_prompt` (localized) is
@@ -154,6 +172,8 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
         CONSTITUTION_SYSTEM_PROMPT if task == "Constitution" else MAXIM_SYSTEM_PROMPT
     )
     system_prompt = localize_prompt(base_prompt, user_language, user_intent)
+    if file_prefix:
+        system_prompt = system_prompt + "\n\n" + file_prefix
 
     # Run ES retrieval and web enrichment in parallel
     agent_label = task.lower()
@@ -319,9 +339,16 @@ async def constitution_node(state: LegalAgentState) -> dict:
     # For long queries: include user's pasted content in LLM generation query
     gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
 
+    # Gap #1: render uploaded-document text as a system-prompt prefix so
+    # Constitution sees any user-attached file (e.g. "does this Amendment
+    # violate the basic structure?" with the Amendment PDF attached).
+    from core.state import FileContextData as _FileContextData
+    from core.file_context import format_file_context_prefix as _fmt_files
+    _file_prefix = _fmt_files(_FileContextData.from_state(state))
     try:
         result = await _handle_constitution_or_maxim("Constitution", gen_query, chat_history,
-                                                      user_language, state.get("user_intent"))
+                                                      user_language, state.get("user_intent"),
+                                                      file_prefix=_file_prefix)
     except Exception as e:
         from core.metrics import record_agent_error
         record_agent_error("Constitution", e)
@@ -353,9 +380,15 @@ async def maxim_node(state: LegalAgentState) -> dict:
              using_agent_query="Maxim" in agent_queries)
     gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
 
+    # Gap #1: render uploaded-document text as a system-prompt prefix so
+    # Maxim sees any user-attached file (context-aware maxim explanations).
+    from core.state import FileContextData as _FileContextData
+    from core.file_context import format_file_context_prefix as _fmt_files
+    _file_prefix = _fmt_files(_FileContextData.from_state(state))
     try:
         result = await _handle_constitution_or_maxim("Maxim", gen_query, chat_history,
-                                                      user_language, state.get("user_intent"))
+                                                      user_language, state.get("user_intent"),
+                                                      file_prefix=_file_prefix)
     except Exception as e:
         from core.metrics import record_agent_error
         record_agent_error("Maxim", e)
@@ -384,8 +417,15 @@ async def legal_concepts_node(state: LegalAgentState) -> dict:
              using_agent_query="Legal_Concepts" in agent_queries)
     gen_query = f"User's document/context:\n{user_context}\n\nUser's question:\n{query}" if user_context else query
 
+    # Gap #1: render uploaded-document text as prefix so Legal_Concepts
+    # answers with the user's uploaded matter in view.
+    from core.state import FileContextData as _FileContextData
+    from core.file_context import format_file_context_prefix as _fmt_files
+    _file_prefix = _fmt_files(_FileContextData.from_state(state))
     try:
-        result = await _handle_legal_concepts(gen_query, chat_history, user_language, state.get("user_intent"))
+        result = await _handle_legal_concepts(gen_query, chat_history, user_language,
+                                              state.get("user_intent"),
+                                              file_prefix=_file_prefix)
     except Exception as e:
         from core.metrics import record_agent_error
         record_agent_error("Legal_Concepts", e)

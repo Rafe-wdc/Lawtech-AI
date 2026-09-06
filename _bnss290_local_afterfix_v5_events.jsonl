@@ -1,0 +1,36 @@
+{"type": "thread_id", "data": "8e3ff8e9-a4d5-4ffd-974d-96d3b25993ae"}
+{"type": "file_processing", "message": "Processing uploaded files..."}
+{"type": "file_processing", "stage": "docx_extract_start", "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...", "file": "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"}
+{"type": "file_processing", "stage": "all_files_done", "message": "Processed 1 docx", "files": ["APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"], "errors": []}
+{"type": "file_processing", "message": "Processed 1 docx", "files": ["APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"]}
+{"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1785059053.2619228, "step": "validate"}
+{"type": "status", "agent": "guardrail_input", "message": "Validating query..."}
+{"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1785059053.2665691, "step": "language"}
+{"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1785059053.6457517, "step": "language", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1785059053.6471353, "step": "history"}
+{"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1785059053.6566272, "found": 0, "step": "history", "substep": true}
+{"type": "status", "agent": "memory", "message": "Loading context..."}
+{"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}
+{"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1785059053.6607018, "step": "classify"}
+{"type": "progress", "agent": "orchestrator", "message": "Identified: Drafting, SCI_Judgment, Judgment, Document", "ts": 1785059057.9712594, "detail": "Drafting", "step": "classify", "substep": true}
+{"type": "progress", "agent": "orchestrator", "message": "Preparing search queries for 2 agents...", "ts": 1785059057.9725618, "found": 2, "step": "plan"}
+{"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}
+{"type": "agents_planned", "agents": ["Drafting", "Document"]}
+{"type": "progress", "agent": "drafting", "message": "Using uploaded document as the reference (review-and-redraft mode)", "ts": 1785059059.583914, "step": "reference"}
+{"type": "progress", "agent": "document", "message": "Loading uploaded documents...", "ts": 1785059059.584487, "step": "load"}
+{"type": "progress", "agent": "document", "message": "Loading 1 document collection(s)...", "ts": 1785059059.5847206, "found": 1, "step": "search"}
+{"type": "progress", "agent": "drafting", "message": "Gathered legal context: newacts, legislation, judgments", "ts": 1785059061.763325, "found": 3, "step": "reference", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting 10 sections one by one...", "ts": 1785059066.5310004, "step": "generate"}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 1 of 10: BEFORE THE HON\u2019BLE COURT OF JUDICIAL MAGISTRATE FIRST CLASS AT NAGPUR", "ts": 1785059066.531143, "step": "section:1", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 2 of 10: M.V. SUMMONS/CASE NO. 233 OF 2026", "ts": 1785059066.5311959, "step": "section:2", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 3 of 10: PROSECUTION: STATE OF MAHARASHTRA VERSUS ACCUSED/APPLICANT: SHARAD NARENDRA MESHRAM", "ts": 1785059092.798942, "step": "section:3", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 4 of 10: ENHANCED APPLICATION FOR DISPOSAL OF CASE UNDER SECTION 290 OF BNSS R/W SECTION 185 OF THE MOTOR VEHICLES ACT, 1988", "ts": 1785059092.7991023, "step": "section:4", "substep": true}
+{"type": "progress", "agent": "document", "message": "Found 1 relevant passages", "ts": 1785059098.8833444, "found": 1, "step": "search", "substep": true}
+{"type": "progress", "agent": "document", "message": "Generating answer from documents...", "ts": 1785059098.8835359, "step": "generate"}
+{"type": "status", "agent": "document", "message": "Searching uploaded documents..."}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 5 of 10: JURISDICTIONAL SUBMISSION", "ts": 1785059169.6519947, "step": "section:5", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 6 of 10: INVOCATION OF BNSS PROVISIONS", "ts": 1785059169.6520922, "step": "section:6", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 7 of 10: LEGAL GROUNDS FOR LENIENCY", "ts": 1785059191.175836, "step": "section:7", "substep": true}
+{"type": "progress", "agent": "drafting", "message": "Drafting section 8 of 10: VOLUNTARY ADMISSION (SEC. 290 BNSS)", "ts": 1785059191.1759694, "step": "section:8", "substep": true}
+{"type": "error", "data": "Request timed out. Please try a simpler query."}
+{"type": "done", "agents_used": ["Drafting", "Document"], "token_usage": {"input_tokens": 46517, "output_tokens": 21711, "total_tokens": 68228, "cache_read_tokens": 15026, "cache_creation_tokens": 0, "reasoning_tokens": 17306, "cost_usd": 0.426001, "by_agent": {"Orchestrator": {"input": 7763, "output": 475, "total": 8238, "cache_read": 5274, "calls": 3, "cost_usd": 0.000966}, "Drafting": {"input": 37745, "output": 16496, "total": 54241, "cache_read": 9752, "calls": 4, "cost_usd": 0.348134}, "Document": {"input": 1009, "output": 4740, "total": 5749, "cache_read": 0, "calls": 1, "cost_usd": 0.076901}}, "calls": [{"agent": "Orchestrator", "step": "classify_and_plan", "input": 1429, "output": 72, "total": 1501, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000172}, {"agent": "Orchestrator", "step": "extract_user_intent", "input": 5525, "output": 297, "total": 5822, "cache_read": 5274, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000671}, {"agent": "Orchestrator", "step": "rewrite_per_agent_queries", "input": 809, "output": 106, "total": 915, "cache_read": 0, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000123}, {"agent": "Drafting", "step": "fanout_judge", "input": 2559, "output": 613, "total": 3172, "cache_read": 1585, "cache_creation": 0, "reasoning": 0, "cost_usd": 0.000501}, {"agent": "Drafting", "step": "generate_section_pair", "input": 11369, "output": 3125, "total": 14494, "cache_read": 0, "cache_creation": 0, "reasoning": 3037, "cost_usd": 0.075831}, {"agent": "Document", "step": "qa_chromadb", "input": 1009, "output": 4740, "total": 5749, "cache_read": 0, "cache_creation": 0, "reasoning": 2824, "cost_usd": 0.076901}, {"agent": "Drafting", "step": "generate_section_pair", "input": 11494, "output": 10148, "total": 21642, "cache_read": 0, "cache_creation": 0, "reasoning": 9276, "cost_usd": 0.208608}, {"agent": "Drafting", "step": "generate_section_pair", "input": 12323, "output": 2610, "total": 14933, "cache_read": 8167, "cache_creation": 0, "reasoning": 2169, "cost_usd": 0.063194}]}, "thread_id": "8e3ff8e9-a4d5-4ffd-974d-96d3b25993ae", "conversation_turn": 0, "query_rewritten": false, "effective_query": null}

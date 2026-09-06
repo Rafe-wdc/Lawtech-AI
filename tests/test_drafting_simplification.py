@@ -711,7 +711,7 @@ class TestGenerateSectionwise:
             *, sections_to_write, section_position_start, total_sections,
             query, user_facts, reference_draft, prior_text,
             gathered_context, user_intent, user_language,
-            review_and_redraft_mode=False,
+            review_and_redraft_mode=False, niche_overlay="",
         ):
             calls.append({
                 "sections_to_write": list(sections_to_write),
@@ -890,7 +890,12 @@ class TestGenerateDraftDispatcher:
                 reasoning="short notice — single-pass",
             )
 
+        async def _no_niche(*a, **kw):
+            return None
+
         with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting_niche.pick_drafting_niche",
+                   side_effect=_no_niche), \
              patch("agents.drafting._generate_single_pass",
                    side_effect=_fake_single_pass), \
              patch("agents.drafting._generate_sectionwise",
@@ -928,7 +933,12 @@ class TestGenerateDraftDispatcher:
                 reasoning="long writ — 2-section fan-out",
             )
 
+        async def _no_niche(*a, **kw):
+            return None
+
         with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting_niche.pick_drafting_niche",
+                   side_effect=_no_niche), \
              patch("agents.drafting._generate_single_pass",
                    side_effect=_fake_single_pass), \
              patch("agents.drafting._generate_sectionwise",
@@ -962,7 +972,12 @@ class TestGenerateDraftDispatcher:
                 reasoning="judge returned empty list",
             )
 
+        async def _no_niche(*a, **kw):
+            return None
+
         with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting_niche.pick_drafting_niche",
+                   side_effect=_no_niche), \
              patch("agents.drafting._generate_single_pass",
                    side_effect=_fake_single_pass), \
              patch("agents.drafting._generate_sectionwise",
@@ -1224,9 +1239,16 @@ class TestSectionwiseChunkingIntegration:
         # And the reduced blob is smaller than the original
         assert len(pair_facts) < len(big_facts)
 
-    def test_flag_on_router_empty_selection_falls_back_to_raw(self):
-        """Router returns [] for every section → fallback to raw user_facts
-        so the section-writer never sees LESS than the current pipeline."""
+    def test_flag_on_router_empty_selection_sends_empty_facts(self):
+        """Router returns [] for every section → send EMPTY user_facts.
+
+        The old fallback-to-raw behaviour was replaced 2026-09-02: on
+        very large uploads the raw-fallback path overflowed the 1M-token
+        ceiling on legitimate 0-pick sections (Verification / signature
+        / cause-title). Respecting the router's decision lets those
+        sections generate cleanly from the system prompt + reference
+        draft + prior_text alone.
+        """
         sections = [
             _Section(id="a", heading="A", summary=""),
             _Section(id="b", heading="B", summary=""),
@@ -1241,7 +1263,7 @@ class TestSectionwiseChunkingIntegration:
             return "ok"
 
         async def _fake_router(**kwargs):
-            return []  # No indices picked → fallback
+            return []  # No indices picked → send empty (not raw fallback)
 
         with patch.dict(os.environ,
                         {"DRAFTING_PER_SECTION_CHUNKING": "1"}, clear=False):
@@ -1257,7 +1279,7 @@ class TestSectionwiseChunkingIntegration:
                     progress_emit=self._silent_progress,
                     gathered_context=None,
                 ))
-        assert seen_user_facts == [big_facts]
+        assert seen_user_facts == [""]
 
     def test_flag_on_too_few_chunks_skips_routing(self):
         """Above threshold but <4 chunks (huge single-paragraph blob) →
@@ -1322,7 +1344,12 @@ class TestPreflightBudget:
         async def _fake_section(**kwargs):
             return "OK"
 
+        async def _no_niche(*a, **kw):
+            return None
+
         with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting_niche.pick_drafting_niche",
+                   side_effect=_no_niche), \
              patch("agents.drafting._generate_single_pass",
                    side_effect=_fake_single), \
              patch("agents.drafting._generate_sectionwise",
@@ -1358,7 +1385,12 @@ class TestPreflightBudget:
             section_called.append(True)
             return "OK"
 
+        async def _no_niche(*a, **kw):
+            return None
+
         with patch("agents.drafting._judge_fanout", side_effect=_fake_judge), \
+             patch("agents.drafting_niche.pick_drafting_niche",
+                   side_effect=_no_niche), \
              patch("agents.drafting._generate_single_pass",
                    side_effect=_fake_single), \
              patch("agents.drafting._generate_sectionwise",

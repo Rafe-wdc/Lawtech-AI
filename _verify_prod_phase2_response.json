@@ -1,0 +1,455 @@
+﻿{
+    "globalThreadId":  "47ec1dd4-f969-4558-b4c1-190239a4838d",
+    "result":  "## Applicable Offences under Bharatiya Nyaya Sanhita, 2023\n\n1. The following offences under the Bharatiya Nyaya Sanhita, 2023 (BNS, 2023) may be applicable to the actions of the hacker who gained unauthorized access to the fintech company\u0027s servers and stole sensitive data:\n\n2. **Theft (Section 303 of the BNS, 2023):** While electronic data is intangible, its theft can be prosecuted under this\nsection. The act of dishonestly taking movable property out of a person\u0027s possession without consent constitutes theft.\nThe source code, Aadhaar records, PAN data, bank account details, and credit card information, when stored on a server\n(a movable property), can be considered part of it. The unauthorized copying and removal of this data with dishonest\nintent to sell it on the dark web falls within the ambit of this offence.\n\n3. **Cheating (Section 318 of the BNS, 2023):** If the hacker, by deceiving the company\u0027s computer systems or personnel, fraudulently or dishonestly induced the system to allow access and transfer of data, it would constitute cheating. The act of gaining unauthorized access often involves deceptive methods, thereby causing wrongful loss to the company and its customers.\n\n4. **Cheating by Personation (Section 319 of the BNS, 2023):** If the hacker gained access by pretending to be an authorized employee or user, or by using stolen credentials, this section would be directly applicable. This involves cheating by pretending to be some other person, or by knowingly substituting one person for another.\n\n5. **Mischief (Section 337 of the BNS, 2023):** The hacker\u0027s actions, with the intent to cause wrongful loss or damage to the fintech company, which result in the destruction of any property or any change in any property or in the situation thereof which diminishes its value or utility, would amount to mischief. The theft and subsequent sale of proprietary source code and customer data diminish the value and utility of the company\u0027s digital assets and security infrastructure.\n\n6. **Receiving stolen property (Section 307 of the BNS, 2023):** While this offence primarily applies to individuals who purchase the stolen data on the dark web, it can also apply to the hacker for dishonestly retaining the stolen property (the data) knowing it to be stolen, before its sale.\n\n7. **Criminal Conspiracy (Section 61 of the BNS, 2023):** If the investigation reveals that the hacker acted in concert with one or more persons to commit the illegal act of hacking and data theft, they would all be liable for criminal conspiracy.\n\n## Provisions of the Information Technology Act, 2000\n\n8. The Information Technology Act, 2000 (IT Act) is the specific legislation in India that governs cybercrimes. The following provisions are directly applicable to the scenario:\n\n9. **Section 43 - Penalty and compensation for damage to computer, computer system, etc.:** This section imposes civil liability for various unauthorized acts. The hacker\u0027s conduct attracts several clauses, including:\n(a) accessing or securing access to a computer, computer system or computer network without permission;\n(b) downloading, copying or extracting any data, computer data base or information from such computer, computer system or computer network;\n(c) introducing any computer contaminant or computer virus into any computer, computer system or network; and\n(e) causing damage to the computer, computer system, or computer data base.\n\n10. **Section 65 - Tampering with computer source documents:** The prompt explicitly states that the hacker stole the company\u0027s \"Source code\". This section makes it a specific offence to knowingly or intentionally conceal, destroy, or alter any computer source code used for a computer, computer programme, computer system, or computer network, when such code is required to be kept or maintained.\n\n11. **Section 66 - Computer related offences:** This is a key penal provision that criminalizes any act mentioned in Section 43 if it is done dishonestly or fraudulently. Since the hacker stole the data with the intent to sell it on the dark web for financial gain, the acts of unauthorized access and copying of data were clearly done with dishonest and fraudulent intent, making them punishable with imprisonment and a fine under this section.\n\n12. **Section 66C - Punishment for identity theft:** The theft of Aadhaar records, PAN data, bank account details, and credit card information directly constitutes the theft of unique identification features of the company\u0027s customers. This section penalizes any person who fraudulently or dishonestly makes use of the electronic signature, password, or any other unique identification feature of any other person.\n\n13. **Section 66D - Punishment for cheating by personation by using computer resource:** This section is the IT Act\u0027s equivalent of the BNS offence. It punishes anyone who, by means of any communication device or computer resource, cheats by personation. If the hacker used computer resources to impersonate an authorized user to gain access, this section would apply.\n\n14. **Section 72 - Penalty for breach of confidentiality and privacy:** This section applies to any person who, having secured access to any electronic record, book, information, or document without the consent of the person concerned, discloses such material to any other person. The hacker secured unauthorized access to sensitive customer data and disclosed it by selling it on the dark web, constituting a severe breach of confidentiality and privacy.\n\n## Investigation Procedure\n\n15. The investigation into the cybercrime against the fintech company will be conducted in accordance with the provisions of the Code of Criminal Procedure, 1973 (CrPC), supplemented by the specific requirements of the Information Technology Act, 2000. The key procedural steps are as follows:\n\n16. **Registration of First Information Report (FIR):** The investigation formally commences upon the registration of an FIR. The fintech company, through an authorized representative, will file a detailed complaint with the local police or a specialized Cyber Crime Cell. Based on this complaint, an FIR will be registered under Section 154 of the CrPC, listing the applicable offences under the Bharatiya Nyaya Sanhita, 2023, and the Information Technology Act, 2000.\n\n17. **Appointment of Investigating Officer (IO):** Given the technical nature of the crime, the case will be assigned to an Investigating Officer (IO), typically not below the rank of an Inspector, who has expertise in handling cybercrime cases.\n\n18. **Crime Scene Visit and Examination:** The IO will visit the premises of the fintech company, which constitutes the primary crime scene. The objective is to secure the physical location of the servers, identify the compromised systems, and understand the network architecture to prevent further data loss or evidence tampering.\n\n19. **Collection of Preliminary Evidence:** The IO will collect initial evidence, including server logs, network traffic data, and statements from the company\u0027s IT and security personnel. This helps in establishing the timeline of the breach and the initial entry point of the hacker.\n\n20. **Recording of Witness Statements:** The IO will record detailed statements of key personnel from the fintech company, such as the Chief Technology Officer, network administrators, and security analysts, under Section 161 of the CrPC. These statements will form a crucial part of the investigation records.\n\n21. **Forensic Analysis of Digital Evidence:** All seized electronic devices and data (servers, hard drives, logs) will be sent to a Cyber Forensic Laboratory for detailed analysis. The forensic experts will aim to trace the digital footprints of the hacker, identify the malware or techniques used, recover deleted data, and link the intrusion to a specific source (e.g., an IP address).\n\n22. **Identification and Tracing of the Accused:** Based on the forensic report and other intelligence, the investigation will focus on identifying the hacker. This may involve coordinating with Internet Service Providers (ISPs) to trace IP addresses, analyzing cryptocurrency transactions on the dark web, and seeking information from other national and international law enforcement agencies if the crime has cross-border links.\n\n23. **Search, Seizure, and Arrest:** Once the suspect is identified and located, the IO will obtain the necessary warrants to conduct a search of the suspect\u0027s premises. During the search, electronic devices like laptops, mobile phones, and storage media will be seized. If sufficient evidence is found linking the suspect to the crime, they will be arrested in accordance with the procedure established under the CrPC.\n\n24. **Filing of Charge Sheet:** Upon the conclusion of the investigation, if there is sufficient evidence to prosecute the accused, the IO will file a final report, known as the Charge Sheet, before the competent court under Section 173 of the CrPC. The Charge Sheet will detail the facts of the case, the evidence collected, the list of witnesses, and the specific offences for which the accused is being charged.\n\n25. **Informing the Victim:** As per emerging procedural requirements, such as those outlined in Rule 19 of The Uttar Pradesh Bharatiya Nagarik Suraksha Rules, 2024, the Investigating Officer shall keep the complainant (the fintech company) informed about the progress of the investigation, including the status of the forensic examination and the arrest of the accused.\n\n## Digital Evidence Collection\n\n26. The collection of digital evidence is a highly sensitive process that must be conducted in a forensically sound manner to ensure its integrity and admissibility in court. The following methods and best practices will be employed:\n\n27. **Identification of Evidence Sources:** The first step is to identify all potential sources of digital evidence. In this case, these include the fintech company\u0027s compromised servers (database, application, web servers), network devices (firewalls, routers, intrusion detection systems), workstations of employees with privileged access, and logs from cloud service providers.\n\n28. **Securing and Isolating the Scene:** The physical and digital crime scene must be secured. Compromised systems should be isolated from the network to prevent the hacker from remotely deleting evidence or causing further damage. Access to the physical servers must be restricted.\n\n29. **Live Data Acquisition:** For critical systems that cannot be immediately shut down, volatile data must be collected first. This includes capturing the contents of the Random Access Memory (RAM), running processes, active network connections, and logged-on user data. This information is transient and will be lost if the system is powered off.\n\n30. **Forensic Imaging:** Instead of simply copying files, a bit-for-bit duplicate (forensic image) of the storage media (hard drives, SSDs) of the servers and other relevant devices will be created. This process captures all data, including deleted files, temporary files, and unallocated space, without altering the original evidence.\n\n31. **Use of Write-Blockers:** During the imaging process, hardware or software write-blockers will be used. These devices prevent any data from being written to the original evidence drive, thereby preserving its original state and integrity.\n\n32. **Hashing for Integrity Verification:** To prove that the forensic image is an exact and unaltered copy of the original, cryptographic hash values (e.g., SHA-256) of both the original media and the created image will be calculated and compared. The matching hash values serve as a digital fingerprint, verifying the integrity of the evidence.\n\n33. **Thorough Documentation:** Every step of the collection process must be meticulously documented. This includes creating a detailed log of all actions taken, photographing the devices and their connections, and noting the system date and time. As per Rule 3 of The Uttar Pradesh Bharatiya Nagarik Suraksha Rules, 2024, audio-visual electronic aids may be used to record the search and seizure process.\n\n34. **Maintaining Chain of Custody:** A strict chain of custody log must be maintained for every piece of digital evidence. This log documents every individual who handled the evidence, the date and time of transfer, the reason for handling, and the location of the evidence at all times. An unbroken chain of custody is essential to prove in court that the evidence has not been tampered with.\n\n## Preservation of Electronic Evidence\n\n35. The preservation of electronic evidence is a continuous and critical process that begins at the moment of collection and extends until the evidence is presented in court. Its primary objective is to maintain the evidence in its original, unaltered state, thereby ensuring its integrity, authenticity, and admissibility as per the provisions of the Bharatiya Sakshya Adhiniyam, 2023.\n\n36. A fundamental principle of preservation is that all forensic analysis must be conducted on a forensic image (a bit-for-bit copy) of the original evidence, never on the original evidence itself. Once collected and imaged, the original storage devices (e.g., hard drives from the company\u0027s servers, the hacker\u0027s seized laptop) must be properly sealed, labelled, and stored in a secure facility to prevent any form of tampering, degradation, or unauthorized access.\n\n37. Secure storage involves both physical and logical controls. The evidence must be kept in a dedicated, access-controlled evidence room. This environment should be free from magnetic fields, excessive heat, humidity, and dust. Anti-static packaging must be used to protect the electronic components from electrostatic discharge.\n\n38. The cryptographic hash values (e.g., SHA-256) calculated during the collection phase serve as a digital fingerprint for the evidence. These hash values must be documented and preserved alongside the evidence. At any point when the evidence is accessed or a new copy is made, the hash value can be recalculated and compared against the original to scientifically prove that no data has been modified, added, or deleted.\n\n39. The chain of custody log, initiated at the time of collection, must be meticulously maintained throughout the preservation period. Every instance of handling, transporting, or storing the evidence must be recorded. The log must clearly state who handled the evidence, the date and time of the transfer, the purpose of the handling, and the location of the evidence at all times. Any break in this chain can compromise the admissibility of the evidence.\n\n40. All preservation activities must be thoroughly documented. This includes logs detailing storage conditions, access records, and any procedures performed. This documentation provides a verifiable audit trail that supports the integrity of the evidence when it is challenged in court.\n\n## Role of Cyber Forensic Laboratory\n\n41. The Cyber Forensic Laboratory plays a pivotal role in the investigation of complex cybercrimes. It acts as the specialized technical wing that assists the Investigating Officer by conducting in-depth scientific analysis of the collected digital evidence. The findings of the laboratory provide the crucial technical proof required to link the crime to the perpetrator.\n\n42. The primary function of the laboratory is the examination of the forensic images of seized electronic devices. In this case, experts would analyze the images of the fintech company\u0027s compromised servers and the hacker\u0027s personal devices (laptops, external hard drives, mobile phones). The goal is to uncover digital artifacts and traces of the illegal activities, such as hacking tools, scripts used for the attack, and remnants of the stolen data.\n\n43. Forensic experts employ advanced techniques for data recovery. They can often retrieve data that has been intentionally deleted, hidden in unallocated disk space, or encrypted by the accused. This could include recovering communication logs related to the sale of data on the dark web, cryptocurrency wallet details, or drafts of the sale listings.\n\n44. The laboratory conducts malware and network forensic analysis. Experts will dissect any malicious software found on the company\u0027s servers to understand its functionality and origin. They will also analyze network traffic logs, firewall records, and server access logs to reconstruct the entire sequence of the attack, from the initial intrusion to the final exfiltration of the stolen Aadhaar, PAN, and financial data.\n\n45. A critical role of the lab is attribution. By analyzing the digital evidence, forensic experts can trace IP addresses to their geographical location, identify the accounts and credentials used in the attack, and follow the financial trail of cryptocurrency transactions used for the sale of data on the dark web. This helps in conclusively linking the digital footprints to the accused hacker.\n\n46. Upon completion of the analysis, the laboratory prepares a detailed and objective forensic report. This report outlines the scope of the examination, the tools and methodologies used, a summary of the findings, and the expert\u0027s conclusions. This report is submitted to the Investigating Officer and becomes a key piece of evidence in the charge sheet filed before the court.\n\n47. Finally, the forensic experts from the laboratory often serve as expert witnesses in court during the trial. They explain their complex technical findings in a clear and understandable manner, helping the court appreciate the significance of the electronic evidence and establishing the scientific basis for the prosecution\u0027s case against the accused.\n\n## Admissibility of Electronic Evidence under Bharatiya Sakshya Adhiniyam, 2023\n\n48. The admissibility of all electronic evidence collected during the investigation, such as the fintech company\u0027s server logs, the forensic images of the hacker\u0027s devices, and communication records from the dark web, is governed by the provisions of the Bharatiya Sakshya Adhiniyam, 2023 (BSA, 2023).\n\n49. Section 61 of the BSA, 2023, mandates that the contents of electronic records must be proved in accordance with the provisions of Section 62 of the said Act. This establishes Section 62 as the specific and exclusive provision for proving electronic evidence.\n\n50. Section 62 of the BSA, 2023 (which corresponds to the erstwhile Section 65B of the Indian Evidence Act, 1872) is the cornerstone for the admissibility of electronic records. It deems a computer output (such as a printout or data stored on electronic media) to be a document and makes it admissible as evidence of the original, without further proof or production of the original, provided certain conditions are satisfied.\n\n51. The conditions for admissibility, as laid down in Section 62(2) of the BSA, 2023, are as follows:\n(a) The computer output containing the information was produced by a computer that was used regularly to store or process information for the purpose of any activities regularly carried on over that period by the person having lawful control over the use of the computer.\n(b) During the said period, information of the kind contained in the electronic record or of the kind from which the information so contained is derived was regularly fed into the computer in the ordinary course of the said activities.\n(c) Throughout the material part of the said period, the computer was operating properly or, if not, then in respect of any period in which it was not operating properly or was out of operation, it was not such as to affect the electronic record or the accuracy of its contents.\n(d) The information contained in the electronic record reproduces or is derived from such information fed into the computer in the ordinary course of the said activities.\n\n52. To satisfy these conditions, Section 62(4) of the BSA, 2023, requires the production of a certificate. This\ncertificate must identify the electronic record containing the statement, describe the manner in which it was produced,\nand give particulars of the device involved in its production. It must be signed by a person occupying a responsible\nofficial position in relation to the operation of the relevant device or the management of the relevant activities. This\ncertificate is considered *prima facie* evidence of any matter stated therein.\n\n53. In the context of this case, for the server logs from the fintech company to be admissible, a certificate under Section 62(4) would be required from a senior official like the Chief Technology Officer. Similarly, for the forensic report and the data recovered from the hacker\u0027s devices, a certificate from the concerned expert at the Cyber Forensic Laboratory would be mandatory.\n\n## Relevant Supreme Court Judgments\n\n54. The law regarding the admissibility of electronic evidence has been clarified and settled by the Hon\u0027ble Supreme Court of India through a series of landmark judgments interpreting Section 65B of the Indian Evidence Act, 1872 (now Section 62 of the BSA, 2023).\n\n55. ***Anvar P.V. v. P.K. Basheer \u0026 Ors., (2014) 10 SCC 473:*** In this seminal judgment, the Supreme Court held that\nSection 65B of the Indian Evidence Act is a special provision that governs the admissibility of electronic records. The\nCourt ruled that any electronic evidence presented in the form of a secondary copy (e.g., a printout, CD, or pen drive)\nis inadmissible unless accompanied by the certificate mandated under Section 65B(4). It clarified that the general\nprovisions relating to secondary evidence under Sections 63 and 65 of the Evidence Act are not applicable to electronic\nrecords. This judgment made the certificate a mandatory prerequisite.\n\n56. ***Shafhi Mohammad v. State of Himachal Pradesh, (2018) 2 SCC 801:*** A two-judge bench of the Supreme Court, in\nthis case, appeared to dilute the strict requirement laid down in *Anvar P.V.* The Court held that the requirement of a\ncertificate under Section 65B(4) is procedural and can be relaxed in the interest of justice, particularly in cases\nwhere a party is not in possession of the device from which the electronic record was produced and therefore cannot\nproduce the required certificate.\n\n57. ***Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal \u0026 Ors., (2020) 7 SCC 1:*** A larger three-judge bench of\nthe Supreme Court was constituted to resolve the conflict between the positions in *Anvar P.V.* and *Shafhi Mohammad*.\nThe Court authoritatively reaffirmed the law laid down in *Anvar P.V.*, holding that the certificate under Section\n65B(4) is a mandatory pre-condition for the admissibility of secondary electronic evidence. The judgment overruled the\ncontrary view in *Shafhi Mohammad*. It clarified that the certificate must be produced at the trial stage. This judgment\nis the final word on the subject, making strict compliance with Section 62(4) of the BSA, 2023, non-negotiable for the\nprosecution to successfully prove its case based on digital evidence.\n\n## Draft FIR\n\n**FIRST INFORMATION REPORT**\n(Under Section 154 of the Code of Criminal Procedure, 1973)\n\n1. **Police Station:** [Name of Cyber Crime Police Station], [City/District]\n2. **FIR No.:** [To be assigned by Police Station]\n3. **Date \u0026 Time of Report:** [Date and Time of Filing]\n4. **Act(s) \u0026 Section(s):**\n- **Bharatiya Nyaya Sanhita, 2023:** Sections 61, 303, 307, 318, 319, and 337.\n- **Information Technology Act, 2000:** Sections 43, 65, 66, 66C, 66D, and 72.\n5. **Place of Occurrence:**\n- **Address:** The servers and network infrastructure located at [Fintech Company\u0027s Registered Address], [City], [State].\n- **Details:** The breach occurred on the company\u0027s primary database and application servers.\n6. **Date \u0026 Time of Occurrence:** Between [Start Date and Time of Breach] and [End Date and Time of Discovery].\n7. **Information Source:** Written Complaint.\n8. **Complainant/Informant Details:**\n- **Name:** [Name of Authorized Representative, e.g., Chief Information Security Officer]\n- **Designation:** [Designation]\n- **On behalf of:** [Name of Fintech Company]\n- **Address:** [Fintech Company\u0027s Registered Address], [City], [State]\n- **Contact No.:** [Contact Number]\n- **Email ID:** [Official Email ID]\n9. **Details of Offence:**\nIt is reported that between the aforementioned dates, one or more unknown persons, with dishonest and fraudulent intent, gained unauthorized access to the secure servers and computer systems of [Name of Fintech Company]. The perpetrator(s) illegally breached our security measures and exfiltrated a large volume of highly sensitive and confidential data belonging to the company and its customers. The stolen data includes, but is not limited to:\n- Aadhaar records of customers.\n- PAN data of customers.\n- Bank account details of customers.\n- Credit card information (numbers, expiry dates, CVVs) of customers.\n- The company\u0027s proprietary and confidential software source code.\n\nIt has come to our knowledge that this stolen data has been put up for sale on the dark web, causing irreparable\nfinancial loss and reputational damage to the company, and exposing our customers to severe risks of identity theft and\nfinancial fraud. The actions of the unknown accused constitute a grave criminal offence under the provisions of the\nBharatiya Nyaya Sanhita, 2023, and the Information Technology Act, 2000. It is requested that an investigation be\ninitiated immediately to identify, apprehend, and prosecute the culprits.\n10. **Suspect Details:** Unknown person(s) / hacker(s).\n11. **Action Taken:** FIR registered. Investigation entrusted to [Name of Investigating Officer], [Designation].\n12. **Reasons for Delay in Reporting (if any):** The delay was due to the time taken for internal forensic analysis to ascertain the extent of the data breach and confirm the theft.\n13. **Signature of Complainant/Informant:**\n\n14. **Signature of Officer In-charge, Police Station:**\n**Name:** [Name of Officer]\n**Designation:** [Rank]\n**Date:** [Date of Registration]\n\n## Draft Seizure Memo\n\n**MEMORANDUM OF SEIZURE**\n\n**Case FIR No.:** [FIR Number] dated [Date of FIR]\n**Police Station:** [Name of Cyber Crime Police Station], [City/District]\n**Date \u0026 Time of Seizure:** [Date] at [Time]\n**Place of Seizure:** [Address of the Hacker\u0027s Premises where seizure is made]\n\nIn the course of the investigation of the above-mentioned case, a search was conducted at the aforementioned premises. The following articles/electronic devices, which are reasonably suspected to contain evidence related to the commission of the offence of hacking, data theft, and sale of data, are hereby seized in the presence of the following independent witnesses:\n\n**Witnesses:**\n1. **Name:** [Name of Witness 1]\n**S/o:** [Father\u0027s Name of Witness 1]\n**Address:** [Address of Witness 1]\n\n2. **Name:** [Name of Witness 2]\n**S/o:** [Father\u0027s Name of Witness 2]\n**Address:** [Address of Witness 2]\n\n**List of Articles Seized:**\n\n1. **Item 1:** One (1) Laptop, Make: [Brand], Model: [Model No.], Serial No.: [Serial No.].\n- **Description:** Black colour, in working condition. Suspected to contain hacking tools, scripts, and communication logs related to the offence.\n- **Hash Value (SHA-256) of forensic image:** [To be generated and recorded by Forensic Expert]\n\n2. **Item 2:** Two (2) External Hard Drives, Make: [Brand], Capacity: [e.g., 2 TB each], Serial Nos.: [Serial No. 1], [Serial No. 2].\n- **Description:** Suspected to contain copies of the stolen Aadhaar, PAN, bank, credit card data, and the fintech company\u0027s source code.\n- **Hash Value (SHA-256) of forensic image:** [To be generated and recorded by Forensic Expert]\n\n3. **Item 3:** One (1) Mobile Phone, Make: [Brand], Model: [Model No.], IMEI No.: [IMEI No.].\n- **Description:** Grey colour, with one SIM card. Suspected to contain communications related to the sale of data on the dark web and details of cryptocurrency wallets used for transactions.\n- **Hash Value (SHA-256) of forensic image:** [To be generated and recorded by Forensic Expert]\n\n4. **Item 4:** Three (3) Pen Drives of various makes and capacities.\n- **Description:** Suspected to contain malware, hacking tools, or fragments of stolen data.\n- **Hash Value (SHA-256) of forensic image:** [To be generated and recorded by Forensic Expert]\n\nAll the above-mentioned electronic devices have been seized and sealed in separate tamper-proof evidence bags, duly labelled with the case details. The seizure has been conducted in the presence of the above-named witnesses, and a copy of this memo has been provided to the person from whom the seizure was made.\n\n**Signature of Witnesses:**\n\n1. (Signature of Witness 1)\n[Name of Witness 1]\n\n2. (Signature of Witness 2)\n[Name of Witness 2]\n\n**Signature of Seizing Officer:**\n\n(Signature)\n**Name:** [Name of Investigating Officer]\n**Designation:** [Rank]\n**Police Station:** [Name of Cyber Crime Police Station]\n**Date:** [Date of Seizure]\n\n## Draft Arrest Memo\n\n**MEMORANDUM OF ARREST**\n\n**Case FIR No.:** [FIR Number] dated [Date of FIR]\n**Police Station:** [Name of Cyber Crime Police Station], [City/District]\n**Date \u0026 Time of Arrest:** [Date of Arrest] at [Time of Arrest]\n**Place of Arrest:** [Address where arrest is made]\n\nI, [Name of Arresting Officer], [Designation], of [Name of Cyber Crime Police Station], hereby place under arrest the person detailed below in connection with the investigation of the above-cited FIR:\n\n1. **Name of Arrestee:** [Name of Hacker]\n2. **Father\u0027s/Husband\u0027s Name:** [Father\u0027s/Husband\u0027s Name]\n3. **Address:** [Full Address of Arrestee]\n4. **Age/Date of Birth:** [Age] years\n5. **Gender:** [Male/Female/Other]\n6. **Identification Marks:** [Any visible identification marks]\n7. **Offence(s) for which arrested:** Under Sections 61, 303, 307, 318, 319, and 337 of the Bharatiya Nyaya Sanhita, 2023, and Sections 43, 65, 66, 66C, 66D, and 72 of the Information Technology Act, 2000.\n8. **Grounds of Arrest:** The arrestee is arrested based on credible information and evidence gathered during the\ninvestigation, which indicates their involvement in gaining unauthorized access to the servers of [Name of Fintech\nCompany], stealing sensitive customer data (including Aadhaar, PAN, bank account, and credit card details) and\nproprietary source code, and subsequently selling the said data on the dark web. The forensic analysis of seized\nelectronic devices from the arrestee\u0027s possession corroborates their involvement in the commission of these offences.\n9. **Information of Arrest:** A friend/relative of the arrestee, namely [Name of Person Informed], residing at [Address of Person Informed], who is the [Relationship] of the arrestee, has been informed of the arrest and the place of detention via telephone number [Phone Number] at [Time] on [Date].\n10. **Physical Condition of Arrestee:** The arrestee has no apparent injuries at the time of arrest and appears to be in a normal physical condition.\n11. **Articles found on the person of the Arrestee:** [List of personal belongings, e.g., Wallet containing Rs. [Amount], one mobile phone (already seized under seizure memo), house keys, etc.]\n12. **Signature/Thumb Impression of Arrestee:**\n\n13. **Signature of Witness:**\n**Name:** [Name of Independent Witness]\n**Address:** [Address of Witness]\n\n14. **Signature of Arresting Officer:**\n(Signature)\n**Name:** [Name of Arresting Officer]\n**Designation:** [Rank]\n**Date \u0026 Time:** [Date] at [Time]\n\n*Note: The arrestee has been informed of the grounds of arrest and their right to legal counsel. The arrestee will be produced before the competent Magistrate within 24 hours of arrest, excluding the time necessary for the journey.*\n\n## Draft Charge Sheet\n\n**CHARGE SHEET**\n(Final Report under Section 173 of the Code of Criminal Procedure, 1973)\n\n**1. Police Station:** [Name of Cyber Crime Police Station], [City/District]\n**2. FIR No. \u0026 Date:** [FIR Number] dated [Date of FIR]\n**3. Date of Offence:** Between [Start Date of Breach] and [End Date of Discovery]\n**4. Name of Complainant:** [Name of Authorized Representative], [Designation], on behalf of [Name of Fintech Company], [Company Address].\n**5. Name of Accused:** [Name of Hacker], S/o [Father\u0027s Name], R/o [Address of Accused].\n**6. Offence(s) Charged:**\n- **Bharatiya Nyaya Sanhita, 2023:** Sections 61 (Criminal Conspiracy), 303 (Theft), 307 (Receiving stolen property), 318 (Cheating), 319 (Cheating by Personation), and 337 (Mischief).\n- **Information Technology Act, 2000:** Sections 43 (Penalty for damage to computer), 65 (Tampering with computer source documents), 66 (Computer related offences), 66C (Identity theft), 66D (Cheating by personation by using computer resource), and 72 (Breach of confidentiality and privacy).\n**7. Brief Facts of the Case:**\nThe investigation was initiated based on a written complaint filed by [Name of Complainant] of [Name of Fintech\nCompany], alleging a sophisticated cyber-attack on the company\u0027s servers. The complaint stated that between [Start Date]\nand [End Date], an unknown perpetrator gained unauthorized access and stole a vast repository of sensitive data,\nincluding customer Aadhaar records, PAN data, bank account details, credit card information, and the company\u0027s\nproprietary source code. The stolen data was subsequently advertised and sold on the dark web.\n\nDuring the investigation, technical analysis of the company\u0027s server logs, firewall data, and network traffic was conducted. The digital trail, including IP addresses used for the intrusion and data exfiltration, was traced. This technical investigation, combined with intelligence gathering, led to the identification of the accused, [Name of Hacker].\n\nA search was conducted at the premises of the accused on [Date of Seizure], and several electronic devices, including a laptop, external hard drives, and a mobile phone, were seized as per the Seizure Memo. These devices were sent to the Cyber Forensic Laboratory for analysis. The forensic report has confirmed the following:\n(a) The presence of hacking tools and malicious scripts used to breach the fintech company\u0027s servers.\n(b) The existence of large databases on the accused\u0027s hard drives, which match the stolen Aadhaar, PAN, bank, and credit card data of the company\u0027s customers.\n(c) The recovery of the fintech company\u0027s proprietary source code.\n(d) Communication logs and browser history showing access to dark web marketplaces and correspondence related to the sale of the stolen data.\n(e) Details of cryptocurrency wallets that received payments corresponding to the sale of the data.\n\nStatements of witnesses, including the complainant, the company\u0027s IT personnel, and the forensic expert, have been recorded under Section 161 of the CrPC, which corroborate the prosecution\u0027s case. The accused, [Name of Hacker], was arrested on [Date of Arrest]. The investigation has established that the accused acted with dishonest and fraudulent intent to cause wrongful loss to the company and its customers and wrongful gain to himself.\n\n**8. List of Witnesses:**\n1. [Name of Complainant], Authorized Representative, [Name of Fintech Company]\n2. [Name of IT Head], [Name of Fintech Company]\n3. [Name of Forensic Expert], Cyber Forensic Laboratory, [City]\n4. [Name of Witness 1 to Seizure Memo]\n5. [Name of Witness 2 to Seizure Memo]\n6. [Name of Arresting Officer]\n7. [Name of Investigating Officer]\n\n**9. List of Documents and Articles:**\n1. First Information Report (FIR)\n2. Complaint from [Name of Fintech Company]\n3. Seizure Memo dated [Date of Seizure]\n4. Arrest Memo dated [Date of Arrest]\n5. Cyber Forensic Laboratory Report No. [Report No.] dated [Date of Report]\n6. Statements of witnesses recorded under Section 161 CrPC\n7. Seized articles (Laptop, Hard Drives, Mobile Phone, etc.)\n8. Certificate under Section 62 of the Bharatiya Sakshya Adhiniyam, 2023\n\nIt is submitted that from the evidence collected during the investigation, a prima facie case is made out against the accused, [Name of Hacker], for the commission of the offences mentioned above. It is therefore prayed that the Hon\u0027ble Court may be pleased to take cognizance of the offences and try the accused in accordance with the law.\n\n**Submitted by:**\n\n(Signature)\n**Name:** [Name of Investigating Officer]\n**Designation:** [Rank]\n**Police Station:** [Name of Cyber Crime Police Station]\n**Date:** [Date of Filing Charge Sheet]\n\n---\n\n## REFERENCES \u0026 CITATIONS\n\n\n### NEWACTS CITATIONS:\nI cannot provide information on specific sections of the Bharatiya Nyaya Sanhita, 2023, that deal with \"unauthorized access, data theft, and sale of stolen data on dark web\" based on the provided context. The provided sections of the Bharatiya Nyaya Sanhita, 2023, primarily cover general provisions, punishment for certain offenses, culpable homicide, and murder. They do not contain provisions related to cybercrimes such as unauthorized access, data theft, or activities on the dark web.\n\n### JUDGMENT CITATIONS:\nBased on the provided context, there is no specific Indian court judgment detailing a cybercrime involving unauthorized access to a fintech company, data theft, dark web sale of personal information (Aadhaar, PAN, bank, credit card), and source code. The supplied context primarily consists of news articles and general information regarding data breaches in India, rather than court judgments.\n\nThe provided information highlights several instances of large-scale data breaches in India where personally\nidentifiable information (PII) such as Aadhaar numbers, passport details, PAN cards, mobile numbers, and bank/credit\ncard records were compromised and subsequently offered for sale on the dark web. These incidents include the alleged\nsale of 815 million Indian citizens\u0027 data, including Aadhaar and passport details, on Breach Forums by threat actors\nlike \u0027pwn0001\u0027 and \u0027Lucius\u0027. Another incident involved the CoWIN database leak, exposing Aadhaar, PAN, mobile numbers,\nand home addresses. Furthermore, there have been reports of 1.3 million credit and debit card records from Indian banks\nbeing sold on the dark web, including card numbers, expiration dates, CVVs, and full PII. The context also mentions the\nBigBasket data breach in 2020, where details of over 20 million users, including email IDs, password hashes, phone\nnumbers, and addresses, were sold on the dark web. The misuse of PAN and Aadhaar data for fraudulent loans, impacting\ncredit scores, is also noted as a rising cyber fraud trend.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+    "token_usage":  {
+                        "input_tokens":  150943,
+                        "output_tokens":  18973,
+                        "total_tokens":  169916,
+                        "cache_read_tokens":  66495,
+                        "cache_creation_tokens":  0,
+                        "reasoning_tokens":  8552,
+                        "cost_usd":  0.397784,
+                        "by_agent":  {
+                                         "Orchestrator":  {
+                                                              "input":  8348,
+                                                              "output":  876,
+                                                              "total":  9224,
+                                                              "cache_read":  5467,
+                                                              "calls":  3,
+                                                              "cost_usd":  0.001186
+                                                          },
+                                         "Newacts":  {
+                                                         "input":  331,
+                                                         "output":  78,
+                                                         "total":  409,
+                                                         "cache_read":  0,
+                                                         "calls":  2,
+                                                         "cost_usd":  0.000049
+                                                     },
+                                         "Judgment":  {
+                                                          "input":  5357,
+                                                          "output":  258,
+                                                          "total":  5615,
+                                                          "cache_read":  0,
+                                                          "calls":  2,
+                                                          "cost_usd":  0.000639
+                                                      },
+                                         "Drafting":  {
+                                                          "input":  114727,
+                                                          "output":  17646,
+                                                          "total":  132373,
+                                                          "cache_read":  61028,
+                                                          "calls":  8,
+                                                          "cost_usd":  0.388969
+                                                      },
+                                         "SelfRefine":  {
+                                                            "input":  22180,
+                                                            "output":  115,
+                                                            "total":  22295,
+                                                            "cache_read":  0,
+                                                            "calls":  1,
+                                                            "cost_usd":  0.006941
+                                                        }
+                                     },
+                        "calls":  [
+                                      {
+                                          "agent":  "Orchestrator",
+                                          "step":  "classify_and_plan",
+                                          "input":  1488,
+                                          "output":  115,
+                                          "total":  1603,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000195
+                                      },
+                                      {
+                                          "agent":  "Orchestrator",
+                                          "step":  "extract_user_intent",
+                                          "input":  5958,
+                                          "output":  397,
+                                          "total":  6355,
+                                          "cache_read":  5467,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000755
+                                      },
+                                      {
+                                          "agent":  "Orchestrator",
+                                          "step":  "rewrite_per_agent_queries",
+                                          "input":  902,
+                                          "output":  364,
+                                          "total":  1266,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000236
+                                      },
+                                      {
+                                          "agent":  "Newacts",
+                                          "step":  "extract_metadata",
+                                          "input":  331,
+                                          "output":  41,
+                                          "total":  372,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000049
+                                      },
+                                      {
+                                          "agent":  "Judgment",
+                                          "step":  "extract_metadata",
+                                          "input":  1009,
+                                          "output":  164,
+                                          "total":  1173,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000167
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "pick_reference",
+                                          "input":  4478,
+                                          "output":  88,
+                                          "total":  4566,
+                                          "cache_read":  3799,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000483
+                                      },
+                                      {
+                                          "agent":  "Newacts",
+                                          "step":  "generate",
+                                          "input":  0,
+                                          "output":  37,
+                                          "total":  37,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.0
+                                      },
+                                      {
+                                          "agent":  "Judgment",
+                                          "step":  "relevance_judge",
+                                          "input":  4348,
+                                          "output":  94,
+                                          "total":  4442,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000472
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "fanout_judge",
+                                          "input":  2763,
+                                          "output":  755,
+                                          "total":  3518,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000578
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "generate_section_pair",
+                                          "input":  14864,
+                                          "output":  2715,
+                                          "total":  17579,
+                                          "cache_read":  4085,
+                                          "cache_creation":  0,
+                                          "reasoning":  1525,
+                                          "cost_usd":  0.06098
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "generate_section_pair",
+                                          "input":  16007,
+                                          "output":  3048,
+                                          "total":  19055,
+                                          "cache_read":  4086,
+                                          "cache_creation":  0,
+                                          "reasoning":  1644,
+                                          "cost_usd":  0.066929
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "generate_section_pair",
+                                          "input":  17415,
+                                          "output":  2500,
+                                          "total":  19915,
+                                          "cache_read":  4087,
+                                          "cache_creation":  0,
+                                          "reasoning":  1526,
+                                          "cost_usd":  0.062029
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "generate_section_pair",
+                                          "input":  18427,
+                                          "output":  2725,
+                                          "total":  21152,
+                                          "cache_read":  12263,
+                                          "cache_creation":  0,
+                                          "reasoning":  1524,
+                                          "cost_usd":  0.065524
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "generate_section_pair",
+                                          "input":  19587,
+                                          "output":  2774,
+                                          "total":  22361,
+                                          "cache_read":  16353,
+                                          "cache_creation":  0,
+                                          "reasoning":  1171,
+                                          "cost_usd":  0.063934
+                                      },
+                                      {
+                                          "agent":  "Drafting",
+                                          "step":  "generate_section_pair",
+                                          "input":  21186,
+                                          "output":  3041,
+                                          "total":  24227,
+                                          "cache_read":  16355,
+                                          "cache_creation":  0,
+                                          "reasoning":  1162,
+                                          "cost_usd":  0.068513
+                                      },
+                                      {
+                                          "agent":  "SelfRefine",
+                                          "step":  "critique",
+                                          "input":  22180,
+                                          "output":  115,
+                                          "total":  22295,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.006941
+                                      }
+                                  ]
+                    },
+    "source":  [
+                   {
+                       "source_type":  "drafting",
+                       "title":  "Reference draft (web-synthesised: \u003cweb:picker-rejected\u003e)",
+                       "content":  [
+                                       "## SAMPLE REFERENCE DRAFT\n\n### I. Applicable Offences under Bharatiya Nyaya Sanhita, 2023\n\nThe following offences under the Bharatiya Nyaya Sanhita, 2023 (BNS, 2023) may be applicable in the given scenario:\n\n1.  **Theft (Section 303 BNS, 2023):** While data itself is intangible, the act of dishonest"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "\u003cweb:picker-rejected\u003e",
+                       "agent_name":  "Drafting",
+                       "relevance_score":  null,
+                       "template_type":  "web-synthesized"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 1",
+                       "content":  [
+                                       "Section Number: Section 1 of The Bharatiya Nyaya Sanhita,2023\nSection Name: Short title,commencement and application\nSection Provisions: (1)This Act may be called the Bharatiya Nyaya Sanhita, 2023.\n(2)It shall come into force on such date as the Central Government may, by notification in the Officia"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "1",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 10",
+                       "content":  [
+                                       "Section Number: Section 10 of The Bharatiya Nyaya Sanhita,2023\nSection Name: Punishment of person guilty of one of several offences,the judgment stating that it is doubtful of which\nSection Provisions: In all cases in which judgment is given that a person is guilty of one of several offences specifi"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "10",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 100",
+                       "content":  [
+                                       "Section Number: Section 100 of The Bharatiya Nyaya Sanhita, 2023\nSection Name: Culpable homicide\nSection Provisions: Whoever causes death by doing an act with the intention of causing death, or with the intention of causing such \nbodily injury as is likely to cause death, or with the knowledge that "
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "100",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 101",
+                       "content":  [
+                                       "Section Number: Section 101 of The Bharatiya Nyaya Sanhita, 2023\nSection Name: Murder\nSection Provisions: Except in the cases hereinafter excepted, culpable homicide is murder,:\n(a)if the act by which the death is caused is done with the intention of causing death; or\n(b)if the act by which the deat"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "101",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 102",
+                       "content":  [
+                                       "Section Number: Section 102 of The Bharatiya Nyaya Sanhita, 2023\nSection Name: Culpable homicide by causing death of person other than person whose death was intended\nSection Provisions: If a person, by doing anything which he intends or knows to be likely to cause death, commits culpable homicide b"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "102",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 103",
+                       "content":  [
+                                       "Section Number: Section 103 of The Bharatiya Nyaya Sanhita, 2023\nSection Name: Punishment for murder\nSection Provisions: (1)Whoever commits murder shall be punished with death or imprisonment for life, and shall also be liable to fine.\n(2)When a group of five or more persons acting in concert commit"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "103",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 104",
+                       "content":  [
+                                       "Section Number: Section 104 of The Bharatiya Nyaya Sanhita, 2023\nSection Name: Punishment for murder by life-convict\nSection Provisions: Whoever, being under sentence of imprisonment for life, commits murder, shall be punished with death or with \nimprisonment for life, which shall mean the remainder"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "104",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 105",
+                       "content":  [
+                                       "Section Number: Section 105 of The Bharatiya Nyaya Sanhita, 2023\nSection Name: Punishment for culpable homicide not amounting to murder\nSection Provisions: Whoever commits culpable homicide not amounting to murder, shall be punished with imprisonment for life, or \nimprisonment of either description "
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "105",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 1",
+                       "content":  [
+                                       "Section Number: Section 1 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: Short title, application and commencement\nSection Provision: (1)This Act may be called the Bharatiya Sakshya Adhiniyam, 2023.\n(2)It applies to all judicial proceedings in or before any Court, including Courts-martial,\nb"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "1",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 10",
+                       "content":  [
+                                       "Section Number: Section 10 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: Facts tending to enable Court to determine amount are relevant in \nsuits for damages\nSection Provision: In suits in which damages are claimed, any fact which will enable the Court to\ndetermine the amount of damages whi"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  null,
+                       "section_number":  "10",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "thehindu.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEpR9BvAMkv0p3kD29YkPw0TOhpEODG1uqnw_aG7hpYJ30UztJMvKXLDMS1H3utqGc5_nV-Kwqe0Vw1B8Tmf8j4Zz1we3C3t0Fqp4bVUCxXQJptvyD1ztPGhMkfZi-Dquj8Tf79q2HbbCMNG8Iq-yGFLAwVY7CmiiUli8vxNg4l9OqBOaUN3Af9JSLQFX8bVvyVVgdPeVzE8XC1RaK-vpxaf_us_2T43pVTSeaDF11tq2qg9xZg0VdXLT1qyaiuOuA=",
+                       "web_title":  "thehindu.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "resecurity.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF1S8XLwNO56H6Iyhbd84DsqOGZmbqP0yPxf7vDKH0Cvnb1xaaIkm4O_X0Y65df7sOi5YmYQlWKx6qGcfgGG_oOvEQ3esOJCXwakwpaveVB9bY_PFJPmkIKhW2IW4lW_oQCbCksoVCZD7HAfVrbC9LhEeyiOoYN_2zytrHJck7DmrPOawL4iKOHf6f9gGTTMAIdqvS73AlxzTV0We-wqi5DzQjs09g9jrlTDMHdqoAKc2PXhokySFrlEzHO0ElfO-D_",
+                       "web_title":  "resecurity.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "thecyberexpress.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGpCezL8lesJ_xMeUbcDV01yEXKmdFhyktgNUG7YIRYCtOOdS9Idk0tkgsSYfakDUmyupc0HA-ilEWIHZzi759gMit4UNVO9R4LTNVzIJFuK6r45M6gtGrjLiJTcZrsXuKN_NhCY2LaX8tvbUSPEu0Ba4nBexld",
+                       "web_title":  "thecyberexpress.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "wikipedia.org",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFF7LiOLhq2vS5lJrktXtFHRwpBGAZHHY_O6wP0QigHj10GFZLF7Bca-sQUBiTr3-Mrzel0NqpFWW-6f1nA1yQbTebGNB_DqHpMwEzY7y8UHtq4fEElhmWnSU7-URmQjNhThQwLxBSq_70nvtEb5Mk=",
+                       "web_title":  "wikipedia.org"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "the420.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFD5Bm95HAffPedqf8yCaTtB3UjgxvuNEpNuGbsXB3WYAZ9rItKpipShXgmlNIUBSywgDW_JfUUzR0LKMGXQOK1b-Yhiyz-Z-KWqj4tFa410cTCsZZDTmBGJB_fbZ4Sc2rtegszbKupX-HH9kg3gMflJWq9ECxlQH20nSyAgj7dhLHE4A==",
+                       "web_title":  "the420.in"
+                   }
+               ],
+    "agents_used":  [
+                        "Drafting",
+                        "Newacts",
+                        "Judgment"
+                    ],
+    "effective_query":  "A hacker gains unauthorized access to a fintech company\u0027s servers.\n\nHe steals:\n\nAadhaar records PAN data Bank account details Credit card information Source code\n\nThe data is sold on the dark web.\n\nPrepare:\n\nIdentify every applicable offence under Bharatiya Nyaya Sanhita 2023. Discuss provisions of the Information Technology Act. Explain investigation procedure. Digital evidence collection. Preservation of electronic evidence. Role of cyber forensic laboratory. Admissibility of electronic evidence under Bharatiya Sakshya Adhiniyam. Draft FIR. Draft seizure memo. Draft arrest memo. Draft charge sheet. Relevant Supreme Court judgments.",
+    "query_rewritten":  true,
+    "conversation_turn":  1,
+    "followup_suggestions":  [
+                                 "What are other BNS sections?",
+                                 "What IT Act sections apply?",
+                                 "How is data theft proven?"
+                             ]
+}

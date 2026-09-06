@@ -1,0 +1,58 @@
+{
+  "base": "https://api.lawttorney.com/pyapi",
+  "prompt": "Make notes of counter arguments on behalf of Opponent, Cover all the points including Violation of 33(2)(b) by non payment of one month's wages or lesser wages including deductions, in any case a lesser payment than what has been mandated, So also not considered the past record of service and victimizing the workmen for the union activities. Also provide relevant case laws.",
+  "elapsed_s": 85.54,
+  "ttfb_ms": 1112,
+  "thread_id": "7bcc0f5a-2162-4254-95fd-848a107a82b2",
+  "effective_query": null,
+  "query_rewritten": false,
+  "agents_planned": [
+    "Scenario",
+    "Judgment",
+    "SCI_Judgment"
+  ],
+  "answer_len": 6641,
+  "answer_words": 1020,
+  "event_type_counts": {
+    "thread_id": 1,
+    "progress": 24,
+    "status": 8,
+    "context": 1,
+    "agents_planned": 1,
+    "token": 74,
+    "token_reset": 1,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "unique_progress_steps": [
+    "analyze",
+    "classify",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "metadata",
+    "plan",
+    "prepare",
+    "react",
+    "results",
+    "rewrite",
+    "search",
+    "synthesize",
+    "validate",
+    "web_search"
+  ],
+  "errors": [],
+  "raw_events_written": 114,
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ]
+}

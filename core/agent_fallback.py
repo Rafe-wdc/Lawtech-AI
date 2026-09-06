@@ -114,6 +114,7 @@ async def web_search_fallback(
     *,
     user_language: str = "en",
     intent=None,
+    file_context_prefix: str = "",
 ) -> AgentResult:
     """Fall back to Gemini 2.5 Flash with Google Search grounding.
 
@@ -167,7 +168,17 @@ async def web_search_fallback(
         # so responses match the user's requested language even for callers
         # that pass a default `user_language="en"`.
         localized_system = localize_prompt(web_prompt, user_language, intent)
-        full_prompt = f"{localized_system}\n\nUser Query: {query}"
+        # Gap #1: append uploaded-document text when the caller supplied
+        # `file_context_prefix`. Comes BEFORE the user query so the model
+        # sees "here is the user's uploaded matter" as reasoning context
+        # for the answer it synthesises from web grounding.
+        if file_context_prefix:
+            full_prompt = (
+                f"{localized_system}\n\n{file_context_prefix}\n\n"
+                f"User Query: {query}"
+            )
+        else:
+            full_prompt = f"{localized_system}\n\nUser Query: {query}"
         client = get_genai_client()
 
         # Call scenario_web_grounded (Flash) with capped exponential backoff

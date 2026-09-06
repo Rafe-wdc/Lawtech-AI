@@ -280,6 +280,32 @@ class _SqliteChatHistoryStore:
                     )
                     conn.commit()
                     log.info("Migrated thread_files: added ocr_status column")
+                # Gap #3 (2026-09-02): per-file kind classification, needed for
+                # cross-turn persistence so restored file_context on subsequent
+                # turns still carries the classifier verdict.
+                if "file_kind" not in tf_cols:
+                    conn.execute(
+                        "ALTER TABLE thread_files ADD COLUMN file_kind TEXT NOT NULL DEFAULT ''"
+                    )
+                    conn.commit()
+                    log.info("Migrated thread_files: added file_kind column")
+                if "file_kind_confidence" not in tf_cols:
+                    conn.execute(
+                        "ALTER TABLE thread_files ADD COLUMN file_kind_confidence REAL NOT NULL DEFAULT 0.0"
+                    )
+                    conn.commit()
+                    log.info("Migrated thread_files: added file_kind_confidence column")
+                # Gap #8 (2026-09-02): deterministic batch id per multipart
+                # upload request. Replaces the brittle 10-second timestamp
+                # window in agents/memory._restore_file_context. Legacy rows
+                # (NULL / empty) fall back to the timestamp path so old
+                # threads don't lose file context.
+                if "batch_id" not in tf_cols:
+                    conn.execute(
+                        "ALTER TABLE thread_files ADD COLUMN batch_id TEXT NOT NULL DEFAULT ''"
+                    )
+                    conn.commit()
+                    log.info("Migrated thread_files: added batch_id column")
 
             # Migration: per-turn typed state for follow-up simplification (Level 1
             # of docs/followup_pipeline_simplification_plan.md). Enables Turn N
@@ -620,13 +646,17 @@ class _SqliteChatHistoryStore:
                         thread_id, file_id, filename, file_type, mime_type,
                         size_bytes, local_path, extracted_text,
                         chromadb_collection, gemini_uri, gemini_name,
-                        gemini_expiry, gemini_supported, page_count, upload_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        gemini_expiry, gemini_supported, page_count, upload_error,
+                        file_kind, file_kind_confidence, batch_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(thread_id, file_id) DO UPDATE SET
-                        gemini_uri    = excluded.gemini_uri,
-                        gemini_name   = excluded.gemini_name,
-                        gemini_expiry = excluded.gemini_expiry,
-                        upload_error  = excluded.upload_error
+                        gemini_uri           = excluded.gemini_uri,
+                        gemini_name          = excluded.gemini_name,
+                        gemini_expiry        = excluded.gemini_expiry,
+                        upload_error         = excluded.upload_error,
+                        file_kind            = excluded.file_kind,
+                        file_kind_confidence = excluded.file_kind_confidence,
+                        batch_id             = excluded.batch_id
                 """, (
                     thread_id,
                     _pg_safe_str(getattr(pf, "file_id", "")),
@@ -643,6 +673,9 @@ class _SqliteChatHistoryStore:
                     int(getattr(pf, "gemini_supported", False) or False),
                     getattr(pf, "page_count", 0) or 0,
                     _pg_safe_str(getattr(pf, "error", "")),
+                    _pg_safe_str(getattr(pf, "file_kind", "")),
+                    float(getattr(pf, "file_kind_confidence", 0.0) or 0.0),
+                    _pg_safe_str(getattr(pf, "batch_id", "")),
                 ))
                 conn.commit()
                 log.debug("Thread file saved",
@@ -668,7 +701,8 @@ class _SqliteChatHistoryStore:
                 SELECT file_id, filename, file_type, mime_type, size_bytes,
                        local_path, extracted_text, chromadb_collection,
                        gemini_uri, gemini_name, gemini_expiry,
-                       gemini_supported, page_count, upload_error, ocr_status
+                       gemini_supported, page_count, upload_error, ocr_status,
+                       file_kind, file_kind_confidence, batch_id, created_at
                 FROM thread_files
                 WHERE thread_id = ?
                 ORDER BY created_at ASC

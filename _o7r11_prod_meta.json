@@ -1,0 +1,60 @@
+{
+  "run_label": "o7r11_prod",
+  "elapsed_s": 83.14,
+  "ttfb_ms": 702,
+  "http_ok": true,
+  "raw_events_written": 30,
+  "thread_id": "dcc82cf2-5e32-4e00-942a-0f20081828c9",
+  "answer_len": 2900,
+  "answer_words": 470,
+  "answer_case_citations_count_regex": 0,
+  "answer_case_citations_sample": [],
+  "structure_signals": {
+    "found_order_vii_rule_11": true,
+    "found_cpc_reference": true,
+    "found_cause_title": false,
+    "found_prayer": true,
+    "found_verification": true,
+    "found_affidavit": false,
+    "found_placeholders": true,
+    "found_grounds_section": false
+  },
+  "agents_planned": [
+    "Drafting"
+  ],
+  "event_type_counts": {
+    "thread_id": 1,
+    "progress": 17,
+    "status": 6,
+    "context": 1,
+    "agents_planned": 1,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "progress_step_count": 17,
+  "unique_progress_steps": [
+    "classify",
+    "cleanup",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "reference",
+    "rewrite",
+    "self_refine",
+    "synthesize",
+    "validate"
+  ],
+  "errors": [],
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ]
+}

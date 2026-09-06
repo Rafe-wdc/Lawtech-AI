@@ -1,0 +1,23 @@
+{"type": "thread_id", "data": "e4ee83a2-4d7a-44c1-879a-c15266e413bd"}
+{"type": "progress", "agent": "guardrail", "message": "Validating query...", "ts": 1788203608.023201, "step": "validate"}
+{"type": "status", "agent": "guardrail_input", "message": "Validating query..."}
+{"type": "progress", "agent": "memory", "message": "Detecting language...", "ts": 1788203608.0253994, "step": "language"}
+{"type": "progress", "agent": "memory", "message": "Detected: en", "ts": 1788203608.0284753, "step": "language", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Loading conversation history...", "ts": 1788203608.0286884, "step": "history"}
+{"type": "progress", "agent": "memory", "message": "Found 0 previous turns", "ts": 1788203608.0327244, "found": 0, "step": "history", "substep": true}
+{"type": "progress", "agent": "memory", "message": "Rewriting follow-up query...", "ts": 1788203608.0354135, "step": "rewrite"}
+{"type": "status", "agent": "memory", "message": "Loading context..."}
+{"type": "context", "query_rewritten": false, "effective_query": null, "history_turns": 1, "has_summary": false}
+{"type": "progress", "agent": "orchestrator", "message": "Understanding your question...", "ts": 1788203608.0382426, "step": "classify"}
+{"type": "progress", "agent": "orchestrator", "message": "Identified: Legal_Concepts", "ts": 1788203608.30291, "detail": "Legal_Concepts", "step": "classify", "substep": true}
+{"type": "status", "agent": "orchestrator_plan", "message": "Planning search strategy..."}
+{"type": "agents_planned", "agents": ["Legal_Concepts"]}
+{"type": "progress", "agent": "legal_concepts", "message": "Researching legal concept...", "ts": 1788203608.3053262, "step": "research"}
+{"type": "progress", "agent": "legal_concepts", "message": "Generating explanation...", "ts": 1788203608.5511513, "step": "generate"}
+{"type": "status", "agent": "legal_concepts", "message": "Explaining legal concepts..."}
+{"type": "progress", "agent": "orchestrator", "message": "Merging results from 1 agents...", "ts": 1788203608.5523899, "found": 1, "step": "synthesize"}
+{"type": "status", "agent": "orchestrator_synthesize", "message": "Injecting citations into draft..."}
+{"type": "progress", "agent": "guardrail", "message": "Finalizing response...", "ts": 1788203608.7304437, "step": "finalize"}
+{"type": "status", "agent": "guardrail_output", "message": "Finalizing..."}
+{"type": "response", "content": "I was unable to retrieve information on this topic at the moment. Please try rephrasing your question.\n"}
+{"type": "done", "agents_used": ["Legal_Concepts"], "token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0, "cache_creation_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.0, "by_agent": {}, "calls": []}, "thread_id": "e4ee83a2-4d7a-44c1-879a-c15266e413bd", "conversation_turn": 1, "query_rewritten": false, "effective_query": null}

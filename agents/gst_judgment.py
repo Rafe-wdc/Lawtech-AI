@@ -103,14 +103,26 @@ async def gst_judgment_node(state: LegalAgentState) -> dict:
         tools = AGENT_TOOLS["gst_judgment"]
         log.debug("Building ReAct agent", tools_count=len(tools))
 
+        # Gap #1: inject uploaded-document text into the ReAct agent's
+        # system prompt so GST_Judgment sees the user's matter (upload an
+        # AAAR order + ask "similar rulings on ITC?" — the order's text
+        # now influences tool selection). Empty when no files attached.
+        from core.state import FileContextData as _FileContextData
+        from core.file_context import format_file_context_prefix as _fmt_files
+        _gst_system_prompt = localize_prompt(
+            GST_JUDGMENT_SYSTEM_PROMPT,
+            user_language,
+            state.get("user_intent"),
+        )
+        _file_prefix = _fmt_files(_FileContextData.from_state(state))
+        if _file_prefix:
+            _gst_system_prompt = _gst_system_prompt + "\n\n" + _file_prefix
+            log.info("GST_Judgment: uploaded file context injected",
+                     prefix_len=len(_file_prefix))
         agent = create_react_agent(
             llm,
             tools,
-            prompt=SystemMessage(content=localize_prompt(
-                GST_JUDGMENT_SYSTEM_PROMPT,
-                user_language,
-                state.get("user_intent"),
-            )),
+            prompt=SystemMessage(content=_gst_system_prompt),
         )
 
         progress("gst_judgment", "Running multi-step research (ReAct agent)...", step="react")

@@ -2369,25 +2369,89 @@ def _normalise_heading(text: str) -> str:
     return t
 
 
+# Sections whose "heading" is inherently the document's opening block rather
+# than a descriptive label. The writer legitimately adapts the planner's
+# abstract placeholder ("BEFORE THE HON'BLE COURT / TRIBUNAL", "Cause Title
+# and Parties", "TO,") into the actual court caption or addressee block for
+# THIS matter. Substring matching between the abstract and adapted forms
+# systematically fails ("cause title" vs "before the adjudicating authority,
+# central goods & services tax..." share no substring), so these ids are
+# treated as PRESENT whenever the draft has any heading in its opening
+# portion — the actual court name IS the heading.
+_OPENING_BLOCK_SECTION_IDS = frozenset({
+    "cause_title", "cause", "court_title", "court_caption", "caption",
+    "heading", "addressee", "addressee_block", "party_block", "parties",
+    "title", "court_and_parties", "cause_and_parties",
+})
+
+
+def _substantive_word_overlap(want: str, got: str, min_ratio: float = 0.5) -> bool:
+    """Fuzzy match — do these two headings share at least `min_ratio` of
+    their substantive words (ignoring stopwords)?
+
+    Catches legitimate heading adaptations the strict substring check misses:
+      "Preliminary Objections" vs "Preliminary Submissions and Objections"
+        -> {preliminary, objections} vs {preliminary, submissions, objections}
+        -> 2/2 want words present = 1.0 -> matched
+      "Reply on Merits" vs "Para-wise Reply and Denial on Merits"
+        -> {reply, merits} vs {para, wise, reply, denial, merits}
+        -> 2/2 want words present = 1.0 -> matched
+      "Grounds for Bail" vs "Legal Grounds"
+        -> {grounds, bail} vs {legal, grounds}
+        -> 1/2 want words present = 0.5 -> matched at threshold
+    """
+    _STOP = frozenset({
+        "the", "a", "an", "of", "and", "or", "for", "to", "on", "in", "at",
+        "by", "with", "as", "is", "are", "be", "this", "that",
+    })
+    def _words(t: str) -> set[str]:
+        return {w for w in re.split(r"[^a-z0-9]+", t.lower()) if w and w not in _STOP and len(w) > 2}
+    w_want = _words(want)
+    w_got = _words(got)
+    if not w_want or not w_got:
+        return False
+    shared = w_want & w_got
+    return len(shared) / len(w_want) >= min_ratio
+
+
 def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
-    """Planned sections whose heading never made it into the draft.
+    """Planned sections that never made it into the draft.
 
-    A section counts as present when its normalised heading appears anywhere
-    in the draft's own headings, in either direction — the writer is allowed
-    to lengthen a heading ("Prayer" -> "Prayer for Bail") or trim a long one,
-    but not to drop the section or rename it into something unrelated.
+    Three-tier presence check per section, in order of strictness:
 
-    Substring matching in both directions is deliberately permissive: the goal
-    is catching a DROPPED section, not policing wording. A false "missing"
-    triggers a wasted 25s repair call, so the bar is set to avoid that.
+      1. OPENING-BLOCK exemption: sections in `_OPENING_BLOCK_SECTION_IDS`
+         (cause_title, addressee, court_caption, etc.) are treated as
+         present whenever the draft has any heading in its opening ~40
+         lines. Rationale: the writer legitimately replaces the planner's
+         abstract heading with the real court caption for THIS matter, so
+         substring / word-overlap on the abstract heading is unreliable.
+         Their absence downstream causes the repair to blindly re-emit the
+         planner's abstract heading and append it as a trailing fragment
+         (2026-09-06 duplicated-cause-title incident).
+
+      2. SUBSTRING match (original behaviour): normalised planner heading
+         appears in one of the draft's headings, or vice versa.
+
+      3. WORD-OVERLAP match (new): at least 50% of the substantive words
+         in the planner's heading appear in one of the draft's headings.
+         Catches legitimate rewordings like "Grounds" -> "Legal Grounds"
+         and "Preliminary Objections" -> "Preliminary Submissions and
+         Objections" that substring matching misses in both directions.
+
+    Any of the three matching → section present. All three fail → missing.
     """
     if not draft or not sections:
         return []
     draft_headings: list[str] = []
+    opening_has_heading = False
+    _opening_lines_scanned = 0
+    _OPENING_WINDOW_LINES = 40
     for line in draft.splitlines():
         s = line.strip()
         if not s:
+            _opening_lines_scanned += 1
             continue
+        _opening_lines_scanned += 1
         # `## Heading`, and also `**Heading**` alone on a line — some drafts
         # mark sections in bold rather than with hashes, and treating those as
         # "no heading" would flag a complete document as entirely missing.
@@ -2395,6 +2459,8 @@ def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_
             h = _normalise_heading(s)
             if h:
                 draft_headings.append(h)
+                if _opening_lines_scanned <= _OPENING_WINDOW_LINES:
+                    opening_has_heading = True
 
     # No headings recognised at all: the writer is not marking sections in a
     # form we can read, so we cannot tell a dropped section from a differently
@@ -2405,11 +2471,24 @@ def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_
 
     missing: list["_Section"] = []
     for sec in sections:
+        sec_id = (getattr(sec, "id", "") or "").lower().strip()
         want = _normalise_heading(sec.heading)
         if not want:
             continue
+
+        # Tier 1 — opening-block sections are present iff the draft opens
+        # with any heading. The writer's adapted court caption IS the heading.
+        if sec_id in _OPENING_BLOCK_SECTION_IDS and opening_has_heading:
+            continue
+
+        # Tier 2 — original substring match (either direction).
         if any(want in got or got in want for got in draft_headings):
             continue
+
+        # Tier 3 — word-overlap match (>= 50% of substantive words shared).
+        if any(_substantive_word_overlap(want, got) for got in draft_headings):
+            continue
+
         missing.append(sec)
     return missing
 
@@ -2784,11 +2863,54 @@ async def _generate_sectionwise(
                 log.warning("Section repair failed", error=short_err(e),
                             headings=[s.heading[:40] for s in chunk])
         if repaired:
-            draft = draft + "\n\n" + "\n\n".join(repaired)
+            # SAFETY NET (2026-09-06): before blind-appending, drop any
+            # repaired chunk whose substantive body is already present in
+            # the draft. Belt-and-suspenders against a future false
+            # positive from `_missing_planned_sections` (that function
+            # was tightened in the same commit, but the append is the
+            # last line of defence — a duplicate never lands even if the
+            # detector is later loosened by accident). The check compares
+            # normalised heading-shingles between the repaired chunk and
+            # the existing draft; ~85% word overlap on the chunk's own
+            # words with the existing draft's headings means we already
+            # have this section.
+            deduped_repaired: list[str] = []
+            existing_headings_norm = [
+                _normalise_heading(line.strip())
+                for line in draft.splitlines()
+                if line.strip().startswith("#")
+                or (line.strip().startswith("**") and line.strip().endswith("**"))
+            ]
+            for chunk_text in repaired:
+                chunk_first_heading = ""
+                for line in chunk_text.splitlines():
+                    s = line.strip()
+                    if s.startswith("#") or (s.startswith("**") and s.endswith("**")):
+                        chunk_first_heading = _normalise_heading(s)
+                        break
+                already_present = bool(chunk_first_heading) and any(
+                    _substantive_word_overlap(chunk_first_heading, got, min_ratio=0.85)
+                    or chunk_first_heading in got
+                    or got in chunk_first_heading
+                    for got in existing_headings_norm
+                )
+                if already_present:
+                    log.warning(
+                        "Repaired section already present in draft — skipping "
+                        "append to prevent duplicate section fragment",
+                        chunk_heading_preview=chunk_first_heading[:80],
+                        chunk_chars=len(chunk_text),
+                    )
+                    continue
+                deduped_repaired.append(chunk_text)
+            if deduped_repaired:
+                draft = draft + "\n\n" + "\n\n".join(deduped_repaired)
             still_missing = _missing_planned_sections(draft, sections)
             log.info("Plan adherence after repair",
                      recovered=len(missing) - len(still_missing),
-                     still_missing=[s.heading[:40] for s in still_missing])
+                     still_missing=[s.heading[:40] for s in still_missing],
+                     appended_chunks=len(deduped_repaired),
+                     deduped_chunks=len(repaired) - len(deduped_repaired))
 
     # G-24: emit draft_incomplete SSE + prepend a banner when any pair
     # failed. The frontend already listens for draft_incomplete (see

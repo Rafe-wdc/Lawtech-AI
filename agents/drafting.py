@@ -1824,8 +1824,9 @@ async def _judge_fanout(
         # means a shorter document. If drafts regress in length, revisit
         # this before touching the writer — the writer honours whatever plan
         # it is given (instrumentation shows planned == emitted).
+        from core.clients import GEMINI_FLASH_MODEL_ID
         llm = init_chat_model(
-            "google_genai:gemini-2.5-flash",
+            f"google_genai:{GEMINI_FLASH_MODEL_ID}",
             temperature=0.0,
             thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)

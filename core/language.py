@@ -418,8 +418,33 @@ def _format_intent_directives(intent) -> str:
     depth = getattr(intent, "response_depth", "standard")
     if depth == "brief":
         parts.append(
-            "USER DEPTH: keep the response under 200 words. Prefer the most "
-            "load-bearing facts. Skip background and elaboration."
+            "USER DEPTH: brief. Skip background, motivation, and elaboration; "
+            "cut every sentence that does not directly answer the user's "
+            "question or extract a load-bearing fact from the material.\n"
+            "\n"
+            "\"Brief\" is CONTEXT-SCALED, not a hard word cap. In Indian "
+            "legal English \"brief\" means a substantive case-brief a lawyer "
+            "can hand to counsel — NOT a five-line TL;DR. Match the response "
+            "size to the material:\n"
+            "\n"
+            "  - Q&A on a statute, principle, or doctrine ('is X allowed', "
+            "'what is the limitation period for Y') → 150-250 words.\n"
+            "  - Q&A on a specific document fact ('who is the plaintiff?', "
+            "'what is the claim amount?') → 20-60 words. One sentence is "
+            "often enough.\n"
+            "  - Summary / brief of an attached DOCUMENT: honour the depth "
+            "guidance the domain agent's own prompt sets for source-scaled "
+            "summaries (typically 300-4,500 chars depending on source "
+            "length — a 29-page court filing brief is naturally 2,500-"
+            "4,500 chars even in brief mode; a 2-page notice brief is "
+            "300-800 chars). Do NOT collapse a 29-page filing into 200 "
+            "words — that loses material facts a lawyer needs to brief "
+            "the client.\n"
+            "\n"
+            "The rule of thumb: a lawyer receiving your response should not "
+            "need to re-read the source to answer their next tactical "
+            "question. If cutting more words would force them back to the "
+            "source, you have cut too much."
         )
     elif depth == "detailed":
         parts.append(

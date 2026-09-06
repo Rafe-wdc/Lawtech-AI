@@ -280,10 +280,58 @@ The user's own words steer the shape. Do NOT default to summarising.
   names) are NEVER translated or anglicised. Numerals + statutory
   references + case citations follow the `LEGAL LANGUAGE REGISTER`
   already applied via localize_prompt.
-- "Summarise", "give me the gist", "what is this about", "explain in
-  short" → CONCISE SUMMARY. Only in this mode may you paraphrase.
-  Still name every party, date, and section number exactly, and still
-  omit anything you cannot read.
+- "Summarise", "brief summary", "give me the gist", "what is this
+  about", "explain in short", "case brief" → SUMMARY MODE. The only
+  mode that permits paraphrase. Still name every party, date, and
+  section number EXACTLY, and still omit anything you cannot read.
+
+  VOLUME IS A HARD FLOOR SCALED TO SOURCE-DOCUMENT SIZE — NOT a
+  soft target. In Indian legal English a "brief" is a substantive
+  case-brief a lawyer can hand to counsel, NOT a five-line TL;DR.
+  UNDER-producing a summary of a long document is the specialist
+  failure to avoid; OVER-producing is fine. The words "brief",
+  "in short", "concise" in the user's query DO NOT authorise
+  going below the floor.
+
+  Match the summary MINIMUM to the source:
+
+    * Short source (1-3 pages, e.g. legal notice, one-page
+      affidavit, RTI application): FLOOR 1 paragraph, 300-800
+      chars. Cover purpose, parties, demand, deadline.
+    * Medium source (4-10 pages, e.g. reply notice, complaint,
+      short pleading): FLOOR 3 paragraphs, 1,200-2,000 chars.
+      Cover purpose, parties, material facts, key statutory
+      anchors, outcome sought.
+    * Long source (10-29 pages — court pleadings, writ
+      petitions, SCNs, judgments, agreements): FLOOR 5 sections
+      with `##` markdown headings, 2,800-4,500 chars.
+      Use these EXACT section headings, in this order:
+
+          ## Forum & Parties
+          ## Material Facts (chronological)
+          ## Key Exhibits / Documents Relied Upon
+          ## Dispositive Issues
+          ## Reliefs Sought / Order Impugned
+
+      The Material Facts section MUST include at least 6-10
+      specific dates from the record (execution dates of
+      agreements, order dates, filing dates), each with a
+      one-sentence description of what happened on that date.
+      A 29-page court filing whose Material Facts section
+      names only 2-3 dates is compressed too aggressively —
+      the lawyer needs the chronological spine to brief the
+      client.
+    * Very long source (30+ pages, e.g. arbitration paperbooks,
+      multi-noticee SCN, long judgment): FLOOR 6-8 sections,
+      4,500-7,000 chars. Same structure as above plus additional
+      sections as the record warrants (e.g., ## Prior Litigation
+      History, ## Interim Orders in Related Proceedings).
+
+  If the user genuinely wanted a one-liner they would have asked
+  a specific question ("who is the plaintiff?", "what is the
+  claim amount?"). A summary request on a multi-page filing is
+  a request for a substantive brief, not a tweet — and the
+  volume floor above is where "substantive" starts.
 - Specific question ("What amount is claimed?", "Who is the
   respondent?", "Which BNS section applies?") → DIRECT ANSWER quoting
   the exact passage that supports it, with a page / clause / annexure

@@ -57,7 +57,7 @@ MAX_INLINE_PDF_PAGES = 20
 # OCR latency on long PDFs. We keep a high-DPI option for genuinely poor
 # text-layer cases and default to V1's 96 for the common path.
 # (Bug analysis 2026-06-23: V2 file-processing regression — V1 baseline.)
-VISION_DPI_LOW = 96             # V1 default — fast, acceptable for most cases
+VISION_DPI_LOW = int(os.environ.get("OCR_FIRST_PASS_DPI", "96"))  # V1 default — fast, acceptable for most cases
 VISION_DPI_HIGH = 200            # used when low-DPI OCR returns very little text
 VISION_DPI = VISION_DPI_LOW      # default; _vision_ocr_pdf may escalate
 
@@ -1067,17 +1067,17 @@ def _ocr_pdf_at_dpi(
     SSE channel — useful for 100+ page scanned PDFs where OCR alone takes
     1-3 minutes and the user would otherwise see dead silence.
     """
-    from core.clients import get_gemini_flash_full
+    from core.clients import get_gemini_flash_full, GEMINI_FLASH_MODEL_ID
+    llm = get_gemini_flash_full(temperature=0.0)
 
     with log_time(log, "PDF page rendering", pages=page_count, dpi=dpi):
         batches = _render_pdf_pages(file_path, page_count, dpi=dpi)
 
     total = len(batches)
-    llm = get_gemini_flash_full(temperature=0.0)
     log.info("Starting parallel OCR",
              batches=total, pages=page_count, dpi=dpi,
              batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT,
-             model="gemini-2.5-flash")
+             model=GEMINI_FLASH_MODEL_ID)
 
     if emit and total:
         emit({

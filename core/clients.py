@@ -306,27 +306,54 @@ def get_gemini_flash_lite(temperature: float = 0.3,
 get_gemini_flash = get_gemini_flash_lite
 
 
+import os as _os  # noqa: E402
+# 2026-09-06: upgraded default Flash from gemini-2.5-flash to gemini-3.6-flash
+# after a WhatsApp-screenshot OCR incident where 2.5-flash returned 504
+# DEADLINE_EXCEEDED on 2 of 3 pages ("RPC from prefill to decode failed").
+# 3.6-flash OCR'd all 3 pages in 36s vs 273s for 2.5. Roll back with
+# GEMINI_FLASH_MODEL=gemini-2.5-flash in .env.
+GEMINI_FLASH_MODEL_ID = _os.environ.get("GEMINI_FLASH_MODEL", "gemini-3.6-flash").strip()
+
+
+def _flash_thinking_kwargs(thinking_budget: int) -> dict:
+    """Return safe kwargs for `thinking_budget` on the active flash model.
+
+    gemini-3.6-flash rejects `thinking_budget=0` with HTTP 400
+    INVALID_ARGUMENT — the API does not allow disabling thinking on 3.6.
+    gemini-2.5-flash accepts `0` and treats it as "no thinking".
+
+    To keep callers portable across the swap, we drop the kwarg entirely
+    on 3.6 when a caller asked for `0`, letting the model use its own
+    default thinking budget. All other values pass through.
+    """
+    if thinking_budget == 0 and "3.6" in GEMINI_FLASH_MODEL_ID:
+        return {}
+    return {"thinking_budget": thinking_budget}
+
+
 @lru_cache(maxsize=8)
 def get_gemini_flash_full(temperature: float = 0.3,
                           max_output_tokens: int = 65535,
                           thinking_budget: int = 0):
-    """Gemini 2.5 Flash — balanced. For response generation, synthesis, ReAct agents.
+    """Gemini Flash — balanced. For response generation, synthesis, ReAct agents.
 
-    Defaults: max output ceiling (65K), thinking disabled (0).
+    Model ID is `GEMINI_FLASH_MODEL_ID` (env-configurable, defaults to
+    `gemini-3.6-flash` as of 2026-09-06).
 
-    Pure-generation paths (legislation, judgment, newacts, drafting, synthesis)
-    don't need thinking and tolerate latency poorly — keep the default.
+    Defaults: max output ceiling (65K), thinking disabled (0) — but note
+    gemini-3.6-flash cannot disable thinking, so on 3.6 we omit the
+    thinking_budget kwarg and let the model pick its own default.
 
     ReAct agents (SCI/GST/Judgment) that benefit from tool-planning reasoning
     should explicitly opt in: `get_gemini_flash_full(temperature=0, thinking_budget=2048)`.
     """
     return init_chat_model(
-        "google_genai:gemini-2.5-flash",
+        f"google_genai:{GEMINI_FLASH_MODEL_ID}",
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        thinking_budget=thinking_budget,
         max_retries=2,
         timeout=120,
+        **_flash_thinking_kwargs(thinking_budget),
     )
 
 
@@ -361,12 +388,12 @@ def get_drafting_llm(max_output_tokens: int = 65535,
     for drafts; the drafting prompt is highly structured).
     """
     return init_chat_model(
-        "google_genai:gemini-2.5-flash",
+        f"google_genai:{GEMINI_FLASH_MODEL_ID}",
         temperature=0.4,
         max_output_tokens=max_output_tokens,
-        thinking_budget=thinking_budget,
         max_retries=2,
         timeout=180,
+        **_flash_thinking_kwargs(thinking_budget),
     )
 
 

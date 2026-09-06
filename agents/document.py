@@ -135,17 +135,29 @@ def _generate_from_docs(
         model=picked_model,
     )
 
+    # Output-token cap. 2026-09-06 incident: extraction of a 29-page
+    # court filing truncated mid-paragraph on the old 8000 cap because
+    # comprehensive-summary / extract / translate requests routinely
+    # need 25-40 K chars of visible output (≈ 8-12 K output tokens
+    # once markdown structure overhead is included) — and gemini-3.6-flash
+    # burns additional output-budget-equivalent tokens on internal
+    # thinking. The old 8000 cap silently truncated with no downstream
+    # detection and no user-visible signal. Sizes below match the
+    # drafting agent's section-pair headroom (PR #40).
+    _MAX_OUT_FLASH = 24000
+    _MAX_OUT_PRO = 32000
+
     with log_time(log, f"LLM generation ({picked_model})"):
         if use_flash:
             llm = get_gemini_flash_full(
                 temperature=0.3,
-                max_output_tokens=8000,
+                max_output_tokens=_MAX_OUT_FLASH,
                 thinking_budget=0,  # small-doc Q&A doesn't need thinking trace
             )
         else:
             llm = get_gemini_pro(
                 temperature=0.3,
-                max_output_tokens=8000,
+                max_output_tokens=_MAX_OUT_PRO,
                 thinking_budget=1024,
             )
         system_prompt = localize_prompt(
@@ -373,6 +385,7 @@ the gap with general legal knowledge or invented details.""",
         prompt = ChatPromptTemplate.from_messages(prompt_messages)
         chain = prompt | llm
 
+        _current_max_out = _MAX_OUT_FLASH if use_flash else _MAX_OUT_PRO
         invoke_args = {
             "query": query,
             "docs": docs_text,
@@ -382,10 +395,51 @@ the gap with general legal knowledge or invented details.""",
             invoke_args["history"] = history_text
         response = chain.invoke(invoke_args)
 
+    # Truncation detection (2026-09-06). Google Gemini returns
+    # finish_reason="MAX_TOKENS" (LangChain surfaces it as
+    # response.response_metadata["finish_reason"]) when the model hit its
+    # output-length cap. Without this check the pipeline shipped the
+    # partial response as if complete — user saw mid-sentence truncation
+    # with no error banner, no continuation signal. We now log the
+    # event and append a visible marker so the lawyer knows to ask a
+    # follow-up rather than assume the response is complete.
+    _finish_reason = ""
+    try:
+        _md = getattr(response, "response_metadata", None) or {}
+        _finish_reason = str(
+            _md.get("finish_reason")
+            or _md.get("stop_reason")
+            or ""
+        ).upper()
+    except Exception:  # noqa: BLE001 — defensive, provider metadata is best-effort
+        _finish_reason = ""
+    _output_truncated = _finish_reason in ("MAX_TOKENS", "LENGTH")
+
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Document", "qa_chromadb", response, model=picked_model)
 
-    return response.text, tokens
+    response_text = response.text or ""
+    if _output_truncated:
+        log.warning(
+            "Document agent output truncated — hit max_output_tokens ceiling",
+            model=picked_model,
+            max_output_tokens=_current_max_out,
+            response_chars=len(response_text),
+            finish_reason=_finish_reason,
+        )
+        response_text = response_text.rstrip() + (
+            "\n\n---\n\n"
+            "**⚠️ Response truncated — the extraction reached the model's "
+            "output-length ceiling before finishing the document.**\n\n"
+            "To see the rest, either:\n"
+            "- Ask a follow-up naming a specific later section "
+            "(e.g. \"continue from page 15\", \"show the Prayer clauses\", "
+            "\"give me the Verification block\"), OR\n"
+            "- Narrow the request (e.g. \"summarise pages 15-29 only\", "
+            "\"just the party names and dates\")."
+        )
+
+    return response_text, tokens
 
 
 # --- Agent Node ---

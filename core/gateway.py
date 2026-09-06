@@ -134,10 +134,60 @@ _APP_START_TIME = time.time()
 _pg_pool = None  # kept for graceful shutdown
 
 
+def _clear_caches_on_startup() -> None:
+    """Wipe chroma_store/ (OCR cache + all collection dirs) on every startup.
+
+    Rationale (2026-09-06 policy):
+
+      * OCR cache — file-hash-keyed OCR text. Earlier failed / partial
+        OCR runs (e.g. Gemini 2.5-flash 504s) can persist incomplete text
+        that every re-upload of the same PDF then reuses. Wiping forces
+        a fresh OCR pass after every restart.
+      * ChromaDB collection dirs — per-thread PDF embeddings. Wiping
+        means users LOSE access to files uploaded in previous turns
+        after any restart / deploy. Trade-off: deterministic clean
+        state on every deploy vs multi-turn attachment persistence.
+      * In-memory response_cache — naturally empty on process boot; no
+        action needed.
+
+    Opt out with `SKIP_CACHE_CLEAR_ON_STARTUP=1` when persistent
+    multi-turn state is desired (e.g. prod with rare restarts).
+
+    Race safety: under gunicorn preload_app=True, this fires per-worker.
+    All workers race to wipe/recreate the same dir; rmtree(ignore_errors)
+    + mkdir(exist_ok=True) tolerates the race. End state is always an
+    empty chroma_store/. Chroma client is lazy-initialized after this
+    (`get_chroma_client` on first request), so no in-flight file handles.
+    """
+    if os.environ.get("SKIP_CACHE_CLEAR_ON_STARTUP", "").strip().lower() in ("1", "true", "yes"):
+        log.info("Startup: cache clear SKIPPED (SKIP_CACHE_CLEAR_ON_STARTUP set)")
+        return
+    from pathlib import Path
+    root = Path(CHROMA_STORE_ROOT)
+    if not root.exists():
+        log.info("Startup: chroma_store not present, nothing to clear",
+                 path=str(root))
+        return
+    try:
+        subdirs = sum(1 for c in root.iterdir() if c.is_dir())
+        files = sum(1 for c in root.iterdir() if c.is_file())
+    except Exception:
+        subdirs = files = -1
+    try:
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True, exist_ok=True)
+        log.info("Startup: chroma_store wiped",
+                 subdirs_removed=subdirs, files_removed=files,
+                 path=str(root))
+    except Exception as e:
+        log.error("Startup: chroma_store wipe failed", error=str(e)[:200])
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _pg_pool
     log.info("Startup: initializing checkpointer and compiling agent graph")
+    _clear_caches_on_startup()
     checkpointer, _pg_pool = await create_checkpointer()
     app.state.agent_graph = compile_graph(checkpointer=checkpointer)
     # Seed the in-flight gate gauges per worker (multiproc-safe — each

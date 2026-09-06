@@ -1570,14 +1570,21 @@ async def _pick_relevant_chunk_indices(
     section: "_Section",
     query: str,
     preview_chars_per_chunk: int = 300,
-) -> list[int]:
+) -> list[int] | None:
     """Ask Gemini Flash Lite which chunks the section-writer will need.
 
-    Returns a list of valid indices into `user_facts_chunks` (0-based, in
-    the router's picked order, deduplicated by the caller). On any failure
-    or empty selection, returns [] — the caller then falls back to sending
-    the full raw source unchanged, preserving the current pipeline's
-    "raw source into every pair-call" behaviour.
+    Returns:
+      * `list[int]` — router SUCCEEDED. May be empty when the model
+        genuinely thinks the section needs no source-doc content
+        (typical for Verification / signature / cause-title sections
+        that generate cleanly from the system prompt + reference draft
+        alone).
+      * `None` — router FAILED (timeout, provider error, malformed
+        output). The caller must distinguish this from a legitimate
+        empty pick so it can honour the CLAUDE.md drafting invariant #6
+        and fall back to raw source, rather than sending empty
+        user_facts (which caused the writer to copy the reference
+        template's cause title verbatim on 2026-09-06).
     """
     if not user_facts_chunks:
         return []
@@ -1644,7 +1651,12 @@ async def _pick_relevant_chunk_indices(
             section=section.heading[:40],
             error=short_err(e),
         )
-        return []
+        # Return None (not []) so the caller can distinguish router
+        # FAILURE from legitimate empty picks. Returning [] here was
+        # the root cause of the 2026-09-06 canonical-name-substitution
+        # regression (caller sent empty user_facts, writer copied the
+        # reference template's cause title verbatim).
+        return None
 
 
 def _reference_excerpt(
@@ -2116,7 +2128,10 @@ async def _generate_section_pair(
 
     llm = get_gemini_pro(
         temperature=0.0,
-        max_output_tokens=12000,
+        max_output_tokens=20000,  # was 12000; bumped 2026-09-06 to give section
+                                  # pairs headroom for court-standard volume when
+                                  # the planner's summary asks for 8-15 pages
+                                  # per section. 20K tokens ~= 80K chars.
         thinking_budget=2048,
     )
 
@@ -2526,13 +2541,22 @@ async def _generate_sectionwise(
                 return_exceptions=True,
             )
             per_section_picks = []
+            any_router_failure = False
             for sec, picks in zip(pair, per_section_picks_raw):
                 if isinstance(picks, BaseException):
                     log.warning(
-                        "Chunk router raised for section; using raw source for this section",
+                        "Chunk router raised for section; treating as router "
+                        "failure (raw-source fallback for the pair)",
                         section=sec.heading[:40],
                         error=short_err(picks),
                     )
+                    any_router_failure = True
+                    per_section_picks.append([])
+                elif picks is None:
+                    # `_pick_relevant_chunk_indices` returns None (not [])
+                    # to signal a real failure (timeout, provider error).
+                    # An empty list means "picked nothing legitimately".
+                    any_router_failure = True
                     per_section_picks.append([])
                 else:
                     per_section_picks.append(picks)
@@ -2550,17 +2574,35 @@ async def _generate_sectionwise(
                         100 * (1 - len(pair_user_facts) / max(len(user_facts), 1)), 1,
                     ),
                 )
+            elif any_router_failure:
+                # 2026-09-06: router TIMED OUT or ERRORED (not the same as
+                # "router intentionally picked 0"). Per the CLAUDE.md
+                # drafting invariant #6 ("Whenever the router fails,
+                # returns empty, or the blob has <4 chunks, the pair
+                # falls back to the raw source"), fall back to raw
+                # source here rather than sending empty user_facts.
+                # Sending empty on a failure caused the writer to
+                # copy the reference-template's cause title verbatim
+                # (canonical-name substitution) because it had no
+                # source facts to work from.
+                pair_user_facts = user_facts
+                log.info(
+                    "Per-section chunking: router failed for at least one "
+                    "section in this pair — falling back to raw source",
+                    pair_start=position_start,
+                    section_headings=[s.heading[:60] for s in pair],
+                    raw_chars=len(pair_user_facts),
+                )
             else:
-                # 2026-09-02: router picked 0 chunks -> this section
-                # legitimately doesn't need source-document content
+                # 2026-09-02: router INTENTIONALLY picked 0 chunks -> this
+                # section legitimately doesn't need source-document content
                 # (typical for Verification / signature / cause-title
-                # sections). Send EMPTY user_facts instead of falling
-                # back to raw source. The old raw-fallback overflowed
-                # the 1M-token ceiling on very large uploads and caused
-                # legitimate 0-pick sections to fail with a
-                # context_length error. Respecting the router's decision
-                # here means these sections generate cleanly from the
-                # system prompt + reference draft + prior_text alone.
+                # sections that generate cleanly from the system prompt +
+                # reference draft + prior_text alone). Send EMPTY
+                # user_facts instead of raw-source fallback; the raw
+                # fallback used to overflow the 1M-token ceiling on very
+                # large uploads and caused legitimate 0-pick sections to
+                # fail with a context_length error.
                 pair_user_facts = ""
                 log.info(
                     "Per-section chunking: no chunks picked — sending empty "

@@ -2136,12 +2136,22 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
     - Do NOT add a separator line ("---") or any transition text ("Moving on to...") between them.
     - Each section starts with its own `## ` heading line.
 
-11. HONOUR THE `## USER DIRECTIVES` BLOCK APPENDED BELOW.
-    - When it carries `USER DEPTH: comprehensive coverage ...`, produce SUBSTANTIVE section bodies — for a Grounds section, emit as many grounds as this pair's fair share of a 15+ ground total (e.g. if this pair is Grounds + Prayer in an 8-section draft, this pair carries ~15 grounds in the Grounds half); for a Facts section, walk the source paragraph-by-paragraph chronologically; for a Prayer, enumerate multiple sub-lettered reliefs (main + interim + alternative + costs + omnibus); for a bail-type draft add character/conduct paragraphs and custodial-interrogation submissions. Weave 2-4 landmark Supreme Court precedents inline into grounds where doctrinally on point. Each ground is 3-5 sentences of substantive argument, not a one-line assertion. A skeleton section when the user asked for detail is a Rule-11 violation the critic will catch.
-    - When it carries `USER DEPTH: keep the response under 200 words`, keep this pair's output tight — do NOT expand.
-    - When no depth directive is present, use standard length.
+11. READ EACH SECTION'S `summary` FIELD AND HONOUR ITS VOLUME LANGUAGE.
+    The planner writes a `summary` for every section in your assigned pair. When that summary contains explicit volume language, that language is a NON-NEGOTIABLE TARGET for the section, not a suggestion — the planner has already calibrated it to the matter and the user's expectations.
+    - Summary contains "expansive paragraph-by-paragraph narrative walking the attached record" → for a Facts / Reply-on-Merits / Para-wise reply section, walk the source paragraph-by-paragraph. If the source has 60 paragraphs, your section responds to Para 1 through Para 60 in order, each response its own numbered paragraph. Do NOT compress; do NOT jump ahead.
+    - Summary contains "court-standard N-M pages" or names an explicit page range → treat that as the section's floor. Court-standard pages in this pipeline's rendering ≈ 1500 chars; produce enough substantive content to hit the lower bound of the range.
+    - Summary says "each objection developed as its own numbered paragraph with the legal basis stated; not a bullet list" (Preliminary Objections) → each objection is its own numbered paragraph with 3-6 sentences and a statutory/procedural basis.
+    - Summary says "detailed legal grounds with statutory citations and supporting case law where authorities exist" (Grounds) → emit substantive grounds; each ground is 3-6 sentences with statutory anchor inline and 1-2 case-law citations where authorities exist in RELEVANT LEGAL CONTEXT.
+    - Summary is short and structural (e.g. "cause title block", "verification and signature") → keep the section naturally compact.
 
-12. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
+12. `## USER DIRECTIVES` block (appended below) STACKS ON TOP OF the summary's volume ask, it does not replace it:
+    - `USER DEPTH: comprehensive coverage` → EXPAND further beyond the summary's floor. Weave 2-4 landmark Supreme Court precedents inline into grounds where doctrinally on point. Character / conduct / custodial-interrogation submissions for bail-type drafts. Interim / alternative / costs / omnibus sub-clauses in the prayer.
+    - `USER DEPTH: keep the response under 200 words` OR any explicit-short directive → the user's cap wins over the summary's floor. Keep this pair tight.
+    - No explicit depth directive present → honour the summary's volume language as-is.
+
+    A skeleton section when the summary asks for court-standard volume is a Rule-11 violation the critic will catch.
+
+13. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
     When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do not provide (deponent's exact address, exact filing date, case number of a related HC proceeding, advocate's enrolment number, court fee amount, etc.), emit an unambiguous placeholder counsel can grep for and fill:
 
         `[TO_FILL: description of what counsel needs to provide]`
@@ -2154,12 +2164,12 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 
     DO NOT hallucinate a plausible-sounding value. DO NOT quietly skip the sentence. DO NOT use different placeholder syntax (`___`, `[XXX]`, `<blank>`, `TBD`) — the pipeline greps for `[TO_FILL:` so only that form is guaranteed to be flagged for counsel review. Today's date and the drafting place are legitimate defaults if the source is silent — that is not hallucination.
 
-13. HONOUR THE `## NICHE OVERLAY` BLOCK APPENDED BELOW.
+14. HONOUR THE `## NICHE OVERLAY` BLOCK APPENDED BELOW.
     A niche-specific overlay is inserted after this base prompt when the document type is one of the ~20 supported filing niches (arbitration rejoinder, plaint, written statement, bail application, writ under Article 226, notice under Section 138 NI Act, and others). The overlay names the STRUCTURAL SKELETON for that niche, the STATUTORY ANCHORS that MUST appear, the CONVENTIONAL PRAYER form, and the VERIFICATION form specific to that niche.
 
-    When the overlay names a required element for a section that falls within your assigned pair (e.g. "PRAYER must include a sub-clause for tribunal fees under Section 31A A&C Act"), include it. When the overlay names a required statutory anchor for a ground / submission in your pair, cite it correctly. The overlay does not override Rules 1-12 — if it conflicts (it should not), the Rule wins.
+    When the overlay names a required element for a section that falls within your assigned pair (e.g. "PRAYER must include a sub-clause for tribunal fees under Section 31A A&C Act"), include it. When the overlay names a required statutory anchor for a ground / submission in your pair, cite it correctly. The overlay does not override Rules 1-13 — if it conflicts (it should not), the Rule wins.
 
-14. OUTPUT ONLY THE SECTION BODIES — no preamble, no postscript, no meta-commentary, no markdown fences. The orchestrator concatenates your output to DOCUMENT SO FAR verbatim.
+15. OUTPUT ONLY THE SECTION BODIES — no preamble, no postscript, no meta-commentary, no markdown fences. The orchestrator concatenates your output to DOCUMENT SO FAR verbatim.
 """
 
 # 4A/4B parity for the section-wise path. The single-pass DRAFTING_SYSTEM_PROMPT

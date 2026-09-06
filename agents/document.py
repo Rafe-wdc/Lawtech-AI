@@ -205,15 +205,26 @@ computer-error jargon in every marker:
   - (a) partial (one or two words unclear) → translate the readable
     portion; write `[unclear]` inline in place of each gap. Do NOT
     guess the gap word.
-  - (a) mostly NO but the CLAUSE'S TOPIC is identifiable → do not
-    invent an English sentence. Use this format:
-      "### Clause 7 (exact wording unclear on scan)
-       This clause appears to concern <one-line topic identification>;
-       the precise wording is not readable enough to translate
-       reliably."
-  - Cannot even identify the topic →
-      "### Clause 2 (illegible)
-       This clause is too degraded on the scan to translate reliably."
+  - (a) mostly NO but the CLAUSE'S TOPIC is identifiable →
+      HARD CAP: the topic hint must be ≤5 general-purpose words
+      (e.g. "concerns residence arrangements", "concerns dispute
+      settlement", "concerns dowry return"). If your candidate hint
+      would need more than 5 words, or would list specific nouns
+      (khasra, gunny bag, section number, party name, address,
+      transport, etc.) that you're stitching together from partially-
+      visible fragments, DOWNGRADE to the "substantially illegible"
+      branch below. Specific-noun lists = reconstruction, not
+      transcription.
+      Format:
+        "### Clause 7 (exact wording unclear on scan)
+         This clause appears to concern <≤5-word general topic>;
+         the precise wording is not readable enough to translate
+         reliably."
+  - Cannot narrow the topic to ≤5 general words → SUBSTANTIALLY
+    ILLEGIBLE. Use the reviewer-approved template verbatim:
+      "### Clause 2 — Text substantially illegible
+       A few words/phrases are visible, but the complete legal
+       meaning cannot be established reliably from the scan."
 
 If your candidate English sentence sounds nonsensical when read aloud
 (e.g. "That my fraudulent place/column is established"; "the money my
@@ -313,9 +324,12 @@ sentences you invented to fill gaps.
   Run each handwritten sentence through the legibility gate.
 - Signature blocks: state that a signature is present; transcribe any
   legibly printed name beneath. NEVER invent a name for an illegible
-  signature. If the signature and the printed name appear to differ
-  (e.g. printed "Manpreet Singh" with signature reading "Manpreet
-  Kaur"), quote both and flag the discrepancy rather than picking one.
+  signature. Handwritten names (as opposed to typed / printed names)
+  must ALWAYS use the `appears to read: "Name" (uncertain)` prefix —
+  never a confident identification. If the signature and the printed
+  name appear to differ (e.g. printed "Manpreet Singh" with signature
+  reading "Manpreet Kaur"), quote both and flag the discrepancy rather
+  than picking one.
 - Seals / stamps: transcribe visible words; uncertain numbers or dates
   as `[unclear digit]` / `[unclear date]`.
 - Marginal / rotated / vertical text: note the position (e.g.

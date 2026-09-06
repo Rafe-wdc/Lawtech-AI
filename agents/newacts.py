@@ -1103,9 +1103,41 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 act_name=metadata.act_name,
             ))
 
+        # Guard: a new-code section cited in the answer must appear in the
+        # rows actually retrieved.
+        #
+        # Measured failure — "Section 309 IPC" was answered with "the
+        # corresponding provision ... is Section 224 BNS", which retains the
+        # offence of attempted suicide. BNS 224 is "Threat of injury to
+        # public servant"; BNS has no general counterpart to IPC 309 at all,
+        # and the narrow successor is BNS 226. The answer even explained,
+        # correctly, that the Mental Healthcare Act 2017 decriminalised
+        # attempted suicide — then asserted the new code retains it.
+        #
+        # Cause: `New Provision:` is blank on 227 of 1,297 old-code rows
+        # (17.5%) and the layout prompt mandated a "### New Provision:
+        # Section Y" heading. The prompt now has a "none recorded" branch;
+        # this is the deterministic backstop, because a prompt rule alone
+        # did not hold for the drafting doc-type flip either.
+        _answer = llm_response.text
+        try:
+            from core.statute_citation_check import annotate as _cite_annotate
+            # `docs_text` is the exact retrieved text the model was given,
+            # built at step 5 from the same hits. Judge the answer against
+            # what the model actually saw, not a second assembly of it that
+            # could drift out of step.
+            _answer, _cite_audit = _cite_annotate(_answer, docs_text)
+            if _cite_audit.get("ungrounded"):
+                log.warning("Newacts answer cited unretrieved new-code sections",
+                            ungrounded=_cite_audit["ungrounded"][:5],
+                            act=act_display)
+        except Exception as _cc_err:
+            log.warning("Statute citation check failed; answer unchanged",
+                        error=str(_cc_err)[:160])
+
         result = AgentResult(
             agent_name="Newacts",
-            content=llm_response.text,
+            content=_answer,
             sources=sources,
             tokens_consumed=tokens,
         )

@@ -50,7 +50,8 @@ from core.state import (
     IntegrationContextData, FileContextData,
 )
 from core.clients import (
-    get_es_client, get_gemini_pro,
+    get_es_client, get_gemini_flash_lite, cacheable_system,
+    get_gemini_flash_full, get_gemini_flash_planning, get_drafting_llm,
     # Circuit-breaker helpers referenced from `try/except` blocks in
     # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
     # at module scope so the `except:` handler can still call
@@ -61,7 +62,7 @@ from core.clients import (
     is_gemini_flash_available, record_gemini_flash_failure,
     record_gemini_flash_success,
 )
-from core.settings import ES_INDICES
+from core.settings import GEMINI_MODELS, MODELS, ES_INDICES
 from core.language import (
     localize_prompt, detect_source_languages, language_name,
     is_off_target_language, output_script_ratio,
@@ -509,13 +510,9 @@ async def _translate_query_for_es_match(
     if not user_language or user_language == "en":
         return ""
     try:
-        from langchain.chat_models import init_chat_model
         from core.language import language_name
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        )
+        llm = get_gemini_flash_lite(temperature=0.0)
         source_lang = language_name(user_language)
         prompt = (
             f"Translate the following legal-drafting query from {source_lang} "
@@ -577,13 +574,9 @@ async def _pick_reference_source(
     if not file_paths:
         return None
     try:
-        from langchain.chat_models import init_chat_model
         from config.prompts import DRAFTING_PICKER_PROMPT
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        ).with_structured_output(_PickerChoice, include_raw=True)
+        llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_PickerChoice, include_raw=True)
 
         candidates_block = "\n".join(f"- {p}" for p in file_paths)
         prompt = ChatPromptTemplate.from_template(DRAFTING_PICKER_PROMPT)
@@ -1335,8 +1328,7 @@ async def _generate_single_pass(
     # not a creative one — zero temperature forces strict instruction
     # following; the larger thinking budget gives the model headroom to
     # cross-reference each emitted entity back to the CASE FACTS block.
-    llm = get_gemini_pro(
-        temperature=0.0,
+    llm = get_drafting_llm(
         max_output_tokens=24000,
         thinking_budget=4096,
     )
@@ -1359,7 +1351,7 @@ async def _generate_single_pass(
         )
         return await asyncio.to_thread(
             llm.invoke,
-            [SystemMessage(content=system_prompt),
+            [SystemMessage(content=cacheable_system(system_prompt)),
              HumanMessage(content=final_user_block)],
         )
 
@@ -1589,7 +1581,6 @@ async def _pick_relevant_chunk_indices(
     if not user_facts_chunks:
         return []
     try:
-        from langchain.chat_models import init_chat_model
         from config.prompts import DRAFTING_CHUNK_ROUTER_PROMPT
 
         preview_lines: list[str] = []
@@ -1600,10 +1591,7 @@ async def _pick_relevant_chunk_indices(
             preview_lines.append(f"[{i}] {preview}")
         catalog = "\n".join(preview_lines)
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        ).with_structured_output(_SelectedChunks, include_raw=True)
+        llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_SelectedChunks, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_CHUNK_ROUTER_PROMPT)
         chain = prompt | llm
@@ -1779,7 +1767,6 @@ async def _judge_fanout(
     single-pass on any error so traffic never breaks.
     """
     try:
-        from langchain.chat_models import init_chat_model
         from core.language import language_name
         from config.prompts import DRAFTING_FANOUT_JUDGE_PROMPT
 
@@ -1812,7 +1799,7 @@ async def _judge_fanout(
                 "Apply the default fan-out rules above."
             )
 
-        # Planner model: Gemini 2.5 Flash (full) with a thinking budget,
+        # Planner model: Flash (full) tier with a thinking budget,
         # upgraded from flash-lite.
         #
         # This is a deliberate TRADE, measured on hi/gu/ta/te + en, 3 runs
@@ -1836,11 +1823,13 @@ async def _judge_fanout(
         # means a shorter document. If drafts regress in length, revisit
         # this before touching the writer — the writer honours whatever plan
         # it is given (instrumentation shows planned == emitted).
-        from core.clients import GEMINI_FLASH_MODEL_ID
-        llm = init_chat_model(
-            f"google_genai:{GEMINI_FLASH_MODEL_ID}",
-            temperature=0.0,
-            thinking_budget=2048,
+        # Routed through get_gemini_flash_planning (Gemini-only, NOT the
+        # generation tier) because this is a structured-output call:
+        # with_structured_output() has different semantics on Anthropic vs
+        # Gemini, and the fan-out judge is an internal planning step, not a
+        # user-facing answer.
+        llm = get_gemini_flash_planning(
+            temperature=0.0, thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)
@@ -2126,19 +2115,15 @@ async def _generate_section_pair(
         "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
     )
 
-    llm = get_gemini_pro(
-        temperature=0.0,
-        max_output_tokens=20000,  # was 12000; bumped 2026-09-06 to give section
-                                  # pairs headroom for court-standard volume when
-                                  # the planner's summary asks for 8-15 pages
-                                  # per section. 20K tokens ~= 80K chars.
+    llm = get_drafting_llm(
+        max_output_tokens=20000,
         thinking_budget=2048,
     )
 
     # Bound to the request deadline, then fail over to OpenAI.
     #
     # This call used to be an unbounded `asyncio.to_thread(llm.invoke, ...)`.
-    # `get_gemini_pro` is configured timeout=180, max_retries=2, so the SDK
+    # `get_drafting_llm` is configured timeout=180, max_retries=1, so the SDK
     # could spend ~540 s+ inside a single call against a 300 s request
     # budget. Observed in production logs: one section-pair call ran for
     # 592 s, the connection dropped, the retry was then skipped as "budget
@@ -2175,7 +2160,7 @@ async def _generate_section_pair(
             user_block + "\n\n" + extra_instruction if extra_instruction
             else user_block
         )
-        return [SystemMessage(content=system_prompt),
+        return [SystemMessage(content=cacheable_system(system_prompt)),
                 HumanMessage(content=final_user_block)]
 
     async def _invoke_once(extra_instruction: str = "") -> object:
@@ -2206,9 +2191,10 @@ async def _generate_section_pair(
             # never the right lever for that class of overflow.
             from core.clients import get_gemini_flash_full
             log.warning(
-                "Gemini Pro section-pair failed — failing over to Gemini Flash",
+                "Section-pair generation failed — failing over to the Flash tier",
                 error=short_err(primary_err),
-                provider_from="gemini-2.5-pro", provider_to="gemini-2.5-flash",
+                provider_from=MODELS["drafting"],
+                provider_to=GEMINI_MODELS["flash"],
             )
             fb = get_gemini_flash_full(
                 temperature=0.0,
@@ -2221,7 +2207,7 @@ async def _generate_section_pair(
             )
             log.info(
                 "Gemini Flash fallback produced the section pair",
-                provider="gemini-2.5-flash",
+                provider=GEMINI_MODELS["flash"],
             )
             return resp
 
@@ -3009,8 +2995,7 @@ async def _generate_draft_modification(
     )
     system_prompt = localize_prompt(system_prompt, user_language, user_intent)
 
-    llm = get_gemini_pro(
-        temperature=0.0,
+    llm = get_drafting_llm(
         max_output_tokens=24000,
         thinking_budget=4096,
     )
@@ -3025,7 +3010,7 @@ async def _generate_draft_modification(
         with log_time(log, "Draft modification (fast path)"):
             response = await asyncio.to_thread(
                 llm.invoke,
-                [SystemMessage(content=system_prompt),
+                [SystemMessage(content=cacheable_system(system_prompt)),
                  HumanMessage(content="Produce the complete modified draft now.")],
             )
     except Exception as e:
@@ -3863,6 +3848,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     draft,
                     user_query=query,
                     intent=intent_obj,
+                    critic_llm=get_drafting_llm(max_output_tokens=8192),
+                    refiner_llm=get_drafting_llm(max_output_tokens=24000),
                     source_languages=source_langs,
                     source_registry=_registry,
                     # A finished draft has no business getting materially

@@ -1801,9 +1801,14 @@ async def _refine(
             )
         _record_tokens("SelfRefine", "refine", result)
         record_gemini_flash_success()
-        text = getattr(result, "content", None)
-        if text is None:
-            text = str(result)
+        text = getattr(result, "text", "") or getattr(result, "content", "")
+        if isinstance(text, list):
+            text = "".join(
+                b.get("text", "") if isinstance(b, dict) else getattr(b, "text", str(b))
+                for b in text
+            )
+        elif not isinstance(text, str):
+            text = str(text)
 
         # A rewrite that ran out of output budget is a TRUNCATED document, not
         # a refinement. The refiner re-emits the whole response, so hitting the

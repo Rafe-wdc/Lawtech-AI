@@ -43,22 +43,137 @@ TIMEOUT_ES_PARALLEL_SEC: float = 22.0      # Parallel ES search (per-agent)
 TIMEOUT_CHROMADB_SEC: float = 90.0         # ChromaDB retrieval + PDF Q&A
 TIMEOUT_NEARBY_SECTIONS_SEC: float = 5.0   # Newacts nearby-section lookup
 
-# --- Model IDs ---
-MODELS = {
-    "orchestrator": "gpt-4o",
-    "task_classifier": "gpt-4o",
-    "drafting": "gemini-2.5-flash",
-    "judgment_metadata": "gpt-4o",
-    "newacts_metadata": "gpt-4o",
-    "draft_selector": "gpt-4o-mini",
-    "legislation_match": "gpt-4o-mini",
-    "scenario_web_grounded": "gemini-2.5-flash",
-    "legal_concepts": "gemini-2.5-flash-lite",
-    "query_rewrite": "gemini-2.5-flash-lite",
-    "guardrail_injection": "gemini-2.5-flash-lite",
-    "pdf_chat": "gemini-2.5-pro",
-    "pdf_vision_ocr": "gemini-2.5-flash-lite",
+# --- Gemini model tiers (2026-09-04 upgrade: 2.5 series -> 3.x) ---
+#
+# Single source of truth for which Gemini model backs each tier. Every
+# factory in core/clients.py reads these, so a model swap or rollback is an
+# env change, not a code change. Previously each factory hardcoded its own
+# model string and the MODELS dict below had drifted out of sync with them.
+#
+# Tier -> model rationale (measured 2026-09-04, see MODEL_UPGRADE_PLAN.md §3):
+#   flash_lite  gemini-3.5-flash-lite  routing/classification. 14/15 vs 12/15
+#                                      for 2.5-flash-lite at identical latency.
+#   flash       gemini-3.8-flash       intent extraction, fan-out planner,
+#                                      and other flash-tier tasks that are NOT
+#                                      user-facing answer generation. Note
+#                                      3.8 is both NEWER and CHEAPER than
+#                                      3.5-flash ($0.75/$3.75 vs $1.50/$9.00).
+#   generation  anthropic:claude-sonnet-5  User-facing response generation
+#                                      AND drafting. Claude Sonnet 5 at
+#                                      $2/$10 per 1M tokens. Override with
+#                                      GENERATION_MODEL env var. Falls back
+#                                      to flash tier if unset.
+#
+# NO PRO TIER (removed 2026-09-07). Every stage that used it has been measured
+# onto Flash and none regressed:
+#   drafting   CLAUDE.md invariant #2 — 2.5 Pro broke the "USE THE EXACT
+#              HEADING TEXT GIVEN" rule MORE often than Flash Lite
+#   OCR        equal accuracy, faster (5.4s vs 8.1s), production incident data
+#   pdf_chat   73k-char doc: Flash 14.2s/$0.0666 vs Pro 16.3s/$0.0693, same
+#              needle found and same hallucination refused
+# The published numbers agree: gemini-3.8-flash beats gemini-3.1-pro-preview on
+# aggregate (51.0 vs 43.4) and reasoning (46.9 vs 45.1), costs 3.3-4x less, and
+# its training data is 14 months newer (Mar 2026 vs Jan 2025) — which matters
+# for Indian legal work. There is no GA gemini-3.x-pro to pin to; the old
+# `gemini-pro-latest` alias resolved to a PREVIEW model. If a Pro tier is ever
+# needed again, add it back with an eval, not on the assumption that Pro wins.
+#   vision      gemini-3.6-flash       Vision OCR ONLY. Pinned separately
+#                                      from the flash tier because the model
+#                                      choice here rests on production
+#                                      evidence, not benchmarks: on the
+#                                      2026-09-06 WhatsApp-screenshot
+#                                      incident gemini-2.5-flash returned 504
+#                                      DEADLINE_EXCEEDED on 2 of 3 pages,
+#                                      while 3.6-flash OCR'd all 3 in 36s vs
+#                                      273s. Pro was measured at equal
+#                                      accuracy on clean documents but has no
+#                                      production track record here and costs
+#                                      ~5x. Note gemini-3.8-flash is the same
+#                                      price as 3.6 and benchmarks higher
+#                                      (Artificial Analysis 59 vs 50), but
+#                                      that has NOT been validated on scanned
+#                                      Indic/handwritten legal pages — A/B it
+#                                      via GEMINI_VISION_MODEL before moving.
+GEMINI_MODELS = {
+    "flash_lite": os.getenv("GEMINI_FLASH_LITE_MODEL", "gemini-3.5-flash-lite"),
+    "flash":      os.getenv("GEMINI_FLASH_MODEL",      "gemini-3.8-flash"),
+    "vision":     os.getenv("GEMINI_VISION_MODEL",     "gemini-3.6-flash"),
+    # Generation tier — user-facing answer synthesis and drafting.
+    # Defaults to Claude Sonnet 5 (provider-qualified).  Override with
+    # GENERATION_MODEL env var, e.g. GENERATION_MODEL=gemini-3.8-flash to
+    # fall back to Gemini Flash.
+    "generation": os.getenv("GENERATION_MODEL",        "anthropic:claude-sonnet-5"),
 }
+
+# Default thinking level for Gemini 3.x when a caller does not specify one.
+# Valid: minimal | low | medium | high. NEVER use "minimal" — measured
+# regression (3/5 vs 5/5 for "low" on drafting format detection). Gemini 3's
+# own default is "high", which would be a large latency/cost jump over the
+# 2.5-era `thinking_budget=0` this codebase used, so we pin "low".
+GEMINI_THINKING_DEFAULT = os.getenv("GEMINI_THINKING_LEVEL", "low")
+
+# --- Model IDs (per-stage; resolved from the tiers above) ---
+# OpenAI entries are retained for the stages that may move to GPT later.
+# NOTE: nothing in the runtime currently calls an OpenAI model — get_gpt4o /
+# get_gpt4o_mini in core/clients.py have zero callers.
+MODELS = {
+    "orchestrator": GEMINI_MODELS["flash_lite"],
+    "task_classifier": GEMINI_MODELS["flash_lite"],
+    # Generation tier — Claude Sonnet 5 for user-facing answer generation.
+    # Override with GENERATION_MODEL env var.
+    "drafting": GEMINI_MODELS["generation"],
+    "judgment_metadata": GEMINI_MODELS["flash_lite"],
+    "newacts_metadata": GEMINI_MODELS["flash_lite"],
+    "draft_selector": GEMINI_MODELS["flash_lite"],
+    "legislation_match": GEMINI_MODELS["flash_lite"],
+    # GOOGLE-CLIENT-ONLY STAGES — these MUST stay on a Gemini id.
+    #
+    # Both values are passed straight to google.genai's
+    # `client.models.generate_content(model=...)` for Google Search grounding
+    # (agents/scenario.py, core/agent_fallback.py), NOT through LangChain. A
+    # non-Gemini id here is a hard 404 from Google with no fallback:
+    #   404 models/anthropic:claude-sonnet-5 is not found for API version
+    #   v1beta, or is not supported for generateContent
+    # That breaks the Scenario agent AND `web_search_fallback`, which is
+    # tier-3 resilience for EVERY domain agent (see CLAUDE.md "Agent
+    # Resilience"). Legal_Concepts is web-grounded too
+    # (agents/constitution_maxim.py) and routes through the same path.
+    # Enforced below by _assert_google_model.
+    "scenario_web_grounded": GEMINI_MODELS["flash"],
+    "legal_concepts": GEMINI_MODELS["flash"],
+    "query_rewrite": GEMINI_MODELS["flash_lite"],
+    "guardrail_injection": GEMINI_MODELS["flash_lite"],
+    "pdf_chat": os.getenv("PDF_CHAT_MODEL", GEMINI_MODELS["flash"]),
+    "pdf_vision_ocr": GEMINI_MODELS["vision"],
+}
+
+
+# --- Guard: stages that bypass LangChain must carry a Gemini model id ---
+# These are dispatched via google.genai directly (Google Search grounding).
+# Catching a bad value at import beats a 404 in production traffic.
+_GOOGLE_CLIENT_ONLY_STAGES = ("scenario_web_grounded", "legal_concepts")
+
+
+def _assert_google_model(stage: str, model_id: str) -> None:
+    if ":" in model_id and not model_id.startswith("google_genai:"):
+        raise ValueError(
+            f"MODELS[{stage!r}] = {model_id!r} is not a Gemini model. This "
+            "stage is dispatched through google.genai directly for Google "
+            "Search grounding, so a non-Gemini id returns 404 from Google "
+            "with no fallback — breaking the Scenario agent and "
+            "web_search_fallback (tier-3 resilience for every domain agent). "
+            "Point it at a GEMINI_MODELS tier instead."
+        )
+
+
+for _stage in _GOOGLE_CLIENT_ONLY_STAGES:
+    _assert_google_model(_stage, MODELS[_stage])
+
+# The flash TIER is also dispatched directly through google.genai — by the
+# four scenario tools in tools/shared/scenario_tools.py, which moved onto it
+# when the Pro tier was removed. Same 404 exposure, same guard.
+_assert_google_model("GEMINI_MODELS['flash']", GEMINI_MODELS["flash"])
+_assert_google_model("GEMINI_MODELS['vision']", GEMINI_MODELS["vision"])
 
 # --- Elasticsearch / OpenSearch ---
 # ES_URL is the preferred env var; fall back to ELASTICSEARCH_URL for backward compat.

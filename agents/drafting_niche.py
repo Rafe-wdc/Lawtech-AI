@@ -169,10 +169,13 @@ async def pick_drafting_niche(
         return None
 
     try:
-        from langchain.chat_models import init_chat_model
+        from core.clients import get_gemini_flash_lite
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
+        # Routed through the tier factory (2026-09-07). This was the last
+        # hardcoded gemini-2.5 model left on a live path — it runs once per
+        # drafting request (step `pick_niche`), so it silently kept the
+        # retired 2.5 Flash-Lite in production after the 3.x migration.
+        llm = get_gemini_flash_lite(
             temperature=0.0,
         ).with_structured_output(_NichePick, include_raw=True)
 

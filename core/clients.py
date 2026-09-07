@@ -570,17 +570,68 @@ def get_drafting_llm(max_output_tokens: int = 65535,
     """
     model_id = GEMINI_MODELS["generation"]
     provider, _bare = _split_provider(model_id)
-    primary = init_chat_model(
-        model_id if ":" in model_id else f"google_genai:{model_id}",
-        **_output_tokens_kwarg(provider, max_output_tokens),
-        max_retries=1,
-        timeout=180,
-        **_provider_kwargs(provider, 0.4),
-        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
-    )
-    if provider == "anthropic" and not (
-        os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
-    ):
+    def _gemini_generation_llm():
+        """The Gemini flash tier, used whenever the configured tier can't run."""
+        fb = GEMINI_MODELS["flash"]
+        return init_chat_model(
+            fb if ":" in fb else f"google_genai:{fb}",
+            max_output_tokens=min(max_output_tokens, 65535),
+            max_retries=2,
+            timeout=180,
+            **_provider_kwargs("google_genai", 0.4),
+            **_thinking_kwargs(fb, thinking_budget, thinking_level),
+        )
+
+    try:
+        primary = init_chat_model(
+            model_id if ":" in model_id else f"google_genai:{model_id}",
+            **_output_tokens_kwarg(provider, max_output_tokens),
+            max_retries=1,
+            timeout=180,
+            **_provider_kwargs(provider, 0.4),
+            **_thinking_kwargs(model_id, thinking_budget, thinking_level),
+        )
+    except Exception as _e:
+        # CONSTRUCTION failure — a missing provider package, a malformed model
+        # id, an unsupported kwarg. `.with_fallbacks()` cannot rescue any of
+        # these because they happen while BUILDING the primary, so without this
+        # every drafting request raises. Measured 2026-09-07: a server running
+        # from a virtualenv without langchain-anthropic failed every draft with
+        # ImportError; the orchestrator fell through to web_search_fallback and
+        # returned a generic web answer, and section-wise drafts came back as a
+        # 297-char stub after all 5 sections failed.
+        if provider == "google_genai":
+            raise
+        _log.error(
+            "Generation tier failed to initialise — falling back to the Gemini "
+            "flash tier. Output will NOT come from the configured model.",
+            configured=model_id, using=GEMINI_MODELS["flash"],
+            error=str(_e)[:200],
+        )
+        return _gemini_generation_llm()
+    def _anthropic_unavailable() -> str:
+        """Why Anthropic can't be used right now, or '' if it can.
+
+        Checks BOTH the credential and the package. The package check matters:
+        on 2026-09-07 a server running from a different virtualenv had the key
+        but not langchain-anthropic, and drafting died with
+        `ImportError: Initializing ChatAnthropic requires the langchain-anthropic
+        package`. `.with_fallbacks()` cannot rescue that — it is raised while
+        BUILDING the primary — so every draft failed, the orchestrator fell
+        through to web_search_fallback, and users received a generic web-sourced
+        answer instead of a draft. Section-wise drafts fared worse: all 5
+        sections failed and the agent returned a 297-char stub.
+        """
+        if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):
+            return "no ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN is set"
+        try:
+            import langchain_anthropic  # noqa: F401
+        except ImportError:
+            return "langchain-anthropic is not installed (pip install langchain-anthropic)"
+        return ""
+
+    _blocked = _anthropic_unavailable() if provider == "anthropic" else ""
+    if _blocked:
         # NO ANTHROPIC CREDENTIAL — degrade to Gemini at CONSTRUCTION time.
         #
         # `.with_fallbacks()` only rescues failures raised during invoke. A
@@ -595,11 +646,11 @@ def get_drafting_llm(max_output_tokens: int = 65535,
         # Any server whose .env predates the Claude generation tier lands here.
         # Loud, because a Gemini-served draft must never be mistaken for Claude.
         _log.warning(
-            "Generation tier is Anthropic but no ANTHROPIC_API_KEY / "
-            "ANTHROPIC_AUTH_TOKEN is set — using the Gemini flash tier instead. "
-            "Drafts will NOT be produced by the configured model. Set the key, "
-            "or set GENERATION_MODEL to a Gemini id to make this explicit.",
-            configured=model_id, using=GEMINI_MODELS["flash"],
+            "Generation tier is Anthropic but unusable — falling back to the "
+            "Gemini flash tier. Drafts will NOT be produced by the configured "
+            "model. Fix the cause below, or set GENERATION_MODEL to a Gemini id "
+            "to make the choice explicit.",
+            configured=model_id, using=GEMINI_MODELS["flash"], reason=_blocked,
         )
         fb_model = GEMINI_MODELS["flash"]
         return init_chat_model(

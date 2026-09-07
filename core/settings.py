@@ -124,7 +124,7 @@ MODELS = {
     "legal_concepts": GEMINI_MODELS["generation"],
     "query_rewrite": GEMINI_MODELS["flash_lite"],
     "guardrail_injection": GEMINI_MODELS["flash_lite"],
-    "pdf_chat": GEMINI_MODELS["pro"],
+    "pdf_chat": os.getenv("PDF_CHAT_MODEL", GEMINI_MODELS["flash"]),
     "pdf_vision_ocr": GEMINI_MODELS["vision"],
 }
 

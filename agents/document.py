@@ -8,7 +8,7 @@ Manages per-user ChromaDB collections for uploaded documents.
 2. Process → extract text, OCR scanned pages, chunk, embed, store
 3. Chat → retrieve from user's collection, generate answer
 
-Uses: Gemini 2.5 Pro (Q&A), Gemini 2.5 Flash (Vision OCR)
+Uses: Gemini 3.8 Flash (Q&A), Gemini 3.6 Flash (Vision OCR)
 Data Source: ChromaDB (per-user collections in chroma_store/)
 Embedding: all-MiniLM-L6-v2
 """
@@ -120,48 +120,33 @@ def _generate_from_docs(
     # enough — chunks from one PDF are uniform in language.
     source_langs = detect_source_languages(docs_text)
 
-    # Route by document size: small docs go to Flash (~4x cheaper per token,
-    # quality delta minimal for short-context Q&A); large docs stay on Pro
-    # for the deeper reasoning it brings to complex/dense legal text.
-    # 60_000 chars ≈ ~15K input tokens ≈ ~30 pages of typical legal PDF.
-    # Tune based on observed quality; log both signals to inform tuning.
+    # Document Q&A model selection:
+    # Both short and long documents now use gemini-3.8-flash (1M token native context
+    # window, sub-second TTFT, 15x cheaper than legacy Pro).
+    # For long documents (>=60,000 chars ≈ 30+ pages), we allocate a low thinking
+    # budget (1024) to maintain deep legal cross-referencing and tabular precision
+    # without latency or cost spikes.
     _FLASH_ROUTING_THRESHOLD_CHARS = 60_000
-    use_flash = len(docs_text) < _FLASH_ROUTING_THRESHOLD_CHARS
-    from core.settings import GEMINI_MODELS
-    picked_model = (GEMINI_MODELS["flash"] if use_flash
-                    else GEMINI_MODELS["pro"])
+    is_short_doc = len(docs_text) < _FLASH_ROUTING_THRESHOLD_CHARS
+    from core.settings import MODELS, GEMINI_MODELS
+    picked_model = MODELS.get("pdf_chat", GEMINI_MODELS["flash"])
     log.info(
         "PDF chat model routing",
         docs_chars=len(docs_text),
         threshold=_FLASH_ROUTING_THRESHOLD_CHARS,
         model=picked_model,
+        is_short_doc=is_short_doc,
     )
 
-    # Output-token cap. 2026-09-06 incident: extraction of a 29-page
-    # court filing truncated mid-paragraph on the old 8000 cap because
-    # comprehensive-summary / extract / translate requests routinely
-    # need 25-40 K chars of visible output (≈ 8-12 K output tokens
-    # once markdown structure overhead is included) — and gemini-3.6-flash
-    # burns additional output-budget-equivalent tokens on internal
-    # thinking. The old 8000 cap silently truncated with no downstream
-    # detection and no user-visible signal. Sizes below match the
-    # drafting agent's section-pair headroom (PR #40).
-    _MAX_OUT_FLASH = 24000
-    _MAX_OUT_PRO = 32000
+    _MAX_OUT = 32000
 
     with log_time(log, f"LLM generation ({picked_model})"):
-        if use_flash:
-            llm = get_gemini_flash_full(
-                temperature=0.3,
-                max_output_tokens=_MAX_OUT_FLASH,
-                thinking_budget=0,  # small-doc Q&A doesn't need thinking trace
-            )
-        else:
-            llm = get_gemini_pro(
-                temperature=0.3,
-                max_output_tokens=_MAX_OUT_PRO,
-                thinking_budget=1024,
-            )
+        llm = get_gemini_flash_full(
+            temperature=0.3,
+            max_output_tokens=_MAX_OUT,
+            thinking_budget=0 if is_short_doc else 1024,
+            thinking_level=None if is_short_doc else "low",
+        )
         system_prompt = localize_prompt(
             """You are Lawttorney — a legal-document assistant serving Indian
 lawyers, paralegals, and clients. One or more documents have been attached
@@ -435,7 +420,7 @@ the gap with general legal knowledge or invented details.""",
         prompt = ChatPromptTemplate.from_messages(prompt_messages)
         chain = prompt | llm
 
-        _current_max_out = _MAX_OUT_FLASH if use_flash else _MAX_OUT_PRO
+        _current_max_out = _MAX_OUT
         invoke_args = {
             "query": query,
             "docs": docs_text,

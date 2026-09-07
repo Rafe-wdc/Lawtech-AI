@@ -944,7 +944,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
     2026-07-22 upgraded model + prompt + added retry + quality gate to
     match the PDF path.
     """
-    from core.clients import get_gemini_pro
+    from core.clients import get_gemini_vision
     import base64
 
     img_hash = _file_hash(file_path)
@@ -969,7 +969,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
             ".bmp": "image/bmp",
         }.get(ext, "image/jpeg")
 
-        llm = get_gemini_pro(temperature=0.0)
+        llm = get_gemini_vision(temperature=0.0)
         content = [{
             "role": "user",
             "content": [
@@ -1068,13 +1068,13 @@ def _ocr_pdf_at_dpi(
     SSE channel — useful for 100+ page scanned PDFs where OCR alone takes
     1-3 minutes and the user would otherwise see dead silence.
     """
-    from core.clients import get_gemini_pro
+    from core.clients import get_gemini_vision
 
     with log_time(log, "PDF page rendering", pages=page_count, dpi=dpi):
         batches = _render_pdf_pages(file_path, page_count, dpi=dpi)
 
     total = len(batches)
-    llm = get_gemini_pro(temperature=0.0)
+    llm = get_gemini_vision(temperature=0.0)
     log.info("Starting parallel OCR",
              batches=total, pages=page_count, dpi=dpi,
              batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT,

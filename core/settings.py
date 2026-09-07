@@ -56,16 +56,34 @@ TIMEOUT_NEARBY_SECTIONS_SEC: float = 5.0   # Newacts nearby-section lookup
 #   flash       gemini-3.8-flash       generation + intent extraction. Note
 #                                      3.8 is both NEWER and CHEAPER than
 #                                      3.5-flash ($0.75/$3.75 vs $1.50/$9.00).
-#   pro         gemini-pro-latest      drafting, OCR, long-doc Q&A.
+#   pro         gemini-pro-latest      long-document Q&A (pdf_chat) only.
 #
 # `gemini-pro-latest` is a FLOATING alias — it follows Google's current Pro
 # model. There is no GA `gemini-3.x-pro` to pin to yet (only
 # `gemini-3.1-pro-preview`). Pin GEMINI_PRO_MODEL explicitly if alias drift
 # is unacceptable for your deployment.
+#   vision      gemini-3.6-flash       Vision OCR ONLY. Pinned separately
+#                                      from the flash tier because the model
+#                                      choice here rests on production
+#                                      evidence, not benchmarks: on the
+#                                      2026-09-06 WhatsApp-screenshot
+#                                      incident gemini-2.5-flash returned 504
+#                                      DEADLINE_EXCEEDED on 2 of 3 pages,
+#                                      while 3.6-flash OCR'd all 3 in 36s vs
+#                                      273s. Pro was measured at equal
+#                                      accuracy on clean documents but has no
+#                                      production track record here and costs
+#                                      ~5x. Note gemini-3.8-flash is the same
+#                                      price as 3.6 and benchmarks higher
+#                                      (Artificial Analysis 59 vs 50), but
+#                                      that has NOT been validated on scanned
+#                                      Indic/handwritten legal pages — A/B it
+#                                      via GEMINI_VISION_MODEL before moving.
 GEMINI_MODELS = {
     "flash_lite": os.getenv("GEMINI_FLASH_LITE_MODEL", "gemini-3.5-flash-lite"),
     "flash":      os.getenv("GEMINI_FLASH_MODEL",      "gemini-3.8-flash"),
     "pro":        os.getenv("GEMINI_PRO_MODEL",        "gemini-pro-latest"),
+    "vision":     os.getenv("GEMINI_VISION_MODEL",     "gemini-3.6-flash"),
 }
 
 # Default thinking level for Gemini 3.x when a caller does not specify one.
@@ -82,7 +100,15 @@ GEMINI_THINKING_DEFAULT = os.getenv("GEMINI_THINKING_LEVEL", "low")
 MODELS = {
     "orchestrator": GEMINI_MODELS["flash_lite"],
     "task_classifier": GEMINI_MODELS["flash_lite"],
-    "drafting": GEMINI_MODELS["pro"],
+    # Flash tier, NOT Pro. Drafting ran on gemini-2.5-flash before this
+    # upgrade, so Flash is the like-for-like move. Escalating to Pro was
+    # reverted 2026-09-07: CLAUDE.md drafting invariant #2 records that
+    # Gemini 2.5 Pro violated DRAFTING_SECTION_PAIR_PROMPT rule 2 ("USE THE
+    # EXACT HEADING TEXT GIVEN") at a HIGHER rate than Flash Lite, so "Pro is
+    # stronger" does not hold for this prompt. Pro also costs ~5x
+    # ($4.00/$18.00 vs $0.75/$3.75). Set GEMINI_PRO_MODEL-backed drafting
+    # deliberately, with an eval, rather than by tier assumption.
+    "drafting": GEMINI_MODELS["flash"],
     "judgment_metadata": GEMINI_MODELS["flash_lite"],
     "newacts_metadata": GEMINI_MODELS["flash_lite"],
     "draft_selector": GEMINI_MODELS["flash_lite"],
@@ -92,7 +118,7 @@ MODELS = {
     "query_rewrite": GEMINI_MODELS["flash_lite"],
     "guardrail_injection": GEMINI_MODELS["flash_lite"],
     "pdf_chat": GEMINI_MODELS["pro"],
-    "pdf_vision_ocr": GEMINI_MODELS["pro"],
+    "pdf_vision_ocr": GEMINI_MODELS["vision"],
 }
 
 # --- Elasticsearch / OpenSearch ---

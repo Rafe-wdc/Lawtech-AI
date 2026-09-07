@@ -435,24 +435,51 @@ def get_gemini_pro(temperature: float = 0.5,
 
 
 @lru_cache(maxsize=8)
+def get_gemini_vision(temperature: float = 0.0,
+                      max_output_tokens: int = 8192,
+                      thinking_budget: int | None = None,
+                      thinking_level: str | None = None):
+    """Vision OCR tier — scanned PDFs and image uploads.
+
+    Model comes from settings.GEMINI_MODELS["vision"] (default
+    `gemini-3.6-flash`), pinned SEPARATELY from the flash tier: this choice
+    rests on the 2026-09-06 production OCR incident, not on benchmarks, and
+    should not drift when the general flash tier is bumped. See the
+    GEMINI_MODELS comment in core/settings.py before changing it.
+    """
+    model_id = GEMINI_MODELS["vision"]
+    return init_chat_model(
+        f"google_genai:{model_id}",
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        max_retries=2,
+        timeout=180,
+        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
+    )
+
+
+@lru_cache(maxsize=8)
 def get_drafting_llm(max_output_tokens: int = 65535,
                      thinking_budget: int | None = None,
                      thinking_level: str | None = None):
     """Legal drafting — the highest-stakes output in the product.
 
-    Moved from the Flash tier to Pro on 2026-09-04. Drafting produces the
-    document the user actually files; it is the one stage where the stronger
-    model most clearly earns its cost. Model comes from
-    settings.GEMINI_MODELS["pro"].
+    Uses settings.GEMINI_MODELS["flash"]. A brief move to Pro (2026-09-04)
+    was reverted on 2026-09-07: CLAUDE.md drafting invariant #2 records
+    Gemini 2.5 Pro violating DRAFTING_SECTION_PAIR_PROMPT rule 2 ("USE THE
+    EXACT HEADING TEXT GIVEN") at a HIGHER rate than Flash Lite, so the
+    "Pro is stronger" assumption does not hold for this prompt. Pro also
+    costs ~5x. Move drafting to Pro only behind an eval that measures
+    heading adherence, not on tier assumption.
 
     Was `temperature=0.4` + `thinking_budget=0` on gemini-2.5-flash. Thinking
     is now "low" — Gemini 3.x cannot disable it, and format-following did not
     in fact benefit from having reasoning off.
 
-    To roll drafting back to the cheaper Flash tier without touching code,
-    set GEMINI_PRO_MODEL to the flash id, or call get_gemini_flash_full().
+    To move drafting onto Pro without touching code, set GEMINI_FLASH_MODEL
+    to a Pro id — but read the heading-adherence note above first.
     """
-    model_id = GEMINI_MODELS["pro"]
+    model_id = GEMINI_MODELS["flash"]
     return init_chat_model(
         f"google_genai:{model_id}",
         temperature=0.4,

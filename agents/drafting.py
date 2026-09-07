@@ -51,6 +51,7 @@ from core.state import (
 )
 from core.clients import (
     get_es_client, get_gemini_pro, get_gemini_flash_lite,
+    get_gemini_flash_full, get_gemini_flash_planning,
     # Circuit-breaker helpers referenced from `try/except` blocks in
     # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
     # at module scope so the `except:` handler can still call
@@ -1823,12 +1824,12 @@ async def _judge_fanout(
         # means a shorter document. If drafts regress in length, revisit
         # this before touching the writer — the writer honours whatever plan
         # it is given (instrumentation shows planned == emitted).
-        # Routed through get_gemini_flash_full (2026-09-07 merge) instead of
-        # a direct init_chat_model: the factory translates thinking_budget ->
-        # thinking_level per model generation. Passing thinking_budget raw
-        # works on 3.6/3.8 but 400s on 3.x Flash-Lite, so the direct call was
-        # only safe while GEMINI_FLASH_MODEL stayed on a Flash id.
-        llm = get_gemini_flash_full(
+        # Routed through get_gemini_flash_planning (Gemini-only, NOT the
+        # generation tier) because this is a structured-output call:
+        # with_structured_output() has different semantics on Anthropic vs
+        # Gemini, and the fan-out judge is an internal planning step, not a
+        # user-facing answer.
+        llm = get_gemini_flash_planning(
             temperature=0.0, thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)
 

@@ -16,8 +16,10 @@ from typing import Literal
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from core.state import LegalAgentState, AgentResult, FileContextData
-from core.clients import get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm
+from core.clients import (
+    get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm,
+    get_gemini_flash_planning,
+)
 from core.language import devanagari_language, localize_prompt, script_of
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
@@ -659,7 +661,7 @@ def _extract_user_intent(
             # `draft` 5/5. This prompt is ~6,500 tokens; the Lite tier does
             # not hold a spec that long — the same conclusion the language
             # critic reached at line ~966.
-            llm = get_gemini_flash_full(temperature=0.0).with_structured_output(
+            llm = get_gemini_flash_planning(temperature=0.0).with_structured_output(
                 QueryAnalysisV2, include_raw=True,
             )
             prompt = ChatPromptTemplate.from_template(USER_INTENT_EXTRACTION_PROMPT)
@@ -1017,7 +1019,7 @@ async def _enforce_response_language(
             text,
             state.get("original_query", "") or state.get("query", ""),
             audit_intent,
-            critic_llm=get_gemini_flash_full(
+            critic_llm=get_gemini_flash_planning(
                 temperature=0.0, max_output_tokens=4096, thinking_budget=0,
             ),
             source_registry=source_registry,

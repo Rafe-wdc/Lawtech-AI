@@ -335,6 +335,19 @@ def _provider_kwargs(provider: str, temperature: float | None) -> dict:
     return {} if temperature is None else {"temperature": temperature}
 
 
+def _output_tokens_kwarg(provider: str, max_output_tokens: int) -> dict:
+    """Map the output-token-limit parameter to the provider's name.
+
+    - google_genai / openai: `max_output_tokens`
+    - anthropic: `max_tokens` (Claude rejects `max_output_tokens` with a
+      TypeError). Claude Sonnet 5's hard ceiling is 16384; passing a higher
+      value is silently capped by the API, but we clamp here to be explicit.
+    """
+    if provider == "anthropic":
+        return {"max_tokens": min(max_output_tokens, 16384)}
+    return {"max_output_tokens": max_output_tokens}
+
+
 def _thinking_kwargs(model_id: str,
                      thinking_budget: int | None,
                      thinking_level: str | None) -> dict:
@@ -403,6 +416,34 @@ def get_gemini_flash_lite(temperature: float = 0.3,
 get_gemini_flash = get_gemini_flash_lite
 
 
+@lru_cache(maxsize=8)
+def get_gemini_flash_planning(temperature: float = 0.0,
+                               max_output_tokens: int = 8192,
+                               thinking_budget: int | None = None,
+                               thinking_level: str | None = None):
+    """Gemini-only Flash tier for internal planning / structured-output tasks.
+
+    Always targets GEMINI_MODELS["flash"] (default gemini-3.8-flash), regardless
+    of what the generation tier is set to.  Used by:
+      - The drafting fan-out judge (with_structured_output → _FanoutStrategy)
+      - Feedback / critic calls that run structured output against Pydantic
+    These MUST stay on Gemini because:
+      1. They use `with_structured_output()` which has different semantics on
+         Anthropic (tool_choice vs function_call).
+      2. They are internal planning calls, not user-facing answers.
+    """
+    model_id = GEMINI_MODELS["flash"]
+    provider, _bare = _split_provider(model_id)
+    return init_chat_model(
+        model_id if ":" in model_id else f"google_genai:{model_id}",
+        max_output_tokens=max_output_tokens,
+        max_retries=2,
+        timeout=120,
+        **_provider_kwargs(provider, temperature),
+        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
+    )
+
+
 import os as _os  # noqa: E402
 # Back-compat alias for rohit/dev's 2026-09-06 Flash upgrade.
 #
@@ -444,7 +485,7 @@ def get_gemini_flash_full(temperature: float = 0.3,
     provider, _bare = _split_provider(model_id)
     return init_chat_model(
         model_id if ":" in model_id else f"google_genai:{model_id}",
-        max_output_tokens=max_output_tokens,
+        **_output_tokens_kwarg(provider, max_output_tokens),
         max_retries=2,
         timeout=120,
         **_provider_kwargs(provider, temperature),
@@ -526,7 +567,7 @@ def get_drafting_llm(max_output_tokens: int = 65535,
     provider, _bare = _split_provider(model_id)
     return init_chat_model(
         model_id if ":" in model_id else f"google_genai:{model_id}",
-        max_output_tokens=max_output_tokens,
+        **_output_tokens_kwarg(provider, max_output_tokens),
         max_retries=2,
         timeout=180,
         **_provider_kwargs(provider, 0.4),

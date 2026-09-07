@@ -331,7 +331,30 @@ def _provider_kwargs(provider: str, temperature: float | None) -> dict:
     dropped for anthropic and passed through elsewhere.
     """
     if provider == "anthropic":
-        return {}
+        # Claude rejects `temperature` (sampling params removed on current
+        # models). Thinking is configured here rather than in
+        # _thinking_kwargs, which speaks Gemini's dialect only.
+        #
+        # `{"type": "adaptive"}` is the only on-mode for Sonnet 5 — omitting
+        # `thinking` also runs adaptive, but stating it makes the intent
+        # explicit and survives a future default change. `output_config.effort`
+        # controls depth; drafting is the product's highest-stakes output, so
+        # it gets "high" (also Anthropic's own default) rather than a
+        # cost-tuned lower level.
+        # MEASURED 2026-09-07 — effort is NOT set by default.
+        # Forcing output_config.effort="high" on the S.138 drafting task made
+        # things strictly worse: 110-133s vs ~68s unset, and $0.25-0.38 vs
+        # $0.21, with no gain on the quality checks. effort=low/medium were
+        # cheaper but did not fix the substantive miss either (Claude omits
+        # the s.138(b) 30-day limitation plea inconsistently at every level).
+        # Anthropic's own default is already "high"; setting it explicitly
+        # measurably changed behaviour for the worse here, so the default is
+        # left alone and exposed for tuning rather than pinned.
+        kw = {"thinking": {"type": "adaptive"}}
+        _effort = os.getenv("ANTHROPIC_EFFORT", "").strip()
+        if _effort:
+            kw["output_config"] = {"effort": _effort}
+        return kw
     return {} if temperature is None else {"temperature": temperature}
 
 
@@ -344,7 +367,16 @@ def _output_tokens_kwarg(provider: str, max_output_tokens: int) -> dict:
       value is silently capped by the API, but we clamp here to be explicit.
     """
     if provider == "anthropic":
-        return {"max_tokens": min(max_output_tokens, 16384)}
+        # 16384 is NOT Claude's ceiling — the Models API reports
+        # max_tokens=128000 for claude-sonnet-5. It is a NON-STREAMING guard:
+        # the SDK requires streaming for values large enough to risk the
+        # 10-minute HTTP timeout, and this codebase invokes drafting
+        # non-streaming. Raise ANTHROPIC_MAX_TOKENS only alongside switching
+        # that path to .stream(); the API rejects large non-streaming requests
+        # with "Streaming is required for operations that may take longer than
+        # 10 minutes" (verified 2026-09-07 at 32000).
+        cap = int(os.getenv("ANTHROPIC_MAX_TOKENS", "16384"))
+        return {"max_tokens": min(max_output_tokens, cap)}
     return {"max_output_tokens": max_output_tokens}
 
 

@@ -194,13 +194,27 @@ class TokenUsage:
         cache_create = details_in.get("cache_creation") or 0
         reasoning = details_out.get("reasoning") or 0
 
-        # Resolve model name: prefer caller-provided, fall back to response metadata
-        if not model:
-            model = (
-                getattr(response, "response_metadata", {}).get("model_name")
-                or getattr(response, "response_metadata", {}).get("model")
-                or ""
-            )
+        # Resolve model name: prefer what ACTUALLY served the response, and
+        # only fall back to the caller-supplied label.
+        #
+        # The order used to be the reverse (caller first). That silently
+        # mispriced every call served by a LangChain fallback: callers pass the
+        # CONFIGURED model (e.g. MODELS["drafting"] = "anthropic:claude-sonnet-5"),
+        # but when the Anthropic account has no credit the 400 is swallowed by
+        # `.with_fallbacks()` in get_drafting_llm and Gemini answers. Measured
+        # 2026-09-07: an 8-token call served by gemini-3.8-flash was billed at
+        # Claude rates — $0.000032 instead of $0.000012, a 2.7x over-report on
+        # every drafting call, invisible in the usage payload.
+        #
+        # `response_metadata["model_name"]` is written by the provider that
+        # really answered, so it is authoritative. The caller's label is only a
+        # hint about intent.
+        served = (
+            (getattr(response, "response_metadata", None) or {}).get("model_name")
+            or (getattr(response, "response_metadata", None) or {}).get("model")
+            or ""
+        )
+        model = served or model
 
         cost = _estimate_cost_usd(model, ip, op + reasoning)
 

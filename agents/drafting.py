@@ -3847,6 +3847,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     draft,
                     user_query=query,
                     intent=intent_obj,
+                    critic_llm=get_drafting_llm(max_output_tokens=8192),
+                    refiner_llm=get_drafting_llm(max_output_tokens=24000),
                     source_languages=source_langs,
                     source_registry=_registry,
                     # A finished draft has no business getting materially

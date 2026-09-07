@@ -2,7 +2,26 @@
 
 **Date:** 2026-09-04
 **Scope:** LLM model selection across all pipeline stages, PDF/vision attachment handling
-**Status:** Analysis complete. No code changed yet.
+**Status:** SUPERSEDED IN PART - see "What actually shipped" below.
+
+> ## What actually shipped (2026-09-07)
+>
+> This records the analysis as it stood on 2026-09-04. Later measurement in the
+> same effort overturned three of its recommendations. The code reflects the
+> later findings, not this document:
+>
+> | This doc recommended | What shipped | Why |
+> |---|---|---|
+> | Drafting on `gemini-pro-latest` | `anthropic:claude-sonnet-5` | Team decision. Pro also broke the heading rule more often than Flash (CLAUDE.md drafting invariant #2) |
+> | Vision OCR on `gemini-pro-latest` | `gemini-3.6-flash`, own pinned tier | Equal accuracy, faster, and backed by the 2026-09-06 production OCR incident |
+> | Keeping a `pro` tier | **Removed entirely** | 3.8-flash beats 3.1-pro on aggregate (51.0 vs 43.4) and reasoning (46.9 vs 45.1), costs 4x less, training data 14 months newer |
+>
+> Also resolved since: section 9's "Claude was not tested" - Anthropic credit
+> arrived and Claude is now measured end-to-end; and pytest is installed, with
+> the integration suite passing 18/19 locally.
+>
+> The MEASUREMENTS below remain valid. The RECOMMENDATIONS do not.
+> `core/settings.py` GEMINI_MODELS is the source of truth for what runs.
 
 Every claim marked **[measured]** was verified by running code against the live
 APIs with this repo's own prompts and schemas during the analysis session.

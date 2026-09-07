@@ -575,6 +575,27 @@ def get_drafting_llm(max_output_tokens: int = 65535,
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
     if provider == "anthropic":
+        # LOUD FALLBACK.
+        #
+        # 2026-09-07: a full "Claude Sonnet 5 vs Gemini" drafting evaluation
+        # was run and reported as a Claude win. Every one of those calls was
+        # actually served by Gemini: the Anthropic account had no credit, the
+        # 400 was swallowed by this fallback, and nothing in the logs, the
+        # response, or the test output said so. The conclusion was Gemini
+        # compared against Gemini.
+        #
+        # A fallback that hides which model answered makes every downstream
+        # measurement untrustworthy, so it now announces itself. Callers that
+        # must know can read `response.response_metadata["model_name"]` — and
+        # any test asserting a model change MUST assert on that field rather
+        # than on the call merely succeeding.
+        _log.warning(
+            "Generation tier is Anthropic — a Gemini fallback is armed. If "
+            "Anthropic errors (credit, quota, outage) the response will be "
+            "served by Gemini and will NOT be the configured model. Verify "
+            "with response_metadata['model_name'] before drawing conclusions.",
+            configured=model_id, fallback=GEMINI_MODELS["flash"],
+        )
         fb_model = GEMINI_MODELS["flash"]
         fallback = init_chat_model(
             fb_model if ":" in fb_model else f"google_genai:{fb_model}",

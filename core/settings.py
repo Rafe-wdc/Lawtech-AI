@@ -119,14 +119,48 @@ MODELS = {
     "newacts_metadata": GEMINI_MODELS["flash_lite"],
     "draft_selector": GEMINI_MODELS["flash_lite"],
     "legislation_match": GEMINI_MODELS["flash_lite"],
-    # These agent stages produce user-facing answers — generation tier.
-    "scenario_web_grounded": GEMINI_MODELS["generation"],
-    "legal_concepts": GEMINI_MODELS["generation"],
+    # GOOGLE-CLIENT-ONLY STAGES — these MUST stay on a Gemini id.
+    #
+    # Both values are passed straight to google.genai's
+    # `client.models.generate_content(model=...)` for Google Search grounding
+    # (agents/scenario.py, core/agent_fallback.py), NOT through LangChain. A
+    # non-Gemini id here is a hard 404 from Google with no fallback:
+    #   404 models/anthropic:claude-sonnet-5 is not found for API version
+    #   v1beta, or is not supported for generateContent
+    # That breaks the Scenario agent AND `web_search_fallback`, which is
+    # tier-3 resilience for EVERY domain agent (see CLAUDE.md "Agent
+    # Resilience"). Legal_Concepts is web-grounded too
+    # (agents/constitution_maxim.py) and routes through the same path.
+    # Enforced below by _assert_google_model.
+    "scenario_web_grounded": GEMINI_MODELS["flash"],
+    "legal_concepts": GEMINI_MODELS["flash"],
     "query_rewrite": GEMINI_MODELS["flash_lite"],
     "guardrail_injection": GEMINI_MODELS["flash_lite"],
     "pdf_chat": os.getenv("PDF_CHAT_MODEL", GEMINI_MODELS["flash"]),
     "pdf_vision_ocr": GEMINI_MODELS["vision"],
 }
+
+
+# --- Guard: stages that bypass LangChain must carry a Gemini model id ---
+# These are dispatched via google.genai directly (Google Search grounding).
+# Catching a bad value at import beats a 404 in production traffic.
+_GOOGLE_CLIENT_ONLY_STAGES = ("scenario_web_grounded", "legal_concepts")
+
+
+def _assert_google_model(stage: str, model_id: str) -> None:
+    if ":" in model_id and not model_id.startswith("google_genai:"):
+        raise ValueError(
+            f"MODELS[{stage!r}] = {model_id!r} is not a Gemini model. This "
+            "stage is dispatched through google.genai directly for Google "
+            "Search grounding, so a non-Gemini id returns 404 from Google "
+            "with no fallback — breaking the Scenario agent and "
+            "web_search_fallback (tier-3 resilience for every domain agent). "
+            "Point it at a GEMINI_MODELS tier instead."
+        )
+
+
+for _stage in _GOOGLE_CLIENT_ONLY_STAGES:
+    _assert_google_model(_stage, MODELS[_stage])
 
 # --- Elasticsearch / OpenSearch ---
 # ES_URL is the preferred env var; fall back to ELASTICSEARCH_URL for backward compat.

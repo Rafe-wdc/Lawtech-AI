@@ -68,10 +68,30 @@ MODELS = [
      dict(temperature=1.0, thinking_level="low")),
 ]
 
+# Claude joins the comparison only when a credential AND the package exist.
+# NOTE ON KWARGS: claude-sonnet-5 / claude-opus-5 REJECT `temperature` with a
+# 400 (sampling params were removed), and `thinking_budget` / `thinking_level`
+# are Gemini-only spellings that also 400. So these entries pass NO sampling or
+# thinking kwargs at all — omitting `thinking` runs adaptive, which is the only
+# on-mode for Sonnet 5. Do not copy the Gemini kwargs above onto these rows.
+if os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"):
+    try:
+        import langchain_anthropic  # noqa: F401
+        MODELS += [
+            ("claude-sonnet-5", "anthropic:claude-sonnet-5", {}),
+            ("claude-opus-5",   "anthropic:claude-opus-5",   {}),
+        ]
+    except ImportError:
+        print("[skip] claude: pip install langchain-anthropic")
+else:
+    print("[skip] claude: no ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN")
+
 
 def make_llm(model_id, kwargs, schema):
+    """Bare ids mean google_genai; provider-qualified ids pass through."""
+    spec = model_id if ":" in model_id else f"google_genai:{model_id}"
     return init_chat_model(
-        f"google_genai:{model_id}", max_output_tokens=4096,
+        spec, max_output_tokens=4096,
         max_retries=1, timeout=90, **kwargs,
     ).with_structured_output(schema, include_raw=True)
 

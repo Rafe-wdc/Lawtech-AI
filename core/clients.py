@@ -578,6 +578,39 @@ def get_drafting_llm(max_output_tokens: int = 65535,
         **_provider_kwargs(provider, 0.4),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
+    if provider == "anthropic" and not (
+        os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
+    ):
+        # NO ANTHROPIC CREDENTIAL — degrade to Gemini at CONSTRUCTION time.
+        #
+        # `.with_fallbacks()` only rescues failures raised during invoke. A
+        # missing key raises inside the Anthropic client and the Gemini
+        # fallback cannot help if it is also mid-flight, so an environment
+        # without the key would surface an error event to the user rather than
+        # a degraded answer. That matters beyond drafting: get_drafting_llm is
+        # also called by the orchestrator's citation injection
+        # (agents/orchestrator.py) and tools/shared/llm_tools.py, so a
+        # credential-less deploy would break ordinary non-drafting queries too.
+        #
+        # Any server whose .env predates the Claude generation tier lands here.
+        # Loud, because a Gemini-served draft must never be mistaken for Claude.
+        _log.warning(
+            "Generation tier is Anthropic but no ANTHROPIC_API_KEY / "
+            "ANTHROPIC_AUTH_TOKEN is set — using the Gemini flash tier instead. "
+            "Drafts will NOT be produced by the configured model. Set the key, "
+            "or set GENERATION_MODEL to a Gemini id to make this explicit.",
+            configured=model_id, using=GEMINI_MODELS["flash"],
+        )
+        fb_model = GEMINI_MODELS["flash"]
+        return init_chat_model(
+            fb_model if ":" in fb_model else f"google_genai:{fb_model}",
+            max_output_tokens=min(max_output_tokens, 65535),
+            max_retries=2,
+            timeout=180,
+            **_provider_kwargs("google_genai", 0.4),
+            **_thinking_kwargs(fb_model, thinking_budget, thinking_level),
+        )
+
     if provider == "anthropic":
         # LOUD FALLBACK.
         #

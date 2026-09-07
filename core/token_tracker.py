@@ -71,6 +71,15 @@ _MODEL_PRICES_USD_PER_M: dict[str, tuple[float, float]] = {
     "google_genai:gemini-3.1-flash-lite":  (0.25,  1.50),
     "google_genai:gemini-3.1-pro-preview": (4.00, 18.00),
     "google_genai:gemini-pro-latest":      (4.00, 18.00),
+    # Claude (Anthropic) — official pricing from platform.claude.com read
+    # 2026-09-07. The $2/$10 Sonnet 5 rate was introductory through 2026-08-31
+    # and is now the permanent standard rate.
+    "claude-sonnet-5":               (2.00,  10.00),
+    "claude-opus-5":                 (5.00,  25.00),
+    "claude-haiku-4-5":              (1.00,   5.00),
+    "anthropic:claude-sonnet-5":     (2.00,  10.00),
+    "anthropic:claude-opus-5":       (5.00,  25.00),
+    "anthropic:claude-haiku-4-5":    (1.00,   5.00),
 }
 
 

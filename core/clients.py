@@ -427,18 +427,20 @@ def get_gemini_flash_full(temperature: float = 0.3,
                           max_output_tokens: int = 65535,
                           thinking_budget: int | None = None,
                           thinking_level: str | None = None):
-    """Balanced tier — response generation, synthesis, ReAct agents.
+    """Generation tier — user-facing response synthesis, ReAct agents.
 
-    Model comes from settings.GEMINI_MODELS["flash"] (default
-    `gemini-3.8-flash` — both newer AND cheaper than 3.5-flash:
-    $0.75/$3.75 vs $1.50/$9.00 per 1M tokens).
+    Model comes from settings.GEMINI_MODELS["generation"] (default
+    `anthropic:claude-sonnet-5` — $2/$10 per 1M tokens). Override with
+    GENERATION_MODEL env var.
 
-    Thinking now defaults to "low" rather than the 2.5-era "off". Gemini 3.x
-    cannot fully disable thinking, and the previous `thinking_budget=0` on
-    every generation path was a measured quality drag — see
-    MODEL_UPGRADE_PLAN.md §1.
+    When targeting Claude, `temperature` and `thinking_budget`/`thinking_level`
+    are automatically suppressed by _provider_kwargs and _thinking_kwargs;
+    Claude runs in adaptive thinking mode by default.
+
+    For Gemini targets, thinking defaults to "low" rather than the 2.5-era
+    "off". See MODEL_UPGRADE_PLAN.md §1.
     """
-    model_id = GEMINI_MODELS["flash"]
+    model_id = GEMINI_MODELS["generation"]
     provider, _bare = _split_provider(model_id)
     return init_chat_model(
         model_id if ":" in model_id else f"google_genai:{model_id}",
@@ -509,22 +511,18 @@ def get_drafting_llm(max_output_tokens: int = 65535,
                      thinking_level: str | None = None):
     """Legal drafting — the highest-stakes output in the product.
 
-    Uses settings.GEMINI_MODELS["flash"]. A brief move to Pro (2026-09-04)
-    was reverted on 2026-09-07: CLAUDE.md drafting invariant #2 records
-    Gemini 2.5 Pro violating DRAFTING_SECTION_PAIR_PROMPT rule 2 ("USE THE
-    EXACT HEADING TEXT GIVEN") at a HIGHER rate than Flash Lite, so the
-    "Pro is stronger" assumption does not hold for this prompt. Pro also
-    costs ~5x. Move drafting to Pro only behind an eval that measures
-    heading adherence, not on tier assumption.
+    Uses settings.GEMINI_MODELS["generation"] (default
+    `anthropic:claude-sonnet-5`). Override with GENERATION_MODEL env var.
 
-    Was `temperature=0.4` + `thinking_budget=0` on gemini-2.5-flash. Thinking
-    is now "low" — Gemini 3.x cannot disable it, and format-following did not
-    in fact benefit from having reasoning off.
+    Claude Sonnet 5 is the default because drafting is constrained
+    format-following against a retrieved template — a production workload
+    where Anthropic's own guidance recommends Sonnet over Opus. It runs in
+    adaptive thinking mode; `temperature` is fixed at 0.4 for Gemini
+    fallbacks and suppressed for Claude.
 
-    To move drafting onto Pro without touching code, set GEMINI_FLASH_MODEL
-    to a Pro id — but read the heading-adherence note above first.
+    To revert to Gemini Flash: set GENERATION_MODEL=gemini-3.8-flash.
     """
-    model_id = GEMINI_MODELS["flash"]
+    model_id = GEMINI_MODELS["generation"]
     provider, _bare = _split_provider(model_id)
     return init_chat_model(
         model_id if ":" in model_id else f"google_genai:{model_id}",

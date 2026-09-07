@@ -53,9 +53,16 @@ TIMEOUT_NEARBY_SECTIONS_SEC: float = 5.0   # Newacts nearby-section lookup
 # Tier -> model rationale (measured 2026-09-04, see MODEL_UPGRADE_PLAN.md §3):
 #   flash_lite  gemini-3.5-flash-lite  routing/classification. 14/15 vs 12/15
 #                                      for 2.5-flash-lite at identical latency.
-#   flash       gemini-3.8-flash       generation + intent extraction. Note
+#   flash       gemini-3.8-flash       intent extraction, fan-out planner,
+#                                      and other flash-tier tasks that are NOT
+#                                      user-facing answer generation. Note
 #                                      3.8 is both NEWER and CHEAPER than
 #                                      3.5-flash ($0.75/$3.75 vs $1.50/$9.00).
+#   generation  anthropic:claude-sonnet-5  User-facing response generation
+#                                      AND drafting. Claude Sonnet 5 at
+#                                      $2/$10 per 1M tokens. Override with
+#                                      GENERATION_MODEL env var. Falls back
+#                                      to flash tier if unset.
 #   pro         gemini-pro-latest      long-document Q&A (pdf_chat) only.
 #
 # `gemini-pro-latest` is a FLOATING alias — it follows Google's current Pro
@@ -84,6 +91,11 @@ GEMINI_MODELS = {
     "flash":      os.getenv("GEMINI_FLASH_MODEL",      "gemini-3.8-flash"),
     "pro":        os.getenv("GEMINI_PRO_MODEL",        "gemini-pro-latest"),
     "vision":     os.getenv("GEMINI_VISION_MODEL",     "gemini-3.6-flash"),
+    # Generation tier — user-facing answer synthesis and drafting.
+    # Defaults to Claude Sonnet 5 (provider-qualified).  Override with
+    # GENERATION_MODEL env var, e.g. GENERATION_MODEL=gemini-3.8-flash to
+    # fall back to Gemini Flash.
+    "generation": os.getenv("GENERATION_MODEL",        "anthropic:claude-sonnet-5"),
 }
 
 # Default thinking level for Gemini 3.x when a caller does not specify one.
@@ -100,21 +112,16 @@ GEMINI_THINKING_DEFAULT = os.getenv("GEMINI_THINKING_LEVEL", "low")
 MODELS = {
     "orchestrator": GEMINI_MODELS["flash_lite"],
     "task_classifier": GEMINI_MODELS["flash_lite"],
-    # Flash tier, NOT Pro. Drafting ran on gemini-2.5-flash before this
-    # upgrade, so Flash is the like-for-like move. Escalating to Pro was
-    # reverted 2026-09-07: CLAUDE.md drafting invariant #2 records that
-    # Gemini 2.5 Pro violated DRAFTING_SECTION_PAIR_PROMPT rule 2 ("USE THE
-    # EXACT HEADING TEXT GIVEN") at a HIGHER rate than Flash Lite, so "Pro is
-    # stronger" does not hold for this prompt. Pro also costs ~5x
-    # ($4.00/$18.00 vs $0.75/$3.75). Set GEMINI_PRO_MODEL-backed drafting
-    # deliberately, with an eval, rather than by tier assumption.
-    "drafting": GEMINI_MODELS["flash"],
+    # Generation tier — Claude Sonnet 5 for user-facing answer generation.
+    # Override with GENERATION_MODEL env var.
+    "drafting": GEMINI_MODELS["generation"],
     "judgment_metadata": GEMINI_MODELS["flash_lite"],
     "newacts_metadata": GEMINI_MODELS["flash_lite"],
     "draft_selector": GEMINI_MODELS["flash_lite"],
     "legislation_match": GEMINI_MODELS["flash_lite"],
-    "scenario_web_grounded": GEMINI_MODELS["flash"],
-    "legal_concepts": GEMINI_MODELS["flash"],
+    # These agent stages produce user-facing answers — generation tier.
+    "scenario_web_grounded": GEMINI_MODELS["generation"],
+    "legal_concepts": GEMINI_MODELS["generation"],
     "query_rewrite": GEMINI_MODELS["flash_lite"],
     "guardrail_injection": GEMINI_MODELS["flash_lite"],
     "pdf_chat": GEMINI_MODELS["pro"],

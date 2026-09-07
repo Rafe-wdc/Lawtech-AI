@@ -468,20 +468,17 @@ def get_gemini_flash_full(temperature: float = 0.3,
                           max_output_tokens: int = 65535,
                           thinking_budget: int | None = None,
                           thinking_level: str | None = None):
-    """Generation tier — user-facing response synthesis, ReAct agents.
+    """Balanced Flash tier — response generation, synthesis, ReAct agents.
 
-    Model comes from settings.GEMINI_MODELS["generation"] (default
-    `anthropic:claude-sonnet-5` — $2/$10 per 1M tokens). Override with
-    GENERATION_MODEL env var.
-
-    When targeting Claude, `temperature` and `thinking_budget`/`thinking_level`
-    are automatically suppressed by _provider_kwargs and _thinking_kwargs;
-    Claude runs in adaptive thinking mode by default.
+    Model comes from settings.GEMINI_MODELS["flash"] (default
+    `gemini-3.8-flash` — both newer AND cheaper than 3.5-flash:
+    $0.75/$3.75 vs $1.50/$9.00 per 1M tokens). Override with
+    GEMINI_FLASH_MODEL env var.
 
     For Gemini targets, thinking defaults to "low" rather than the 2.5-era
     "off". See MODEL_UPGRADE_PLAN.md §1.
     """
-    model_id = GEMINI_MODELS["generation"]
+    model_id = GEMINI_MODELS["flash"]
     provider, _bare = _split_provider(model_id)
     return init_chat_model(
         model_id if ":" in model_id else f"google_genai:{model_id}",
@@ -561,18 +558,34 @@ def get_drafting_llm(max_output_tokens: int = 65535,
     adaptive thinking mode; `temperature` is fixed at 0.4 for Gemini
     fallbacks and suppressed for Claude.
 
-    To revert to Gemini Flash: set GENERATION_MODEL=gemini-3.8-flash.
+    If Anthropic Claude encounters an error (e.g. credit limit, network,
+    or service degradation), it automatically falls back to Gemini 3.8 Flash
+    so drafts never fail.
+
+    To revert to Gemini Flash permanently: set GENERATION_MODEL=gemini-3.8-flash.
     """
     model_id = GEMINI_MODELS["generation"]
     provider, _bare = _split_provider(model_id)
-    return init_chat_model(
+    primary = init_chat_model(
         model_id if ":" in model_id else f"google_genai:{model_id}",
         **_output_tokens_kwarg(provider, max_output_tokens),
-        max_retries=2,
+        max_retries=1,
         timeout=180,
         **_provider_kwargs(provider, 0.4),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
+    if provider == "anthropic":
+        fb_model = GEMINI_MODELS["flash"]
+        fallback = init_chat_model(
+            fb_model if ":" in fb_model else f"google_genai:{fb_model}",
+            max_output_tokens=min(max_output_tokens, 65535),
+            max_retries=2,
+            timeout=180,
+            **_provider_kwargs("google_genai", 0.4),
+            **_thinking_kwargs(fb_model, thinking_budget, thinking_level),
+        )
+        return primary.with_fallbacks([fallback])
+    return primary
 
 
 # --- Google GenAI client (for Gemini with Google Search grounding) ---

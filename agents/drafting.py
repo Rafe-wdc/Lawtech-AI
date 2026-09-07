@@ -51,7 +51,7 @@ from core.state import (
 )
 from core.clients import (
     get_es_client, get_gemini_pro, get_gemini_flash_lite,
-    get_gemini_flash_full, get_gemini_flash_planning,
+    get_gemini_flash_full, get_gemini_flash_planning, get_drafting_llm,
     # Circuit-breaker helpers referenced from `try/except` blocks in
     # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
     # at module scope so the `except:` handler can still call
@@ -1328,8 +1328,7 @@ async def _generate_single_pass(
     # not a creative one — zero temperature forces strict instruction
     # following; the larger thinking budget gives the model headroom to
     # cross-reference each emitted entity back to the CASE FACTS block.
-    llm = get_gemini_pro(
-        temperature=0.0,
+    llm = get_drafting_llm(
         max_output_tokens=24000,
         thinking_budget=4096,
     )
@@ -2116,12 +2115,8 @@ async def _generate_section_pair(
         "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
     )
 
-    llm = get_gemini_pro(
-        temperature=0.0,
-        max_output_tokens=20000,  # was 12000; bumped 2026-09-06 to give section
-                                  # pairs headroom for court-standard volume when
-                                  # the planner's summary asks for 8-15 pages
-                                  # per section. 20K tokens ~= 80K chars.
+    llm = get_drafting_llm(
+        max_output_tokens=20000,
         thinking_budget=2048,
     )
 
@@ -2999,8 +2994,7 @@ async def _generate_draft_modification(
     )
     system_prompt = localize_prompt(system_prompt, user_language, user_intent)
 
-    llm = get_gemini_pro(
-        temperature=0.0,
+    llm = get_drafting_llm(
         max_output_tokens=24000,
         thinking_budget=4096,
     )

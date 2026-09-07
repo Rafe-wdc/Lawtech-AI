@@ -304,6 +304,37 @@ def get_gpt4o_mini(temperature: float = 0.3):
 #   budget >  2048  -> "medium"
 #
 # Callers may pass `thinking_level=` directly to bypass the translation.
+def _split_provider(model_id: str) -> tuple[str, str]:
+    """Split a tier value into (provider, bare_model_id).
+
+    Tier values may be provider-qualified (`anthropic:claude-opus-5`,
+    `openai:gpt-5.4`) or bare, in which case google_genai is assumed so every
+    pre-existing GEMINI_*_MODEL value keeps working unchanged.
+
+    This is what makes a cross-provider move a config change: setting
+    GEMINI_FLASH_MODEL=anthropic:claude-opus-5 routes the whole Flash tier to
+    Claude without touching code.
+    """
+    if ":" in model_id:
+        provider, _, bare = model_id.partition(":")
+        return provider, bare
+    return "google_genai", model_id
+
+
+def _provider_kwargs(provider: str, temperature: float | None) -> dict:
+    """Sampling kwargs that the target provider actually accepts.
+
+    Anthropic's current models (claude-opus-5, claude-sonnet-5, and the
+    4.6/4.7/4.8 family) REJECT `temperature` with a 400 — sampling params were
+    removed. Gemini 3.x Flash-Lite accepts it but silently ignores it. Passing
+    it blindly across providers is therefore a hard failure on Claude, so it is
+    dropped for anthropic and passed through elsewhere.
+    """
+    if provider == "anthropic":
+        return {}
+    return {} if temperature is None else {"temperature": temperature}
+
+
 def _thinking_kwargs(model_id: str,
                      thinking_budget: int | None,
                      thinking_level: str | None) -> dict:
@@ -311,7 +342,17 @@ def _thinking_kwargs(model_id: str,
 
     Gemini 2.5 models keep `thinking_budget` so that rolling GEMINI_*_MODEL
     back to a 2.5 id stays a working configuration.
+
+    Non-Gemini providers get NOTHING from this function. Both `thinking_budget`
+    and `thinking_level` are Gemini-specific spellings; Anthropic uses
+    `thinking={"type": "adaptive"}` plus `output_config.effort`, and sending a
+    Gemini kwarg to Claude is a 400. Wiring Anthropic's thinking controls is
+    deliberately left undone until the path can be tested against a real key.
     """
+    provider, bare = _split_provider(model_id)
+    if provider != "google_genai":
+        return {}
+    model_id = bare
     is_25 = model_id.startswith("gemini-2.5")
     if is_25:
         # 2.5 does not understand thinking_level — map it back to a budget.
@@ -347,12 +388,13 @@ def get_gemini_flash_lite(temperature: float = 0.3,
     on this tier — see MODEL_UPGRADE_PLAN.md §4.
     """
     model_id = GEMINI_MODELS["flash_lite"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        f"google_genai:{model_id}",
-        temperature=temperature,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
         max_retries=2,
         timeout=60,
+        **_provider_kwargs(provider, temperature),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 
@@ -397,12 +439,13 @@ def get_gemini_flash_full(temperature: float = 0.3,
     MODEL_UPGRADE_PLAN.md §1.
     """
     model_id = GEMINI_MODELS["flash"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        f"google_genai:{model_id}",
-        temperature=temperature,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
         max_retries=2,
         timeout=120,
+        **_provider_kwargs(provider, temperature),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 
@@ -424,12 +467,13 @@ def get_gemini_pro(temperature: float = 0.5,
     16K/2048 defaults are a safe ceiling for anything that inherits.
     """
     model_id = GEMINI_MODELS["pro"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        f"google_genai:{model_id}",
-        temperature=temperature,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
         max_retries=2,
         timeout=180,
+        **_provider_kwargs(provider, temperature),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 
@@ -448,12 +492,13 @@ def get_gemini_vision(temperature: float = 0.0,
     GEMINI_MODELS comment in core/settings.py before changing it.
     """
     model_id = GEMINI_MODELS["vision"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        f"google_genai:{model_id}",
-        temperature=temperature,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
         max_retries=2,
         timeout=180,
+        **_provider_kwargs(provider, temperature),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 
@@ -480,12 +525,13 @@ def get_drafting_llm(max_output_tokens: int = 65535,
     to a Pro id — but read the heading-adherence note above first.
     """
     model_id = GEMINI_MODELS["flash"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        f"google_genai:{model_id}",
-        temperature=0.4,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
         max_retries=2,
         timeout=180,
+        **_provider_kwargs(provider, 0.4),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 

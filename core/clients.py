@@ -613,6 +613,32 @@ def get_drafting_llm(max_output_tokens: int = 65535,
     return primary
 
 
+
+def cacheable_system(text: str) -> "str | list":
+    """System-message content that Anthropic will prompt-cache.
+
+    Returns the string unchanged for Gemini/OpenAI. For Anthropic, wraps it in
+    a single text block carrying `cache_control: ephemeral` so the prefix is
+    written to cache once and read back at 0.1x input price
+    ($0.20/MTok vs $2.00 on claude-sonnet-5).
+
+    This matters here because DRAFTING_SYSTEM_PROMPT is ~10,100 tokens and is
+    byte-identical on every request for a given language + niche combination —
+    it is the single largest repeated cost in the drafting path. Caching is a
+    PREFIX match, so anything volatile must stay in the user message, which is
+    already how drafting is structured (facts and query go in the human block).
+
+    Minimum cacheable prefix is 1024-4096 tokens depending on model; the
+    drafting prompt clears it comfortably. A shorter prompt simply won't cache
+    and costs the same as today, so this is safe to apply unconditionally.
+    """
+    provider, _bare = _split_provider(GEMINI_MODELS["generation"])
+    if provider != "anthropic":
+        return text
+    return [{"type": "text", "text": text,
+             "cache_control": {"type": "ephemeral"}}]
+
+
 # --- Google GenAI client (for Gemini with Google Search grounding) ---
 
 @lru_cache(maxsize=1)

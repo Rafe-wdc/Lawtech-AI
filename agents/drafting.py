@@ -50,7 +50,7 @@ from core.state import (
     IntegrationContextData, FileContextData,
 )
 from core.clients import (
-    get_es_client, get_gemini_flash_lite,
+    get_es_client, get_gemini_flash_lite, cacheable_system,
     get_gemini_flash_full, get_gemini_flash_planning, get_drafting_llm,
     # Circuit-breaker helpers referenced from `try/except` blocks in
     # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
@@ -1351,7 +1351,7 @@ async def _generate_single_pass(
         )
         return await asyncio.to_thread(
             llm.invoke,
-            [SystemMessage(content=system_prompt),
+            [SystemMessage(content=cacheable_system(system_prompt)),
              HumanMessage(content=final_user_block)],
         )
 
@@ -2160,7 +2160,7 @@ async def _generate_section_pair(
             user_block + "\n\n" + extra_instruction if extra_instruction
             else user_block
         )
-        return [SystemMessage(content=system_prompt),
+        return [SystemMessage(content=cacheable_system(system_prompt)),
                 HumanMessage(content=final_user_block)]
 
     async def _invoke_once(extra_instruction: str = "") -> object:
@@ -3010,7 +3010,7 @@ async def _generate_draft_modification(
         with log_time(log, "Draft modification (fast path)"):
             response = await asyncio.to_thread(
                 llm.invoke,
-                [SystemMessage(content=system_prompt),
+                [SystemMessage(content=cacheable_system(system_prompt)),
                  HumanMessage(content="Produce the complete modified draft now.")],
             )
     except Exception as e:

@@ -16,6 +16,14 @@ from typing import Literal
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+# Restored 2026-09-07: this line was dropped in ae2d3cb when the core.clients
+# import was restructured, leaving FileContextData / LegalAgentState /
+# SourceMetadata unbound. orchestrator_plan_node calls
+# FileContextData.from_state(state) on EVERY request, so the graph raised
+# NameError at the plan node and every query returned an SSE 'error' event.
+from core.state import (
+    LegalAgentState, AgentResult, FileContextData, SourceMetadata,
+)
 from core.clients import (
     get_gemini_flash, get_gemini_flash_full, get_drafting_llm,
     get_gemini_flash_planning,

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
-from core.clients import get_genai_client, get_gemini_flash_full, get_gemini_pro
+from core.clients import get_genai_client, get_gemini_flash_full
 from core.settings import GEMINI_MODELS, TIMEOUT_WEB_SEARCH_SEC
 from core.logger import get_logger
 from config.prompts import SCENARIO_SYSTEM_PROMPT
@@ -90,7 +90,7 @@ def web_search_grounded(query: str, chat_history_text: str = "") -> dict:
 
         client = get_genai_client()
         response = client.models.generate_content(
-            model=GEMINI_MODELS["pro"],
+            model=GEMINI_MODELS["flash"],
             contents=[full_prompt],
             config={
                 "tools": [{"google_search": {}}],
@@ -145,7 +145,7 @@ Scenario: {query}"""
         parts.append(f"\n\n{scenario_prompt}")
 
         response = client.models.generate_content(
-            model=GEMINI_MODELS["pro"],
+            model=GEMINI_MODELS["flash"],
             contents=["\n".join(parts)],
             config={
                 "tools": [{"google_search": {}}],
@@ -234,7 +234,7 @@ def find_similar_cases(scenario: str) -> dict:
         )
 
         response = client.models.generate_content(
-            model=GEMINI_MODELS["pro"],
+            model=GEMINI_MODELS["flash"],
             contents=[prompt],
             config={
                 "tools": [{"google_search": {}}],
@@ -336,7 +336,7 @@ def get_legal_news(topic: str) -> dict:
         )
 
         response = client.models.generate_content(
-            model=GEMINI_MODELS["pro"],
+            model=GEMINI_MODELS["flash"],
             contents=[prompt],
             config={
                 "tools": [{"google_search": {}}],

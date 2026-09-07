@@ -491,34 +491,6 @@ def get_gemini_flash_full(temperature: float = 0.3,
 
 
 @lru_cache(maxsize=8)
-def get_gemini_pro(temperature: float = 0.5,
-                   max_output_tokens: int = 16000,
-                   thinking_budget: int | None = 2048,
-                   thinking_level: str | None = None):
-    """Strongest tier — PDF chat, Vision OCR, complex reasoning.
-
-    Model comes from settings.GEMINI_MODELS["pro"] (default
-    `gemini-pro-latest`, a floating alias — see settings.GEMINI_MODELS).
-
-    Defaults tightened 2026-08-10: previous 65535/8192 defaults meant any caller
-    that forgot to override was billing up to 8192 thinking tokens ($0.08 output-
-    priced) plus a 65K output ceiling per call. The typical Pro workload doesn't
-    approach these bounds; drafting/refiner callsites already override. The new
-    16K/2048 defaults are a safe ceiling for anything that inherits.
-    """
-    model_id = GEMINI_MODELS["pro"]
-    provider, _bare = _split_provider(model_id)
-    return init_chat_model(
-        model_id if ":" in model_id else f"google_genai:{model_id}",
-        max_output_tokens=max_output_tokens,
-        max_retries=2,
-        timeout=180,
-        **_provider_kwargs(provider, temperature),
-        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
-    )
-
-
-@lru_cache(maxsize=8)
 def get_gemini_vision(temperature: float = 0.0,
                       max_output_tokens: int = 8192,
                       thinking_budget: int | None = None,

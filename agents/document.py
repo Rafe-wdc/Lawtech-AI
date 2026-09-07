@@ -22,7 +22,7 @@ from datetime import date
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
-from core.clients import get_gemini_pro, get_gemini_flash_full
+from core.clients import get_gemini_flash_full
 from core.settings import TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt, detect_source_languages
 from core.logger import get_logger, log_time, short_err

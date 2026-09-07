@@ -50,7 +50,7 @@ from core.state import (
     IntegrationContextData, FileContextData,
 )
 from core.clients import (
-    get_es_client, get_gemini_pro, get_gemini_flash_lite,
+    get_es_client, get_gemini_flash_lite,
     get_gemini_flash_full, get_gemini_flash_planning, get_drafting_llm,
     # Circuit-breaker helpers referenced from `try/except` blocks in
     # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
@@ -62,7 +62,7 @@ from core.clients import (
     is_gemini_flash_available, record_gemini_flash_failure,
     record_gemini_flash_success,
 )
-from core.settings import GEMINI_MODELS, ES_INDICES
+from core.settings import GEMINI_MODELS, MODELS, ES_INDICES
 from core.language import (
     localize_prompt, detect_source_languages, language_name,
     is_off_target_language, output_script_ratio,
@@ -2123,7 +2123,7 @@ async def _generate_section_pair(
     # Bound to the request deadline, then fail over to OpenAI.
     #
     # This call used to be an unbounded `asyncio.to_thread(llm.invoke, ...)`.
-    # `get_gemini_pro` is configured timeout=180, max_retries=2, so the SDK
+    # `get_drafting_llm` is configured timeout=180, max_retries=1, so the SDK
     # could spend ~540 s+ inside a single call against a 300 s request
     # budget. Observed in production logs: one section-pair call ran for
     # 592 s, the connection dropped, the retry was then skipped as "budget
@@ -2191,9 +2191,10 @@ async def _generate_section_pair(
             # never the right lever for that class of overflow.
             from core.clients import get_gemini_flash_full
             log.warning(
-                "Gemini Pro section-pair failed — failing over to Gemini Flash",
+                "Section-pair generation failed — failing over to the Flash tier",
                 error=short_err(primary_err),
-                provider_from=GEMINI_MODELS["pro"], provider_to=GEMINI_MODELS["flash"],
+                provider_from=MODELS["drafting"],
+                provider_to=GEMINI_MODELS["flash"],
             )
             fb = get_gemini_flash_full(
                 temperature=0.0,

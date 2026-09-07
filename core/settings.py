@@ -63,12 +63,20 @@ TIMEOUT_NEARBY_SECTIONS_SEC: float = 5.0   # Newacts nearby-section lookup
 #                                      $2/$10 per 1M tokens. Override with
 #                                      GENERATION_MODEL env var. Falls back
 #                                      to flash tier if unset.
-#   pro         gemini-pro-latest      long-document Q&A (pdf_chat) only.
 #
-# `gemini-pro-latest` is a FLOATING alias — it follows Google's current Pro
-# model. There is no GA `gemini-3.x-pro` to pin to yet (only
-# `gemini-3.1-pro-preview`). Pin GEMINI_PRO_MODEL explicitly if alias drift
-# is unacceptable for your deployment.
+# NO PRO TIER (removed 2026-09-07). Every stage that used it has been measured
+# onto Flash and none regressed:
+#   drafting   CLAUDE.md invariant #2 — 2.5 Pro broke the "USE THE EXACT
+#              HEADING TEXT GIVEN" rule MORE often than Flash Lite
+#   OCR        equal accuracy, faster (5.4s vs 8.1s), production incident data
+#   pdf_chat   73k-char doc: Flash 14.2s/$0.0666 vs Pro 16.3s/$0.0693, same
+#              needle found and same hallucination refused
+# The published numbers agree: gemini-3.8-flash beats gemini-3.1-pro-preview on
+# aggregate (51.0 vs 43.4) and reasoning (46.9 vs 45.1), costs 3.3-4x less, and
+# its training data is 14 months newer (Mar 2026 vs Jan 2025) — which matters
+# for Indian legal work. There is no GA gemini-3.x-pro to pin to; the old
+# `gemini-pro-latest` alias resolved to a PREVIEW model. If a Pro tier is ever
+# needed again, add it back with an eval, not on the assumption that Pro wins.
 #   vision      gemini-3.6-flash       Vision OCR ONLY. Pinned separately
 #                                      from the flash tier because the model
 #                                      choice here rests on production
@@ -89,7 +97,6 @@ TIMEOUT_NEARBY_SECTIONS_SEC: float = 5.0   # Newacts nearby-section lookup
 GEMINI_MODELS = {
     "flash_lite": os.getenv("GEMINI_FLASH_LITE_MODEL", "gemini-3.5-flash-lite"),
     "flash":      os.getenv("GEMINI_FLASH_MODEL",      "gemini-3.8-flash"),
-    "pro":        os.getenv("GEMINI_PRO_MODEL",        "gemini-pro-latest"),
     "vision":     os.getenv("GEMINI_VISION_MODEL",     "gemini-3.6-flash"),
     # Generation tier — user-facing answer synthesis and drafting.
     # Defaults to Claude Sonnet 5 (provider-qualified).  Override with
@@ -161,6 +168,12 @@ def _assert_google_model(stage: str, model_id: str) -> None:
 
 for _stage in _GOOGLE_CLIENT_ONLY_STAGES:
     _assert_google_model(_stage, MODELS[_stage])
+
+# The flash TIER is also dispatched directly through google.genai — by the
+# four scenario tools in tools/shared/scenario_tools.py, which moved onto it
+# when the Pro tier was removed. Same 404 exposure, same guard.
+_assert_google_model("GEMINI_MODELS['flash']", GEMINI_MODELS["flash"])
+_assert_google_model("GEMINI_MODELS['vision']", GEMINI_MODELS["vision"])
 
 # --- Elasticsearch / OpenSearch ---
 # ES_URL is the preferred env var; fall back to ELASTICSEARCH_URL for backward compat.

@@ -17,7 +17,7 @@ from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from core.clients import (
-    get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm,
+    get_gemini_flash, get_gemini_flash_full, get_drafting_llm,
     get_gemini_flash_planning,
 )
 from core.language import devanagari_language, localize_prompt, script_of

@@ -75,7 +75,12 @@ OCR_CACHE_DIR = os.path.join(CHROMA_STORE_ROOT, ".ocr_cache")
 # Bump when the OCR prompt or model changes so pre-existing cache entries
 # (which may contain garbage produced by the old prompt / weaker model) are
 # not served to users. Change to "v3" etc. on any future OCR-quality fix.
-OCR_CACHE_VERSION = "v2"
+# v3 (2026-09-07): Vision OCR moved from gemini-2.5-flash to the pinned
+# vision tier (gemini-3.6-flash). Cache entries are keyed by file hash +
+# this version, so without the bump every previously-uploaded document
+# would keep serving OCR text produced by the OLD model - the upgrade
+# would be invisible on exactly the files most likely to be re-uploaded.
+OCR_CACHE_VERSION = "v3"
 
 # thread_files.ocr_status value meaning "OCR ran on this image but produced
 # nothing usable, so its output was withheld pending the user's confirmation".

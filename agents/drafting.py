@@ -37,6 +37,8 @@ See `docs/drafting_simplification_plan.md` for the full design and rationale.
 
 from __future__ import annotations
 
+from datetime import date
+
 import asyncio
 import os
 import re
@@ -1294,7 +1296,28 @@ async def _generate_single_pass(
                 + "\n"
             )
 
+    # TODAY'S DATE - required by the MISSING-FACT POLICY rule, which tells the
+    # model "today's date and the drafting place are legitimate defaults if the
+    # source is silent". Until 2026-09-07 the drafting prompt never said what
+    # today WAS, so a model following that rule had to guess. Measured:
+    # claude-sonnet-5 emitted "Date: 05 August 2026" on a notice drafted
+    # 07 September 2026 - neither today nor a supplied date - while
+    # gemini-3.8-flash sidestepped the rule with [TO_FILL:]. Neither is right on
+    # a statutory notice where limitation runs from the notice date. Every other
+    # agent already passes "Current Date" (document, legislation, judgment,
+    # newacts, constitution_maxim); drafting was the outlier.
+    #
+    # Deliberately in the USER block, not the system prompt: the system prompt
+    # carries cache_control for Anthropic, and a date that changes daily inside
+    # the cached prefix would invalidate the cache every day.
+    _today_block = (
+        f"## TODAY'S DATE\n{date.today().strftime('%d %B %Y')}\n"
+        "Use this when the document needs a notice / verification / drafting "
+        "date and the source is silent. Never infer such a date from other "
+        "dates in the matter.\n\n"
+    )
     user_block = (
+        f"{_today_block}"
         f"{context_block}"
         f"{reference_block}"
         f"{source_docs_block}"
@@ -2092,7 +2115,28 @@ async def _generate_section_pair(
             "global paragraph counter at 1 where appropriate.)\n\n"
         )
 
+    # TODAY'S DATE - required by the MISSING-FACT POLICY rule, which tells the
+    # model "today's date and the drafting place are legitimate defaults if the
+    # source is silent". Until 2026-09-07 the drafting prompt never said what
+    # today WAS, so a model following that rule had to guess. Measured:
+    # claude-sonnet-5 emitted "Date: 05 August 2026" on a notice drafted
+    # 07 September 2026 - neither today nor a supplied date - while
+    # gemini-3.8-flash sidestepped the rule with [TO_FILL:]. Neither is right on
+    # a statutory notice where limitation runs from the notice date. Every other
+    # agent already passes "Current Date" (document, legislation, judgment,
+    # newacts, constitution_maxim); drafting was the outlier.
+    #
+    # Deliberately in the USER block, not the system prompt: the system prompt
+    # carries cache_control for Anthropic, and a date that changes daily inside
+    # the cached prefix would invalidate the cache every day.
+    _today_block = (
+        f"## TODAY'S DATE\n{date.today().strftime('%d %B %Y')}\n"
+        "Use this when the document needs a notice / verification / drafting "
+        "date and the source is silent. Never infer such a date from other "
+        "dates in the matter.\n\n"
+    )
     user_block = (
+        f"{_today_block}"
         f"{context_block}"
         f"{reference_block}"
         f"{prior_block}"

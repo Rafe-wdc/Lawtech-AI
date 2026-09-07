@@ -31,7 +31,7 @@ jobs:
           pip install --quiet \
             fastapi pydantic python-dotenv structlog \
             langgraph langchain langchain-core langchain-openai \
-            langchain-google-genai slowapi uvicorn gunicorn \
+            langchain-google-genai langchain-anthropic slowapi uvicorn gunicorn \
             psycopg psutil prometheus-client
 
       - name: Check Python syntax (all .py files)

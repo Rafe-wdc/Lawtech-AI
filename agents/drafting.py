@@ -349,6 +349,36 @@ _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
 
 
+# A markdown table separator row: "|---|---|", "| :-- | --: |" etc.
+_SEP_ROW_RE = r"^\s*\|[\s:|-]{3,}\|\s*$"
+
+
+def _party_pipes_to_dot_leader(text: str) -> str:
+    """Turn a leftover party-block table row into filing-format plain text.
+
+    After an orphan `|---|---|` separator is dropped, the content row it came
+    with is left looking like:
+
+        R/at: [TO_FILL: full residential address] |.....Applicant/Accused |
+
+    which is neither a table nor a cause title. Real Indian filings put the
+    party label on its own line behind a dot leader — the Supreme Court's own
+    writ format uses ".....Petitioner" / "....Respondents". So the trailing
+    pipe is dropped and the label moves to its own line.
+
+    Only lines carrying a dot-leader label are rewritten; any other stray pipe
+    is left alone so genuine tables elsewhere in the draft are untouched.
+    """
+    text = re.sub(
+        r"[ \t]*\|[ \t]*(\.{2,}[^|\n]*?)[ \t]*\|?[ \t]*$",
+        lambda m: "\n\n" + m.group(1).strip(),
+        text,
+        flags=re.MULTILINE,
+    )
+    # Any remaining trailing pipe on a party line is cosmetic debris.
+    return re.sub(r"[ \t]*\|[ \t]*$", "", text, flags=re.MULTILINE)
+
+
 def validate_draft(
     full_draft: str,
     stance=None,  # kept for signature compatibility; unused
@@ -414,6 +444,38 @@ def validate_draft(
             f"Stripped {len(cite_hits)} leftover [CITE: ...] placeholder(s)."
         )
 
+    # Malformed cause-title tables. The prompt used to license a one-row
+    # markdown table to right-align the party label; claude-sonnet-5 emitted the
+    # CONTENT row first and the `|---|---|` separator after it, which is not
+    # valid markdown, so the client rendered raw pipes and the separator as
+    # literal text in a filed draft (advocates 2026-09-08):
+    #
+    #     R/at: [TO_FILL: address] |.....Applicant/Accused |
+    #     |---|---|
+    #
+    # The prompt now bans the table outright, but a prompt rule alone has not
+    # held anywhere else in this pipeline, so the guarantee is also mechanical.
+    # A separator row is legitimate ONLY when a data row follows it; an orphan
+    # is dropped and the stray pipes on the party line become a dot-leader,
+    # which is what Supreme Court filing format uses.
+    _lines = cleaned.split("\n")
+    _sep = re.compile(_SEP_ROW_RE)
+    _fixed: list[str] = []
+    _orphans = 0
+    for _i, _ln in enumerate(_lines):
+        if _sep.match(_ln):
+            _nxt = next((x for x in _lines[_i + 1:_i + 3] if x.strip()), "")
+            if "|" not in _nxt:          # nothing follows -> orphan separator
+                _orphans += 1
+                continue
+        _fixed.append(_ln)
+    if _orphans:
+        cleaned = "\n".join(_fixed)
+        # Party line left behind as "text |.....Label |" -> "text" + dot-leader.
+        cleaned = _party_pipes_to_dot_leader(cleaned)
+        warnings.append(
+            f"Repaired {_orphans} malformed cause-title table row(s)."
+        )
     # Accidental repeated blocks. Advocates 2026-09-08 reported duplicated
     # content. Reproduced on BOTH models, so it is a pipeline defect, not a
     # model one: each section-pair call receives `prior_text` (the document so

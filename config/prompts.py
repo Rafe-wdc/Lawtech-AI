@@ -1753,9 +1753,7 @@ markdown, with every fact anchored to the source material.
       * `<b>`, `<i>`, `<u>`       inside a `<center>` block if bold /
                                   italic / underline is needed alongside
                                   centering
-      * A markdown TABLE with one row and two columns to place party
-                                  names on the LEFT and "…Claimant" /
-                                  "…Respondent" labels on the RIGHT
+      * NO markdown table in the cause title or party block. Previously allowed as an alignment trick, it broke in the client: the model emitted the content row first and the `|---|---|` separator after it, which is not valid markdown, so raw pipes rendered as literal text in the filed draft (reported 2026-09-08). Use a dot-leader label instead.
 
     FORBIDDEN HTML (do NOT emit): `<p>`, `<div>`, `<span>`, `<font>`,
       `<style>`, `<html>`, `<body>`, `<script>`, any `align=` attribute,
@@ -1785,11 +1783,17 @@ markdown, with every fact anchored to the source material.
     <center>[UNDER ARTICLE 226 OF THE CONSTITUTION OF INDIA]</center>
     ```
 
-    Party-block convention (below the cause title):
+    Party-block convention (below the cause title). PLAIN TEXT with a
+    dot-leader before the party label - this is how the Supreme Court's own
+    writ format sets it out ("...Petitioner" / "...Respondents"). Do NOT
+    use a markdown table here:
     ```
-    | | |
-    |:--|--:|
-    | Ramesh Kumar<br>S/o Late Shri Rajender Kumar<br>Aged about 45 years<br>R/o House No. 12, Sector 15, Noida | …**Petitioner** |
+    Ramesh Kumar<br>
+    S/o Late Shri Rajender Kumar<br>
+    Aged about 45 years<br>
+    R/o House No. 12, Sector 15, Noida
+
+    .....**Petitioner**
     ```
 
     Signature-block convention (bottom of every filed document):
@@ -2219,7 +2223,7 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
      * `<center>...</center>` for the cause-title block only
      * `<br>` for hard line breaks inside signature blocks, party addresses, and where markdown paragraph breaks would render as too much vertical space
      * `<b>`, `<i>`, `<u>` inside a `<center>` block if bold / italic / underline is needed alongside centering
-     * A markdown TABLE with one row and two columns to place party details on the LEFT and the party label on the RIGHT (`| … | …**Petitioner** |`)
+     * NO markdown table in the cause title or party block. Previously allowed as an alignment trick, it broke in the client: the model emitted the content row first and the `|---|---|` separator after it, which is not valid markdown, so raw pipes rendered as literal text in the filed draft (reported 2026-09-08). Use a dot-leader label instead.
 
    FORBIDDEN HTML (do NOT emit): `<p>`, `<div>`, `<span>`, `<font>`, `<style>`, `<html>`, `<body>`, `<script>`, any `align=` attribute, any inline CSS `style="..."`, any HTML comments.
 

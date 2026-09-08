@@ -414,6 +414,50 @@ def validate_draft(
             f"Stripped {len(cite_hits)} leftover [CITE: ...] placeholder(s)."
         )
 
+    # Accidental repeated blocks. Advocates 2026-09-08 reported duplicated
+    # content. Reproduced on BOTH models, so it is a pipeline defect, not a
+    # model one: each section-pair call receives `prior_text` (the document so
+    # far) and DRAFTING_SECTION_PAIR_PROMPT rule 5 tells it to avoid
+    # "re-emission of content already pled earlier". That rule is routinely
+    # ignored, so the guarantee moves into code (CLAUDE.md invariant 2: prompt
+    # rules that do not hold become deterministic checks).
+    #
+    # CRITICAL EXEMPTION - an affidavit legitimately repeats the cause title.
+    # A bail application ends with a supporting affidavit carrying its OWN
+    # court name, case number and party block, then "AFFIDAVIT IN SUPPORT OF..."
+    # and the deponent verification. Measured on a real draft: all four
+    # "duplicate" blocks were exactly that, and stripping them would leave an
+    # unfilable affidavit. So a repeat is preserved when an affidavit or
+    # verification title appears nearby; anything else is a genuine repeat.
+    _AFFIDAVIT_NEAR = re.compile(
+        r"(AFFIDAVIT|VERIFICATION|SOLEMNLY AFFIRM|ON SOLEMN AFFIRMATION|DEPONENT)",
+        re.IGNORECASE,
+    )
+    _blocks = re.split(r"(\n\s*\n)", cleaned)
+    _seen: dict[str, int] = {}
+    _dropped = 0
+    _out: list[str] = []
+    for _i, _blk in enumerate(_blocks):
+        _norm = re.sub(r"\s+", " ", _blk).strip().lower()
+        # Only consider substantial prose blocks; short lines (VERSUS, dates,
+        # numbering) repeat legitimately all over a filing.
+        if len(_norm) < 80 or _blk.strip().startswith("#"):
+            _out.append(_blk); continue
+        if _norm in _seen:
+            _ctx = "".join(_blocks[max(0, _i - 8):_i + 9])
+            if _AFFIDAVIT_NEAR.search(_ctx):
+                _out.append(_blk)          # legitimate affidavit caption
+            else:
+                _dropped += 1              # genuine duplicate - drop it
+            continue
+        _seen[_norm] = _i
+        _out.append(_blk)
+    if _dropped:
+        cleaned = "".join(_out)
+        cleaned = re.sub(r"(\n\s*){3,}", "\n\n", cleaned)
+        warnings.append(
+            f"Removed {_dropped} duplicated block(s) (affidavit captions preserved)."
+        )
     # Em / en dashes — the "ChatGPT dash". Flagged by advocates 2026-09-08 as
     # reading machine-written. Indian legal drafting sets off a parenthetical
     # with commas, semicolons or parentheses; an em-dash in a statutory notice

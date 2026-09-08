@@ -414,6 +414,74 @@ def validate_draft(
             f"Stripped {len(cite_hits)} leftover [CITE: ...] placeholder(s)."
         )
 
+    # Accidental repeated blocks. Advocates 2026-09-08 reported duplicated
+    # content. Reproduced on BOTH models, so it is a pipeline defect, not a
+    # model one: each section-pair call receives `prior_text` (the document so
+    # far) and DRAFTING_SECTION_PAIR_PROMPT rule 5 tells it to avoid
+    # "re-emission of content already pled earlier". That rule is routinely
+    # ignored, so the guarantee moves into code (CLAUDE.md invariant 2: prompt
+    # rules that do not hold become deterministic checks).
+    #
+    # CRITICAL EXEMPTION - an affidavit legitimately repeats the cause title.
+    # A bail application ends with a supporting affidavit carrying its OWN
+    # court name, case number and party block, then "AFFIDAVIT IN SUPPORT OF..."
+    # and the deponent verification. Measured on a real draft: all four
+    # "duplicate" blocks were exactly that, and stripping them would leave an
+    # unfilable affidavit. So a repeat is preserved when an affidavit or
+    # verification title appears nearby; anything else is a genuine repeat.
+    _AFFIDAVIT_NEAR = re.compile(
+        r"(AFFIDAVIT|VERIFICATION|SOLEMNLY AFFIRM|ON SOLEMN AFFIRMATION|DEPONENT)",
+        re.IGNORECASE,
+    )
+    _blocks = re.split(r"(\n\s*\n)", cleaned)
+    _seen: dict[str, int] = {}
+    _dropped = 0
+    _out: list[str] = []
+    for _i, _blk in enumerate(_blocks):
+        _norm = re.sub(r"\s+", " ", _blk).strip().lower()
+        # Only consider substantial prose blocks; short lines (VERSUS, dates,
+        # numbering) repeat legitimately all over a filing.
+        if len(_norm) < 80 or _blk.strip().startswith("#"):
+            _out.append(_blk); continue
+        if _norm in _seen:
+            _ctx = "".join(_blocks[max(0, _i - 8):_i + 9])
+            if _AFFIDAVIT_NEAR.search(_ctx):
+                _out.append(_blk)          # legitimate affidavit caption
+            else:
+                _dropped += 1              # genuine duplicate - drop it
+            continue
+        _seen[_norm] = _i
+        _out.append(_blk)
+    if _dropped:
+        cleaned = "".join(_out)
+        cleaned = re.sub(r"(\n\s*){3,}", "\n\n", cleaned)
+        warnings.append(
+            f"Removed {_dropped} duplicated block(s) (affidavit captions preserved)."
+        )
+    # Em / en dashes — the "ChatGPT dash". Flagged by advocates 2026-09-08 as
+    # reading machine-written. Indian legal drafting sets off a parenthetical
+    # with commas, semicolons or parentheses; an em-dash in a statutory notice
+    # marks the document as generated. No prompt rule forbade it and nothing
+    # normalised it, so it survived to the client.
+    #
+    # Mechanical and unambiguous, so it lives here rather than in
+    # CRITIQUE_PROMPT (invariant 4). Three shapes, most specific first:
+    #   "word — word"  spaced, parenthetical  -> ", "
+    #   "word—word"    unspaced, range/compound -> "-"
+    #   leading "— "   list/aside marker      -> ""
+    # Measured on real drafts: claude-sonnet-5 emitted 1-3 per notice,
+    # gemini-3.8-flash 0-2. This fixes both.
+    _dash_before = cleaned.count("—") + cleaned.count("–")
+    if _dash_before:
+        cleaned = re.sub(r"(?m)^\s*[—–]\s+", "", cleaned)
+        cleaned = re.sub(r"\s+[—–]\s+", ", ", cleaned)
+        cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
+        cleaned = cleaned.replace("—", "-").replace("–", "-")
+        cleaned = re.sub(r",\s*,", ",", cleaned)
+        warnings.append(
+            f"Normalised {_dash_before} em/en dash(es) to legal-register punctuation."
+        )
+
     # Empty numbered paragraphs — a bare `N.` line with no body.
     empty_para_hits = _EMPTY_NUMBERED_PARA_RE.findall(cleaned)
     if empty_para_hits:
@@ -2444,6 +2512,65 @@ def _substantive_word_overlap(want: str, got: str, min_ratio: float = 0.5) -> bo
     return len(shared) / len(w_want) >= min_ratio
 
 
+
+def _insert_repaired_in_plan_order(
+    draft: str,
+    sections: list["_Section"],
+    missing: list["_Section"],
+    repaired: list[str],
+) -> str:
+    """Splice repaired sections back at their planned positions.
+
+    The repair pass regenerates sections the writer skipped. Appending them
+    put a missing "Statement of Facts" after the Prayer - structurally wrong
+    for a filing, and what advocates flagged 2026-09-08 as sections being
+    "up and down".
+
+    For each repaired chunk, find the planned section that FOLLOWS it and is
+    present in the draft, then insert immediately before that heading. When
+    no following section is present the gap is at the end, so appending is
+    correct there. Never loses content: an unlocatable anchor degrades to the
+    previous append behaviour.
+    """
+    if not repaired:
+        return draft
+
+    heading_pos: dict[str, int] = {}
+    for line in draft.splitlines():
+        st = line.strip()
+        if st.startswith("#") or (st.startswith("**") and st.endswith("**")):
+            norm = _normalise_heading(st)
+            if norm and norm not in heading_pos:
+                heading_pos[norm] = draft.find(line)
+
+    def _anchor_for(sec: "_Section") -> int:
+        try:
+            idx = next(i for i, s in enumerate(sections) if s.id == sec.id)
+        except StopIteration:
+            return -1
+        for later in sections[idx + 1:]:
+            pos = heading_pos.get(_normalise_heading(later.heading))
+            if pos is not None and pos >= 0:
+                return pos
+        return -1
+
+    plan_order = {s.id: i for i, s in enumerate(sections)}
+    paired = list(zip(missing, repaired))[: len(repaired)]
+    # Insert from the LAST planned position backwards so earlier offsets stay
+    # valid as the string grows.
+    paired.sort(key=lambda pr: plan_order.get(pr[0].id, 10_000), reverse=True)
+
+    appended: list[str] = []
+    for sec, chunk in paired:
+        at = _anchor_for(sec)
+        if at > 0:
+            draft = draft[:at] + chunk.strip() + "\n\n" + draft[at:]
+        else:
+            appended.append(chunk)
+    if appended:
+        draft = draft + "\n\n" + "\n\n".join(reversed(appended))
+    return draft
+
 def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
     """Planned sections that never made it into the draft.
 
@@ -2934,7 +3061,15 @@ async def _generate_sectionwise(
                     continue
                 deduped_repaired.append(chunk_text)
             if deduped_repaired:
-                draft = draft + "\n\n" + "\n\n".join(deduped_repaired)
+                # Insert each repaired section at its PLANNED position rather than
+                # appending. Appending put a regenerated "Statement of Facts"
+                # after the Prayer and Verification - advocates 2026-09-08
+                # reported "sections up and down". The plan is ordered and
+                # `missing` preserves that order, so the anchor is the next
+                # planned section that DID reach the draft.
+                draft = _insert_repaired_in_plan_order(
+                    draft, sections, missing, deduped_repaired,
+                )
             still_missing = _missing_planned_sections(draft, sections)
             log.info("Plan adherence after repair",
                      recovered=len(missing) - len(still_missing),

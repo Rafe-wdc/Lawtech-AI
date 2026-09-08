@@ -459,6 +459,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
         progress("judgment", "Extracting case details from query...", step="metadata")
         # Preliminary search uses regex-fallback metadata (fast) while GPT-4o extracts
         # richer metadata. If preliminary hits are found, we skip the refined search.
+        
         def _preliminary_search():
             prelim_meta = _judgment_regex_fallback(query)
             prelim_court, _ = _normalize_court_filter(prelim_meta.court_name)

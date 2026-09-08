@@ -33,6 +33,44 @@ from __future__ import annotations
 # Stable identifiers used by the selector. Order matters only for the
 # selector prompt — put the most-frequently-requested niches first so the
 # LLM sees them in a natural priority order.
+# ---------------------------------------------------------------------------
+# Canonical reference template per niche (structural stability)
+# ---------------------------------------------------------------------------
+#
+# ES returns ~100 candidate templates for a generic query and their BM25
+# scores are near-ties - measured 2026-09-08 on "Draft a general bail
+# application": 3.7 / 3.6 / 3.6 / 3.4. `_pick_reference_source` then asks an
+# LLM to break that tie, and it flips between runs: run 1 chose the Sessions
+# Court format, runs 2-4 chose the High Court format.
+#
+# That flip is not cosmetic. The fan-out judge uses the picked template as its
+# structural skeleton, so a different template means a different forum,
+# different headings and a different paragraph breakdown for the SAME query.
+#
+# Niche detection, by contrast, was 100% stable across the same runs
+# (bail_application_regular 4/4). So where a niche has one obviously-correct
+# template, pin it and skip the tie-break entirely. Values are matched as
+# case-insensitive substrings against the ES `source` path, so they survive
+# directory moves and minor filename edits.
+#
+# A niche absent from this map, or whose template is not in the ES result set,
+# falls through to the LLM picker unchanged - this narrows the picker's job
+# rather than replacing it.
+NICHE_CANONICAL_TEMPLATE: dict[str, str] = {
+    # VERIFIED against the live ES corpus 2026-09-08: each value is a filename
+    # PREFIX whose one match is the correct generic template for that niche.
+    #
+    # Entries are added only after checking the match. Two rejected in review:
+    #   plaint_civil_suit  -> "Plaint" matched "Plaint for Mesne Profit.csv",
+    #                         a specific suit, not a generic plaint
+    #   written_statement  -> matched a tenant-specific written statement
+    # A niche without an entry falls through to the LLM picker, which is the
+    # previous behaviour - so an absent entry costs nothing and a WRONG entry
+    # is worse than none: it pins every run to the wrong document type.
+    "bail_application_regular": "Bail Application under Section 439",
+    "notice_ni_act_s138":       "Notice under Section 138 of Negotiable Instruments Act",
+}
+
 NICHE_KEYS: tuple[str, ...] = (
     "bail_application_regular",
     "bail_application_anticipatory",
@@ -409,7 +447,7 @@ NOTICE_NI_ACT_S138 = """## NICHE OVERLAY — LEGAL NOTICE UNDER SECTION 138 OF T
 8. NUMBERED FACT PARAGRAPHS — (i) source of the debt / liability; (ii) issuance of the cheque with cheque number, date, amount, drawee bank branch; (iii) presentation and dishonour with the specific date of the bank's return memo and the exact reason recorded on the memo (e.g. "Funds Insufficient", "Payment Stopped by Drawer", "Signature Differs", "Account Closed"); (iv) any prior demand and its outcome.
 9. STATUTORY DEMAND paragraph — "In the circumstances aforesaid, my Client, through the undersigned, hereby demands from you the sum of Rs. [amount] being the cheque amount, together with interest at [rate]% per annum from the date of dishonour till realisation, WITHIN FIFTEEN (15) DAYS from the date of receipt of this notice, failing which my Client shall, without any further intimation, initiate criminal prosecution against you under Section 138 read with Sections 141 and 142 of the Negotiable Instruments Act, 1881, entirely at your risk as to costs and consequences."
 10. Closing — "Yours faithfully".
-11. Signature block — Advocate's name, enrolment number, address, contact.
+11. Signature block — the advocate's signature and name only (no enrolment number, address or contact).
 12. "CC: my Client" (optional).
 
 **Mandatory statutory anchors:**
@@ -435,7 +473,7 @@ REPLY_TO_LEGAL_NOTICE = """## NICHE OVERLAY — REPLY TO A LEGAL NOTICE
 1. Letterhead of the replying advocate.
 2. Date and reference number.
 3. "By Registered Post AD / Speed Post AD / Electronic Mail" — mode of dispatch.
-4. Addressee — the advocate who sent the original notice (name, address, enrolment number from the original notice); CC to the original client if named.
+4. Addressee — the advocate who sent the original notice (name, and address if the original notice states it); CC to the original client if named.
 5. Subject line — "REPLY TO YOUR LEGAL NOTICE DATED [___] BEARING REFERENCE [___]".
 6. Salutation — "Dear Sir / Madam".
 7. Introductory paragraph — advocate's authority ("I have been instructed by my client [name] (hereinafter, my Client) to reply to your legal notice dated [___] served upon my Client on [___] as under:—").
@@ -444,7 +482,7 @@ REPLY_TO_LEGAL_NOTICE = """## NICHE OVERLAY — REPLY TO A LEGAL NOTICE
 10. AFFIRMATIVE STANCE — my Client's positive version of the matter as a numbered narrative.
 11. Closing paragraph — "In view of the foregoing, my Client denies the claims raised in the notice under reply, calls upon you to withdraw the notice unconditionally, and reserves the right to initiate appropriate legal proceedings in the event of any adverse action. This reply is without prejudice to my Client's rights and contentions."
 12. Closing — "Yours faithfully".
-13. Signature block — Advocate's name, enrolment number, address, contact.
+13. Signature block — the advocate's signature and name only (no enrolment number, address or contact).
 14. "CC: my Client".
 
 **Mandatory considerations:**

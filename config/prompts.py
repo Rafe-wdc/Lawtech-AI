@@ -1753,9 +1753,7 @@ markdown, with every fact anchored to the source material.
       * `<b>`, `<i>`, `<u>`       inside a `<center>` block if bold /
                                   italic / underline is needed alongside
                                   centering
-      * A markdown TABLE with one row and two columns to place party
-                                  names on the LEFT and "…Claimant" /
-                                  "…Respondent" labels on the RIGHT
+      * NO markdown table in the cause title or party block. Previously allowed as an alignment trick, it broke in the client: the model emitted the content row first and the `|---|---|` separator after it, which is not valid markdown, so raw pipes rendered as literal text in the filed draft (reported 2026-09-08). Use a dot-leader label instead.
 
     FORBIDDEN HTML (do NOT emit): `<p>`, `<div>`, `<span>`, `<font>`,
       `<style>`, `<html>`, `<body>`, `<script>`, any `align=` attribute,
@@ -1785,31 +1783,36 @@ markdown, with every fact anchored to the source material.
     <center>[UNDER ARTICLE 226 OF THE CONSTITUTION OF INDIA]</center>
     ```
 
-    Party-block convention (below the cause title):
+    Party-block convention (below the cause title). PLAIN TEXT with a
+    dot-leader before the party label - this is how the Supreme Court's own
+    writ format sets it out ("...Petitioner" / "...Respondents"). Do NOT
+    use a markdown table here:
     ```
-    | | |
-    |:--|--:|
-    | Ramesh Kumar<br>S/o Late Shri Rajender Kumar<br>Aged about 45 years<br>R/o House No. 12, Sector 15, Noida | …**Petitioner** |
+    Ramesh Kumar<br>
+    S/o Late Shri Rajender Kumar<br>
+    Aged about 45 years<br>
+    R/o House No. 12, Sector 15, Noida
+
+    .....**Petitioner**
     ```
 
     Signature-block convention (bottom of every filed document):
     ```
     Place: New Delhi<br>
-    Date: [TO_FILL: date] September, 2026
+    Date: 08 September 2026          (use TODAY'S DATE from the user block)
 
     <br>
 
     (Signature)<br>
     **[Advocate Name]**<br>
-    Counsel for the Petitioner<br>
-    Enrollment No. [TO_FILL: bar council no.]
+    Counsel for the Petitioner
     ```
 
 11. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
 
     When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do
     NOT provide (deponent's exact address, exact filing date, case
-    number of a related HC proceeding, advocate's enrolment number,
+    number of a related HC proceeding,
     court fee amount, etc.), emit an unambiguous placeholder counsel
     can grep for and fill:
 
@@ -2220,7 +2223,7 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
      * `<center>...</center>` for the cause-title block only
      * `<br>` for hard line breaks inside signature blocks, party addresses, and where markdown paragraph breaks would render as too much vertical space
      * `<b>`, `<i>`, `<u>` inside a `<center>` block if bold / italic / underline is needed alongside centering
-     * A markdown TABLE with one row and two columns to place party details on the LEFT and the party label on the RIGHT (`| … | …**Petitioner** |`)
+     * NO markdown table in the cause title or party block. Previously allowed as an alignment trick, it broke in the client: the model emitted the content row first and the `|---|---|` separator after it, which is not valid markdown, so raw pipes rendered as literal text in the filed draft (reported 2026-09-08). Use a dot-leader label instead.
 
    FORBIDDEN HTML (do NOT emit): `<p>`, `<div>`, `<span>`, `<font>`, `<style>`, `<html>`, `<body>`, `<script>`, any `align=` attribute, any inline CSS `style="..."`, any HTML comments.
 
@@ -2254,7 +2257,7 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
     A skeleton section when the summary asks for court-standard volume is a Rule-11 violation the critic will catch.
 
 13. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
-    When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do not provide (deponent's exact address, exact filing date, case number of a related HC proceeding, advocate's enrolment number, court fee amount, etc.), emit an unambiguous placeholder counsel can grep for and fill:
+    When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do not provide (deponent's exact address, exact filing date, case number of a related HC proceeding, court fee amount, etc.), emit an unambiguous placeholder counsel can grep for and fill:
 
         `[TO_FILL: description of what counsel needs to provide]`
 
@@ -2294,7 +2297,10 @@ A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA. The new criminal codes c
 B. PROCEDURAL DISCLOSURES THE DRAFTER MUST NOT SILENTLY OMIT. Where the document type calls for them, include them — bracketed when the facts are unknown:
    - Bail applications: a paragraph disclosing whether any earlier bail application has been made, and its outcome. Indian courts treat non-disclosure of a previous unsuccessful application as a serious lapse. Use e.g. "[STATE WHETHER ANY PREVIOUS BAIL APPLICATION HAS BEEN FILED. If yes, give the court, case number, date and outcome. If none, state: No previous application for bail has been filed by the Applicant in this matter before this or any other Court.]"
    - VERIFICATION must separate paragraphs of FACT (verified true to personal knowledge) from paragraphs of LEGAL SUBMISSION (believed true on advice of counsel).
-   - The advocate block needs a name, enrolment number and address for service, not a bare name — bracket what is unknown.
+   - The advocate block is the SIGNATURE and the advocate's NAME only. Do NOT
+     emit enrolment / Bar Council number, address for service, phone or email —
+     this product captures only the signature and name, so stubbing those fields
+     leaves the user deleting boilerplate on every draft.
 This is not a licence to add sections the reference draft does not have; the reference remains the structural anchor. It covers omissions that expose the litigant, not general enrichment.
 """
 

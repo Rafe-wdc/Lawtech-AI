@@ -148,7 +148,15 @@ def _validate_pick(raw_key: str | None) -> str | None:
     return None
 
 
-async def pick_drafting_niche(
+# Per-request memo so the niche can be resolved EARLY (to pin the reference
+# template, see agents/drafting.py) and read again later by the generation
+# path without paying for a second Flash-Lite call. Keyed on the exact inputs;
+# bounded because the key space is drafting queries, not arbitrary text.
+_NICHE_MEMO: dict[tuple[str, str], "str | None"] = {}
+_NICHE_MEMO_MAX = 512
+
+
+async def _pick_drafting_niche_uncached(
     query: str,
     user_facts: str | None = None,
     *,
@@ -165,6 +173,9 @@ async def pick_drafting_niche(
     ``config.drafting_niches.get_niche_overlay`` which returns an empty
     string on ``None`` — so the caller never needs a special case.
     """
+    _memo_key = ((query or "")[:600], (user_facts or "")[:600])
+    if _memo_key in _NICHE_MEMO:
+        return _NICHE_MEMO[_memo_key]
     if not query or not query.strip():
         return None
 
@@ -247,3 +258,28 @@ __all__ = [
     "NICHE_SELECTOR_PROMPT",
     "NICHE_NONE_SENTINEL",
 ]
+
+async def pick_drafting_niche(
+    query: str,
+    user_facts: str | None = None,
+    *,
+    timeout_s: float = 8.0,
+) -> str | None:
+    """Memoised wrapper around the niche selector.
+
+    The niche is now resolved EARLY in drafting_node so it can pin the
+    reference template (agents/drafting.py: structural stability), and again
+    later by the generation path for the overlay. Without this memo that would
+    be two identical Flash-Lite calls per draft. Keyed on the exact inputs, so
+    a different query or different uploaded facts re-runs the selector.
+    """
+    key = ((query or "")[:600], (user_facts or "")[:600])
+    if key in _NICHE_MEMO:
+        return _NICHE_MEMO[key]
+    res = await _pick_drafting_niche_uncached(
+        query, user_facts, timeout_s=timeout_s,
+    )
+    if len(_NICHE_MEMO) >= _NICHE_MEMO_MAX:
+        _NICHE_MEMO.clear()
+    _NICHE_MEMO[key] = res
+    return res

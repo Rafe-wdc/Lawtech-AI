@@ -349,6 +349,36 @@ _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
 
 
+# A markdown table separator row: "|---|---|", "| :-- | --: |" etc.
+_SEP_ROW_RE = r"^\s*\|[\s:|-]{3,}\|\s*$"
+
+
+def _party_pipes_to_dot_leader(text: str) -> str:
+    """Turn a leftover party-block table row into filing-format plain text.
+
+    After an orphan `|---|---|` separator is dropped, the content row it came
+    with is left looking like:
+
+        R/at: [TO_FILL: full residential address] |.....Applicant/Accused |
+
+    which is neither a table nor a cause title. Real Indian filings put the
+    party label on its own line behind a dot leader — the Supreme Court's own
+    writ format uses ".....Petitioner" / "....Respondents". So the trailing
+    pipe is dropped and the label moves to its own line.
+
+    Only lines carrying a dot-leader label are rewritten; any other stray pipe
+    is left alone so genuine tables elsewhere in the draft are untouched.
+    """
+    text = re.sub(
+        r"[ \t]*\|[ \t]*(\.{2,}[^|\n]*?)[ \t]*\|?[ \t]*$",
+        lambda m: "\n\n" + m.group(1).strip(),
+        text,
+        flags=re.MULTILINE,
+    )
+    # Any remaining trailing pipe on a party line is cosmetic debris.
+    return re.sub(r"[ \t]*\|[ \t]*$", "", text, flags=re.MULTILINE)
+
+
 def validate_draft(
     full_draft: str,
     stance=None,  # kept for signature compatibility; unused
@@ -414,6 +444,38 @@ def validate_draft(
             f"Stripped {len(cite_hits)} leftover [CITE: ...] placeholder(s)."
         )
 
+    # Malformed cause-title tables. The prompt used to license a one-row
+    # markdown table to right-align the party label; claude-sonnet-5 emitted the
+    # CONTENT row first and the `|---|---|` separator after it, which is not
+    # valid markdown, so the client rendered raw pipes and the separator as
+    # literal text in a filed draft (advocates 2026-09-08):
+    #
+    #     R/at: [TO_FILL: address] |.....Applicant/Accused |
+    #     |---|---|
+    #
+    # The prompt now bans the table outright, but a prompt rule alone has not
+    # held anywhere else in this pipeline, so the guarantee is also mechanical.
+    # A separator row is legitimate ONLY when a data row follows it; an orphan
+    # is dropped and the stray pipes on the party line become a dot-leader,
+    # which is what Supreme Court filing format uses.
+    _lines = cleaned.split("\n")
+    _sep = re.compile(_SEP_ROW_RE)
+    _fixed: list[str] = []
+    _orphans = 0
+    for _i, _ln in enumerate(_lines):
+        if _sep.match(_ln):
+            _nxt = next((x for x in _lines[_i + 1:_i + 3] if x.strip()), "")
+            if "|" not in _nxt:          # nothing follows -> orphan separator
+                _orphans += 1
+                continue
+        _fixed.append(_ln)
+    if _orphans:
+        cleaned = "\n".join(_fixed)
+        # Party line left behind as "text |.....Label |" -> "text" + dot-leader.
+        cleaned = _party_pipes_to_dot_leader(cleaned)
+        warnings.append(
+            f"Repaired {_orphans} malformed cause-title table row(s)."
+        )
     # Accidental repeated blocks. Advocates 2026-09-08 reported duplicated
     # content. Reproduced on BOTH models, so it is a pipeline defect, not a
     # model one: each section-pair call receives `prior_text` (the document so
@@ -692,6 +754,23 @@ async def _pick_reference_source(
         return None
 
 
+
+# Template-pick cache: (niche_key, normalised query) -> ES source path.
+# Process-local and unbounded-guarded; a worker restart simply re-picks. Small
+# because the key space is drafting queries, not arbitrary user text.
+_TEMPLATE_PICK_CACHE: dict[str, str] = {}
+_TEMPLATE_PICK_CACHE_MAX = 512
+
+
+def _normalise_pick_query(q: str) -> str:
+    """Collapse a query to a stable cache key.
+
+    Lowercase, strip punctuation, collapse whitespace. "Draft a general bail
+    application" and "draft a general bail application." must share a key, or
+    the cache never hits on the paraphrases users actually type.
+    """
+    return re.sub(r"[^a-z0-9 ]+", " ", (q or "").lower())[:400].strip()
+
 async def _acquire_reference_draft(
     query: str,
     progress_emit,
@@ -699,6 +778,7 @@ async def _acquire_reference_draft(
     user_language: str = "en",
     intent=None,
     original_query: str = "",
+    niche_key: str = "",
 ) -> tuple[str, str, str, str]:
     """Stage 1 of the simplified drafting pipeline (v1 DraftRetriever pattern).
 
@@ -781,7 +861,62 @@ async def _acquire_reference_draft(
     # the LLM reasons about English file names against English intent —
     # regional-script tokens against English paths produced picker-rejections
     # even when a good template existed in the corpus.
-    picked = await _pick_reference_source(search_query, file_paths)
+    # STRUCTURAL STABILITY (2026-09-08). ES scores for a generic drafting
+    # query are near-ties - measured 3.7 / 3.6 / 3.6 / 3.4 on "Draft a general
+    # bail application" - so the LLM tie-break flipped between runs and took
+    # the whole document structure with it: run 1 produced a Sessions Court
+    # bail application, runs 2-4 a High Court one. The fan-out judge uses the
+    # picked template as its skeleton, so the forum, headings and paragraph
+    # breakdown all changed for the SAME query.
+    #
+    # Two deterministic layers ahead of the picker, cheapest first:
+    #   1. Canonical pin - niche detection is stable (4/4 in the same test),
+    #      so a niche with one obviously-correct template skips the tie-break.
+    #   2. Pick cache - identical (niche, query) reuses the previous choice.
+    #      Deliberately caches the TEMPLATE PATH, not the draft: prompt fixes,
+    #      statute updates and refiner changes still apply on every request.
+    #      That is the difference from RESPONSE_CACHE_ENABLED, which serves a
+    #      whole stale draft and hid our own fixes from testers.
+    picked = None
+    _cache_key = f"{niche_key}|{_normalise_pick_query(search_query)}"
+
+    if niche_key:
+        from config.drafting_niches import NICHE_CANONICAL_TEMPLATE
+        _want = NICHE_CANONICAL_TEMPLATE.get(niche_key, "")
+        if _want:
+            # Match the FILE NAME with startswith, not a substring anywhere in
+            # the path. Substring matching pinned the wrong template: for
+            # notice_ni_act_s138 the pattern "Notice under Section 138 of
+            # Negotiable Instruments Act" also matches "Reply to Legal Notice
+            # under Section 138 of Negotiable Instruments Act" - a reply to a
+            # notice, which is the opposite document. Stable-but-wrong is worse
+            # than the flip-flop this pin exists to fix.
+            _wl = _want.lower()
+            for _p in file_paths:
+                _base = _p.rsplit("/", 1)[-1].rsplit(chr(92), 1)[-1].lower()
+                if _base.startswith(_wl):
+                    picked = _p
+                    log.info("Reference pinned by niche (picker skipped)",
+                             niche_key=niche_key, picked=_p[:90])
+                    break
+            if picked is None:
+                log.info("Niche has a canonical template but it is not in the "
+                         "ES candidates - falling through to the picker",
+                         niche_key=niche_key, want=_want[:60])
+
+    if picked is None:
+        _cached = _TEMPLATE_PICK_CACHE.get(_cache_key)
+        if _cached and _cached in file_paths:
+            picked = _cached
+            log.info("Reference pick served from cache",
+                     niche_key=niche_key or "none", picked=_cached[:90])
+
+    if picked is None:
+        picked = await _pick_reference_source(search_query, file_paths)
+        if picked:
+            if len(_TEMPLATE_PICK_CACHE) >= _TEMPLATE_PICK_CACHE_MAX:
+                _TEMPLATE_PICK_CACHE.clear()
+            _TEMPLATE_PICK_CACHE[_cache_key] = picked
 
     if picked is None:
         log.info("Picker rejected all candidates; synthesizing via web")
@@ -3851,6 +3986,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
             english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         else:
+            # Resolve the niche BEFORE the reference lookup so it can pin the
+            # canonical template and skip the LLM tie-break. Memoised in
+            # agents/drafting_niche, so the generation path re-reads it for
+            # free. Failure is non-fatal: an empty key falls through to the
+            # pick cache and then the picker - previous behaviour.
+            _early_niche_key = ""
+            try:
+                from agents.drafting_niche import pick_drafting_niche as _pdn
+                _early_niche_key = await _pdn(query, user_facts) or ""
+            except Exception as _ne:
+                log.debug("Early niche resolution failed", error=str(_ne)[:120])
             progress("drafting", "Searching templates and relevant law...",
                      step="reference")
             (reference_text, reference_source, reference_kind,
@@ -3862,6 +4008,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         user_language=user_language,
                         intent=intent_obj,
                         original_query=original_query,
+                        niche_key=_early_niche_key,
                     ),
                     _gather_relevant_context(query),
                 )

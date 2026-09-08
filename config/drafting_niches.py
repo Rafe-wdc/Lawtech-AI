@@ -33,6 +33,44 @@ from __future__ import annotations
 # Stable identifiers used by the selector. Order matters only for the
 # selector prompt — put the most-frequently-requested niches first so the
 # LLM sees them in a natural priority order.
+# ---------------------------------------------------------------------------
+# Canonical reference template per niche (structural stability)
+# ---------------------------------------------------------------------------
+#
+# ES returns ~100 candidate templates for a generic query and their BM25
+# scores are near-ties - measured 2026-09-08 on "Draft a general bail
+# application": 3.7 / 3.6 / 3.6 / 3.4. `_pick_reference_source` then asks an
+# LLM to break that tie, and it flips between runs: run 1 chose the Sessions
+# Court format, runs 2-4 chose the High Court format.
+#
+# That flip is not cosmetic. The fan-out judge uses the picked template as its
+# structural skeleton, so a different template means a different forum,
+# different headings and a different paragraph breakdown for the SAME query.
+#
+# Niche detection, by contrast, was 100% stable across the same runs
+# (bail_application_regular 4/4). So where a niche has one obviously-correct
+# template, pin it and skip the tie-break entirely. Values are matched as
+# case-insensitive substrings against the ES `source` path, so they survive
+# directory moves and minor filename edits.
+#
+# A niche absent from this map, or whose template is not in the ES result set,
+# falls through to the LLM picker unchanged - this narrows the picker's job
+# rather than replacing it.
+NICHE_CANONICAL_TEMPLATE: dict[str, str] = {
+    # VERIFIED against the live ES corpus 2026-09-08: each value is a filename
+    # PREFIX whose one match is the correct generic template for that niche.
+    #
+    # Entries are added only after checking the match. Two rejected in review:
+    #   plaint_civil_suit  -> "Plaint" matched "Plaint for Mesne Profit.csv",
+    #                         a specific suit, not a generic plaint
+    #   written_statement  -> matched a tenant-specific written statement
+    # A niche without an entry falls through to the LLM picker, which is the
+    # previous behaviour - so an absent entry costs nothing and a WRONG entry
+    # is worse than none: it pins every run to the wrong document type.
+    "bail_application_regular": "Bail Application under Section 439",
+    "notice_ni_act_s138":       "Notice under Section 138 of Negotiable Instruments Act",
+}
+
 NICHE_KEYS: tuple[str, ...] = (
     "bail_application_regular",
     "bail_application_anticipatory",

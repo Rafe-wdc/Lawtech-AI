@@ -409,7 +409,7 @@ NOTICE_NI_ACT_S138 = """## NICHE OVERLAY — LEGAL NOTICE UNDER SECTION 138 OF T
 8. NUMBERED FACT PARAGRAPHS — (i) source of the debt / liability; (ii) issuance of the cheque with cheque number, date, amount, drawee bank branch; (iii) presentation and dishonour with the specific date of the bank's return memo and the exact reason recorded on the memo (e.g. "Funds Insufficient", "Payment Stopped by Drawer", "Signature Differs", "Account Closed"); (iv) any prior demand and its outcome.
 9. STATUTORY DEMAND paragraph — "In the circumstances aforesaid, my Client, through the undersigned, hereby demands from you the sum of Rs. [amount] being the cheque amount, together with interest at [rate]% per annum from the date of dishonour till realisation, WITHIN FIFTEEN (15) DAYS from the date of receipt of this notice, failing which my Client shall, without any further intimation, initiate criminal prosecution against you under Section 138 read with Sections 141 and 142 of the Negotiable Instruments Act, 1881, entirely at your risk as to costs and consequences."
 10. Closing — "Yours faithfully".
-11. Signature block — Advocate's name, enrolment number, address, contact.
+11. Signature block — the advocate's signature and name only (no enrolment number, address or contact).
 12. "CC: my Client" (optional).
 
 **Mandatory statutory anchors:**
@@ -435,7 +435,7 @@ REPLY_TO_LEGAL_NOTICE = """## NICHE OVERLAY — REPLY TO A LEGAL NOTICE
 1. Letterhead of the replying advocate.
 2. Date and reference number.
 3. "By Registered Post AD / Speed Post AD / Electronic Mail" — mode of dispatch.
-4. Addressee — the advocate who sent the original notice (name, address, enrolment number from the original notice); CC to the original client if named.
+4. Addressee — the advocate who sent the original notice (name, and address if the original notice states it); CC to the original client if named.
 5. Subject line — "REPLY TO YOUR LEGAL NOTICE DATED [___] BEARING REFERENCE [___]".
 6. Salutation — "Dear Sir / Madam".
 7. Introductory paragraph — advocate's authority ("I have been instructed by my client [name] (hereinafter, my Client) to reply to your legal notice dated [___] served upon my Client on [___] as under:—").
@@ -444,7 +444,7 @@ REPLY_TO_LEGAL_NOTICE = """## NICHE OVERLAY — REPLY TO A LEGAL NOTICE
 10. AFFIRMATIVE STANCE — my Client's positive version of the matter as a numbered narrative.
 11. Closing paragraph — "In view of the foregoing, my Client denies the claims raised in the notice under reply, calls upon you to withdraw the notice unconditionally, and reserves the right to initiate appropriate legal proceedings in the event of any adverse action. This reply is without prejudice to my Client's rights and contentions."
 12. Closing — "Yours faithfully".
-13. Signature block — Advocate's name, enrolment number, address, contact.
+13. Signature block — the advocate's signature and name only (no enrolment number, address or contact).
 14. "CC: my Client".
 
 **Mandatory considerations:**

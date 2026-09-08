@@ -1795,21 +1795,20 @@ markdown, with every fact anchored to the source material.
     Signature-block convention (bottom of every filed document):
     ```
     Place: New Delhi<br>
-    Date: [TO_FILL: date] September, 2026
+    Date: 08 September 2026          (use TODAY'S DATE from the user block)
 
     <br>
 
     (Signature)<br>
     **[Advocate Name]**<br>
-    Counsel for the Petitioner<br>
-    Enrollment No. [TO_FILL: bar council no.]
+    Counsel for the Petitioner
     ```
 
 11. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
 
     When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do
     NOT provide (deponent's exact address, exact filing date, case
-    number of a related HC proceeding, advocate's enrolment number,
+    number of a related HC proceeding,
     court fee amount, etc.), emit an unambiguous placeholder counsel
     can grep for and fill:
 
@@ -2254,7 +2253,7 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
     A skeleton section when the summary asks for court-standard volume is a Rule-11 violation the critic will catch.
 
 13. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
-    When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do not provide (deponent's exact address, exact filing date, case number of a related HC proceeding, advocate's enrolment number, court fee amount, etc.), emit an unambiguous placeholder counsel can grep for and fill:
+    When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do not provide (deponent's exact address, exact filing date, case number of a related HC proceeding, court fee amount, etc.), emit an unambiguous placeholder counsel can grep for and fill:
 
         `[TO_FILL: description of what counsel needs to provide]`
 
@@ -2294,7 +2293,10 @@ A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA. The new criminal codes c
 B. PROCEDURAL DISCLOSURES THE DRAFTER MUST NOT SILENTLY OMIT. Where the document type calls for them, include them — bracketed when the facts are unknown:
    - Bail applications: a paragraph disclosing whether any earlier bail application has been made, and its outcome. Indian courts treat non-disclosure of a previous unsuccessful application as a serious lapse. Use e.g. "[STATE WHETHER ANY PREVIOUS BAIL APPLICATION HAS BEEN FILED. If yes, give the court, case number, date and outcome. If none, state: No previous application for bail has been filed by the Applicant in this matter before this or any other Court.]"
    - VERIFICATION must separate paragraphs of FACT (verified true to personal knowledge) from paragraphs of LEGAL SUBMISSION (believed true on advice of counsel).
-   - The advocate block needs a name, enrolment number and address for service, not a bare name — bracket what is unknown.
+   - The advocate block is the SIGNATURE and the advocate's NAME only. Do NOT
+     emit enrolment / Bar Council number, address for service, phone or email —
+     this product captures only the signature and name, so stubbing those fields
+     leaves the user deleting boilerplate on every draft.
 This is not a licence to add sections the reference draft does not have; the reference remains the structural anchor. It covers omissions that expose the litigant, not general enrichment.
 """
 

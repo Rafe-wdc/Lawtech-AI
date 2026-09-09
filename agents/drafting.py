@@ -348,6 +348,11 @@ _HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
 
+# A line opening with a bare number of three or more digits and a period.
+# Two-digit numbers are genuine paragraph numbers; three-plus are years
+# and amounts that hard-wrapping stranded at line start.
+_LINE_INITIAL_BIG_NUMBER_RE = re.compile(r"(?m)^([ \t]*\d{3,})\.(?=\s)")
+
 
 # A markdown table separator row: "|---|---|", "| :-- | --: |" etc.
 _SEP_ROW_RE = r"^\s*\|[\s:|-]{3,}\|\s*$"
@@ -378,6 +383,25 @@ def _party_pipes_to_dot_leader(text: str) -> str:
     # Any remaining trailing pipe on a party line is cosmetic debris.
     return re.sub(r"[ \t]*\|[ \t]*$", "", text, flags=re.MULTILINE)
 
+
+
+
+def _br_to_layout(text: str, br_re) -> str:
+    """Turn <br> into layout the markdown renderer keeps.
+
+    Outside a table a <br> becomes a paragraph break, the only line break
+    that survives rendering. Inside a table row it becomes a space: a
+    newline there splits the row and the whole table falls apart (the
+    table prompt explicitly allows <br> between bullets inside a cell,
+    config/prompts.py). Found 2026-09-09 on the IPC 420 / BNS 318 comparison.
+    """
+    out = []
+    for line in text.split("\n"):
+        if "<br" in line.lower():
+            is_row = line.lstrip().startswith("|") or line.count("|") >= 2
+            line = br_re.sub(" " if is_row else "\n\n", line)
+        out.append(line)
+    return "\n".join(out)
 
 def validate_draft(
     full_draft: str,
@@ -424,15 +448,34 @@ def validate_draft(
         log.info("Validator: mojibake auto-fixed (substring fallback)",
                  patterns_fixed=fixed_count)
 
-    # HTML strip — convert <br> / <hr> to markdown equivalents first so
-    # newlines survive, then drop any remaining tag scaffolding. Inner
-    # text is preserved.
-    cleaned = _HTML_BR_RE.sub("\n", cleaned)
+    # HTML strip. The prompt forbids HTML outright (2026-09-09; until then
+    # it whitelisted <center>/<br>), so any tag here is a model slip. <br>
+    # used to become a single "\n", which the markdown renderer collapses
+    # into the previous line - that is how "NAME: X<br>SIGNATURE" reached
+    # an advocate as one run-on line. A paragraph break is the only line
+    # break that survives rendering, so that is what a stray <br> becomes.
+    # Inner text of every other tag is preserved.
+    cleaned = _br_to_layout(cleaned, _HTML_BR_RE)
     cleaned = _HTML_HR_RE.sub("\n---\n", cleaned)
     cleaned, html_strip_count = _HTML_ANY_TAG_RE.subn("", cleaned)
     if html_strip_count:
         warnings.append(
             f"Stripped {html_strip_count} HTML tag(s) from draft."
+        )
+
+    # A line that opens with a bare number and a period is a markdown
+    # ordered-list item. When the writer hard-wraps prose, a year or an
+    # amount can land at line start ("... arrested on 12 March\n2023. The
+    # accused ...") and render as list item number 2023 with its own
+    # indent. Numbers of three or more digits are never paragraph numbers
+    # in a pleading, so escaping the period is safe. Mechanical only.
+    cleaned, _stranded = _LINE_INITIAL_BIG_NUMBER_RE.subn(
+        lambda m: m.group(1) + "\\.", cleaned
+    )
+    if _stranded:
+        warnings.append(
+            f"Escaped {_stranded} line-initial number(s) that would render "
+            "as list items."
         )
 
     # [CITE: ...] survivors — the generation prompt forbids them, this is
@@ -535,11 +578,11 @@ def validate_draft(
     # gemini-3.8-flash 0-2. This fixes both.
     _dash_before = cleaned.count("—") + cleaned.count("–")
     if _dash_before:
-        cleaned = re.sub(r"(?m)^\s*[—–]\s+", "", cleaned)
-        cleaned = re.sub(r"\s+[—–]\s+", ", ", cleaned)
+        cleaned = re.sub(r"(?m)^[ \t]*[—–][ \t]+", "", cleaned)
+        cleaned = re.sub(r"[ \t]+[—–][ \t]+", ", ", cleaned)
         cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
         cleaned = cleaned.replace("—", "-").replace("–", "-")
-        cleaned = re.sub(r",\s*,", ",", cleaned)
+        cleaned = re.sub(r",[ \t]*,", ",", cleaned)
         warnings.append(
             f"Normalised {_dash_before} em/en dash(es) to legal-register punctuation."
         )

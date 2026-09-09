@@ -1808,32 +1808,71 @@ markdown, with every fact anchored to the source material.
     Counsel for the Petitioner
     ```
 
-11. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
+11. MISSING-FACT POLICY: SHORT NATURAL PLACEHOLDERS, NEVER HALLUCINATE.
 
-    When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do
-    NOT provide (deponent's exact address, exact filing date, case
-    number of a related HC proceeding,
-    court fee amount, etc.), emit an unambiguous placeholder counsel
-    can grep for and fill:
+    When the USER QUERY and UPLOADED SOURCE DOCUMENTS do not give you a
+    case-specific particular, write the sentence you would have written
+    anyway and put a SHORT, NATURAL placeholder where the fact belongs:
 
-        `[TO_FILL: description of what counsel needs to provide]`
+        `[FIR No.]`  `[Date]`  `[Police Station]`  `[District]`
+        `[Name of Applicant]`  `[Date of Arrest]`  `[Name of Jail]`
 
     Examples:
-      * `Verified at New Delhi on this [TO_FILL: day] day of September, 2026`
-      * `R/o [TO_FILL: deponent's full residential address]`
-      * `filed vide OMP(I)(Comm) No. [TO_FILL: HC case number] of 2025`
-      * `Court fee of Rs. [TO_FILL: court fee amount] paid`
+      * `registered at Police Station [Police Station], District [District]`
+      * `The Applicant was arrested on [Date of Arrest] and has since been
+        confined at [Name of Jail].`
+      * `Verified at New Delhi on this [Day] day of September, 2026`
+      * `Court fee of Rs. [Court Fee] paid`
 
-    DO NOT hallucinate a plausible-sounding value. DO NOT quietly skip
-    the sentence. DO NOT use different placeholder syntax (`___`,
-    `[XXX]`, `<blank>`, `TBD`) — the pipeline greps for `[TO_FILL:` so
-    only that form is guaranteed to be flagged for counsel review.
+    THREE RULES GOVERN PLACEHOLDERS:
+
+    (a) KEEP THE LABEL SHORT. Two or three words naming the field —
+        `[Police Station]`, never `[TO_FILL: name of the police station
+        where the FIR came to be registered]`. The label NAMES the field;
+        it does not explain it. A long label turns a filable sentence
+        into an instruction manual and is itself a defect.
+        Label in Title Case - `[Police Station]`, `[Location]`,
+        `[FIR No.]` - never ALL CAPS. A pleading already reserves capitals
+        for structural signals: section headings, party designations
+        (`...APPLICANT/ACCUSED`) and the document title. A capitalised
+        placeholder competes with those instead of reading as a fillable
+        field, and shouts in running prose when a draft carries forty of
+        them. Keep genuine abbreviations capitalised inside the label
+        (`[FIR No.]`, `[IPC Sections]`), not the whole label.
+
+    (b) ONLY FOR THE GENUINELY UNKNOWABLE. Placeholders are for
+        case-specific particulars nobody could infer: names, addresses,
+        ages, FIR / case / cheque numbers, dates, amounts, the sections
+        actually charged, the jail of confinement. They are NOT for
+        anything you can properly draft — the enabling provision, the
+        grounds, the prayer, the settled law, the structure of the
+        pleading, the verification form. Draft all of that in FULL. A
+        placeholder standing where legal content belongs is a defect.
+
+    (c) NEVER NARRATE THE GAP. Do not write a sentence whose only
+        function is to announce that a fact is missing, and do not hedge
+        around a bracket. Put the bracket in the sentence and move on.
+
+        WRONG: "The exact circumstances in which the complaint came to be
+        lodged, and the sequence of events immediately preceding the
+        registration of the FIR, are set out in detail in the FIR and in
+        the statements recorded by the Investigating Officer."
+        RIGHT: "The FIR was registered on [Date] on the complaint of
+        [Name of Complainant], alleging offences under Sections
+        [Sections Charged]."
+
+    DO NOT hallucinate a plausible-sounding value: an invented FIR number
+    or date in a filed application misleads the court, which is far worse
+    than an honest blank. DO NOT quietly drop the sentence. DO NOT use
+    `___`, `[XXX]`, `<blank>`, `TBD`, `FILL IN`, `[citation needed]` or
+    `[to be confirmed]` — bare rules and verification-hedge brackets read
+    as defects rather than as fields, and the critic flags them as such.
 
     The one exception: today's date and place-of-drafting are legitimate
     defaults if the source is silent. When you write "Place: New Delhi"
     or "Date: [today's date]", that is not a hallucination — that is the
     document being executed at the moment of filing. Use the actual
-    place from the addressee block if present; otherwise `[TO_FILL: place]`.
+    place from the addressee block if present; otherwise `[Place]`.
 
 12. HONOUR THE `## NICHE OVERLAY` BLOCK APPENDED BELOW.
 
@@ -2256,18 +2295,22 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 
     A skeleton section when the summary asks for court-standard volume is a Rule-11 violation the critic will catch.
 
-13. MISSING-FACT POLICY: USE `[TO_FILL: ...]` MARKERS, NEVER HALLUCINATE.
-    When you need a fact the USER QUERY and UPLOADED SOURCE DOCUMENTS do not provide (deponent's exact address, exact filing date, case number of a related HC proceeding, court fee amount, etc.), emit an unambiguous placeholder counsel can grep for and fill:
-
-        `[TO_FILL: description of what counsel needs to provide]`
+13. MISSING-FACT POLICY: SHORT NATURAL PLACEHOLDERS, NEVER HALLUCINATE.
+    When the USER QUERY and UPLOADED SOURCE DOCUMENTS do not give you a case-specific particular, write the sentence you would have written anyway and put a SHORT, NATURAL placeholder where the fact belongs: `[FIR No.]`, `[Date]`, `[Police Station]`, `[District]`, `[Name of Applicant]`, `[Date of Arrest]`, `[Name of Jail]`.
 
     Examples:
-      * `Verified at New Delhi on this [TO_FILL: day] day of September, 2026`
-      * `R/o [TO_FILL: deponent's full residential address]`
-      * `filed vide OMP(I)(Comm) No. [TO_FILL: HC case number] of 2025`
-      * `Court fee of Rs. [TO_FILL: court fee amount] paid`
+      * `registered at Police Station [Police Station], District [District]`
+      * `The Applicant was arrested on [Date of Arrest] and has since been confined at [Name of Jail].`
+      * `Verified at New Delhi on this [Day] day of September, 2026`
+      * `Court fee of Rs. [Court Fee] paid`
 
-    DO NOT hallucinate a plausible-sounding value. DO NOT quietly skip the sentence. DO NOT use different placeholder syntax (`___`, `[XXX]`, `<blank>`, `TBD`) — the pipeline greps for `[TO_FILL:` so only that form is guaranteed to be flagged for counsel review. Today's date and the drafting place are legitimate defaults if the source is silent — that is not hallucination.
+    (a) KEEP THE LABEL SHORT. Two or three words naming the field — `[Police Station]`, never `[TO_FILL: name of the police station where the FIR came to be registered]`. The label NAMES the field; it does not explain it. A long label turns a filable sentence into an instruction manual and is itself a defect.
+
+    (b) ONLY FOR THE GENUINELY UNKNOWABLE. Placeholders are for case-specific particulars nobody could infer: names, addresses, ages, FIR / case / cheque numbers, dates, amounts, the sections actually charged, the jail of confinement. They are NOT for anything you can properly draft — the enabling provision, the grounds, the prayer, the settled law, the structure of the pleading, the verification form. Draft all of that in FULL. A placeholder standing where legal content belongs is a defect.
+
+    (c) NEVER NARRATE THE GAP. Do not write a sentence whose only function is to announce that a fact is missing, and do not hedge around a bracket. Put the bracket in the sentence and move on. WRONG: "The exact circumstances in which the complaint came to be lodged, and the sequence of events immediately preceding the registration of the FIR, are set out in detail in the FIR and in the statements recorded by the Investigating Officer." RIGHT: "The FIR was registered on [Date] on the complaint of [Name of Complainant], alleging offences under Sections [Sections Charged]."
+
+    DO NOT hallucinate a plausible-sounding value: an invented FIR number or date in a filed application misleads the court, which is far worse than an honest blank. DO NOT quietly drop the sentence. DO NOT use `___`, `[XXX]`, `<blank>`, `TBD`, `FILL IN`, `[citation needed]` or `[to be confirmed]` — bare rules and verification-hedge brackets read as defects rather than as fields, and the critic flags them as such. Today's date and the drafting place are legitimate defaults if the source is silent — that is not hallucination.
 
 14. HONOUR THE `## NICHE OVERLAY` BLOCK APPENDED BELOW.
     A niche-specific overlay is inserted after this base prompt when the document type is one of the ~20 supported filing niches (arbitration rejoinder, plaint, written statement, bail application, writ under Article 226, notice under Section 138 NI Act, and others). The overlay names the STRUCTURAL SKELETON for that niche, the STATUTORY ANCHORS that MUST appear, the CONVENTIONAL PRAYER form, and the VERIFICATION form specific to that niche.

@@ -90,6 +90,81 @@ def _format_chat_history(chat_history: list) -> str:
     return "\n".join(parts)
 
 
+# Chars per page for a typed Indian legal filing: measured 1,600-1,800 on a
+# 20-page rejoinder and a 30-page appeal; 2,000 keeps the page estimate
+# conservative so the tier never overshoots.
+_CHARS_PER_PAGE_EST = 2000
+# Advocate rule (2026-09-09): a summary should be at least 10% of the
+# source. Target band 10-15%; ceiling stops a short memo becoming a
+# restatement and keeps very long paperbooks inside the output budget.
+_SUMMARY_MIN_RATIO = 0.10
+_SUMMARY_MAX_RATIO = 0.15
+_SUMMARY_ABS_MIN_CHARS = 300
+_SUMMARY_ABS_MAX_CHARS = 24_000
+
+
+def summary_length_bounds(src_chars: int) -> tuple[int, int, int]:
+    """(estimated_pages, min_chars, max_chars) for a summary of a source
+    of `src_chars` characters. Pure; used by the prompt and by tests.
+
+    min = 10% of the source, never below 300 chars; max = 15%, never above
+    24,000. The old page tiers were floors written in pages that the model
+    could not see; this replaces them with numbers it is told outright.
+    """
+    src_chars = max(0, int(src_chars or 0))
+    pages = max(1, round(src_chars / _CHARS_PER_PAGE_EST))
+    lo = max(_SUMMARY_ABS_MIN_CHARS, int(src_chars * _SUMMARY_MIN_RATIO))
+    lo = min(lo, _SUMMARY_ABS_MAX_CHARS - 200)
+    hi = min(_SUMMARY_ABS_MAX_CHARS, max(lo + 200, int(src_chars * _SUMMARY_MAX_RATIO)))
+    return pages, lo, hi
+
+
+# Share of the summary budget per required section for a 10+ page source.
+# Material Facts carries the chronology and gets the largest share.
+_SECTION_BUDGET_SHARES = (
+    ("Forum & Parties", 0.08),
+    ("Material Facts (chronological)", 0.42),
+    ("Key Exhibits / Documents Relied Upon", 0.15),
+    ("Dispositive Issues", 0.20),
+    ("Reliefs Sought / Order Impugned", 0.15),
+)
+_CHARS_PER_WORD_EST = 6.5   # measured 6.6 on generated legal-English summaries
+
+
+def _source_size_note(src_chars: int) -> str:
+    """The message the model reads before the question.
+
+    Numbers, not tiers, and a WORD budget rather than characters: measured
+    on a 30-page appeal, a character ceiling was overshot by 70% (25% of
+    the source instead of 15%), while models track word counts and
+    per-section allocations far more closely.
+    """
+    pages, lo, hi = summary_length_bounds(src_chars)
+    lo_w, hi_w = int(lo / _CHARS_PER_WORD_EST), int(hi / _CHARS_PER_WORD_EST)
+    # Aim a quarter of the way into the band, not the middle: the model
+    # overshoots its stated target by roughly 30% (measured 1,403 words
+    # against a 1,065 target), so a low aim point lands inside the band.
+    target_w = lo_w + (hi_w - lo_w) // 4
+    note = (
+        f"The attached material is about {pages} page(s), {src_chars:,} characters. "
+        f"If the request is a summary, brief, gist or overview: write about "
+        f"{target_w:,} words in total, never fewer than {lo_w:,} and never more "
+        f"than {hi_w:,} (that is 10-15% of the source). Fewer than {lo_w:,} words "
+        f"is a defect: material facts, dates or grounds were dropped. More than "
+        f"{hi_w:,} words is also a defect: the brief has become a second copy of "
+        f"the source, so compress rather than enumerate."
+    )
+    if pages >= 10:
+        split = "; ".join(
+            f"{name}: about {max(40, int(target_w * share)):,} words"
+            for name, share in _SECTION_BUDGET_SHARES
+        )
+        note += (
+            f" Budget by section: {split}. Any extra section the record warrants "
+            f"comes out of the Material Facts share, not on top of the total."
+        )
+    return note
+
 def _generate_from_docs(
     query: str,
     docs: list[Document],
@@ -272,27 +347,35 @@ The user's own words steer the shape. Do NOT default to summarising.
   mode that permits paraphrase. Still name every party, date, and
   section number EXACTLY, and still omit anything you cannot read.
 
-  VOLUME IS A HARD FLOOR SCALED TO SOURCE-DOCUMENT SIZE — NOT a
+  VOLUME IS A HARD FLOOR SCALED TO SOURCE-DOCUMENT SIZE - NOT a
   soft target. In Indian legal English a "brief" is a substantive
   case-brief a lawyer can hand to counsel, NOT a five-line TL;DR.
   UNDER-producing a summary of a long document is the specialist
-  failure to avoid; OVER-producing is fine. The words "brief",
-  "in short", "concise" in the user's query DO NOT authorise
-  going below the floor.
+  failure to avoid. OVER-producing is the other failure: a summary
+  that runs to a quarter of the source is no longer a brief, it is a
+  second copy the lawyer has to read. The words "brief", "in short",
+  "concise" in the user's query DO NOT authorise going below the
+  floor; "detailed", "comprehensive" DO NOT authorise going above
+  the ceiling.
 
-  Match the summary MINIMUM to the source:
+  THE BAND IS 10-15% OF THE SOURCE LENGTH. The message headed
+  "Source size and required length" gives you the source's size and
+  the exact minimum and maximum character counts for THIS request.
+  Those numbers are computed from the file and override any guess
+  you would make from reading it. Plan the response to land inside
+  the band: cover every section required for the size, give each
+  its share of the budget, and stop when the ceiling is reached.
 
-    * Short source (1-3 pages, e.g. legal notice, one-page
-      affidavit, RTI application): FLOOR 1 paragraph, 300-800
-      chars. Cover purpose, parties, demand, deadline.
-    * Medium source (4-10 pages, e.g. reply notice, complaint,
-      short pleading): FLOOR 3 paragraphs, 1,200-2,000 chars.
-      Cover purpose, parties, material facts, key statutory
-      anchors, outcome sought.
-    * Long source (10-29 pages — court pleadings, writ
-      petitions, SCNs, judgments, agreements): FLOOR 5 sections
-      with `##` markdown headings, 2,800-4,500 chars.
-      Use these EXACT section headings, in this order:
+  Structure by source size (the size message tells you the pages):
+
+    * 1-3 pages (legal notice, one-page affidavit, RTI application):
+      running prose, 1-3 paragraphs. Cover purpose, parties, demand,
+      deadline.
+    * 4-9 pages (reply notice, complaint, short pleading): 3-6
+      paragraphs. Cover purpose, parties, material facts, key
+      statutory anchors, outcome sought.
+    * 10-29 pages (court pleadings, writ petitions, SCNs, judgments,
+      agreements): `##` markdown sections, in this order:
 
           ## Forum & Parties
           ## Material Facts (chronological)
@@ -305,15 +388,17 @@ The user's own words steer the shape. Do NOT default to summarising.
       agreements, order dates, filing dates), each with a
       one-sentence description of what happened on that date.
       A 29-page court filing whose Material Facts section
-      names only 2-3 dates is compressed too aggressively —
+      names only 2-3 dates is compressed too aggressively -
       the lawyer needs the chronological spine to brief the
       client.
-    * Very long source (30+ pages, e.g. arbitration paperbooks,
-      multi-noticee SCN, long judgment): FLOOR 6-8 sections,
-      4,500-7,000 chars. Same structure as above plus additional
-      sections as the record warrants (e.g., ## Prior Litigation
-      History, ## Interim Orders in Related Proceedings).
-
+    * 30+ pages (arbitration paperbooks, multi-noticee SCN, long
+      judgment): the same five sections plus the additional sections
+      the record warrants (## Grounds of Appeal / Challenge,
+      ## Prior Litigation History, ## Interim Orders in Related
+      Proceedings, ## Findings of the Court Below). Material Facts
+      carries 12-20 dated entries: the chronological spine, not every
+      date the record mentions. Group routine procedural dates into
+      one entry ("hearings on 4 dates between March and July 2025").
   If the user genuinely wanted a one-liner they would have asked
   a specific question ("who is the plaintiff?", "what is the
   claim amount?"). A summary request on a multi-page filing is
@@ -414,6 +499,7 @@ the gap with general legal knowledge or invented details.""",
             prompt_messages.append(("user", "Previous conversation:\n{history}"))
         prompt_messages.extend([
             ("user", "Document content:\n{docs}"),
+            ("user", "Source size and required length: {size_note}"),
             ("user", "Current Date: {date}"),
             ("user", "Question: {query}"),
         ])
@@ -424,6 +510,7 @@ the gap with general legal knowledge or invented details.""",
         invoke_args = {
             "query": query,
             "docs": docs_text,
+            "size_note": _source_size_note(len(docs_text)),
             "date": str(date.today()),
         }
         if history_text:

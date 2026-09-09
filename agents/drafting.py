@@ -563,6 +563,16 @@ def validate_draft(
         warnings.append(
             f"Removed {_dropped} duplicated block(s) (affidavit captions preserved)."
         )
+
+    # No section heading appears twice (a supporting affidavit is the one
+    # exception). Paraphrased repeats slip past the exact-block pass
+    # above; this catches them by heading. Reported 2026-09-09: s.239 discharge application shipped
+    # with PRAYER and VERIFICATION twice.
+    cleaned, _repeated = _collapse_repeated_sections(cleaned)
+    if _repeated:
+        warnings.append(
+            f"Removed repeated section(s): {', '.join(_repeated)}."
+        )
     # Em / en dashes — the "ChatGPT dash". Flagged by advocates 2026-09-08 as
     # reading machine-written. Indian legal drafting sets off a parenthetical
     # with commas, semicolons or parentheses; an em-dash in a statutory notice
@@ -2749,6 +2759,126 @@ def _insert_repaired_in_plan_order(
         draft = draft + "\n\n" + "\n\n".join(reversed(appended))
     return draft
 
+# A heading line: `## Text`, `### Text`, or a bold-only line `**TEXT**`.
+# Bold-only counts because the writer marks some sections that way and
+# _missing_planned_sections already treats them as headings.
+_SECTION_HEADING_LINE_RE = re.compile(
+    r"(?m)^[ \t]*(?:#{1,6}[ \t]+\S.*|\*\*[^*\n]{2,118}\*\*[ \t]*:?)[ \t]*$"
+)
+
+
+def _split_heading_blocks(text: str) -> list[tuple[str, str]]:
+    """Split text into (normalised_heading, block_text) in document order.
+
+    The first element may have heading "" when text starts without one.
+    """
+    blocks: list[tuple[str, str]] = []
+    cur_head, cur_start = "", 0
+    for m in _SECTION_HEADING_LINE_RE.finditer(text):
+        if m.start() > cur_start or cur_head:
+            blocks.append((cur_head, text[cur_start:m.start()]))
+        cur_head, cur_start = _normalise_heading(m.group(0)), m.start()
+    blocks.append((cur_head, text[cur_start:]))
+    return [(h, b) for h, b in blocks if b.strip()]
+
+
+def _heading_present(want: str, have: list[str]) -> bool:
+    """Same three-tier test _missing_planned_sections uses, on one heading."""
+    if not want:
+        return False
+    if any(want in got or got in want for got in have):
+        return True
+    return any(_substantive_word_overlap(want, got) for got in have)
+
+
+def _drop_reemitted_sections(
+    pair_text: str, planned: list[str], already: list[str],
+) -> tuple[str, list[str]]:
+    """Remove sections a pair wrote that it was not asked for and that
+    already exist in the document so far.
+
+    Reported 2026-09-09 on a s.239 discharge application: the pair writer
+    re-emitted MOST RESPECTFULLY SHOWETH, PRAYER, an advocate block and
+    VERIFICATION after they were already drafted, so the filed draft carried
+    each twice (the second copies paraphrased, so exact-block dedupe missed
+    them). Rule 1 of DRAFTING_SECTION_PAIR_PROMPT forbids this and does not
+    hold on its own, which is the same lesson as the doc-type flip (CLAUDE.md
+    invariant 2, exception).
+
+    A block is kept when its heading matches one of THIS pair's planned
+    headings, or when it matches nothing already present. Headless leading
+    text is always kept. Returns (cleaned_text, dropped_headings).
+    """
+    if not pair_text or not already:
+        return pair_text, []
+    planned_n = [_normalise_heading(h) for h in planned if h]
+    kept, dropped = [], []
+    for head, block in _split_heading_blocks(pair_text):
+        if head and not _heading_present(head, planned_n) and _heading_present(head, already):
+            dropped.append(head)
+            continue
+        kept.append(block)
+    return "".join(kept).strip(), dropped
+
+
+def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
+    """Keep the first occurrence of every section heading; drop later ones.
+
+    A pleading names each section once. When the pair writer re-emits an
+    earlier section (paraphrased, so the exact-block pass misses it) the
+    filed draft carries it twice - PRAYER, VERIFICATION, the opening
+    MOST RESPECTFULLY SHOWETH block and a second BRIEF FACTS heading were
+    all reported on one s.239 discharge application, 2026-09-09.
+
+    Two headings count as the same section when their normalised text is
+    equal, or one contains the other and both have at least two words, or
+    both begin with prayer / verif. Bold-only lines count as headings only
+    when they have two or more words, so party labels (**Petitioner**),
+    **vs** and **DEPONENT** are never treated as sections.
+
+    Exception: once an AFFIDAVIT heading is reached nothing is dropped. A
+    supporting affidavit legitimately restates the cause title and carries
+    its own VERIFICATION. Structural and mechanical, no content judgement.
+    """
+    blocks = _split_heading_blocks(text)
+    if len(blocks) < 2:
+        return text, []
+
+    def _is_section_heading(raw_first_line: str, head: str) -> bool:
+        if not head:
+            return False
+        if raw_first_line.lstrip().startswith("#"):
+            return True
+        return len(head.split()) >= 2
+
+    def _same(a: str, b: str) -> bool:
+        if a == b:
+            return True
+        if a.startswith("prayer") and b.startswith("prayer"):
+            return True
+        if a.startswith("verif") and b.startswith("verif"):
+            return True
+        if (a in b or b in a) and len(a.split()) >= 2 and len(b.split()) >= 2:
+            return True
+        return False
+
+    seen: list[str] = []
+    in_affidavit = False
+    kept, dropped = [], []
+    for head, block in blocks:
+        first = block.lstrip().split("\n", 1)[0]
+        is_head = _is_section_heading(first, head)
+        if is_head and "affidavit" in head:
+            in_affidavit = True
+        if is_head and not in_affidavit and any(_same(head, h) for h in seen):
+            dropped.append(head)
+            continue
+        if is_head:
+            seen.append(head)
+        kept.append(block)
+    return "".join(kept), dropped
+
+
 def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
     """Planned sections that never made it into the draft.
 
@@ -3117,6 +3247,19 @@ async def _generate_sectionwise(
                 pair_text = ""
                 break
 
+        if pair_text.strip():
+            # Drop sections this pair re-emitted that already exist in the
+            # document so far (rule 1 of the pair prompt does not hold on
+            # its own). See _drop_reemitted_sections.
+            _already = [h for h, _ in _split_heading_blocks("\n\n".join(completed)) if h]
+            pair_text, _reemitted = _drop_reemitted_sections(
+                pair_text, [sec.heading for sec in pair], _already,
+            )
+            if _reemitted:
+                log.warning(
+                    "Section pair re-emitted already-drafted sections; dropped",
+                    position_start=position_start, dropped=_reemitted,
+                )
         if pair_text.strip():
             completed.append(pair_text.strip())
         else:

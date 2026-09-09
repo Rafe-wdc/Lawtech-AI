@@ -426,7 +426,8 @@ async def metrics_middleware(request: Request, call_next):
 _MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT_PER_WORKER", "10"))
 _inflight_sem = asyncio.Semaphore(_MAX_INFLIGHT)
 _INFLIGHT_EXCLUDE_PATHS = {
-    "/", "/pyapi/health", "/pyapi/health/detailed", "/pyapi/metrics",
+    "/", "/pyapi/health", "/pyapi/health/detailed",
+    "/pyapi/health/verifier_stats", "/pyapi/metrics",
 }
 _INFLIGHT_RETRY_AFTER_SEC = 5
 
@@ -1815,6 +1816,35 @@ async def health(request: Request):
 # tripwires (str(e).splitlines()[0]) were the last residual crash sites
 # in this file. Live-ping health checks now happen inline via a
 # post-deploy smoke workflow instead of a persistent admin endpoint.
+
+
+@app.get("/pyapi/health/verifier_stats")
+async def health_verifier_stats():
+    """Live snapshot of verifier-unavailability counters.
+
+    Added 2026-09-09 alongside the self_refine fail-closed cutover. The
+    process-local counter in ``core.self_refine._verifier_failure_counters``
+    increments every time the critic (or any future verifier layer) had
+    to ship a response behind ``x_audit_status="unverified"`` because it
+    could not run — transport error, parse failure, timeout, rate limit,
+    circuit-open.
+
+    Payload shape::
+
+        {
+          "total": 3,
+          "by_agent_reason": [
+             {"agent": "self_refine", "reason": "timeout",         "count": 2},
+             {"agent": "self_refine", "reason": "flash_circuit_open","count": 1}
+          ]
+        }
+
+    Empty when everything is healthy. Ops greps for ``total > 0``.
+    Resets on process restart (in-memory counter, no persistence — the
+    goal is trend visibility, not durable metrics).
+    """
+    from .self_refine import get_verifier_stats
+    return get_verifier_stats()
 
 
 # ============================================================

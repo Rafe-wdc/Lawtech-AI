@@ -7,7 +7,7 @@ Agents return partial dicts — LangGraph merges them into the full state.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Annotated
+from typing import Any, Literal, Annotated, NotRequired
 from langchain_core.messages import BaseMessage
 from langgraph.graph import MessagesState
 
@@ -238,6 +238,14 @@ class LegalAgentState(MessagesState):
     # over `regenerate_of` so "regenerate" produces a polished version of
     # the previous answer instead of a completely new one.
     regenerate_of: str | None
+
+    # DynamicPlanner output (Move 3 Phase A). Populated by
+    # orchestrator_plan_node when DYNAMIC_ORCHESTRATOR=1 so downstream
+    # fan-out (route_after_orchestrator) and the synthesizer can read
+    # planner-decided flags (cite_appendix_recommended, overall_confidence,
+    # self_critique). Typed as Any to avoid importing config.intent at
+    # state-module load time. NotRequired: legacy path (flag off) omits it.
+    _dynamic_plan: NotRequired[Any]
 
     # Final output
     final_response: str

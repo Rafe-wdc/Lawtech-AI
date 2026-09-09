@@ -306,6 +306,72 @@ All domain agents have a 3-tier fallback:
 
 Shared utilities in `core/agent_fallback.py`.
 
+## Verifier fail-closed discipline (do not regress)
+
+Every verifier layer (self_refine critic, flag_hallucination,
+placeholder-drift refiner, injection detectors) MUST fail closed on
+transport / parse / timeout / rate-limit errors. Silent-pass defaults
+(`Critique(passes=True, confidence=0.0)`) are a P0 bug — they existed
+and were removed 2026-09-09 (harness audit finding #4).
+
+Contract:
+- On critic exception: return `Critique(passes=False, violations=[
+  Violation(field="verifier_unavailable", severity="critical", ...)])`
+  — never `passes=True` on error.
+- On verifier unavailability: response ships with `x_audit_status="unverified"`
+  in the SSE `done` envelope, WARN log with `reason`, in-process counter
+  bump.
+- `core.audit_status.mark_unverified()` sets a request-scoped ContextVar
+  that `core.chat_runner` reads onto the `done` event. Envelope only —
+  do NOT show a user-facing banner (UI decision is Rohit's).
+- Grep `agent.log` for `self_refine_critic_unavailable`,
+  `stream_final_reconciled identical=False`, or a `self_refine_completed
+  outcome=unverified_*` line — any hit means regression.
+- Live counter surface: `GET /pyapi/health/verifier_stats` returns
+  per-`(agent, reason)` counts and a total, resetting on process
+  restart.
+- Terminal outcomes are one of `AuditOutcome = {skipped, passed,
+  refined_and_passed, refined_and_failed, unverified_critic_failed,
+  unverified_budget_exhausted}` — logged on the
+  `self_refine_completed` INFO/WARN line at every exit path.
+- The critic is still Gemini-based; only error handling changed.
+  CRITIQUE_PROMPT wording is untouched. Do NOT add regex heuristics to
+  replace the critic — violates `feedback_no_mechanical_patterns`.
+
+Regression tests: `tests/test_self_refine_fail_closed.py` (11 tests).
+
+## Streaming = final invariant (do not regress)
+
+Byte-for-byte after layout normalization:
+`"".join(streamed_tokens) + flush == _strip_html_from_response(final_response)`.
+
+- Both `_strip_html_from_response` (terminal) and the token-stream
+  filter `StreamingHtmlFilter` (per-token) call the shared
+  `_normalize_html_layout` helper in `core/chat_runner.py`. Editing one
+  transform means editing the other in the same commit.
+- Multi-token HTML fragments (e.g. `<b` + `r>`) are buffered by
+  `StreamingHtmlFilter` until the closing tag arrives and full line
+  context is available (mirrors `core.url_filter.StreamingUrlFilter`).
+  Emission happens only at newline boundaries so `<br>` in a
+  table row still resolves to a space and `<br>` in prose still resolves
+  to a paragraph break.
+- Divergence signal: `run_chat_pipeline` logs
+  `stream_final_reconciled identical=<bool> reset_emitted=<bool>` on
+  EVERY request. Grep for `identical=False` to catch regressions in
+  post-stream transforms (self_refine rewrite, guardrail sanitization,
+  language enforcement).
+- When the stitched-tokens stream diverges from `final_response`,
+  chat_runner emits an additive `token_reset` SSE event before the
+  `response` event so clients that render tokens live can clear their
+  buffer and re-render from the canonical payload. Existing consumers
+  already handle `token_reset`; the event contract stays backward-
+  compatible.
+- Historical reference: memory `project_stream_final_consistency.md`.
+  This replaces the lost `reconcile_streamed_answer` guarantee.
+- Regression tests: `tests/test_stream_final_consistency.py` (13 tests
+  covering BR / HR / table rows / split tags / adversarial `<script>`
+  fragments / safety valve).
+
 ## Code Style
 
 - Python 3.12+
@@ -315,6 +381,34 @@ Shared utilities in `core/agent_fallback.py`.
 - Use `langchain` abstractions for LLM chains and prompts
 - State accessed as dict: `state["key"]` or `state.get("key")` (TypedDict)
 - LangChain imports: `langchain.messages` for message types, `langchain_core.messages` for BaseMessage
+
+## LangGraph state discipline (do not regress)
+
+Two silent-failure bugs shipped for months before the 2026-09-09 audit
+caught them. Both were latent under `MemorySaver` and only manifested at
+parallel fan-out; neither raised an exception. Enforced by
+`core/graph_guards.py` + `tests/test_graph_state_isolation.py`.
+
+- **Never mutate `state` in-place** inside a node (`state["x"] = y`).
+  Return a dict; LangGraph merges declared keys via reducers. In-place
+  writes may not survive checkpoint serialization AND race parallel
+  siblings under a shared-state fan-out.
+- **Every returned key** must be declared in
+  `core/state.py:LegalAgentState`. Undeclared keys have no reducer and
+  are silently dropped. Use `NotRequired[T]` for optional fields.
+- **Every `Send(node, state)`** must snapshot: `Send(node, dict(state))`.
+  Deep-copy is forbidden — the messages list is large and every fan-out
+  would allocate a duplicate. Shallow is sufficient because no node
+  mutates message objects or shared containers in place (audit
+  2026-09-09; guarded by `test_route_after_orchestrator_snapshots_per_send`).
+- **Turn on `LAWTECH_STATE_MUTATION_TRAP=1` locally** to catch
+  violations at development time — `guarded_node` wraps state in
+  `types.MappingProxyType` so any bare assignment raises `TypeError`
+  at the offending line. Off by default; MUST NOT be set in prod.
+- **In prod**, `guarded_node` still WARNs on regressions — grep
+  `agent.log` for `undeclared_state_key` or `in_node_state_mutation`.
+  The schema itself is logged once at graph build time as
+  `graph_state_schema` (greppable for accidental removals).
 
 ## Important Notes
 

@@ -45,6 +45,8 @@ typed UserIntent the critic uses as ground truth.
 from __future__ import annotations
 
 import asyncio
+from enum import Enum
+from threading import Lock
 from typing import Any, Awaitable, Callable, Literal, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -52,11 +54,131 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from config.intent import LegalArtifact, UserIntent, default_intent
 from config.prompts import INJECTION_GUARD_PREAMBLE, wrap_untrusted
+from core.audit_status import mark_unverified
 from core.clients import get_gemini_flash_full, get_gemini_flash_lite
 from core.logger import get_logger, log_time, short_err
 from core.token_tracker import record as _record_tokens
 
 log = get_logger("SelfRefine")
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed verifier signalling
+# ---------------------------------------------------------------------------
+#
+# Every verifier layer MUST fail closed on transport/parse/timeout errors —
+# a silent-pass default (passes=True, confidence=0.0) is a P0 bug that lets
+# the exact wrong-language / hallucination-substitution defects the layer
+# exists to catch ship as "passed" in the logs. See
+# `_harness_audit_2026_09_09.md` finding #4 and CLAUDE.md
+# "Verifier fail-closed discipline".
+#
+# When the critic cannot run we surface a synthetic Violation with
+# ``field=VERIFIER_UNAVAILABLE_FIELD``; downstream code detects this and
+# routes to the "unverified" path (attempt one fallback refine, mark the
+# response envelope, ship). Never silently pass.
+VERIFIER_UNAVAILABLE_FIELD = "verifier_unavailable"
+
+
+class AuditOutcome(str, Enum):
+    """Terminal outcome of a ``self_refine`` invocation.
+
+    Emitted on the ``self_refine_completed`` log line so an operator can
+    grep for silent regressions.
+    """
+    skipped = "skipped"
+    passed = "passed"
+    refined_and_passed = "refined_and_passed"
+    refined_and_failed = "refined_and_failed"
+    unverified_critic_failed = "unverified_critic_failed"
+    unverified_budget_exhausted = "unverified_budget_exhausted"
+
+
+# Live in-process counter of verifier failures, keyed by ``(agent, reason)``.
+# Exposed by ``core/gateway.py`` at ``GET /pyapi/health/verifier_stats`` so
+# ops can track prevalence without a full metrics stack. Reset on process
+# restart — the counter is intentionally lightweight.
+_verifier_failure_counters: dict[tuple[str, str], int] = {}
+_verifier_counters_lock = Lock()
+
+
+def _bump_verifier_failure(agent: str, reason: str) -> None:
+    key = (agent or "unknown", reason or "unknown")
+    with _verifier_counters_lock:
+        _verifier_failure_counters[key] = _verifier_failure_counters.get(key, 0) + 1
+
+
+def get_verifier_stats() -> dict:
+    """Snapshot of the verifier-failure counter for the health surface.
+
+    Returns a dict with per-``(agent, reason)`` counts plus a total. Keys
+    stringified for JSON. Safe to call from any thread; the return value
+    is a fresh copy — the underlying dict is not exposed.
+    """
+    with _verifier_counters_lock:
+        items = list(_verifier_failure_counters.items())
+    per: list[dict] = []
+    total = 0
+    for (agent, reason), count in items:
+        per.append({"agent": agent, "reason": reason, "count": count})
+        total += count
+    per.sort(key=lambda r: (-r["count"], r["agent"], r["reason"]))
+    return {"total": total, "by_agent_reason": per}
+
+
+def reset_verifier_stats() -> None:
+    """Test helper: clear the counter."""
+    with _verifier_counters_lock:
+        _verifier_failure_counters.clear()
+
+
+def _classify_critic_exception(exc: BaseException) -> str:
+    """Bucket a critic-side exception into one of the coarse reasons the
+    audit surface exposes. Keeps the counter dimensionality bounded and
+    the log lines greppable.
+    """
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timeout"
+    name = type(exc).__name__.lower()
+    if "timeout" in name:
+        return "timeout"
+    text = (str(exc) or "").lower()
+    if "429" in text or "resource_exhausted" in text or "rate limit" in text:
+        return "rate_limit"
+    if "parse" in text or "json" in name or "validation" in name:
+        return "parse_error"
+    return "unexpected"
+
+
+def _verifier_unavailable_critique(reason: str, detail: str = "") -> "Critique":
+    """Build the fail-closed Critique returned when the critic can't run.
+
+    The synthetic violation carries ``field=VERIFIER_UNAVAILABLE_FIELD`` so
+    downstream code can distinguish "critic ran and flagged nothing" from
+    "critic never ran". ``severity="critical"`` prevents the placeholder-mode
+    filter from silently dropping it (it filters by ``field ==
+    'placeholder_marker'``, so a different field survives).
+    """
+    return Critique(
+        passes=False,
+        confidence=0.0,
+        violations=[Violation(
+            field=VERIFIER_UNAVAILABLE_FIELD,
+            issue=f"Critic could not run ({reason}). Response ships unverified.",
+            severity="critical",
+            suggested_fix=(detail
+                           or "Re-run the request; if this recurs, check the "
+                              "Gemini Flash circuit breaker and rate-limit "
+                              "state via /pyapi/health/verifier_stats."),
+        )],
+    )
+
+
+def _critique_is_verifier_unavailable(critique: "Critique") -> bool:
+    """True when a critique was fabricated because the critic could not run."""
+    return any(
+        v.field == VERIFIER_UNAVAILABLE_FIELD for v in critique.violations
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1589,9 +1711,14 @@ async def _critique(
 ) -> Critique:
     """Run a single critique LLM call. Returns a Critique (passes + violations).
 
-    On any error: returns a "passes=True, confidence=0" critique so the loop
-    treats it as "nothing to do" and stops. We do not want a critic blip to
-    break the user-visible request.
+    On any error: fails CLOSED — returns a Critique flagged with a
+    ``verifier_unavailable`` violation so the caller can route the response
+    through the "unverified" path (attempt one fallback refine, mark the
+    envelope, ship). Increments the process-local verifier-failure counter
+    and emits a ``self_refine_critic_unavailable`` WARN log line. Never
+    silently returns ``passes=True`` on error — that was a P0 silent-pass
+    bug removed on 2026-09-09; see CLAUDE.md
+    "Verifier fail-closed discipline".
 
     `retrieved_sources_whitelist` is the SourceRegistry-derived allowed-
     citation pool for the `unretrieved_citation` category. Empty string
@@ -1601,18 +1728,29 @@ async def _critique(
     self_refine after multi-agent synthesis.
     """
     # Circuit breaker: skip the critic entirely when Gemini Flash is
-    # unhealthy. Better to ship an un-audited draft (same as the existing
-    # "critique failed → passes=True" fallback) than to sit for 45s
-    # waiting on a call that we already know is failing.
+    # unhealthy. Better to ship an un-audited draft (surfaced through the
+    # verifier_unavailable path below) than to sit for 45s waiting on a
+    # call we already know is failing.
     from core.clients import (
         is_gemini_flash_available, record_gemini_flash_failure,
         record_gemini_flash_success,
     )
     if not is_gemini_flash_available():
-        log.warning("Gemini Flash circuit open — skipping critique",
-                    fast_fail=True,
-                    reason="flash_circuit_open")
-        return Critique(passes=True, confidence=0.0)
+        # Fail CLOSED: the critic never ran. Surface as a synthetic
+        # verifier_unavailable violation so the caller ships the response
+        # behind x_audit_status="unverified" rather than logging it as a
+        # pass. The old fail-open (passes=True) was a silent-pass bug —
+        # see CLAUDE.md "Verifier fail-closed discipline".
+        _bump_verifier_failure("self_refine", "flash_circuit_open")
+        log.warning(
+            "self_refine_critic_unavailable",
+            reason="flash_circuit_open",
+            fast_fail=True,
+        )
+        return _verifier_unavailable_critique(
+            "flash_circuit_open",
+            "Gemini Flash circuit breaker is open — wait for it to recover.",
+        )
 
     try:
         with log_time(log, "Self-refine critique"):
@@ -1688,14 +1826,19 @@ async def _critique(
                 )
                 result = repaired
             else:
+                _bump_verifier_failure("self_refine", "parse_error")
                 log.error(
-                    "Critique unparseable after repair — DRAFT SHIPS UNAUDITED",
+                    "self_refine_critic_unavailable — draft ships unaudited",
+                    reason="parse_error",
                     parsing_error=short_err(perr) if perr else None,
                     finish_reason=finish_reason,
                     raw_content_len=len(raw_content),
                     raw_content=raw_content[:2000],
                 )
-                return Critique(passes=True, confidence=0.0)
+                return _verifier_unavailable_critique(
+                    "parse_error",
+                    "Critic output was unparseable and the repair pass failed.",
+                )
         log.info(
             "Critique result",
             passes=result.passes,
@@ -1708,12 +1851,15 @@ async def _critique(
         return result
     except Exception as e:
         record_gemini_flash_failure()
+        reason = _classify_critic_exception(e)
+        _bump_verifier_failure("self_refine", reason)
         log.warning(
-            "Critique LLM call failed; treating as pass to avoid blocking user",
+            "self_refine_critic_unavailable",
+            reason=reason,
             error=short_err(e),
             exc_info=True,
         )
-        return Critique(passes=True, confidence=0.0)
+        return _verifier_unavailable_critique(reason, short_err(e))
 
 
 async def _refine(
@@ -1901,6 +2047,15 @@ async def self_refine(
     # hallucinating. Skip force-run when registry is empty.
     has_registry = bool(source_registry) and getattr(source_registry, "__len__", lambda: 0)() > 0
     if not (has_directives or has_lang_mismatch or has_registry):
+        log.info(
+            "self_refine_completed",
+            outcome=AuditOutcome.skipped.value,
+            iterations=0,
+            critic_failures=0,
+            refiner_failures=0,
+            original_len=len(response),
+            final_len=len(response),
+        )
         return response, []
 
     # Compute the allowed-citation whitelist ONCE, reuse across iterations.
@@ -1911,6 +2066,15 @@ async def self_refine(
         log.info(
             "Self-refine skipped — response below min length",
             response_chars=len(response), min=min_response_chars,
+        )
+        log.info(
+            "self_refine_completed",
+            outcome=AuditOutcome.skipped.value,
+            iterations=0,
+            critic_failures=0,
+            refiner_failures=0,
+            original_len=len(response),
+            final_len=len(response),
         )
         return response, []
 
@@ -1923,6 +2087,8 @@ async def self_refine(
     history: list[Critique] = []
     current = response
     original_response_len = len(response)  # for cumulative-shrink guard
+    critic_failures = 0
+    refiner_failures = 0
     for iteration in range(max_iterations + 1):  # +1 for the final critique
         critique = await _critique(
             user_query, critic_intent, current, critic_llm,
@@ -1951,26 +2117,56 @@ async def self_refine(
                     "passes": critique.passes or not _kept,
                 })
         history.append(critique)
+
+        # Fail-closed branch: the critic could not run (transport / parse /
+        # timeout / rate-limit / circuit-open). The response ships behind
+        # x_audit_status="unverified" — we attempt ONE fallback refine on
+        # the same violations block so the caller gets a best-effort audit
+        # even when the critic itself was unavailable, then mark the
+        # request unverified and stop the loop. Never silently pass.
+        if _critique_is_verifier_unavailable(critique):
+            critic_failures += 1
+            mark_unverified()
+            if iteration == 0 and len(current) >= min_response_chars:
+                fallback = await _refine(
+                    user_query, critic_intent, current, critique, refiner_llm,
+                    retrieved_sources_whitelist=_whitelist,
+                )
+                if fallback and fallback != current:
+                    current = fallback
+                else:
+                    refiner_failures += 1
+            log.warning(
+                "self_refine_completed",
+                outcome=AuditOutcome.unverified_critic_failed.value,
+                iterations=iteration,
+                critic_failures=critic_failures,
+                refiner_failures=refiner_failures,
+                original_len=original_response_len,
+                final_len=len(current),
+            )
+            return current, history
+
         if critique.passes:
-            # Distinguish a real pass from a FAIL-SAFE pass. Every error path in
-            # `_critique` returns exactly `Critique(passes=True, confidence=0.0)`
-            # with no violations — an unparseable critique, a blocked call, or
-            # "Request deadline already exceeded; refusing to start work". A
-            # genuine pass carries the model's own confidence (measured: 0.9-1.0).
+            # A genuine pass carries the model's own confidence (measured:
+            # 0.9-1.0). Under the fail-closed regime introduced 2026-09-09
+            # the critic never fabricates `passes=True, confidence=0.0` on
+            # error — those paths now route through the
+            # `_critique_is_verifier_unavailable` branch above.
             #
-            # That distinction matters because the loop returns `current`, which
-            # may already be a REFINED and shortened draft from an earlier
-            # iteration. Observed in production: iteration 1 shrank a draft 13%,
-            # iteration 2's refinement timed out, the critic then refused to
-            # start, and the loop logged `passed | confidence=0.0 |
-            # cumulative_violations=8` — shipping the shrunken intermediate as
-            # though it had been audited. Nothing verified that draft; fall back
-            # to what the caller gave us rather than keep an unaudited loss.
+            # Defensive belt-and-braces: a real critic response can still
+            # come back shaped like `passes=True, confidence=0.0, []` (an
+            # actual LLM answer that just happens to be low-confidence).
+            # If we already shrank the draft in an earlier iteration, that
+            # "pass" would silently bless the loss. Revert to the caller's
+            # original instead — the same tripwire that caught the 2026
+            # shrunken-intermediate regression.
             _unverified = critique.confidence == 0.0 and not critique.violations
             if _unverified and len(current) < original_response_len:
                 log.warning(
-                    "Self-refine ended on an unverified pass with the response "
-                    "already shortened; reverting to the caller's original",
+                    "Self-refine ended on an unverified pass with the "
+                    "response already shortened; reverting to the caller's "
+                    "original",
                     iteration=iteration,
                     original_len=original_response_len,
                     current_len=len(current),
@@ -1978,10 +2174,30 @@ async def self_refine(
                         100 * (1 - len(current) / max(original_response_len, 1)), 1),
                     cumulative_violations=sum(len(c.violations) for c in history),
                 )
+                log.info(
+                    "self_refine_completed",
+                    outcome=AuditOutcome.refined_and_failed.value,
+                    reason="unverified_pass_after_shrink",
+                    iterations=iteration,
+                    critic_failures=critic_failures,
+                    refiner_failures=refiner_failures,
+                    original_len=original_response_len,
+                    final_len=original_response_len,
+                )
                 return response, history
+            outcome = (
+                AuditOutcome.refined_and_passed
+                if iteration > 0
+                else AuditOutcome.passed
+            )
             log.info(
-                "Self-refine passed",
-                iteration=iteration,
+                "self_refine_completed",
+                outcome=outcome.value,
+                iterations=iteration,
+                critic_failures=critic_failures,
+                refiner_failures=refiner_failures,
+                original_len=original_response_len,
+                final_len=len(current),
                 confidence=round(critique.confidence, 2),
                 verified=not _unverified,
                 cumulative_violations=sum(len(c.violations) for c in history),
@@ -1992,16 +2208,27 @@ async def self_refine(
         # self-correction without grounding can degrade quality).
         if critique.confidence < 0.5:
             log.info(
-                "Self-refine stopping — low-confidence critique",
-                iteration=iteration,
+                "self_refine_completed",
+                outcome=AuditOutcome.refined_and_failed.value,
+                reason="low_confidence_critique",
+                iterations=iteration,
+                critic_failures=critic_failures,
+                refiner_failures=refiner_failures,
+                original_len=original_response_len,
+                final_len=len(current),
                 confidence=round(critique.confidence, 2),
                 violation_count=len(critique.violations),
             )
             return current, history
         if iteration >= max_iterations:
             log.warning(
-                "Self-refine max iterations exhausted",
+                "self_refine_completed",
+                outcome=AuditOutcome.unverified_budget_exhausted.value,
                 iterations=iteration,
+                critic_failures=critic_failures,
+                refiner_failures=refiner_failures,
+                original_len=original_response_len,
+                final_len=len(current),
                 final_violations=len(critique.violations),
             )
             return current, history
@@ -2010,6 +2237,11 @@ async def self_refine(
             user_query, critic_intent, current, critique, refiner_llm,
             retrieved_sources_whitelist=_whitelist,
         )
+        if refined == current:
+            # _refine returns the input unchanged on any exception (see
+            # `except` handler at line ~1840). Count that as a refiner
+            # failure so operators can see it in the terminal outcome log.
+            refiner_failures += 1
         # Destructive-refinement guard #1 (PER-ITERATION): reject a
         # refinement that drops the response length by more than 30%
         # in a single step. Observed 2026-07-30 on a Hindi anticipatory-
@@ -2043,6 +2275,16 @@ async def self_refine(
             # Skip the refinement, break the loop — retrying would just
             # feed the shorter draft back to the critic and produce further
             # destructive shortening.
+            log.info(
+                "self_refine_completed",
+                outcome=AuditOutcome.refined_and_failed.value,
+                reason="destructive_shrink_per_iter",
+                iterations=iteration,
+                critic_failures=critic_failures,
+                refiner_failures=refiner_failures,
+                original_len=original_response_len,
+                final_len=len(current),
+            )
             return current, history
         # Destructive-refinement guard #2 (CUMULATIVE): the per-iteration
         # guard misses the "three small shrinks that add up" case
@@ -2061,7 +2303,26 @@ async def self_refine(
                 drop_pct=round(100 * (1 - len(refined) / max(original_response_len, 1)), 1),
                 iteration=iteration,
             )
+            log.info(
+                "self_refine_completed",
+                outcome=AuditOutcome.refined_and_failed.value,
+                reason="destructive_shrink_cumulative",
+                iterations=iteration,
+                critic_failures=critic_failures,
+                refiner_failures=refiner_failures,
+                original_len=original_response_len,
+                final_len=original_response_len,
+            )
             return response, history
         current = refined
 
+    log.info(
+        "self_refine_completed",
+        outcome=AuditOutcome.unverified_budget_exhausted.value,
+        iterations=max_iterations,
+        critic_failures=critic_failures,
+        refiner_failures=refiner_failures,
+        original_len=original_response_len,
+        final_len=len(current),
+    )
     return current, history

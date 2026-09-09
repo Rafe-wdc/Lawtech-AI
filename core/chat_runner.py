@@ -24,6 +24,11 @@ from core.chat_store import chat_store
 from core.logger import get_logger
 from core.response_cache import response_cache, CacheEntry
 
+# NOTE: StreamingHtmlFilter is defined below in this module (not imported
+# from a sibling). Kept alongside the transforms so the token filter and
+# the terminal `response` filter are edited together — see the module-
+# level comment on _normalize_html_layout.
+
 log = get_logger("ChatRunner")
 
 
@@ -64,33 +69,30 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-# Defense-in-depth HTML stripper for final response. The drafting validator
-# already strips HTML from drafting outputs, but ANY agent (Legislation,
-# Judgment, Scenario, Constitution/Maxim, etc.) could in principle emit
-# HTML the frontend renders as literal text. This is the last line of
-# defense between the LLM and the user. Converts <br>/<hr> to markdown-
-# safe equivalents, then strips every remaining HTML-shaped tag while
-# keeping the inner content. Idempotent: safe to apply to already-clean
-# text.
+# Defense-in-depth HTML stripper. The drafting validator already strips
+# HTML from drafting outputs, but ANY agent (Legislation, Judgment, Scenario,
+# Constitution/Maxim, etc.) could in principle emit HTML the frontend
+# renders as literal text. This is the last line of defense between the
+# LLM and the user.
 #
-# `<br>` -> space. The LLM frequently emits `<br>` INSIDE table cells
-# to line-break numbered / bulleted content (e.g. "1. First<br>2. Second"
-# in a "Key Conditions" cell). Converting to "\n" (the naive markdown
-# equivalent) BREAKS the table because markdown table syntax requires
-# each row on one line — the "\n" terminates the row and the renderer
-# stops reading cells. Space keeps the row intact; the "1." / "2." /
-# "3." prefixes the LLM emits make the numbered structure visually
-# obvious even without an explicit line break. This loses a visual
-# break in the rare case an LLM uses `<br>` in prose outside a table,
-# but preserving broken tables is the higher-value trade.
+# `<br>` inside a table cell -> space; outside a table -> paragraph break
+# (a blank line, since single newlines collapse in markdown). Inside a
+# table `\n` terminates the row and the renderer stops reading cells; the
+# table prompt explicitly allows `<br>` between bullets inside a cell.
+# Outside a table `<br>` is a real visual break the reader expects.
 #
-# `<hr>` -> `\n---\n`: horizontal rules aren't inside tables in
-# practice, so the standard markdown equivalent is safe.
+# `<hr>` -> `\n---\n`: horizontal rules aren't inside tables in practice,
+# so the standard markdown equivalent is safe.
+#
+# Both `_strip_html_from_response` (terminal) and the token-stream filter
+# `StreamingHtmlFilter` (per-token) MUST apply IDENTICAL transforms — if
+# they diverge, the client stitching tokens sees a different string than
+# the final `response` event and the layout jumps. Invariant enforced by
+# the `stream_final_reconciled identical=<bool>` log line in
+# ``run_chat_pipeline``. See CLAUDE.md "Streaming = final invariant".
 _FINAL_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _FINAL_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _FINAL_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
-
-
 
 
 def _br_to_layout(text: str, br_re) -> str:
@@ -98,9 +100,7 @@ def _br_to_layout(text: str, br_re) -> str:
 
     Outside a table a <br> becomes a paragraph break, the only line break
     that survives rendering. Inside a table row it becomes a space: a
-    newline there splits the row and the whole table falls apart (the
-    table prompt explicitly allows <br> between bullets inside a cell,
-    config/prompts.py). Found 2026-09-09 on the IPC 420 / BNS 318 comparison.
+    newline there splits the row and the whole table falls apart.
     """
     out = []
     for line in text.split("\n"):
@@ -110,41 +110,112 @@ def _br_to_layout(text: str, br_re) -> str:
         out.append(line)
     return "\n".join(out)
 
+
+def _normalize_html_layout(text: str) -> str:
+    """Single source of truth for HTML → markdown layout normalization.
+
+    Both the terminal ``_strip_html_from_response`` and the streaming
+    ``StreamingHtmlFilter`` call this so tokens stitched by a client
+    render to the same text as the final ``response`` event.
+    Idempotent: safe to apply to already-clean text.
+    """
+    if not text or "<" not in text:
+        return text
+    out = _br_to_layout(text, _FINAL_BR_RE)
+    out = _FINAL_HR_RE.sub("\n---\n", out)
+    out, _ = _FINAL_TAG_RE.subn("", out)
+    return out
+
+
 def _strip_html_from_response(text: str) -> str:
     """Strip HTML tags from a final response. See module-level comment."""
     if not text or "<" not in text:
         return text
-    # A <br> becomes a PARAGRAPH break, not a space. This is the last strip
-    # before the client, and it runs on every task type, so a judgment summary
-    # or scenario answer that emitted "Name<br>Designation" used to reach the
-    # screen as "Name Designation" on one line. A blank line is the only line
-    # break the markdown renderer preserves (single newlines collapse), which
-    # is also what agents/drafting.validate_draft now does. 2026-09-09.
-    out = _br_to_layout(text, _FINAL_BR_RE)
-    out = _FINAL_HR_RE.sub("\n---\n", out)
-    out, n = _FINAL_TAG_RE.subn("", out)
-    if n:
-        log.warning("Final-response HTML strip", tags_removed=n,
+    out = _normalize_html_layout(text)
+    if out != text:
+        # Count only real tag removals for the log preview — BR/HR were
+        # translated to layout, not stripped.
+        _, tag_count = _FINAL_TAG_RE.subn("", out)
+        log.warning("Final-response HTML strip",
+                    original_len=len(text), normalized_len=len(out),
                     preview=text[:200])
+        del tag_count
     return out
 
 
-# Defense-in-depth: scrub tag-shaped fragments from every token chunk
-# BEFORE it reaches the client. The final strip above already fires on
-# the terminal `response` event, but token events flow to the browser
-# in real time — if an agent emits a full `<script>...</script>` inside
-# a single chunk, the frontend markdown renderer sees it before the
-# terminal strip runs. Multi-token spanning attacks (e.g. `<scri` +
-# `pt>`) still fall to the terminal strip; single-token attacks stop
-# here. Cheap (compiled regex), preserves legit `<= 5` etc.
-def _strip_html_from_token(text: str) -> str:
-    if not text or "<" not in text:
-        return text
-    scrubbed, n = _FINAL_TAG_RE.subn("", text)
-    if n:
-        log.warning("Token-level HTML strip",
-                    tags_removed=n, preview=text[:120])
-    return scrubbed
+class StreamingHtmlFilter:
+    """Rolling-buffer HTML normalizer for SSE token streams.
+
+    Applies the SAME transforms as ``_strip_html_from_response`` — <br> to
+    paragraph break (or space inside a table row), <hr> to markdown rule,
+    remaining tags stripped — but buffers across token boundaries so a
+    tag split across chunks ("<b" + "r>") is never emitted mid-flight.
+    Model: mirrors ``core.url_filter.StreamingUrlFilter``.
+
+    Contract: ``"".join(push(t) for t in tokens) + flush()`` equals
+    ``_strip_html_from_response("".join(tokens))`` — byte-for-byte.
+    Enforced by tests in ``tests/test_stream_final_consistency.py``.
+    """
+
+    _MAX_BUFFER = 4096
+
+    def __init__(self) -> None:
+        self._buffer = ""
+
+    def push(self, token: str) -> str:
+        """Feed one streamed token in; return the safe-to-emit prefix out."""
+        if not token:
+            return ""
+        self._buffer += token
+        return self._drain()
+
+    def flush(self) -> str:
+        """Drain the held buffer on stream close."""
+        if not self._buffer:
+            return ""
+        tail = self._buffer
+        self._buffer = ""
+        return _normalize_html_layout(tail)
+
+    def _drain(self) -> str:
+        """Emit only fully-committed lines from the buffer.
+
+        The `<br>` decision (space in a table row, `\n\n` in prose) needs
+        the whole line's pipe count — that context is only available
+        once the closing `\n` arrives. Fast-path emitting characters as
+        they stream would lose the leading `| Steps |` when a mid-line
+        `<br>` later arrives, so we can only emit at newline boundaries.
+        A safety valve flushes an unterminated line once it grows past
+        `_MAX_BUFFER` so a pathological stream cannot pin unbounded
+        memory. Empty and no-`<` fast paths are only safe when we can
+        emit the whole buffer at once — anything short of that risks
+        the described context loss.
+        """
+        buf = self._buffer
+        if not buf:
+            return ""
+
+        last_nl = buf.rfind("\n")
+        if last_nl == -1:
+            # No committed line yet. If the buffer is small and MIGHT
+            # gain a `<`, hold. Also hold when a `<` is already present.
+            # Safety valve on unbounded growth.
+            if len(buf) >= self._MAX_BUFFER:
+                self._buffer = ""
+                return _normalize_html_layout(buf)
+            return ""
+
+        # At least one committed newline. Emit up to `last_nl + 1`; hold
+        # whatever partial line follows so its `<br>` decision has the
+        # correct pipe context when the next newline arrives.
+        complete = buf[:last_nl + 1]
+        pending = buf[last_nl + 1:]
+        # Safety valve on the held pending region.
+        if len(pending) >= self._MAX_BUFFER:
+            self._buffer = ""
+            return _normalize_html_layout(buf)
+        self._buffer = pending
+        return _normalize_html_layout(complete)
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +530,23 @@ async def run_chat_pipeline(
     all_source_metadata: list[dict] = []
     effective_query = i.query
     query_rewritten = False
+
+    # Bug 3 fix (2026-09-09): the token stream and the terminal `response`
+    # event MUST render to the same text. `StreamingHtmlFilter` applies the
+    # SAME transforms as `_strip_html_from_response` and buffers across
+    # token boundaries so a tag split as "<b" + "r>" never leaks through.
+    # `stitched_tokens_buf` accumulates every emitted token for a byte-for-
+    # byte reconciliation check against `final_response` at end-of-stream.
+    # See CLAUDE.md "Streaming = final invariant".
+    html_filter = StreamingHtmlFilter()
+    stitched_tokens_buf: list[str] = []
+    reset_emitted = False
+
+    # Reset the per-request audit-status contextvar. self_refine sets this
+    # to "unverified" when the critic can't run so the response envelope
+    # can carry an x_audit_status field. See core/audit_status.py.
+    from core.audit_status import reset_audit_status, get_audit_status
+    reset_audit_status()
     # Track whether any agent fell back to web-grounded search (Tier 3).
     # If true, the response reflects a non-deterministic branch (ES-hits
     # vs web-fallback flips on repeat calls when the relevance gate is
@@ -502,11 +590,20 @@ async def run_chat_pipeline(
                     if isinstance(chunk, dict):
                         kind = chunk.get("type")
                         if kind == "token":
-                            yield _sse({
-                                "type": "token",
-                                "content": _strip_html_from_token(chunk["content"]),
-                            })
+                            safe = html_filter.push(chunk["content"])
+                            if safe:
+                                stitched_tokens_buf.append(safe)
+                                yield _sse({"type": "token", "content": safe})
                         elif kind == "token_reset":
+                            # An upstream retry / rewrite told the client
+                            # to clear its buffer. Drop everything we've
+                            # tracked so the reconciliation compares only
+                            # the post-reset stream to final_response, and
+                            # reset the HTML filter so an in-flight tag
+                            # from the pre-reset stream is discarded.
+                            html_filter = StreamingHtmlFilter()
+                            stitched_tokens_buf.clear()
+                            reset_emitted = True
                             yield _sse({"type": "token_reset"})
                         elif kind == "drafting_progress":
                             # Required fields kept first so old consumers reading
@@ -633,9 +730,39 @@ async def run_chat_pipeline(
         yield _sse({"type": "error", "data": redact_brands(str(e))})
 
     # --- Final events ------------------------------------------------------
+    # Drain any buffered in-flight HTML fragment from the streaming filter
+    # so the stitched-tokens buffer matches what the client rendered live.
+    _stream_tail = html_filter.flush()
+    if _stream_tail:
+        stitched_tokens_buf.append(_stream_tail)
+        yield _sse({"type": "token", "content": _stream_tail})
+
     # Strip any HTML before delivery. validate_draft already runs in the
     # drafting agent, but this catches HTML from any other agent path too.
     final_response = _strip_html_from_response(final_response)
+
+    # Reconciliation — the "streaming = final" invariant (see CLAUDE.md).
+    # When the terminal `response` event diverges from what we streamed
+    # (post-stream self_refine rewrite, guardrail sanitization, ...), emit
+    # a `token_reset` so clients that display the live stream clear their
+    # buffer and re-render from the response payload. Emit ONLY on real
+    # divergence — a matching stream is the fast path. `identical` is
+    # logged unconditionally so grep on `identical=False` shows the
+    # regression rate live.
+    stitched_tokens = "".join(stitched_tokens_buf)
+    stream_identical = stitched_tokens == final_response
+    if final_response and not stream_identical and not reset_emitted:
+        yield _sse({"type": "token_reset"})
+        reset_emitted = True
+    log.info(
+        "stream_final_reconciled",
+        endpoint=i.endpoint_name,
+        thread_id=i.thread_id[:12],
+        stitched_len=len(stitched_tokens),
+        final_len=len(final_response),
+        identical=stream_identical,
+        reset_emitted=reset_emitted,
+    )
 
     if final_response:
         yield _sse({"type": "response", "content": final_response})
@@ -766,7 +893,14 @@ async def run_chat_pipeline(
     # token breakdown captured by the request-scoped tracker.
     # The previously-emitted flat `total_tokens` int has been removed in
     # favour of `token_usage.total_tokens`; clients should read that.
-    yield _sse({
+    #
+    # `x_audit_status` is present ONLY when the self_refine critic could
+    # not run (transport/parse/timeout) and the response ships without
+    # a completed audit. Ops and eval scripts filter on this field to
+    # identify runs where the verifier was unavailable; end users see
+    # no UI change (there is no user-facing banner — see CLAUDE.md
+    # "Verifier fail-closed discipline"). Absent field = audit ran.
+    _done_event = {
         "type": "done",
         "agents_used": agents_used,
         "token_usage": token_usage_dict,
@@ -774,4 +908,8 @@ async def run_chat_pipeline(
         "conversation_turn": conversation_turn,
         "query_rewritten": query_rewritten,
         "effective_query": effective_query if query_rewritten else None,
-    })
+    }
+    _audit_status = get_audit_status()
+    if _audit_status:
+        _done_event["x_audit_status"] = _audit_status
+    yield _sse(_done_event)

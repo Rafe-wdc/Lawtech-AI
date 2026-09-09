@@ -1637,6 +1637,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # agents + intent + normalized_query + cite_appendix + self-critique).
         # Off by default until validated. Fallback: default_dynamic_plan()
         # on any failure, then the rest of the node proceeds normally.
+        dynamic_plan = None
         if _dynamic_orchestrator_enabled():
             log.info("Plan phase: using DynamicPlanner (Move 3 Phase A)")
             try:
@@ -1653,16 +1654,15 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                 dynamic_plan = default_dynamic_plan()
             # Adapt the DynamicPlan into the same variables the legacy
             # dual-call path produces below. Downstream code (rest of this
-            # function + `state` writes) reads task/agents_planned/
+            # function + return dict) reads task/agents_planned/
             # extracted_intent/response_instructions and doesn't care where
-            # they came from.
+            # they came from. `dynamic_plan` is exported via the return dict
+            # (LangGraph merges declared state keys) rather than mutated
+            # in-place (Bug 2 fix, 2026-09-09).
             results = [
                 (dynamic_plan.normalized_query, dynamic_plan.intent),
                 (dynamic_plan.task, list(dynamic_plan.agents)),
             ]
-            # Stash the DynamicPlan so the rest of the node can read
-            # cite_appendix_recommended and other planner-decided flags.
-            state["_dynamic_plan"] = dynamic_plan
         else:
             intent_coro = asyncio.wait_for(
                 asyncio.to_thread(
@@ -2009,6 +2009,11 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         "agent_queries": agent_queries,
         "response_instructions": response_instructions,
     }
+    # Bug 2 fix (2026-09-09): return the DynamicPlan via the state dict
+    # rather than mutating state in-place. LangGraph declares this key
+    # in LegalAgentState so the reducer preserves it through fan-out.
+    if dynamic_plan is not None:
+        result["_dynamic_plan"] = dynamic_plan
     # Phase 1: surface the structured intent on state when it was successfully
     # extracted. Downstream consumers can opt in to reading it ahead of Phase 2
     # by checking state.get("user_intent"). Stays None otherwise.

@@ -16,6 +16,7 @@ from langgraph.types import Send
 from .state import LegalAgentState
 from .logger import get_logger, short_err
 from .metrics import observe_node_duration
+from .graph_guards import guarded_node, log_graph_state_schema
 
 log = get_logger("Graph")
 
@@ -113,13 +114,21 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
     """After orchestrator planning: fan out to domain agents in parallel.
 
     Uses LangGraph Send API to invoke multiple agents simultaneously.
-    Each agent receives the full shared state and writes its results
-    to agent_results[agent_name] — the custom reducer merges them.
+    Each agent receives a per-Send SHALLOW COPY of the shared state (see
+    Bug 1 fix, 2026-09-09). Under MemorySaver LangGraph does no defensive
+    copy; without the snapshot, any in-node `state["x"] = y` mutation
+    would leak across parallel siblings and race `agent_results`
+    accumulation. Deep-copy is forbidden here — the messages list can be
+    large and every fan-out would allocate a duplicate. Shallow is
+    sufficient because the mutation audit (2026-09-09) confirmed no node
+    mutates message objects or shared containers in place. The
+    `guarded_node` decorator plus tests/test_graph_state_isolation.py
+    guard against future regressions.
     """
     # Handle guardrail-blocked queries (PII, injection, etc.)
     if state.get("is_blocked"):
         log.info("Routing to blocked_response (guardrail blocked)")
-        return [Send("blocked_response", state)]
+        return [Send("blocked_response", dict(state))]
 
     # Sagar bug #5 (2026-06-16): regenerate short-circuit. When
     # orchestrator_plan_node refined a previous response (task='Refine',
@@ -132,13 +141,13 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
             and (state.get("final_response") or "").strip()):
         log.info("Regenerate short-circuit: skipping agent fan-out and synthesis",
                  final_len=len(state.get("final_response") or ""))
-        return [Send("guardrail_output", state)]
+        return [Send("guardrail_output", dict(state))]
 
     planned = state.get("tasks_planned", [])
 
     if not planned:
         log.warning("No tasks planned, falling back to scenario")
-        return [Send("scenario", state)]
+        return [Send("scenario", dict(state))]
 
     # Map task types to node names, deduplicating
     sends = []
@@ -147,14 +156,31 @@ def route_after_orchestrator(state: LegalAgentState) -> list[Send]:
         node = AGENT_NODE_MAP.get(task, "scenario")
         if node not in seen_nodes:
             seen_nodes.add(node)
-            sends.append(Send(node, state))
+            sends.append(Send(node, dict(state)))
 
     node_names = list(seen_nodes)
-    log.info("Fan-out routing",
-             tasks_planned=planned, nodes=node_names,
-             parallel_count=len(sends))
+    # Fan-out observability (2026-09-09). `dynamic_plan_*` fields are a
+    # summary of the DynamicPlan on state (task/agents/confidence/cite
+    # flag) — logged here so a wrong plan is greppable in agent.log
+    # against `request_id`. Full plan is already logged by
+    # orchestrator_plan_node upstream; do not duplicate it.
+    _dp = state.get("_dynamic_plan")
+    _dp_task = getattr(_dp, "task", None) if _dp is not None else None
+    _dp_agents = list(getattr(_dp, "agents", []) or []) if _dp is not None else None
+    _dp_conf = getattr(_dp, "overall_confidence", None) if _dp is not None else None
+    _dp_cite = getattr(_dp, "cite_appendix_recommended", None) if _dp is not None else None
+    log.info("orchestrator_fan_out",
+             request_id=state.get("request_id"),
+             agents=node_names,
+             count=len(sends),
+             tasks_planned=planned,
+             snapshot_strategy="shallow",
+             dynamic_plan_task=_dp_task,
+             dynamic_plan_agents=_dp_agents,
+             dynamic_plan_confidence=_dp_conf,
+             cite_appendix=_dp_cite)
 
-    return sends if sends else [Send("scenario", state)]
+    return sends if sends else [Send("scenario", dict(state))]
 
 
 # --- Graph Construction ---
@@ -200,29 +226,35 @@ def build_graph() -> StateGraph:
 
     # --- Add Nodes ---
 
-    # Infrastructure agents — wrapped in _timed_node so
-    # `lawtech_node_duration_seconds{node=<name>}` gets observed on
-    # every run, success or failure.
-    graph.add_node("guardrail_input", _timed_node("guardrail_input", guardrail_input_node))
-    graph.add_node("memory", _timed_node("memory", memory_node))
-    graph.add_node("orchestrator_plan", _timed_node("orchestrator_plan", orchestrator_plan_node))
-    graph.add_node("orchestrator_synthesize", _timed_node("orchestrator_synthesize", orchestrator_synthesize_node))
-    graph.add_node("guardrail_output", _timed_node("guardrail_output", guardrail_output_node))
-    graph.add_node("blocked_response", _timed_node("blocked_response", blocked_response_node))
+    # Every node is wrapped `_timed_node(name, guarded_node(raw_fn))`.
+    # `guarded_node` (innermost) sees the raw function name via
+    # `fn.__name__` so its WARN messages carry the true node identifier.
+    # `_timed_node` (outermost) records `lawtech_node_duration_seconds`
+    # for every invocation, success or failure.
+    def _wrap(name: str, fn):
+        return _timed_node(name, guarded_node(fn))
+
+    # Infrastructure agents
+    graph.add_node("guardrail_input", _wrap("guardrail_input", guardrail_input_node))
+    graph.add_node("memory", _wrap("memory", memory_node))
+    graph.add_node("orchestrator_plan", _wrap("orchestrator_plan", orchestrator_plan_node))
+    graph.add_node("orchestrator_synthesize", _wrap("orchestrator_synthesize", orchestrator_synthesize_node))
+    graph.add_node("guardrail_output", _wrap("guardrail_output", guardrail_output_node))
+    graph.add_node("blocked_response", _wrap("blocked_response", blocked_response_node))
 
     # Domain agents
-    graph.add_node("legislation", _timed_node("legislation", legislation_node))
-    graph.add_node("judgment", _timed_node("judgment", judgment_node))
-    graph.add_node("newacts", _timed_node("newacts", newacts_node))
-    graph.add_node("drafting", _timed_node("drafting", drafting_node))
-    graph.add_node("scenario", _timed_node("scenario", scenario_node))
-    graph.add_node("constitution", _timed_node("constitution", constitution_node))
-    graph.add_node("maxim", _timed_node("maxim", maxim_node))
-    graph.add_node("legal_concepts", _timed_node("legal_concepts", legal_concepts_node))
-    graph.add_node("document", _timed_node("document", document_node))
-    graph.add_node("sci_judgment", _timed_node("sci_judgment", sci_judgment_node))
-    graph.add_node("gst_judgment", _timed_node("gst_judgment", gst_judgment_node))
-    graph.add_node("non_legal", _timed_node("non_legal", non_legal_node))
+    graph.add_node("legislation", _wrap("legislation", legislation_node))
+    graph.add_node("judgment", _wrap("judgment", judgment_node))
+    graph.add_node("newacts", _wrap("newacts", newacts_node))
+    graph.add_node("drafting", _wrap("drafting", drafting_node))
+    graph.add_node("scenario", _wrap("scenario", scenario_node))
+    graph.add_node("constitution", _wrap("constitution", constitution_node))
+    graph.add_node("maxim", _wrap("maxim", maxim_node))
+    graph.add_node("legal_concepts", _wrap("legal_concepts", legal_concepts_node))
+    graph.add_node("document", _wrap("document", document_node))
+    graph.add_node("sci_judgment", _wrap("sci_judgment", sci_judgment_node))
+    graph.add_node("gst_judgment", _wrap("gst_judgment", gst_judgment_node))
+    graph.add_node("non_legal", _wrap("non_legal", non_legal_node))
 
     # --- Add Edges ---
 
@@ -266,6 +298,11 @@ def build_graph() -> StateGraph:
     log.info("Graph built",
              infrastructure_nodes=6, domain_agents=len(domain_agents),
              total_nodes=total_nodes)
+
+    # Startup schema audit — one line per process, greppable for
+    # accidental removals or additions to LegalAgentState. Emitted after
+    # every node is registered so the count matches what actually runs.
+    log_graph_state_schema()
 
     return graph
 

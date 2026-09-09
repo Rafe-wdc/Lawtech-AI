@@ -135,3 +135,24 @@ class TestGuardrailNormalisesEveryTask:
 def test_terminal_strip_turns_br_into_paragraph_break():
     from core.chat_runner import _strip_html_from_response
     assert _strip_html_from_response("A<br>B<br/>C") == "A\n\nB\n\nC"
+
+
+TABLE_ROW = "| **Penalty** | up to 7 years | Tiered:<br>General: 3 years<br>Aggravated: 5 years |"
+
+
+def test_terminal_strip_keeps_table_rows_on_one_line():
+    # The table prompt allows <br> between bullets inside a cell. A newline
+    # there would split the row and break the whole table (IPC 420 / BNS 318
+    # comparison, 2026-09-09).
+    from core.chat_runner import _strip_html_from_response
+    out = _strip_html_from_response(TABLE_ROW)
+    assert "\n" not in out and "<br" not in out
+    assert out.count("|") == TABLE_ROW.count("|")
+
+
+def test_validate_draft_keeps_table_rows_on_one_line():
+    from agents.drafting import validate_draft
+    r = validate_draft("| Head A | Head B |\n|---|---|\n" + TABLE_ROW + "\n")
+    out = r[0] if isinstance(r, tuple) else r
+    assert "<br" not in out
+    assert sum(1 for l in out.splitlines() if l.startswith("|")) == 3

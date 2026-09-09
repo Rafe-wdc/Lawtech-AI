@@ -384,6 +384,25 @@ def _party_pipes_to_dot_leader(text: str) -> str:
     return re.sub(r"[ \t]*\|[ \t]*$", "", text, flags=re.MULTILINE)
 
 
+
+
+def _br_to_layout(text: str, br_re) -> str:
+    """Turn <br> into layout the markdown renderer keeps.
+
+    Outside a table a <br> becomes a paragraph break, the only line break
+    that survives rendering. Inside a table row it becomes a space: a
+    newline there splits the row and the whole table falls apart (the
+    table prompt explicitly allows <br> between bullets inside a cell,
+    config/prompts.py). Found 2026-09-09 on the IPC 420 / BNS 318 comparison.
+    """
+    out = []
+    for line in text.split("\n"):
+        if "<br" in line.lower():
+            is_row = line.lstrip().startswith("|") or line.count("|") >= 2
+            line = br_re.sub(" " if is_row else "\n\n", line)
+        out.append(line)
+    return "\n".join(out)
+
 def validate_draft(
     full_draft: str,
     stance=None,  # kept for signature compatibility; unused
@@ -436,7 +455,7 @@ def validate_draft(
     # an advocate as one run-on line. A paragraph break is the only line
     # break that survives rendering, so that is what a stray <br> becomes.
     # Inner text of every other tag is preserved.
-    cleaned = _HTML_BR_RE.sub("\n\n", cleaned)
+    cleaned = _br_to_layout(cleaned, _HTML_BR_RE)
     cleaned = _HTML_HR_RE.sub("\n---\n", cleaned)
     cleaned, html_strip_count = _HTML_ANY_TAG_RE.subn("", cleaned)
     if html_strip_count:

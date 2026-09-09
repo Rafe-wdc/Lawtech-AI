@@ -91,6 +91,25 @@ _FINAL_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _FINAL_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
 
 
+
+
+def _br_to_layout(text: str, br_re) -> str:
+    """Turn <br> into layout the markdown renderer keeps.
+
+    Outside a table a <br> becomes a paragraph break, the only line break
+    that survives rendering. Inside a table row it becomes a space: a
+    newline there splits the row and the whole table falls apart (the
+    table prompt explicitly allows <br> between bullets inside a cell,
+    config/prompts.py). Found 2026-09-09 on the IPC 420 / BNS 318 comparison.
+    """
+    out = []
+    for line in text.split("\n"):
+        if "<br" in line.lower():
+            is_row = line.lstrip().startswith("|") or line.count("|") >= 2
+            line = br_re.sub(" " if is_row else "\n\n", line)
+        out.append(line)
+    return "\n".join(out)
+
 def _strip_html_from_response(text: str) -> str:
     """Strip HTML tags from a final response. See module-level comment."""
     if not text or "<" not in text:
@@ -101,7 +120,7 @@ def _strip_html_from_response(text: str) -> str:
     # screen as "Name Designation" on one line. A blank line is the only line
     # break the markdown renderer preserves (single newlines collapse), which
     # is also what agents/drafting.validate_draft now does. 2026-09-09.
-    out = _FINAL_BR_RE.sub("\n\n", text)
+    out = _br_to_layout(text, _FINAL_BR_RE)
     out = _FINAL_HR_RE.sub("\n---\n", out)
     out, n = _FINAL_TAG_RE.subn("", out)
     if n:

@@ -24,6 +24,35 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 
+import core.clients as _clients
+
+
+@pytest.fixture(autouse=True)
+def _clear_llm_client_caches():
+    """Drop every lru_cached LLM client before and after each test.
+
+    core.clients getters are @lru_cache'd, so a client built during one
+    test survives into the next and the next test's patch of
+    init_chat_model has nothing left to intercept. That made
+    TestJudgeFanout::test_llm_failure_defaults_to_single_pass fail in a
+    full run while passing in isolation. Clearing the caches makes each
+    test hermetic.
+
+    Patches must target core.clients.init_chat_model, NOT
+    langchain.chat_models.init_chat_model: core/clients.py binds the name
+    at import (`from langchain.chat_models import init_chat_model`), so
+    patching the source module is a no-op and the test silently makes a
+    real API call.
+    """
+    def _clear():
+        for _name in dir(_clients):
+            _obj = getattr(_clients, _name, None)
+            if hasattr(_obj, "cache_clear"):
+                _obj.cache_clear()
+    _clear()
+    yield
+    _clear()
+
 from agents.drafting import (
     _PickerChoice,
     _pick_reference_source,
@@ -78,7 +107,7 @@ class TestPickReferenceSource:
                 reasoning="Exact match for Section 138 NI Act demand notice.",
             ),
         })
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -103,7 +132,7 @@ class TestPickReferenceSource:
                 reasoning="No candidate is an RTI application format.",
             ),
         })
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -126,7 +155,7 @@ class TestPickReferenceSource:
                 reasoning="Matched by basename.",
             ),
         })
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -147,7 +176,7 @@ class TestPickReferenceSource:
                 reasoning="hallucinated path",
             ),
         })
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -160,7 +189,7 @@ class TestPickReferenceSource:
         """Picker LLM failure should NOT raise — it should return None so the
         caller falls back to web instead of crashing the request."""
         candidates = ["/templates/Bail Application.csv"]
-        with patch("langchain.chat_models.init_chat_model",
+        with patch("core.clients.init_chat_model",
                    side_effect=RuntimeError("LLM blip")):
             result = _run(_pick_reference_source("bail application", candidates))
         assert result is None
@@ -426,7 +455,7 @@ class TestJudgeFanout:
             "raw": MagicMock(usage_metadata={"total_tokens": 200}),
             "parsed": strategy,
         })
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -464,7 +493,7 @@ class TestJudgeFanout:
             return llm
 
         import core.deadline as _deadline
-        with patch("langchain.chat_models.init_chat_model",
+        with patch("core.clients.init_chat_model",
                    side_effect=_capture_init), \
              patch.object(_deadline, "bounded_wait_for",
                           side_effect=_capture_bounded), \
@@ -502,7 +531,7 @@ class TestJudgeFanout:
         import core.deadline as _deadline
         mock_chain = MagicMock()
         mock_chain.ainvoke = MagicMock()
-        with patch("langchain.chat_models.init_chat_model") as mock_init, \
+        with patch("core.clients.init_chat_model") as mock_init, \
              patch.object(_deadline, "bounded_wait_for", side_effect=_timeout), \
              patch("agents.drafting.ChatPromptTemplate") as mock_prompt:
             mock_llm = MagicMock()
@@ -560,7 +589,7 @@ class TestJudgeFanout:
         assert out == "COMPLETE SINGLE PASS DOCUMENT"
 
     def test_llm_failure_defaults_to_single_pass(self):
-        with patch("langchain.chat_models.init_chat_model",
+        with patch("core.clients.init_chat_model",
                    side_effect=RuntimeError("LLM blip")):
             got = _run(_judge_fanout(
                 query="Draft a notice", reference_draft="ref",
@@ -584,7 +613,7 @@ class TestJudgeFanout:
 
         mock_chain = MagicMock()
         mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -616,7 +645,7 @@ class TestJudgeFanout:
 
         mock_chain = MagicMock()
         mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -646,7 +675,7 @@ class TestJudgeFanout:
 
         mock_chain = MagicMock()
         mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -675,7 +704,7 @@ class TestJudgeFanout:
 
         mock_chain = MagicMock()
         mock_chain.ainvoke = AsyncMock(side_effect=_capture_invoke)
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -1030,8 +1059,12 @@ class TestChunkUserFacts:
 
 
 class TestPickRelevantChunkIndices:
-    """`_pick_relevant_chunk_indices` routes via Gemini Flash Lite; empty
-    chunks / router failures / empty picks always yield []."""
+    """`_pick_relevant_chunk_indices` routes via Gemini Flash Lite.
+
+    Empty chunks yield []; a router FAILURE yields None, so the caller can
+    tell the two apart. See the branch in agents/drafting.py that sets
+    any_router_failure only on None.
+    """
 
     def test_empty_chunks_returns_empty_without_llm_call(self):
         section = _Section(id="s", heading="H", summary="")
@@ -1053,7 +1086,7 @@ class TestPickRelevantChunkIndices:
                 reasoning="Facts para content lives in even indices.",
             ),
         })
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -1079,7 +1112,7 @@ class TestPickRelevantChunkIndices:
                 reasoning="mixed valid + invalid",
             ),
         })
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             mock_llm = MagicMock()
             mock_llm.with_structured_output.return_value = mock_llm
             mock_init.return_value = mock_llm
@@ -1093,17 +1126,23 @@ class TestPickRelevantChunkIndices:
         # Only 0 and 1 are valid; 99 and -1 dropped.
         assert result == [0, 1]
 
-    def test_llm_failure_returns_empty(self):
-        """Router exception → caller falls back to raw source. Returning []
-        is the signal for that fallback."""
+    def test_llm_failure_returns_none(self):
+        """Router exception -> None, which is NOT the same as [].
+
+        The caller (agents/drafting.py, per-section chunking block) branches
+        on exactly this distinction: None means "real failure, fall back to
+        raw source and set any_router_failure", [] means "the router ran and
+        legitimately picked nothing". This test previously asserted [] and
+        passed only because its patch target was inert.
+        """
         chunks = ["a", "b"]
         section = _Section(id="s", heading="H", summary="")
-        with patch("langchain.chat_models.init_chat_model",
+        with patch("core.clients.init_chat_model",
                    side_effect=RuntimeError("Gemini blip")):
             result = _run(_pick_relevant_chunk_indices(
                 user_facts_chunks=chunks, section=section, query="q",
             ))
-        assert result == []
+        assert result is None
 
 
 class TestSectionwiseChunkingIntegration:
@@ -1420,7 +1459,7 @@ class TestTranslateQueryForEsMatch:
 
     def test_english_target_returns_empty_without_llm_call(self):
         """English is a no-op — no translation needed, no LLM call fires."""
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             result = _run(_translate_query_for_es_match(
                 "Draft a Section 138 notice.", "en",
             ))
@@ -1428,13 +1467,13 @@ class TestTranslateQueryForEsMatch:
         mock_init.assert_not_called()
 
     def test_empty_language_returns_empty_without_llm_call(self):
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             result = _run(_translate_query_for_es_match("some text", ""))
         assert result == ""
         mock_init.assert_not_called()
 
     def test_empty_query_returns_empty_without_llm_call(self):
-        with patch("langchain.chat_models.init_chat_model") as mock_init:
+        with patch("core.clients.init_chat_model") as mock_init:
             result = _run(_translate_query_for_es_match("", "hi"))
         assert result == ""
         mock_init.assert_not_called()
@@ -1447,7 +1486,7 @@ class TestTranslateQueryForEsMatch:
         mock_response.content = mock_response.text
         mock_response.usage_metadata = {"total_tokens": 40}
         mock_llm.invoke = MagicMock(return_value=mock_response)
-        with patch("langchain.chat_models.init_chat_model", return_value=mock_llm):
+        with patch("core.clients.init_chat_model", return_value=mock_llm):
             result = _run(_translate_query_for_es_match(
                 "अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
                 "hi",
@@ -1457,7 +1496,7 @@ class TestTranslateQueryForEsMatch:
 
     def test_llm_failure_returns_empty(self):
         """Translator errors → empty string → caller uses original query."""
-        with patch("langchain.chat_models.init_chat_model",
+        with patch("core.clients.init_chat_model",
                    side_effect=RuntimeError("Gemini blip")):
             result = _run(_translate_query_for_es_match(
                 "अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
@@ -1474,7 +1513,7 @@ class TestTranslateQueryForEsMatch:
         mock_response.content = mock_response.text
         mock_response.usage_metadata = {"total_tokens": 40}
         mock_llm.invoke = MagicMock(return_value=mock_response)
-        with patch("langchain.chat_models.init_chat_model", return_value=mock_llm):
+        with patch("core.clients.init_chat_model", return_value=mock_llm):
             result = _run(_translate_query_for_es_match(
                 "अभियुक्त के हस्ताक्षर वकालतनामा पर प्राप्त करने के लिए आवेदन।",
                 "hi",

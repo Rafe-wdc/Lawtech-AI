@@ -95,7 +95,13 @@ def _strip_html_from_response(text: str) -> str:
     """Strip HTML tags from a final response. See module-level comment."""
     if not text or "<" not in text:
         return text
-    out = _FINAL_BR_RE.sub(" ", text)
+    # A <br> becomes a PARAGRAPH break, not a space. This is the last strip
+    # before the client, and it runs on every task type, so a judgment summary
+    # or scenario answer that emitted "Name<br>Designation" used to reach the
+    # screen as "Name Designation" on one line. A blank line is the only line
+    # break the markdown renderer preserves (single newlines collapse), which
+    # is also what agents/drafting.validate_draft now does. 2026-09-09.
+    out = _FINAL_BR_RE.sub("\n\n", text)
     out = _FINAL_HR_RE.sub("\n---\n", out)
     out, n = _FINAL_TAG_RE.subn("", out)
     if n:

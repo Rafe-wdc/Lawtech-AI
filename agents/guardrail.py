@@ -140,6 +140,32 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
                     original_len=pre_len, after_sanitize_output=len(cleaned),
                     removed=pre_len - len(cleaned))
 
+    # Pass 1b: em / en dashes - the "ChatGPT dash". Advocates flagged this on
+    # 2026-09-08 as making the output read machine-written; Indian legal
+    # register sets off a parenthetical with commas, semicolons or brackets.
+    #
+    # This lives HERE, not in the drafting agent, because it has to cover
+    # EVERY response. The first fix went into agents.drafting.validate_draft,
+    # which only runs on the drafting path - so drafts came out clean while
+    # judgment summaries, legislation answers, scenario analyses and document
+    # Q&A still shipped em-dashes. Reported 2026-09-09 on "Prepare detailed
+    # summary for the Manjari Greens phase 3", which routes to a judgment
+    # agent and never touches validate_draft.
+    #
+    # Character classes are [space,tab], never \s: \s matches newlines,
+    # so a dash at end-of-line would swallow the break and glue two lines
+    # together - the exact alignment damage this is meant to prevent.
+    # Three shapes, most specific first: spaced parenthetical -> comma,
+    # unspaced compound or range -> hyphen, leading list marker -> removed.
+    _dash_n = cleaned.count("—") + cleaned.count("–")
+    if _dash_n:
+        cleaned = re.sub(r"(?m)^[ \t]*[—–][ \t]+", "", cleaned)
+        cleaned = re.sub(r"[ \t]+[—–][ \t]+", ", ", cleaned)
+        cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
+        cleaned = cleaned.replace("—", "-").replace("–", "-")
+        cleaned = re.sub(r",[ \t]*,", ",", cleaned)
+        log.info("Normalised em/en dashes in final response",
+                 count=_dash_n, task=task)
     # Pass 2: markdown polish (code fences, bullets, headings, etc.)
     cleaned = sanitize_markdown(cleaned)
 

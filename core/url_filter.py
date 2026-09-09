@@ -204,7 +204,14 @@ def sanitize_prose(text: str | None) -> str:
     # Tidy the orphan whitespace left behind.
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
+    # Interior runs only. This was an unanchored "2+ spaces or tabs -> one
+    # space", which also ate LEADING indentation on every line of every
+    # response: a nested-bullet block indented 0/3/5 came out 0/1/1, so
+    # sub-bullets lost their nesting and rendered as one flat list. Reported
+    # by an advocate 2026-09-09 from the UI. The lookbehind keeps the original
+    # purpose (closing the gap a stripped URL left mid-sentence) while leaving
+    # line-leading whitespace alone.
+    text = re.sub(r"(?<=\S)[ \t]{2,}", " ", text)
     return text
 
 

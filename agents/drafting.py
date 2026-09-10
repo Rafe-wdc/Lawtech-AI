@@ -348,6 +348,130 @@ _HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
 
+# --- hard-wrap repair -------------------------------------------------------
+# A line that starts a new block. A line after a long line that does NOT
+# match this is the continuation of a hard-wrapped paragraph.
+_BLOCK_START_RE = re.compile(
+    r"^[ \t]*(?:"
+    r"#{1,6}[ \t]|"                              # heading
+    r"[-*+][ \t]|"                               # bullet
+    r"\d{1,3}[.)][ \t]|"                        # 1. / 12)
+    r"\([a-z0-9]{1,4}\)[ \t]|"                # (a) (iv) (12)
+    r"[a-z][.)][ \t]|"                            # a. / b)
+    r"[ivxlc]{1,6}[.)][ \t]|"                     # iv. / x)
+    r"\||>|"                                     # table row, quote
+    r"\.{3,}|_{3,}|-{3,}|"                       # dot leader, blank line, rule
+    r"\*\*[^*\n]+\*\*:?[ \t]*$|"                  # bold-only label line
+    r"\[[^\]\n]{1,60}\][ \t]*$|"                     # placeholder-only line
+    r"(?:verified at|place|dated?|sd/-|signature|through|advocate|counsel|"
+    r"deponent|applicant|petitioner|respondent|complainant|accused|plaintiff|"
+    r"defendant|appellant|filed by|drawn by|settled by|to,|dear|subject|ref)\b"
+    r")",
+    re.IGNORECASE,
+)
+_TERMINAL_PUNCT = '.;:!?' + chr(0x2019) + chr(0x201D) + '"' + ")]"
+_UNWRAP_MIN_PREV_LEN = 70   # a hard-wrapped line sits near the wrap width
+
+
+def _unwrap_hard_wrapped_lines(text: str) -> tuple[str, int]:
+    """Join lines the writer hard-wrapped inside one paragraph.
+
+    Advocate screenshot 2026-09-10: paragraphs 1-9 of a bail application
+    wrapped at ~100 columns with each continuation at the left margin, so
+    the client rendered every fragment on its own line; paragraphs 29-33
+    of the same draft were single lines and rendered correctly. The prompt
+    rule "one paragraph = one line" does not hold (measured 26 wrapped
+    joins in a single-pass notice), so the repair is mechanical.
+
+    A line is joined onto the previous one when the previous line is long
+    (>= 70 chars: a wrapped line sits near the wrap width, while cause
+    titles, party lines and signature lines are short), is not a heading,
+    table row or label ending in ':', and the current line does not start
+    a new block (list marker, heading, table, dot leader, bold label,
+    placeholder-only line, or filing furniture such as 'Verified at',
+    'Place:', 'Sd/-', 'DEPONENT'). A short capitalised line after a
+    sentence-ending line is treated as furniture, not a wrapped tail.
+    """
+    if not text or chr(10) not in text:
+        return text, 0
+    out: list[str] = []
+    joins = 0
+    for cur in text.split(chr(10)):
+        if out:
+            prev = out[-1]
+            ps = prev.rstrip()
+            cs = cur.strip()
+            if (
+                cs
+                and len(ps) >= _UNWRAP_MIN_PREV_LEN
+                and not ps.lstrip().startswith(("#", "|"))
+                and not ps.endswith(":")
+                and not _BLOCK_START_RE.match(cs)
+                and not (
+                    len(cs) < 40
+                    and ps[-1] in _TERMINAL_PUNCT
+                    and (cs[0].isupper() or cs[0] in "[(")
+                    and not cs[:1].isdigit()
+                )
+            ):
+                out[-1] = ps + " " + cs
+                joins += 1
+                continue
+        out.append(cur)
+    return chr(10).join(out), joins
+
+
+# --- sub-point nesting -------------------------------------------------------
+_NUMBERED_ITEM_RE = re.compile(r"^(\d{1,3})\.[ \t]+\S")
+_GAP_STOP_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]|\||\.{3,}|-{3,}[ \t]*$|_{3,}|"
+    r"\*\*[^*\n]+\*\*:?[ \t]*$|"
+    r"(?:in witness|signed|witnesses|schedule|annexure|verification|prayer|"
+    r"place|dated?|sd/-|through|advocate|counsel|deponent)\b)",
+    re.IGNORECASE,
+)
+
+
+def _nest_subpoints_under_numbered_items(text: str) -> tuple[str, int]:
+    """Indent left-margin content that sits between two numbered clauses
+    so it nests under the first of them.
+
+    Advocate screenshot 2026-09-10 (partnership deed): clause 10 ended
+    with "in the following amounts and proportions:", then three bullets
+    at the left margin, then a continuation paragraph at the left margin,
+    then clause 11. Markdown ends clause 10 at the first left-margin
+    bullet, so the bullets rendered as a separate list and the paragraph
+    as loose text outside the clause. Gemini indents such sub-points;
+    Claude does not, and the prompt rule asking for it does not hold.
+
+    Only the gap BETWEEN two numbered items (both at column 0) is
+    touched, so the closing block after the last clause (IN WITNESS
+    WHEREOF, signatures, schedule) is never pulled into a clause. A gap
+    holding a heading, table, rule, dot leader, bold label or filing
+    furniture is left alone as well. Lines already indented keep their
+    own deeper indentation. Structural and mechanical.
+    """
+    lines = text.split(chr(10))
+    items = [(i, len(m.group(0)) - 1) for i, l in enumerate(lines)
+             for m in [_NUMBERED_ITEM_RE.match(l)] if m]
+    if len(items) < 2:
+        return text, 0
+    changed = 0
+    for (a, width), (b, _w) in zip(items, items[1:]):
+        gap = lines[a + 1:b]
+        body = [g for g in gap if g.strip()]
+        if not body or any(_GAP_STOP_RE.match(g) for g in body):
+            continue
+        if not any(not g.startswith((" ", chr(9))) for g in body):
+            continue                       # already indented
+        pad = " " * max(3, width)
+        for k in range(a + 1, b):
+            if lines[k].strip() and not lines[k].startswith((" ", chr(9))):
+                lines[k] = pad + lines[k]
+                changed += 1
+    return chr(10).join(lines), changed
+
+
 # A line opening with a bare number of three or more digits and a period.
 # Two-digit numbers are genuine paragraph numbers; three-plus are years
 # and amounts that hard-wrapping stranded at line start.
@@ -461,6 +585,23 @@ def validate_draft(
     if html_strip_count:
         warnings.append(
             f"Stripped {html_strip_count} HTML tag(s) from draft."
+        )
+
+    # Hard-wrapped prose: join continuation lines back into their paragraph
+    # BEFORE the line-initial-number guard below, so a year that was only
+    # stranded by wrapping is rejoined rather than escaped.
+    cleaned, _unwrapped = _unwrap_hard_wrapped_lines(cleaned)
+    if _unwrapped:
+        warnings.append(
+            f"Rejoined {_unwrapped} hard-wrapped line(s) into their paragraphs."
+        )
+
+    # Sub-points and continuation paragraphs the writer left at the left
+    # margin between two numbered clauses are nested under the first.
+    cleaned, _nested = _nest_subpoints_under_numbered_items(cleaned)
+    if _nested:
+        warnings.append(
+            f"Nested {_nested} left-margin line(s) under their numbered clause."
         )
 
     # A line that opens with a bare number and a period is a markdown

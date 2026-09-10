@@ -285,6 +285,13 @@ INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE = """\
   prefacing "Here is your draft" / "I have prepared the following".
 - If the user asks for an explanation, do NOT offer to draft unless
   the user explicitly requests drafting.
+- NO diagrams. No flowcharts, decision trees, ASCII art, box drawings,
+  "+---+" frames, arrows-and-pipes layouts, or anything inside a
+  triple-backtick code fence. Legal writing for practitioners is prose,
+  numbered paragraphs and, where the user asks for one, a markdown
+  table. A remedies overview is a numbered list or a two-column table,
+  never a chart. (Advocate report 2026-09-10: a monospace flowchart of
+  remedies appeared mid-opinion and rendered as misaligned columns.)
 """
 
 

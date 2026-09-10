@@ -181,6 +181,15 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
                  before=pre_url_len, after=len(cleaned),
                  removed=pre_url_len - len(cleaned))
 
+    # Pass 2b2: no diagrams, no code fences. A flowchart drawn as ASCII art
+    # inside a fence renders in monospace, cannot wrap and misaligns; a
+    # legal opinion or draft never needs one. Drawings are removed, other
+    # fences are unwrapped into body text. Advocate report 2026-09-10.
+    from core.diagrams import strip_diagrams as _strip_diagrams
+    cleaned, _diag = _strip_diagrams(cleaned)
+    if _diag["diagrams_removed"] or _diag["fences_unwrapped"]:
+        log.info("Diagram / code-fence repair applied", task=task, **_diag)
+
     # Pass 2c: keep the response inside the answer box. A bare whitelisted
     # PDF URL (70-110 unbreakable chars) becomes a short labelled link; a
     # 20+ char run of underscores used as a blank is capped; a line of

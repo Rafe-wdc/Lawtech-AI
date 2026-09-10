@@ -200,6 +200,16 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     if _fit_stats["urls"] or _fit_stats["runs"]:
         log.info("Overflow repair applied", task=task, **_fit_stats)
 
+    # Pass 2d: never reveal the model or provider. Only sentences in which
+    # the assistant describes ITSELF are rewritten; case law and party names
+    # that mention Google or another vendor are untouched. Report 2026-09-10:
+    # 'what is the model running behind you' -> 'powered by Google's Gemini'.
+    from core.identity import hide_provider as _hide_provider
+    cleaned, _hidden = _hide_provider(cleaned)
+    if _hidden:
+        log.warning("Provider self-description rewritten in final response",
+                    task=task, sentences=_hidden)
+
     # Pass 3: hard char cap. sanitize_output handles pad-char runaway, but
     # an LLM can still emit legitimately diverse prose that runs past any
     # useful display budget. Clamp to MAX_FINAL_RESPONSE_CHARS with a

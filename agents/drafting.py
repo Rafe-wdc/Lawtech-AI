@@ -348,6 +348,79 @@ _HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
 _HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
 
+# --- hard-wrap repair -------------------------------------------------------
+# A line that starts a new block. A line after a long line that does NOT
+# match this is the continuation of a hard-wrapped paragraph.
+_BLOCK_START_RE = re.compile(
+    r"^[ \t]*(?:"
+    r"#{1,6}[ \t]|"                              # heading
+    r"[-*+][ \t]|"                               # bullet
+    r"\d{1,3}[.)][ \t]|"                        # 1. / 12)
+    r"\([a-z0-9]{1,4}\)[ \t]|"                # (a) (iv) (12)
+    r"[a-z][.)][ \t]|"                            # a. / b)
+    r"[ivxlc]{1,6}[.)][ \t]|"                     # iv. / x)
+    r"\||>|"                                     # table row, quote
+    r"\.{3,}|_{3,}|-{3,}|"                       # dot leader, blank line, rule
+    r"\*\*[^*\n]+\*\*:?[ \t]*$|"                  # bold-only label line
+    r"\[[^\]\n]{1,60}\][ \t]*$|"                     # placeholder-only line
+    r"(?:verified at|place|dated?|sd/-|signature|through|advocate|counsel|"
+    r"deponent|applicant|petitioner|respondent|complainant|accused|plaintiff|"
+    r"defendant|appellant|filed by|drawn by|settled by|to,|dear|subject|ref)\b"
+    r")",
+    re.IGNORECASE,
+)
+_TERMINAL_PUNCT = '.;:!?' + chr(0x2019) + chr(0x201D) + '"' + ")]"
+_UNWRAP_MIN_PREV_LEN = 70   # a hard-wrapped line sits near the wrap width
+
+
+def _unwrap_hard_wrapped_lines(text: str) -> tuple[str, int]:
+    """Join lines the writer hard-wrapped inside one paragraph.
+
+    Advocate screenshot 2026-09-10: paragraphs 1-9 of a bail application
+    wrapped at ~100 columns with each continuation at the left margin, so
+    the client rendered every fragment on its own line; paragraphs 29-33
+    of the same draft were single lines and rendered correctly. The prompt
+    rule "one paragraph = one line" does not hold (measured 26 wrapped
+    joins in a single-pass notice), so the repair is mechanical.
+
+    A line is joined onto the previous one when the previous line is long
+    (>= 70 chars: a wrapped line sits near the wrap width, while cause
+    titles, party lines and signature lines are short), is not a heading,
+    table row or label ending in ':', and the current line does not start
+    a new block (list marker, heading, table, dot leader, bold label,
+    placeholder-only line, or filing furniture such as 'Verified at',
+    'Place:', 'Sd/-', 'DEPONENT'). A short capitalised line after a
+    sentence-ending line is treated as furniture, not a wrapped tail.
+    """
+    if not text or chr(10) not in text:
+        return text, 0
+    out: list[str] = []
+    joins = 0
+    for cur in text.split(chr(10)):
+        if out:
+            prev = out[-1]
+            ps = prev.rstrip()
+            cs = cur.strip()
+            if (
+                cs
+                and len(ps) >= _UNWRAP_MIN_PREV_LEN
+                and not ps.lstrip().startswith(("#", "|"))
+                and not ps.endswith(":")
+                and not _BLOCK_START_RE.match(cs)
+                and not (
+                    len(cs) < 40
+                    and ps[-1] in _TERMINAL_PUNCT
+                    and (cs[0].isupper() or cs[0] in "[(")
+                    and not cs[:1].isdigit()
+                )
+            ):
+                out[-1] = ps + " " + cs
+                joins += 1
+                continue
+        out.append(cur)
+    return chr(10).join(out), joins
+
+
 # A line opening with a bare number of three or more digits and a period.
 # Two-digit numbers are genuine paragraph numbers; three-plus are years
 # and amounts that hard-wrapping stranded at line start.
@@ -461,6 +534,15 @@ def validate_draft(
     if html_strip_count:
         warnings.append(
             f"Stripped {html_strip_count} HTML tag(s) from draft."
+        )
+
+    # Hard-wrapped prose: join continuation lines back into their paragraph
+    # BEFORE the line-initial-number guard below, so a year that was only
+    # stranded by wrapping is rejoined rather than escaped.
+    cleaned, _unwrapped = _unwrap_hard_wrapped_lines(cleaned)
+    if _unwrapped:
+        warnings.append(
+            f"Rejoined {_unwrapped} hard-wrapped line(s) into their paragraphs."
         )
 
     # A line that opens with a bare number and a period is a markdown

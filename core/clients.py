@@ -301,7 +301,12 @@ def get_gemini_flash_full(temperature: float = 0.3,
 def get_gemini_pro(temperature: float = 0.5,
                    max_output_tokens: int = 16000,
                    thinking_budget: int = 2048):
-    """Gemini 2.5 Pro — strongest. For scenario analysis, PDF chat, complex reasoning.
+    """Gemini 3.8 Flash — for scenario analysis, PDF chat, complex reasoning.
+
+    Cost swap 2026-09-10: was `gemini-2.5-pro` ($1.25/$10.00 per 1M). Moved to
+    `gemini-3.8-flash` ($0.75/$3.75) — cheaper on both input and output, and a
+    newer training cutoff. The function name is kept so callsites do not churn;
+    it no longer returns a Pro-tier model.
 
     Defaults tightened 2026-08-10: previous 65535/8192 defaults meant any caller
     that forgot to override was billing up to 8192 thinking tokens ($0.08 output-
@@ -310,7 +315,7 @@ def get_gemini_pro(temperature: float = 0.5,
     16K/2048 defaults are a safe ceiling for anything that inherits.
     """
     return init_chat_model(
-        "google_genai:gemini-2.5-pro",
+        "google_genai:gemini-3.8-flash",
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         thinking_budget=thinking_budget,

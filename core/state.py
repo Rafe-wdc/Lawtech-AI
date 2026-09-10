@@ -214,6 +214,11 @@ class LegalAgentState(MessagesState):
                                 # modifiable draft artefact; "" otherwise
     previous_artifact_content: str  # the prior turn's ai_response (raw
                                     # content of the modifiable artefact)
+    conversational_followup: bool   # True when this turn is an
+                                    # acknowledgement ("ok", "thanks",
+                                    # "yes") with no new ask - set by the
+                                    # memory node, read by the planner and
+                                    # the Non_legal agent. See core.followup.
 
     # Agent results — uses custom merge so parallel agents don't overwrite each other
     agent_results: Annotated[dict[str, AgentResult], _merge_agent_results]

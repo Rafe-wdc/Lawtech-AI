@@ -66,6 +66,10 @@ async def _load_chat_history(thread_id: str) -> ChatHistoryResult:
     )
 
 
+class _SkipRewrite(Exception):
+    """Raised inside the rewrite try-block to bypass the LLM rewrite."""
+
+
 # --- Query Rewriting ---
 
 REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query that incorporates relevant context from the conversation history.
@@ -665,6 +669,20 @@ async def memory_node(state: LegalAgentState) -> dict:
                          files=restored_file_context.get("file_names", []),
                          chromadb=len(restored_file_context.get("chromadb_collections", [])))
 
+            # Acknowledgements ("ok", "thanks", "hmm", "yes") carry no new
+            # ask. The rewriter only knows SEARCH and DIRECTIVE shapes and
+            # reconstructs these into the full prior request, which then
+            # re-runs a 2-3 minute draft for an "ok" (advocate report,
+            # 2026-09-10; measured 3 of 5 acks re-drafted). Detect them
+            # deterministically BEFORE the rewriter and keep the raw text.
+            from core.followup import is_conversational_followup
+            if turns > 0 and is_conversational_followup(original_query):
+                conversational = True
+                log.info("Conversational follow-up - skipping rewrite",
+                         query=original_query[:40], prev_task=prev_task)
+                progress("memory", "Acknowledgement noted", substep=True, step="rewrite")
+            else:
+                conversational = False
             progress("memory", "Rewriting follow-up query...", step="rewrite")
             # Bound the rewrite call: without a local ceiling, a slow
             # Gemini Flash blocks the memory step for the entire outer
@@ -673,6 +691,8 @@ async def memory_node(state: LegalAgentState) -> dict:
             # can SKIP itself on short directive follow-ups after Drafting
             # — see PR 3b in _rewrite_query.
             try:
+                if conversational:
+                    raise _SkipRewrite
                 query = await asyncio.wait_for(
                     asyncio.to_thread(
                         _rewrite_query, query, chat_history,
@@ -680,6 +700,8 @@ async def memory_node(state: LegalAgentState) -> dict:
                     ),
                     timeout=15,
                 )
+            except _SkipRewrite:
+                pass
             except asyncio.TimeoutError:
                 log.warning("Rewrite timed out; using original query",
                             timeout_s=15, query=query[:80])
@@ -697,6 +719,7 @@ async def memory_node(state: LegalAgentState) -> dict:
 
     result: dict = {
         "query": query,
+        "conversational_followup": bool(locals().get("conversational", False)),
         "chat_history": chat_history,
         "summary_text": summary_text,
         "user_language": user_language,

@@ -46,7 +46,33 @@ from core.clients import _thinking_kwargs                   # noqa: E402
 from core.token_tracker import _estimate_cost_usd           # noqa: E402
 
 DEFAULT_MODELS = ["gemini-2.5-pro", "gemini-3.8-flash"]
-JUDGE = "openai:gpt-4o-mini"
+# gpt-4o-mini was measured too weak for this: on a 4-line entity_check answer
+# that correctly listed all four planted errors, it reported only three and
+# scored accuracy 2/10. The judge has to be at least as careful as the thing it
+# grades.
+JUDGE = "openai:gpt-4o"
+
+
+def _text_of(content) -> str:
+    """Flatten a message's content to plain text.
+
+    Gemini 3.x returns a LIST of content blocks - `[{"type": "text", "text":
+    ..., "extras": {"signature": "<base64 thought signature>"}}]` - where 2.5
+    returns a bare string. Passing the raw list to the judge means grading a
+    Python repr with a multi-KB signature blob glued to it, which is exactly
+    how a genuinely good draft scored 1/10 on instruction-following.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        out = []
+        for b in content:
+            if isinstance(b, str):
+                out.append(b)
+            elif isinstance(b, dict) and b.get("type") == "text":
+                out.append(b.get("text", ""))
+        return "\n".join(p for p in out if p)
+    return str(content)
 
 # ── Tasks ────────────────────────────────────────────────────────────────────
 # Each mirrors a real callsite: same temperature and thinking budget, with an
@@ -188,6 +214,66 @@ TASKS: dict[str, dict] = {
 }
 
 
+# ── Deterministic checks ─────────────────────────────────────────────────────
+# The LLM judge proved uncalibrated in BOTH directions on these tasks:
+# gpt-4o-mini scored a fully correct doc_qa answer 9/10 and a correct
+# entity_check answer 2/10 (it miscounted the findings); gpt-4o then scored
+# everything 4-5 regardless of content. Every task here has a KNOWN right
+# answer, so score it by assertion instead. These are the numbers to merge on;
+# the LLM grade is kept only as a soft second opinion.
+
+def _has(t: str, *subs: str) -> bool:
+    low = t.lower()
+    return all(s.lower() in low for s in subs)
+
+
+def _none(t: str, *subs: str) -> bool:
+    low = t.lower()
+    return not any(s.lower() in low for s in subs)
+
+
+CHECKS = {
+    "draft_bail": lambda t: {
+        # Regular bail before a Sessions Court is s.483 BNSS. s.480 is s.437
+        # CrPC (Magistrate) and s.482 is anticipatory - both wrong here.
+        "cites s.483 BNSS": "483" in t,
+        "avoids wrong provision (480/482)": _none(t, "section 480", "s.480", "section 482", "s.482"),
+        "heading MOST RESPECTFULLY SHOWETH": _has(t, "MOST RESPECTFULLY SHOWETH"),
+        "heading GROUNDS FOR BAIL": _has(t, "GROUNDS FOR BAIL"),
+        "heading PREVIOUS BAIL APPLICATIONS": _has(t, "PREVIOUS BAIL APPLICATIONS"),
+        "heading PRAYER": _has(t, "PRAYER"),
+        "heading VERIFICATION": _has(t, "VERIFICATION"),
+        "uses the real jail (Yerwada)": "yerwada" in t.lower(),
+        "no invented jail": _none(t, "arthur road"),
+        "keeps the real amount": _has(t, "18,00,000") or _has(t, "18,00,000/-"),
+    },
+    "entity_check": lambda t: {
+        "flags wrong jail": _has(t, "arthur road"),
+        "flags wrong custody date": "08-feb" in t.lower(),
+        "flags wrong amount": "24,00,000" in t,
+        "flags invented convictions": _has(t, "convict") or _has(t, "420"),
+        "no signature blob leaked": _none(t, "extras", "signature"),
+    },
+    "refine": lambda t: {
+        "corrects to s.483": "483" in t,
+        "removes s.480": _none(t, "480"),
+        "keeps heading GROUNDS FOR BAIL": _has(t, "GROUNDS FOR BAIL"),
+        "keeps heading PRAYER": _has(t, "PRAYER"),
+        "keeps heading MOST RESPECTFULLY SHOWETH": _has(t, "MOST RESPECTFULLY SHOWETH"),
+        "renumbers grounds (3 and 4)": ("3." in t and "4." in t),
+        "no collateral shrink": len(t) > 400,
+    },
+    "doc_qa": lambda t: {
+        "notice served 15-Jan-2024": _has(t, "15-jan-2024") or _has(t, "15 january 2024") or _has(t, "15-01-2024"),
+        "interest 12%": "12%" in t or "12 %" in t,
+        "interest runs from 15-Apr-2023": _has(t, "15-apr-2023") or _has(t, "15 april 2023"),
+        "both witnesses named": _has(t, "rohit naik") and _has(t, "sandeep pawar"),
+        # The critical one: the document records NO defence, only silence.
+        "refuses to invent a defence": _none(t, "denies", "contends", "gift", "disputes the loan"),
+    },
+}
+
+
 class Grade(BaseModel):
     quality: int = Field(ge=0, le=10, description="Overall quality against the criteria")
     instruction_following: int = Field(ge=0, le=10, description="Obeyed format/heading/scope instructions")
@@ -216,7 +302,7 @@ def run_one(model: str, task: dict) -> dict:
     u = getattr(r, "usage_metadata", None) or {}
     tin, tout = u.get("input_tokens", 0), u.get("output_tokens", 0)
     return {
-        "ok": True, "text": r.content, "latency_s": round(dt, 2),
+        "ok": True, "text": _text_of(r.content), "latency_s": round(dt, 2),
         "input_tokens": tin, "output_tokens": tout,
         "cost_usd": round(_estimate_cost_usd(model, tin, tout), 6),
         "thinking_kwargs": kw,
@@ -265,20 +351,34 @@ def main() -> int:
             for i in range(a.repeat):
                 r = run_one(m, task)
                 if r["ok"]:
+                    r["checks"] = CHECKS[name](r["text"])
+                    r["checks_passed"] = sum(r["checks"].values())
+                    r["checks_total"] = len(r["checks"])
                     r["grade"] = grade(task, r["text"])
                 runs.append(r)
-                detail = (f"{r['latency_s']}s  ${r['cost_usd']}  q={r['grade']['quality']}"
+                detail = (f"{r['checks_passed']}/{r['checks_total']} checks  "
+                          f"{r['latency_s']}s  ${r['cost_usd']}"
                           if r["ok"] else r["error"][:70])
                 print(f"   {m:18s} run{i + 1} {'ok' if r['ok'] else 'FAIL':4s} {detail}")
             good = [r for r in runs if r["ok"]]
+            # A check counts as passed only if it passed on EVERY run - a rule
+            # the model obeys half the time is not one you can ship behind.
+            stable = {}
+            if good:
+                for k in good[0]["checks"]:
+                    stable[k] = all(r["checks"].get(k) for r in good)
             results[name]["models"][m] = {
                 "runs": runs,
+                "checks_stable": stable,
+                "checks_passed_all_runs": sum(stable.values()),
+                "checks_total": len(stable),
                 "median_latency_s": _median([r["latency_s"] for r in good]),
                 "median_cost_usd": _median([r["cost_usd"] for r in good]),
                 "median_quality": _median([r["grade"]["quality"] for r in good]),
-                "median_instruction": _median([r["grade"]["instruction_following"] for r in good]),
-                "median_accuracy": _median([r["grade"]["factual_accuracy"] for r in good]),
             }
+            for k, ok in stable.items():
+                if not ok:
+                    print(f"       FAILED: {k}")
         print()
 
     out = Path(a.out)
@@ -286,14 +386,25 @@ def main() -> int:
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     (out / f"ab_{stamp}.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
 
-    lines = [f"# Model A/B - {stamp}", "",
-             "| task | model | quality | instr | accuracy | latency | cost |",
-             "|---|---|---|---|---|---|---|"]
+    lines = [f"# Model A/B - {stamp}",
+             "",
+             "`checks` = deterministic assertions passed on EVERY run. "
+             "`llm` is a soft second opinion only - the judge was measured "
+             "uncalibrated on these tasks.",
+             "",
+             "| task | model | checks | llm | latency | cost |",
+             "|---|---|---|---|---|---|"]
     for name, r in results.items():
         for m, s in r["models"].items():
             lines.append(
-                f"| `{name}` | `{m}` | {s['median_quality']} | {s['median_instruction']} | "
-                f"{s['median_accuracy']} | {s['median_latency_s']}s | ${s['median_cost_usd']} |")
+                f"| `{name}` | `{m}` | **{s['checks_passed_all_runs']}/{s['checks_total']}** | "
+                f"{s['median_quality']} | {s['median_latency_s']:.1f}s | "
+                f"${s['median_cost_usd']:.5f} |")
+    lines += ["", "## Failed checks", ""]
+    for name, r in results.items():
+        for m, s in r["models"].items():
+            bad = [k for k, ok in s["checks_stable"].items() if not ok]
+            lines.append(f"- `{name}` / `{m}`: " + (", ".join(bad) if bad else "none"))
     md = "\n".join(lines)
     (out / f"ab_{stamp}.md").write_text(md, encoding="utf-8")
     print(md)

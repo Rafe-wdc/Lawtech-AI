@@ -1737,10 +1737,20 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # a chatty answer instead of a modified draft. Force Drafting back
         # into the plan when the specific "short-directive-on-prior-draft"
         # pattern holds AND the classifier didn't already include Drafting.
+        # An acknowledgement with no new ask is answered in one line by the
+        # Non_legal agent, in context of the previous turn. It must never
+        # inherit the prior Drafting task or be pushed to Document because
+        # a file is attached. Set by the memory node; see core.followup.
+        if state.get("conversational_followup"):
+            log.info("Conversational follow-up - routing to Non_legal",
+                     classifier_task=task, query=_original_query[:40])
+            task = "Non_legal"
+            tasks_planned = ["Non_legal"]
         _prev_task_state = state.get("previous_task", "") or ""
         _prev_kind_state = state.get("previous_artifact_kind", "") or ""
         if (
-            _prev_task_state == "Drafting"
+            not state.get("conversational_followup")
+            and _prev_task_state == "Drafting"
             and _prev_kind_state == "draft"
             and _original_query
             and len(_original_query) < 200
@@ -1764,7 +1774,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                                                     if t != "Drafting"]
 
         # Handle non-legal with file context
-        if task == "Non_legal" and fc and fc.has_content:
+        if task == "Non_legal" and fc and fc.has_content and not state.get("conversational_followup"):
             log.info("Non-legal overridden to Document due to file context")
             task = "Document"
             tasks_planned = ["Document"]

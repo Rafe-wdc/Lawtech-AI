@@ -41,7 +41,7 @@ Your capabilities you may mention:
 - Legal document drafting (petitions, notices, agreements)
 - Legal scenario analysis and advice
 
-User message: {query}
+{turn_context}User message: {query}
 """
 
 
@@ -49,6 +49,26 @@ async def non_legal_node(state: LegalAgentState) -> dict:
     """Generate a contextual, LLM-driven response for non-legal / greeting queries."""
     query = state.get("query", state.get("original_query", ""))
     user_language = state.get("user_language", "en")
+    # Acknowledgement of the previous turn ("ok", "thanks", "yes"):
+    # answer in context, in one or two sentences, and offer the natural
+    # next step for what was just delivered. Never re-deliver it.
+    turn_context = ""
+    if state.get("conversational_followup"):
+        _kind = state.get("previous_artifact_kind") or state.get("previous_task") or "answer"
+        _prev = (state.get("previous_artifact_content") or "")
+        _head = " ".join(_prev.split())[:300]
+        turn_context = (
+            "CONTEXT: the user is replying to what you just delivered - a "
+            f"{_kind}. Its opening reads: \"{_head}\". Their message is an "
+            "acknowledgement, not a new request. Reply in ONE or TWO short "
+            "sentences: acknowledge, then offer one concrete next step that "
+            "fits that deliverable (for a draft: add a ground, change the "
+            "court or party details, translate it, or export it). Do NOT "
+            "introduce yourself, do NOT list capabilities, do NOT repeat or "
+            "summarise the deliverable, do NOT ask them to ask a legal question. "
+            "If their message is a bare yes/no, treat it as a reply to any "
+            "question you asked at the end of the deliverable.\n\n"
+        )
 
     log.info("Non-legal agent started", query=query[:80], lang=user_language)
 
@@ -65,7 +85,7 @@ async def non_legal_node(state: LegalAgentState) -> dict:
 
         with log_time(log, "Non-legal response generation"):
             response = await asyncio.wait_for(
-                chain.ainvoke({"query": query}),
+                chain.ainvoke({"query": query, "turn_context": turn_context}),
                 timeout=20,
             )
 

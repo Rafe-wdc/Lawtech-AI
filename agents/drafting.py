@@ -421,6 +421,57 @@ def _unwrap_hard_wrapped_lines(text: str) -> tuple[str, int]:
     return chr(10).join(out), joins
 
 
+# --- sub-point nesting -------------------------------------------------------
+_NUMBERED_ITEM_RE = re.compile(r"^(\d{1,3})\.[ \t]+\S")
+_GAP_STOP_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]|\||\.{3,}|-{3,}[ \t]*$|_{3,}|"
+    r"\*\*[^*\n]+\*\*:?[ \t]*$|"
+    r"(?:in witness|signed|witnesses|schedule|annexure|verification|prayer|"
+    r"place|dated?|sd/-|through|advocate|counsel|deponent)\b)",
+    re.IGNORECASE,
+)
+
+
+def _nest_subpoints_under_numbered_items(text: str) -> tuple[str, int]:
+    """Indent left-margin content that sits between two numbered clauses
+    so it nests under the first of them.
+
+    Advocate screenshot 2026-09-10 (partnership deed): clause 10 ended
+    with "in the following amounts and proportions:", then three bullets
+    at the left margin, then a continuation paragraph at the left margin,
+    then clause 11. Markdown ends clause 10 at the first left-margin
+    bullet, so the bullets rendered as a separate list and the paragraph
+    as loose text outside the clause. Gemini indents such sub-points;
+    Claude does not, and the prompt rule asking for it does not hold.
+
+    Only the gap BETWEEN two numbered items (both at column 0) is
+    touched, so the closing block after the last clause (IN WITNESS
+    WHEREOF, signatures, schedule) is never pulled into a clause. A gap
+    holding a heading, table, rule, dot leader, bold label or filing
+    furniture is left alone as well. Lines already indented keep their
+    own deeper indentation. Structural and mechanical.
+    """
+    lines = text.split(chr(10))
+    items = [(i, len(m.group(0)) - 1) for i, l in enumerate(lines)
+             for m in [_NUMBERED_ITEM_RE.match(l)] if m]
+    if len(items) < 2:
+        return text, 0
+    changed = 0
+    for (a, width), (b, _w) in zip(items, items[1:]):
+        gap = lines[a + 1:b]
+        body = [g for g in gap if g.strip()]
+        if not body or any(_GAP_STOP_RE.match(g) for g in body):
+            continue
+        if not any(not g.startswith((" ", chr(9))) for g in body):
+            continue                       # already indented
+        pad = " " * max(3, width)
+        for k in range(a + 1, b):
+            if lines[k].strip() and not lines[k].startswith((" ", chr(9))):
+                lines[k] = pad + lines[k]
+                changed += 1
+    return chr(10).join(lines), changed
+
+
 # A line opening with a bare number of three or more digits and a period.
 # Two-digit numbers are genuine paragraph numbers; three-plus are years
 # and amounts that hard-wrapping stranded at line start.
@@ -543,6 +594,14 @@ def validate_draft(
     if _unwrapped:
         warnings.append(
             f"Rejoined {_unwrapped} hard-wrapped line(s) into their paragraphs."
+        )
+
+    # Sub-points and continuation paragraphs the writer left at the left
+    # margin between two numbered clauses are nested under the first.
+    cleaned, _nested = _nest_subpoints_under_numbered_items(cleaned)
+    if _nested:
+        warnings.append(
+            f"Nested {_nested} left-margin line(s) under their numbered clause."
         )
 
     # A line that opens with a bare number and a period is a markdown

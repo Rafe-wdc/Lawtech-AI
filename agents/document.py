@@ -125,9 +125,11 @@ def _generate_from_docs(
     # for the deeper reasoning it brings to complex/dense legal text.
     # 60_000 chars ≈ ~15K input tokens ≈ ~30 pages of typical legal PDF.
     # Tune based on observed quality; log both signals to inform tuning.
+    # 2026-09-10: the large-doc branch moved off gemini-2.5-pro to
+    # gemini-3.8-flash - cheaper than Pro on both input and output.
     _FLASH_ROUTING_THRESHOLD_CHARS = 60_000
     use_flash = len(docs_text) < _FLASH_ROUTING_THRESHOLD_CHARS
-    picked_model = "gemini-2.5-flash" if use_flash else "gemini-2.5-pro"
+    picked_model = "gemini-2.5-flash" if use_flash else "gemini-3.8-flash"
     log.info(
         "PDF chat model routing",
         docs_chars=len(docs_text),

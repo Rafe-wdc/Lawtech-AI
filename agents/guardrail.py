@@ -181,6 +181,16 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
                  before=pre_url_len, after=len(cleaned),
                  removed=pre_url_len - len(cleaned))
 
+    # Pass 2c: keep the response inside the answer box. A bare whitelisted
+    # PDF URL (70-110 unbreakable chars) becomes a short labelled link; a
+    # 20+ char run of underscores used as a blank is capped; a line of
+    # dashes becomes a markdown rule. Advocate report 2026-09-10: 'a few
+    # part of the answer is going beyond the answer box'. See core.overflow.
+    from core.overflow import keep_inside_answer_box as _fit
+    cleaned, _fit_stats = _fit(cleaned)
+    if _fit_stats["urls"] or _fit_stats["runs"]:
+        log.info("Overflow repair applied", task=task, **_fit_stats)
+
     # Pass 3: hard char cap. sanitize_output handles pad-char runaway, but
     # an LLM can still emit legitimately diverse prose that runs past any
     # useful display budget. Clamp to MAX_FINAL_RESPONSE_CHARS with a

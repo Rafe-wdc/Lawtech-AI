@@ -56,7 +56,7 @@ MODELS = {
     "legal_concepts": "gemini-2.5-flash-lite",
     "query_rewrite": "gemini-2.5-flash-lite",
     "guardrail_injection": "gemini-2.5-flash-lite",
-    "pdf_chat": "gemini-2.5-pro",
+    "pdf_chat": "gemini-3.8-flash",
     "pdf_vision_ocr": "gemini-2.5-flash-lite",
 }
 

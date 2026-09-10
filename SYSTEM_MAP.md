@@ -506,7 +506,7 @@ Input:  state["query"], state["chat_history"]
 ALWAYS uses Gemini 2.5 Pro + Google Search grounding (no Elasticsearch)
 
 google.genai.Client.generate_content(
-    model="gemini-2.5-pro",
+    model="gemini-3.8-flash",
     contents=[..., query],
     tools=[{"google_search": {}}],
     config={generation_config, system_instruction=SCENARIO_PROMPT}

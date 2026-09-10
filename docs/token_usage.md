@@ -186,6 +186,7 @@ Update the table when providers revise rates.
 | `gemini-2.5-flash` | $0.30 | $2.50 |
 | `gemini-2.5-flash-lite` | $0.10 | $0.40 |
 | `gemini-2.5-pro` | $1.25 | $10.00 |
+| `gemini-3.8-flash` | $0.75 | $3.75 |
 
 If a model is not in the table (e.g. a new release or a `model: ""` for
 some structured-output paths), `cost_usd` for that call is `0.0` — the

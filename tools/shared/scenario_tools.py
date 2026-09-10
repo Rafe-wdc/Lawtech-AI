@@ -90,7 +90,7 @@ def web_search_grounded(query: str, chat_history_text: str = "") -> dict:
 
         client = get_genai_client()
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model="gemini-3.8-flash",
             contents=[full_prompt],
             config={
                 "tools": [{"google_search": {}}],
@@ -145,7 +145,7 @@ Scenario: {query}"""
         parts.append(f"\n\n{scenario_prompt}")
 
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model="gemini-3.8-flash",
             contents=["\n".join(parts)],
             config={
                 "tools": [{"google_search": {}}],
@@ -234,7 +234,7 @@ def find_similar_cases(scenario: str) -> dict:
         )
 
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model="gemini-3.8-flash",
             contents=[prompt],
             config={
                 "tools": [{"google_search": {}}],
@@ -336,7 +336,7 @@ def get_legal_news(topic: str) -> dict:
         )
 
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model="gemini-3.8-flash",
             contents=[prompt],
             config={
                 "tools": [{"google_search": {}}],

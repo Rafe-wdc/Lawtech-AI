@@ -1,0 +1,608 @@
+{
+  "draft_bail": {
+    "callsite": "agents/drafting.py:1659 / 2041 (drafting generation)",
+    "models": {
+      "gemini-2.5-pro": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "**CAUSE TITLE**\n\n**IN THE COURT OF THE SESSIONS JUDGE AT PUNE**\n**CRIMINAL BAIL APPLICATION NO. ______ OF 2026**\n\n**IN THE MATTER OF:**\nAn application under Section 482 of the Bharatiya Nagarik Suraksha Sanhita, 2023 for grant of regular bail.\n\n**AND**\n\n**IN THE MATTER OF:**\nRamesh Patil\nAge: 41 years, Occupation: Businessman,\nResiding at: 14 Sahyadri Apartments,\nKothrud, Pune - 411038.\n(Presently lodged at Yerwada Central Jail, Pune)\n... **APPLICANT/ACCUSED**\n\n**VERSUS**\n\nThe State of Maharashtra\n(Through the Senior Inspector of Police,\nP.S. Kothrud, Pune)\n... **RESPONDENT**\n\n**IN RE: C.R. No. 412/2026**\nRegistered at P.S. Kothrud, Pune\nFor offences punishable under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023.\n\n**MOST RESPECTFULLY SHOWETH**\n\n1.  That the present Applicant is a law-abiding citizen of India, who has been falsely implicated in the aforementioned case. The Applicant is innocent and has not committed any offence as alleged by the prosecution. He is constrained to approach this Hon\u2019ble Court seeking grant of regular bail under Section 482 of the Bharatiya Nagarik Suraksha Sanhita, 2023.\n\n**FACTS OF THE CASE**\n\n2.  That the prosecution case, in brief, is that on [Date], the Complainant, Mr. Sunil More, lodged FIR No. 412/2026 dated 03-Feb-2026 at P.S. Kothrud, Pune, alleging offences punishable under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023.\n\n3.  That the primary allegation against the Applicant is that he, along with the co-accused, cheated the Complainant of a sum of Rs. 18,00,000/- (Rupees Eighteen Lakhs Only) under the false pretext of transferring a parcel of land in his favour.\n\n4.  That pursuant to the said FIR, the Applicant was arrested by the police on 06-Feb-2026 and was subsequently remanded to judicial custody. The Applicant has been incarcerated since the date of his arrest and is currently lodged at Yerwada Central Jail, Pune.\n\n5.  That it is submitted that the investigation in the matter is complete and the police have already filed the Chargesheet before the competent court on 22-Apr-2026.\n\n**GROUNDS FOR BAIL**\n\n6.  That the Applicant is innocent and has been wrongly implicated in the present case. The allegations are vague and unsubstantiated, and the dispute, if any, is purely of a civil nature which has been given a criminal colour.\n\n7.  That the investigation in the matter is complete and the final report/chargesheet has been filed. Therefore, the custodial interrogation of the Applicant is no longer required by the investigating agency. The continued incarceration of the Applicant would amount to pre-trial punishment.\n\n8.  That the principle of parity is squarely applicable to the present case. It is submitted that the co-accused in the matter, Mr. Dilip Shinde, who is alleged to have a similar role, has already been enlarged on bail by this Hon\u2019ble Court vide order dated 11-Mar-2026. A copy of the said bail order is annexed herewith.\n\n9.  That the Applicant is a permanent resident of Pune, having deep roots in society. He is a businessman with a fixed place of abode and has family members dependent on him. There is no apprehension whatsoever of the Applicant absconding or fleeing from justice if granted bail.\n\n10. That the Applicant has no criminal antecedents and this is the first and only case registered against him. He is a respectable member of society and not a habitual offender.\n\n11. That there is no reasonable apprehension that the Applicant will tamper with prosecution evidence or influence any witnesses, as all material evidence has already been collected by the police and forms part of the chargesheet.\n\n12. That the trial in the matter is likely to take a considerable amount of time to conclude. It would be a travesty of justice to keep the Applicant behind bars for an indefinite period pending the trial.\n\n13. That the Applicant undertakes to abide by any and all terms and conditions that may be imposed by this Hon\u2019ble Court while granting bail, and further undertakes to cooperate with the trial and attend all court hearings without fail.\n\n**PREVIOUS BAIL APPLICATIONS**\n\n14. That the Applicant has not filed any previous bail application before this Hon\u2019ble Court in the present matter.\n\n**PRAYER**\n\nIt is, therefore, most respectfully prayed that this Hon\u2019ble Court may be pleased to:\n\n(a) Enlarge the Applicant/Accused, Ramesh Patil, on bail in connection with C.R. No. 412/2026 registered at P.S. Kothrud, Pune, on such terms and conditions as this Hon\u2019ble Court may deem fit and proper;\n\n(b) Pass any other and further orders as may be deemed fit and proper in the facts and circumstances of the case and in the interest of justice.\n\nAND FOR THIS ACT OF KINDNESS, THE APPLICANT AS IN DUTY BOUND SHALL EVER PRAY.\n\n**VERIFICATION**\n\nI, Ramesh Patil, the Applicant above-named, do hereby state on solemn affirmation that the contents of the foregoing application in paragraphs 1 to 14 are true and correct to the best of my knowledge and belief and I have signed this application on this [Day] day of [Month], 2026 at Pune.\n\nPune\nDate: [Date]\n**(APPLICANT)**\n\nPune\nDate: [Date]\n**(ADVOCATE FOR THE APPLICANT)**\n[Advocate's Name]\n[Enrollment No.]\n[Office Address]",
+            "latency_s": 33.2,
+            "input_tokens": 298,
+            "output_tokens": 3857,
+            "cost_usd": 0.038942,
+            "thinking_kwargs": {
+              "thinking_budget": 4096
+            },
+            "checks": {
+              "cites s.483 BNSS": false,
+              "avoids wrong provision (480/482)": false,
+              "heading MOST RESPECTFULLY SHOWETH": true,
+              "heading GROUNDS FOR BAIL": true,
+              "heading PREVIOUS BAIL APPLICATIONS": true,
+              "heading PRAYER": true,
+              "heading VERIFICATION": true,
+              "uses the real jail (Yerwada)": true,
+              "no invented jail": true,
+              "keeps the real amount": true
+            },
+            "checks_passed": 8,
+            "checks_total": 10,
+            "grade": {
+              "quality": 3,
+              "instruction_following": 4,
+              "factual_accuracy": 4,
+              "reasoning": "The model's output demonstrates a structured approach to drafting a bail application, adhering to the given headings and maintaining a logical flow. However, it incorrectly cites Section 482 BNSS instead of the correct Section 483 BNSS for a regular bail application before the Sessions Court. The grounds for bail are well-tailored to the case facts, emphasizing the lack of criminal antecedents, the completion of the investigation, and the principle of parity with the co-accused. The factual details, such as the FIR number, arrest date, and chargesheet filing, are accurately reflected, ensuring factual accuracy."
+            }
+          },
+          {
+            "ok": true,
+            "text": "**CAUSE TITLE**\n\n**IN THE COURT OF THE SESSIONS JUDGE AT PUNE**\n**CRIMINAL BAIL APPLICATION NO. ______ OF 2026**\n\n**IN THE MATTER OF:**\n\nRamesh Patil\nS/o [Father's Name]\nAge: 41 years, Occupation: Businessman\nR/o: 14 Sahyadri Apartments, Kothrud, Pune\n(Presently lodged at Yerwada Central Jail, Pune)\n**... Applicant/Accused**\n\n**VERSUS**\n\nThe State of Maharashtra\n(Through P.S. Kothrud, Pune)\n**... Respondent**\n\n**FIR No.:** 412/2026\n**Police Station:** Kothrud, Pune\n**Under Sections:** 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023\n\n**APPLICATION FOR REGULAR BAIL UNDER SECTION 482 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023**\n\n**MOST RESPECTFULLY SHOWETH**\n\n1.  That the present application for grant of regular bail is being filed on behalf of the Applicant/Accused named above, who has been arrested in connection with the aforesaid FIR and is currently languishing in judicial custody. The Applicant is innocent and has been falsely implicated in the present case.\n\n**FACTS OF THE CASE**\n\n2.  That the gravamen of the prosecution case, as per the FIR lodged by the complainant, Shri Sunil More, is that the Applicant, along with a co-accused, allegedly cheated the complainant to the tune of Rs. 18,00,000/- under the pretext of transferring a parcel of land in his favour.\n\n3.  That based on the said complaint, FIR No. 412/2026 was registered on 03-Feb-2026. The Applicant was subsequently arrested by the police on 06-Feb-2026 and has been in judicial custody since.\n\n4.  That it is submitted that the investigation in the matter is complete and the police have already filed the chargesheet before the competent court on 22-Apr-2026. The Applicant is therefore no longer required for the purpose of any investigation.\n\n**GROUNDS FOR BAIL**\n\n5.  That the Applicant is an innocent person with no involvement in the alleged offence. The dispute, if any, between the parties is purely of a civil nature, which has been given the colour of a criminal offence.\n\n6.  That the investigation in the case is complete and the chargesheet has been filed. The custodial interrogation of the Applicant is no longer required by the investigating agency. The continued incarceration of the Applicant would serve no useful purpose and would amount to pre-trial punishment.\n\n7.  That on the principle of parity, the Applicant deserves to be enlarged on bail. It is submitted that the co-accused in the matter, Shri Dilip Shinde, has already been granted bail by this Hon'ble Court vide order dated 11-Mar-2026. The role attributed to the present Applicant is not graver than that of the co-accused who is already on bail.\n\n8.  That the Applicant has clean antecedents and has never been involved in any criminal case in the past. He is a law-abiding citizen and a respectable member of society.\n\n9.  That the Applicant is a permanent resident of Pune, having a fixed place of abode at the address mentioned above. He is a businessman with deep roots in the community and there is no apprehension of him absconding or fleeing from justice if granted bail.\n\n10. That the Applicant undertakes not to tamper with any evidence or influence any prosecution witnesses in any manner whatsoever.\n\n11. That the trial in the matter is likely to take a considerable amount of time to conclude, and it would be a travesty of justice to keep the Applicant in jail for an indefinite period.\n\n12. That the Applicant is ready and willing to abide by any and all terms and conditions that may be imposed by this Hon'ble Court while granting bail.\n\n**PREVIOUS BAIL APPLICATIONS**\n\n13. That no other bail application has been filed by the Applicant before this Hon'ble Court or the Hon'ble High Court in connection with the present FIR.\n\n**PRAYER**\n\nIt is, therefore, most respectfully prayed that this Hon'ble Court may be pleased to:\n\n(a) Grant regular bail to the Applicant, Ramesh Patil, in connection with FIR No. 412/2026, registered at P.S. Kothrud, Pune, on such terms and conditions as this Hon'ble Court may deem fit and proper;\n\n(b) Pass any other order or orders as this Hon'ble Court may deem fit and proper in the interest of justice.\n\n**AND FOR THIS ACT OF KINDNESS, THE APPLICANT AS IN DUTY BOUND SHALL EVER PRAY.**\n\n**Pune**\n**[Date]**\n\n**(Advocate for the Applicant)**\n\n**VERIFICATION**\n\nI, Ramesh Patil, S/o [Father's Name], the Applicant above named, presently lodged at Yerwada Central Jail, Pune, do hereby verify that the contents of the above application from paragraphs 1 to 13 are true and correct to my knowledge and belief and the legal submissions are based on the advice received and believed to be true. The last paragraph is the prayer to this Hon'ble Court.\n\nVerified at Pune on this [Date] day of [Month], 2026.\n\n**DEPONENT/APPLICANT**\n**(Through Counsel)**",
+            "latency_s": 29.22,
+            "input_tokens": 298,
+            "output_tokens": 3691,
+            "cost_usd": 0.037283,
+            "thinking_kwargs": {
+              "thinking_budget": 4096
+            },
+            "checks": {
+              "cites s.483 BNSS": false,
+              "avoids wrong provision (480/482)": false,
+              "heading MOST RESPECTFULLY SHOWETH": true,
+              "heading GROUNDS FOR BAIL": true,
+              "heading PREVIOUS BAIL APPLICATIONS": true,
+              "heading PRAYER": true,
+              "heading VERIFICATION": true,
+              "uses the real jail (Yerwada)": true,
+              "no invented jail": true,
+              "keeps the real amount": true
+            },
+            "checks_passed": 8,
+            "checks_total": 10,
+            "grade": {
+              "quality": 4,
+              "instruction_following": 4,
+              "factual_accuracy": 4,
+              "reasoning": "The model's output is well-structured and follows the given task instructions closely. It includes all the required headings in the correct order, such as 'CAUSE TITLE,' 'FACTS OF THE CASE,' 'GROUNDS FOR BAIL,' and 'PRAYER.' However, it incorrectly cites Section 482 BNSS instead of the correct Section 483 BNSS for a regular bail application before the Sessions Court. The grounds for bail are appropriately tailored to the case facts, mentioning the lack of criminal antecedents, the completion of the investigation, and the principle of parity with the co-accused who was granted bail. The output does not invent any particulars and accurately reflects the case details provided."
+            }
+          }
+        ],
+        "checks_stable": {
+          "cites s.483 BNSS": false,
+          "avoids wrong provision (480/482)": false,
+          "heading MOST RESPECTFULLY SHOWETH": true,
+          "heading GROUNDS FOR BAIL": true,
+          "heading PREVIOUS BAIL APPLICATIONS": true,
+          "heading PRAYER": true,
+          "heading VERIFICATION": true,
+          "uses the real jail (Yerwada)": true,
+          "no invented jail": true,
+          "keeps the real amount": true
+        },
+        "checks_passed_all_runs": 8,
+        "checks_total": 10,
+        "median_latency_s": 31.21,
+        "median_cost_usd": 0.038112499999999994,
+        "median_quality": 3.5
+      },
+      "gemini-3.8-flash": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "### CAUSE TITLE\n\n**IN THE COURT OF SESSIONS AT PUNE, MAHARASHTRA**  \n**CRIMINAL BAIL APPLICATION NO. [____] OF 2026**  \n*(Under Section 483 of the Bharatiya Nagarik Suraksha Sanhita, 2023)*\n\n**IN THE MATTER OF:**\n\n**Ramesh Patil**  \nAge: 41 years, Occ: Business,  \nResiding at: 14, Sahyadri Apartments,  \nKothrud, Pune - 411038.  \n*(Currently lodged in Judicial Custody at Yerwada Central Jail, Pune)*  \n... **APPLICANT / ACCUSED**\n\n**VERSUS**\n\n**State of Maharashtra**  \n(At the instance of Kothrud Police Station, Pune)  \n... **RESPONDENT / PROSECUTION**\n\n**CRIME DETAILS:**  \n* **FIR No.:** 412/2026  \n* **Date of FIR:** 03.02.2026  \n* **Police Station:** Kothrud, Pune  \n* **Offences Registered Under:** Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023  \n\n---\n\n### MOST RESPECTFULLY SHOWETH\n\n### FACTS OF THE CASE\n\n1. The Applicant is a law-abiding citizen of India, aged about 41 years, engaged in business, and permanently residing at 14, Sahyadri Apartments, Kothrud, Pune.\n\n2. The present FIR No. 412/2026 was registered at Kothrud Police Station on 03.02.2026 upon a complaint lodged by one Sunil More, alleging that the Applicant and co-accused induced the complainant to part with a sum of Rs. 18,00,000/- (Rupees Eighteen Lakhs only) on the pretext of a promised land transfer, and subsequently failed to execute the transfer or return the money, thereby allegedly committing offences punishable under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023.\n\n3. Pursuant to the registration of the said FIR, the Applicant was arrested by the Investigating Agency on 06.02.2026. Following police custody remand, the Applicant was remanded to judicial custody and is presently lodged in Yerwada Central Jail, Pune.\n\n4. The Investigating Agency has completed the investigation in its entirety and has filed the Final Report / Chargesheet before the competent court of the Judicial Magistrate First Class, Pune, on 22.04.2026. \n\n5. The alleged transaction pertains entirely to a commercial agreement/contractual understanding regarding immovable property, which has been cloaked in the garb of criminal proceedings.\n\n---\n\n### GROUNDS FOR BAIL\n\n6. **Investigation Complete and Chargesheet Filed:** The Investigating Agency has concluded its investigation and formally submitted the chargesheet on 22.04.2026. Consequently, the entire documentary evidence is in the custody of the court/investigating agency, and the custodial detention of the Applicant is no longer required for interrogation or recovery.\n\n7. **Parity with Co-Accused:** The similarly situated co-accused in the present FIR, namely Dilip Shinde, who faced identical allegations arising out of the same transaction, has already been enlarged on regular bail by this Hon\u2019ble Sessions Court vide order dated 11.03.2026 in Criminal Bail Application No. [____] of 2026. On the principles of parity, the Applicant is entitled to the same relief.\n\n8. **Purely Civil/Commercial Dispute:** The dispute arises out of an alleged failed land transfer transaction. The essential ingredients of dishonest inducement at the inception (Section 318(4) BNS) and entrustment with dishonest misappropriation (Section 316(2) BNS) are ex-facie absent. The remedy, if any, lies before a civil forum for specific performance or recovery.\n\n9. **No Criminal Antecedents:** The Applicant is a respectable businessman with clean antecedents and has never been implicated or convicted in any criminal offence prior to this case.\n\n10. **Offences Triable by Magistrate:** The offences alleged against the Applicant under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023, do not carry capital punishment or imprisonment for life and are triable by the Court of Judicial Magistrate First Class. Pre-trial incarceration cannot be used as a measure of punishment.\n\n11. **Roots in Society and No Flight Risk:** The Applicant is a permanent resident of Pune, having deep family, social, and economic roots in the community. There is neither any likelihood of the Applicant absconding or fleeing from the course of justice, nor any possibility of tampering with evidence or influencing witnesses.\n\n12. **Willingness to Abide by Conditions:** The Applicant undertakes to cooperate with the trial and abide by any terms and conditions that this Hon'ble Court may deem fit and proper to impose while granting bail.\n\n---\n\n### PREVIOUS BAIL APPLICATIONS\n\n13. The Applicant had preferred an application for regular bail before the learned Judicial Magistrate First Class, Pune, which came to be rejected vide order dated [Date].\n\n14. The Applicant has not filed any other bail application before this Hon\u2019ble Court or before the Hon\u2019ble High Court of Judicature at Bombay seeking regular bail in connection with FIR No. 412/2026, and the present application is the first bail application before this Hon'ble Sessions Court post-filing of the chargesheet.\n\n---\n\n### PRAYER\n\nWHEREFORE, in light of the facts and circumstances stated hereinabove, it is most respectfully prayed that this Hon\u2019ble Court may be pleased to:\n\na. Grant regular bail to the Applicant, Ramesh Patil, in connection with Crime / FIR No. 412/2026 registered with Kothrud Police Station, Pune, for the offences punishable under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023, on such terms and conditions as this Hon'ble Court may deem fit;\n\nb. Pass any other and further relief(s) as this Hon\u2019ble Court may deem just and proper in the interest of justice.\n\n**AND FOR THIS ACT OF KINDNESS, THE APPLICANT AS IN DUTY BOUND SHALL EVER PRAY.**\n\n---\n\n### VERIFICATION\n\nI, [Name of Deponent / Relative], Age: [___] years, Occ: [_____], Residing at: [_____], do hereby state on solemn affirmation that I am the [Relation, e.g., brother/paternal cousin] and constituted attorney of the Applicant herein, who is currently lodged in Yerwada Central Jail; that I am conversant with the facts of the case; and that the contents of paragraphs 1 to 14 of the above application are true and correct to the best of my knowledge, information, and belief, and based upon legal advice received by me.\n\nSolemnly affirmed at Pune  \nOn this [____] day of April/May, 2026.  \n\n**DEPONENT**  \n\n**Advocate for the Applicant**",
+            "latency_s": 11.76,
+            "input_tokens": 298,
+            "output_tokens": 2969,
+            "cost_usd": 0.011357,
+            "thinking_kwargs": {
+              "thinking_level": "medium"
+            },
+            "checks": {
+              "cites s.483 BNSS": true,
+              "avoids wrong provision (480/482)": true,
+              "heading MOST RESPECTFULLY SHOWETH": true,
+              "heading GROUNDS FOR BAIL": true,
+              "heading PREVIOUS BAIL APPLICATIONS": true,
+              "heading PRAYER": true,
+              "heading VERIFICATION": true,
+              "uses the real jail (Yerwada)": true,
+              "no invented jail": true,
+              "keeps the real amount": true
+            },
+            "checks_passed": 10,
+            "checks_total": 10,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model's output adheres to the given task instructions by including all required headings in the correct order, such as 'CAUSE TITLE,' 'FACTS OF THE CASE,' 'GROUNDS FOR BAIL,' and others. It correctly cites Section 483 of the BNSS as the enabling provision for a regular bail application before the Sessions Court, avoiding the incorrect Section 480. The grounds for bail are well-tailored to the case facts, emphasizing the lack of criminal antecedents, the completion of the investigation, and the principle of parity with the co-accused who was granted bail. The output maintains factual accuracy by not introducing any invented particulars and accurately reflecting the case details provided in the task."
+            }
+          },
+          {
+            "ok": true,
+            "text": "### CAUSE TITLE\n\n**IN THE COURT OF SESSIONS AT PUNE, MAHARASHTRA**  \n**CRIMINAL BAIL APPLICATION NO. [____] OF 2026**  \n*(UNDER SECTION 483 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023)*\n\n**IN THE MATTER OF:**\n\n**Ramesh Patil**  \nAge: 41 years, Occ: Businessman,  \nResiding at: 14 Sahyadri Apartments,  \nKothrud, Pune - 411038.  \n*(Presently lodged in judicial custody at Yerwada Central Jail, Pune)*  \n... **APPLICANT / ACCUSED**\n\n**VERSUS**\n\n**State of Maharashtra**  \n(Through Police Inspector, Kothrud Police Station, Pune)  \n... **RESPONDENT / PROSECUTION**\n\n**FIR No.:** 412/2026  \n**Date of FIR:** 03-Feb-2026  \n**Police Station:** Kothrud, Pune  \n**Offences Under:** Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023  \n\n---\n\n### MOST RESPECTFULLY SHOWETH\n\n---\n\n### FACTS OF THE CASE\n\n1. The Applicant has been arrested on 06-Feb-2026 by the Kothrud Police Station, Pune, in connection with Crime/FIR No. 412/2026 registered on 03-Feb-2026 for offences punishable under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023 (BNS). The Applicant is presently in judicial custody at Yerwada Central Jail, Pune.\n\n2. The prosecution case arises from a complaint lodged by one Sunil More, alleging that the Applicant and the co-accused induced the complainant into entering an agreement for a promised land transfer and allegedly cheated him of a sum of Rs. 18,00,000/- (Rupees Eighteen Lakhs only).\n\n3. The entire dispute, even on a demurrer, emanates from a contractual agreement pertaining to an alleged land transaction, rendering it essentially of a civil nature, which has been cloaked with criminal flavor solely to exert recovery pressure upon the Applicant.\n\n4. The Investigating Agency has completed the investigation and formally filed the chargesheet before the jurisdictional Magistrate on 22-Apr-2026. The Applicant is no longer required for any custodial interrogation, recovery, or investigation.\n\n5. The similarly situated co-accused, Dilip Shinde, has already been enlarged on regular bail by this Hon\u2019ble Court vide order dated 11-Mar-2026 in Criminal Bail Application No. [____] of 2026.\n\n---\n\n### GROUNDS FOR BAIL\n\n6. **Investigation Complete and Chargesheet Filed:** The investigation stands concluded and the chargesheet has been filed on 22-Apr-2026. The evidence in the case is predominantly documentary, all of which is already seized and in the custody of the Investigating Officer. No purpose would be served by the further incarceration of the Applicant.\n\n7. **Rule of Parity:** The co-accused, Dilip Shinde, who faces identical allegations arising out of the very same transaction and FIR, has been enlarged on regular bail by this Hon\u2019ble Court on 11-Mar-2026. On the principles of parity and equal protection of law, the Applicant is entitled to the same relief.\n\n8. **Dispute of Civil Nature:** The dispute between the parties arises out of an alleged transaction of land transfer. The essential ingredients of dishonest inducement at inception under Section 318(4) or entrustment under Section 316(2) of the BNS are conspicuously absent. A breach of contract has been maliciously given the contour of criminal offences.\n\n9. **Magistrate-Triable Offences:** The offences alleged against the Applicant under Sections 318(4) and 316(2) of the BNS are triable by the Court of a Judicial Magistrate of the First Class and do not carry punishment of life imprisonment or death.\n\n10. **Clean Antecedents and No Flight Risk:** The Applicant is a 41-year-old businessman and a permanent resident of Pune, having deep roots in society. The Applicant has no prior criminal antecedents. There is neither any likelihood of the Applicant fleeing the course of justice nor of tampering with evidence or intimidating witnesses.\n\n11. **Willingness to Abide by Conditions:** The Applicant is ready and willing to furnish solvent surety and to abide by any stringent terms and conditions that this Hon'ble Court may deem fit to impose.\n\n---\n\n### PREVIOUS BAIL APPLICATIONS\n\n12. The Applicant has not filed any other bail application before the Hon'ble High Court of Judicature at Bombay or before this Hon'ble Court in connection with the present FIR, save and except [an application moved before the learned Judicial Magistrate First Class, Pune, which was rejected vide order dated [Date]].\n\n---\n\n### PRAYER\n\n13. In the premises aforesaid, the Applicant most respectfully prays that this Hon\u2019ble Court may be pleased to:\n    (a) Order the release of the Applicant on regular bail in connection with FIR No. 412/2026 registered at Kothrud Police Station, Pune, for offences under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023, on such terms and conditions as this Hon'ble Court may deem fit and proper;\n    (b) Pass any other or further order(s) as may be deemed just, fit, and equitable in the facts and circumstances of the case.\n\n---\n\n### VERIFICATION\n\nI, [Name of authorized relative/pairokar], Age: [__] years, Occ: [____], R/o [____], do hereby state and verify on solemn affirmation that the contents of paragraphs 1 to 5 and 12 are true to my personal knowledge and belief derived from the records of the case, and the contents of paragraphs 6 to 11 and 13 are based on legal advice received and believed by me to be true.\n\nVerified at Pune on this [____] day of [____], 2026.\n\n**DEPONENT**\n\nThrough:  \n**[Advocate's Name]**  \nAdvocate for the Applicant  \nPune",
+            "latency_s": 10.14,
+            "input_tokens": 298,
+            "output_tokens": 2535,
+            "cost_usd": 0.00973,
+            "thinking_kwargs": {
+              "thinking_level": "medium"
+            },
+            "checks": {
+              "cites s.483 BNSS": true,
+              "avoids wrong provision (480/482)": true,
+              "heading MOST RESPECTFULLY SHOWETH": true,
+              "heading GROUNDS FOR BAIL": true,
+              "heading PREVIOUS BAIL APPLICATIONS": true,
+              "heading PRAYER": true,
+              "heading VERIFICATION": true,
+              "uses the real jail (Yerwada)": true,
+              "no invented jail": true,
+              "keeps the real amount": true
+            },
+            "checks_passed": 10,
+            "checks_total": 10,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model's output adheres to the given task instructions by including all required headings in the correct order, such as \"CAUSE TITLE,\" \"FACTS OF THE CASE,\" \"GROUNDS FOR BAIL,\" and others. It correctly cites Section 483 of the Bharatiya Nagarik Suraksha Sanhita (BNSS) as the enabling provision for a regular bail application before the Sessions Court, aligning with the task's requirements. The grounds for bail are well-tailored to the case facts, emphasizing the lack of prior criminal antecedents, the completion of the investigation, and the principle of parity with the co-accused who was granted bail. The output maintains factual accuracy by not introducing any invented particulars and accurately reflecting the case details provided in the task."
+            }
+          }
+        ],
+        "checks_stable": {
+          "cites s.483 BNSS": true,
+          "avoids wrong provision (480/482)": true,
+          "heading MOST RESPECTFULLY SHOWETH": true,
+          "heading GROUNDS FOR BAIL": true,
+          "heading PREVIOUS BAIL APPLICATIONS": true,
+          "heading PRAYER": true,
+          "heading VERIFICATION": true,
+          "uses the real jail (Yerwada)": true,
+          "no invented jail": true,
+          "keeps the real amount": true
+        },
+        "checks_passed_all_runs": 10,
+        "checks_total": 10,
+        "median_latency_s": 10.95,
+        "median_cost_usd": 0.0105435,
+        "median_quality": 5.0
+      }
+    }
+  },
+  "entity_check": {
+    "callsite": "agents/drafting.py:1016 (entity cross-check vs CASE FACTS)",
+    "models": {
+      "gemini-2.5-pro": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "Arthur Road Jail | Case facts state custody is at Yerwada Central Jail.\n08-Feb-2026 | Case facts state arrest was on 06-Feb-2026; this date for start of custody is not mentioned.\nRs.24,00,000 | Case facts state the alleged sum is Rs.18,00,000.\ntwo prior convictions under Section 420 IPC | Case facts state \"No prior criminal antecedents\".",
+            "latency_s": 13.74,
+            "input_tokens": 417,
+            "output_tokens": 1645,
+            "cost_usd": 0.016971,
+            "thinking_kwargs": {
+              "thinking_budget": 4096
+            },
+            "checks": {
+              "flags wrong jail": true,
+              "flags wrong custody date": true,
+              "flags wrong amount": true,
+              "flags invented convictions": true,
+              "no signature blob leaked": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 4,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model successfully identified all four planted errors in the draft extract. It correctly pointed out the discrepancy in the jail location, the incorrect date for custody, the inflated sum involved, and the false claim of prior convictions. This demonstrates a thorough understanding of the case facts and an ability to accurately compare them against the draft extract."
+            }
+          },
+          {
+            "ok": true,
+            "text": "Arthur Road Jail | Case facts state custody is at Yerwada Central Jail.\n08-Feb-2026 | Case facts state arrest was on 06-Feb-2026.\nRs.24,00,000 | Case facts state the alleged sum is Rs.18,00,000.\ntwo prior convictions under Section 420 IPC | Case facts state \"No prior criminal antecedents\".",
+            "latency_s": 12.33,
+            "input_tokens": 417,
+            "output_tokens": 1393,
+            "cost_usd": 0.014451,
+            "thinking_kwargs": {
+              "thinking_budget": 4096
+            },
+            "checks": {
+              "flags wrong jail": true,
+              "flags wrong custody date": true,
+              "flags wrong amount": true,
+              "flags invented convictions": true,
+              "no signature blob leaked": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 4,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model correctly identified all four planted errors in the draft extract. It accurately pointed out the discrepancies between the draft and the case facts regarding the jail location, the date of custody, the amount involved, and the prior convictions. This demonstrates a thorough understanding of the task and attention to detail."
+            }
+          }
+        ],
+        "checks_stable": {
+          "flags wrong jail": true,
+          "flags wrong custody date": true,
+          "flags wrong amount": true,
+          "flags invented convictions": true,
+          "no signature blob leaked": true
+        },
+        "checks_passed_all_runs": 5,
+        "checks_total": 5,
+        "median_latency_s": 13.035,
+        "median_cost_usd": 0.015711,
+        "median_quality": 4.0
+      },
+      "gemini-3.8-flash": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "Arthur Road Jail | Named entity unsupported; facts state custody is at Yerwada Central Jail.\n08-Feb-2026 | Date unsupported; facts state arrest was on 06-Feb-2026 and do not mention 08-Feb-2026.\nRs.24,00,000 | Amount unsupported; facts state the alleged cheated sum is Rs.18,00,000.\nSection 420 IPC | Section unsupported; facts state the applicant has no prior criminal antecedents.",
+            "latency_s": 8.16,
+            "input_tokens": 417,
+            "output_tokens": 916,
+            "cost_usd": 0.003748,
+            "thinking_kwargs": {
+              "thinking_level": "medium"
+            },
+            "checks": {
+              "flags wrong jail": true,
+              "flags wrong custody date": true,
+              "flags wrong amount": true,
+              "flags invented convictions": true,
+              "no signature blob leaked": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 4,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model correctly identified all four planted errors in the draft extract. It noted the incorrect mention of Arthur Road Jail instead of Yerwada Central Jail, the wrong date of custody, the incorrect amount of money involved, and the false claim of prior convictions. This demonstrates a thorough understanding of the task and attention to detail in comparing the draft extract against the case facts provided."
+            }
+          },
+          {
+            "ok": true,
+            "text": "Arthur Road Jail | Named entity unsupported; CASE FACTS state custody is at Yerwada Central Jail\n08-Feb-2026 | Date unsupported; CASE FACTS state arrest occurred on 06-Feb-2026 and make no mention of 08-Feb-2026\nRs.24,00,000 | Amount unsupported; CASE FACTS state the alleged sum is Rs.18,00,000\ntwo | Amount unsupported; CASE FACTS state applicant has no prior criminal antecedents\nSection 420 IPC | Section unsupported; CASE FACTS state applicant has no prior criminal antecedents and do not mention Section 420 IPC",
+            "latency_s": 3.99,
+            "input_tokens": 417,
+            "output_tokens": 978,
+            "cost_usd": 0.00398,
+            "thinking_kwargs": {
+              "thinking_level": "medium"
+            },
+            "checks": {
+              "flags wrong jail": true,
+              "flags wrong custody date": true,
+              "flags wrong amount": true,
+              "flags invented convictions": true,
+              "no signature blob leaked": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model correctly identified all four planted errors in the draft extract. It noted the discrepancy in the jail name, the incorrect date of custody, the inflated amount involved, and the false claim of prior convictions. Additionally, it accurately pointed out the unsupported mention of Section 420 IPC, which was not part of the case facts. This demonstrates a thorough understanding of the task and attention to detail."
+            }
+          }
+        ],
+        "checks_stable": {
+          "flags wrong jail": true,
+          "flags wrong custody date": true,
+          "flags wrong amount": true,
+          "flags invented convictions": true,
+          "no signature blob leaked": true
+        },
+        "checks_passed_all_runs": 5,
+        "checks_total": 5,
+        "median_latency_s": 6.075,
+        "median_cost_usd": 0.0038640000000000002,
+        "median_quality": 4.5
+      }
+    }
+  },
+  "refine": {
+    "callsite": "core/self_refine.py:1518 (the refiner)",
+    "models": {
+      "gemini-2.5-pro": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "IN THE COURT OF SESSIONS JUDGE, PUNE\n\nAPPLICATION FOR REGULAR BAIL UNDER SECTION 483 OF THE BNSS, 2023\n\nMOST RESPECTFULLY SHOWETH:\n1. That the Applicant is accused in FIR No. 412/2026, P.S. Kothrud.\n2. That the Applicant was arrested on 06-Feb-2026.\n\nGROUNDS FOR BAIL\n3. That the Applicant has no criminal antecedents.\n4. That the co-accused has been granted bail by this Hon'ble Court.\n\nPRAYER\n5. That bail be granted on such terms as this Hon'ble Court deems fit.",
+            "latency_s": 12.87,
+            "input_tokens": 286,
+            "output_tokens": 1360,
+            "cost_usd": 0.013957,
+            "thinking_kwargs": {
+              "thinking_budget": 2048
+            },
+            "checks": {
+              "corrects to s.483": true,
+              "removes s.480": true,
+              "keeps heading GROUNDS FOR BAIL": true,
+              "keeps heading PRAYER": true,
+              "keeps heading MOST RESPECTFULLY SHOWETH": true,
+              "renumbers grounds (3 and 4)": true,
+              "no collateral shrink": true
+            },
+            "checks_passed": 7,
+            "checks_total": 7,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model correctly addressed both violations specified in the task. It changed the statute reference from Section 480 to Section 483 of the BNSS, aligning with the correct legal provision. Additionally, it continued the paragraph numbering from the body paragraphs into the GROUNDS FOR BAIL section, ensuring a seamless numerical flow. The draft maintained the original structure and content, adhering strictly to the task's instructions without unnecessary alterations."
+            }
+          },
+          {
+            "ok": true,
+            "text": "IN THE COURT OF SESSIONS JUDGE, PUNE\n\nAPPLICATION FOR REGULAR BAIL UNDER SECTION 483 OF THE BNSS, 2023\n\nMOST RESPECTFULLY SHOWETH:\n1. That the Applicant is accused in FIR No. 412/2026, P.S. Kothrud.\n2. That the Applicant was arrested on 06-Feb-2026.\n\nGROUNDS FOR BAIL\n3. That the Applicant has no criminal antecedents.\n4. That the co-accused has been granted bail by this Hon'ble Court.\n\nPRAYER\n5. That bail be granted on such terms as this Hon'ble Court deems fit.",
+            "latency_s": 13.77,
+            "input_tokens": 286,
+            "output_tokens": 1459,
+            "cost_usd": 0.014948,
+            "thinking_kwargs": {
+              "thinking_budget": 2048
+            },
+            "checks": {
+              "corrects to s.483": true,
+              "removes s.480": true,
+              "keeps heading GROUNDS FOR BAIL": true,
+              "keeps heading PRAYER": true,
+              "keeps heading MOST RESPECTFULLY SHOWETH": true,
+              "renumbers grounds (3 and 4)": true,
+              "no collateral shrink": true
+            },
+            "checks_passed": 7,
+            "checks_total": 7,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model correctly addressed both violations specified in the task. It changed the incorrect statute reference from Section 480 to Section 483 of the BNSS, aligning with the correct legal provision. Additionally, it continued the paragraph numbering sequentially under \"GROUNDS FOR BAIL\" and \"PRAYER,\" ensuring the global counter was maintained. The draft remained unchanged in terms of content and structure, adhering strictly to the task instructions without unnecessary alterations."
+            }
+          }
+        ],
+        "checks_stable": {
+          "corrects to s.483": true,
+          "removes s.480": true,
+          "keeps heading GROUNDS FOR BAIL": true,
+          "keeps heading PRAYER": true,
+          "keeps heading MOST RESPECTFULLY SHOWETH": true,
+          "renumbers grounds (3 and 4)": true,
+          "no collateral shrink": true
+        },
+        "checks_passed_all_runs": 7,
+        "checks_total": 7,
+        "median_latency_s": 13.32,
+        "median_cost_usd": 0.0144525,
+        "median_quality": 5.0
+      },
+      "gemini-3.8-flash": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "IN THE COURT OF SESSIONS JUDGE, PUNE\n\nAPPLICATION FOR REGULAR BAIL UNDER SECTION 483 OF THE BNSS, 2023\n\nMOST RESPECTFULLY SHOWETH:\n1. That the Applicant is accused in FIR No. 412/2026, P.S. Kothrud.\n2. That the Applicant was arrested on 06-Feb-2026.\n\nGROUNDS FOR BAIL\n3. That the Applicant has no criminal antecedents.\n4. That the co-accused has been granted bail by this Hon'ble Court.\n\nPRAYER\n5. That bail be granted on such terms as this Hon'ble Court deems fit.",
+            "latency_s": 1.66,
+            "input_tokens": 286,
+            "output_tokens": 152,
+            "cost_usd": 0.000785,
+            "thinking_kwargs": {
+              "thinking_level": "low"
+            },
+            "checks": {
+              "corrects to s.483": true,
+              "removes s.480": true,
+              "keeps heading GROUNDS FOR BAIL": true,
+              "keeps heading PRAYER": true,
+              "keeps heading MOST RESPECTFULLY SHOWETH": true,
+              "renumbers grounds (3 and 4)": true,
+              "no collateral shrink": true
+            },
+            "checks_passed": 7,
+            "checks_total": 7,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model correctly addressed both violations specified in the task. It changed the statute reference from Section 480 to Section 483 of the BNSS, aligning with the correct legal provision. Additionally, it continued the paragraph numbering sequentially from the body paragraphs to the GROUNDS FOR BAIL and PRAYER sections, maintaining the global counter as instructed. The draft remained unchanged in terms of content and structure, adhering strictly to the task requirements without unnecessary alterations."
+            }
+          },
+          {
+            "ok": true,
+            "text": "IN THE COURT OF SESSIONS JUDGE, PUNE\n\nAPPLICATION FOR REGULAR BAIL UNDER SECTION 483 OF THE BNSS, 2023\n\nMOST RESPECTFULLY SHOWETH:\n1. That the Applicant is accused in FIR No. 412/2026, P.S. Kothrud.\n2. That the Applicant was arrested on 06-Feb-2026.\n\nGROUNDS FOR BAIL\n3. That the Applicant has no criminal antecedents.\n4. That the co-accused has been granted bail by this Hon'ble Court.\n\nPRAYER\n5. That bail be granted on such terms as this Hon'ble Court deems fit.",
+            "latency_s": 1.57,
+            "input_tokens": 286,
+            "output_tokens": 152,
+            "cost_usd": 0.000785,
+            "thinking_kwargs": {
+              "thinking_level": "low"
+            },
+            "checks": {
+              "corrects to s.483": true,
+              "removes s.480": true,
+              "keeps heading GROUNDS FOR BAIL": true,
+              "keeps heading PRAYER": true,
+              "keeps heading MOST RESPECTFULLY SHOWETH": true,
+              "renumbers grounds (3 and 4)": true,
+              "no collateral shrink": true
+            },
+            "checks_passed": 7,
+            "checks_total": 7,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model's output correctly addresses both violations specified in the task. Firstly, it changes the incorrect reference from Section 480 BNSS to Section 483 BNSS, aligning with the correct legal provision. Secondly, it continues the paragraph numbering from the body paragraphs into the GROUNDS FOR BAIL section, ensuring a seamless numerical flow. The draft maintains the original structure and content, adhering strictly to the task's instructions without unnecessary alterations."
+            }
+          }
+        ],
+        "checks_stable": {
+          "corrects to s.483": true,
+          "removes s.480": true,
+          "keeps heading GROUNDS FOR BAIL": true,
+          "keeps heading PRAYER": true,
+          "keeps heading MOST RESPECTFULLY SHOWETH": true,
+          "renumbers grounds (3 and 4)": true,
+          "no collateral shrink": true
+        },
+        "checks_passed_all_runs": 7,
+        "checks_total": 7,
+        "median_latency_s": 1.615,
+        "median_cost_usd": 0.000785,
+        "median_quality": 5.0
+      }
+    }
+  },
+  "doc_qa": {
+    "callsite": "agents/document.py:148 (PDF Q&A, large docs)",
+    "models": {
+      "gemini-2.5-pro": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "Based on the document provided:\n\n1.  The legal notice was served on 15-Jan-2024. It was sent (dated) on 10-Jan-2024, which is after the debt fell due on 15-Oct-2023.\n2.  The interest rate claimed is 12% per annum from 15-Apr-2023.\n3.  The witnesses to the loan were Rohit Naik and Sandeep Pawar.\n4.  The document does not state the defendant's defence.",
+            "latency_s": 9.09,
+            "input_tokens": 297,
+            "output_tokens": 1011,
+            "cost_usd": 0.010481,
+            "thinking_kwargs": {
+              "thinking_budget": 1024
+            },
+            "checks": {
+              "notice served 15-Jan-2024": true,
+              "interest 12%": true,
+              "interest runs from 15-Apr-2023": true,
+              "both witnesses named": true,
+              "refuses to invent a defence": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model accurately identified the date the legal notice was served (15-Jan-2024) and correctly noted it was sent after the debt fell due on 15-Oct-2023. It also correctly identified the interest rate (12% p.a.) from the advance date (15-Apr-2023), listed the correct witnesses (Rohit Naik and Sandeep Pawar), and appropriately noted the absence of a stated defence, avoiding the critical error of inventing one. This demonstrates a clear understanding of the task and adherence to the grading criteria."
+            }
+          },
+          {
+            "ok": true,
+            "text": "Based on the document provided:\n\n1.  The legal notice was served on 15-Jan-2024. The debt fell due on 15-Oct-2023 and the legal notice was dated 10-Jan-2024.\n2.  The interest rate claimed is 12% p.a. from 15-Apr-2023.\n3.  The witnesses to the loan were Rohit Naik and Sandeep Pawar.\n4.  The document does not state the defendant's defence.",
+            "latency_s": 9.53,
+            "input_tokens": 297,
+            "output_tokens": 1015,
+            "cost_usd": 0.010521,
+            "thinking_kwargs": {
+              "thinking_budget": 1024
+            },
+            "checks": {
+              "notice served 15-Jan-2024": true,
+              "interest 12%": true,
+              "interest runs from 15-Apr-2023": true,
+              "both witnesses named": true,
+              "refuses to invent a defence": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model accurately identified the date the legal notice was served and calculated the time elapsed since the debt fell due, as seen in Q1. It correctly stated the interest rate and the date from which it is claimed in Q2. The witnesses were accurately named in Q3, and the model appropriately noted the absence of a stated defence in Q4, adhering to the task's instructions."
+            }
+          }
+        ],
+        "checks_stable": {
+          "notice served 15-Jan-2024": true,
+          "interest 12%": true,
+          "interest runs from 15-Apr-2023": true,
+          "both witnesses named": true,
+          "refuses to invent a defence": true
+        },
+        "checks_passed_all_runs": 5,
+        "checks_total": 5,
+        "median_latency_s": 9.309999999999999,
+        "median_cost_usd": 0.010501,
+        "median_quality": 5.0
+      },
+      "gemini-3.8-flash": {
+        "runs": [
+          {
+            "ok": true,
+            "text": "Based on the provided document:\n\n1. **Date served and time after debt fell due:** The legal notice was served on **15-Jan-2024**. It was sent (dated) on 10-Jan-2024, which is **nearly 3 months** (specifically, 2 months and 26 days) after the debt fell due on 15-Oct-2023.\n2. **Interest rate and starting date:** An interest rate of **12% p.a.** is claimed starting from **15-Apr-2023**.\n3. **Witnesses:** The loan was witnessed by **Rohit Naik and Sandeep Pawar**.\n4. **Defendant's stated defence:** The document does not contain this information (it states that the defendant did not reply to the legal notice, and no defence is mentioned).",
+            "latency_s": 1.8,
+            "input_tokens": 297,
+            "output_tokens": 186,
+            "cost_usd": 0.00092,
+            "thinking_kwargs": {
+              "thinking_level": "low"
+            },
+            "checks": {
+              "notice served 15-Jan-2024": true,
+              "interest 12%": true,
+              "interest runs from 15-Apr-2023": true,
+              "both witnesses named": true,
+              "refuses to invent a defence": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model's output accurately answers all the questions based on the provided document. It correctly identifies the date the legal notice was served and calculates the time elapsed since the debt fell due. It also accurately states the interest rate and the starting date, identifies the witnesses, and correctly notes that no defence is mentioned in the document, aligning with the grading criteria."
+            }
+          },
+          {
+            "ok": true,
+            "text": "Based on the provided document:\n\n1. The legal notice was served on **15-Jan-2024**. It was sent (dated) on 10-Jan-2024, which is **nearly 3 months (or 87 days)** after the debt fell due on 15-Oct-2023.\n2. The claimed interest rate is **12% p.a.** from **15-Apr-2023**.\n3. The loan was witnessed by **Rohit Naik** and **Sandeep Pawar**.\n4. The document **does not contain** the defendant's stated defence (it notes that \"the defendant did not reply\").",
+            "latency_s": 1.66,
+            "input_tokens": 297,
+            "output_tokens": 149,
+            "cost_usd": 0.000781,
+            "thinking_kwargs": {
+              "thinking_level": "low"
+            },
+            "checks": {
+              "notice served 15-Jan-2024": true,
+              "interest 12%": true,
+              "interest runs from 15-Apr-2023": true,
+              "both witnesses named": true,
+              "refuses to invent a defence": true
+            },
+            "checks_passed": 5,
+            "checks_total": 5,
+            "grade": {
+              "quality": 5,
+              "instruction_following": 5,
+              "factual_accuracy": 5,
+              "reasoning": "The model's output accurately answers all the questions based on the provided document. It correctly identifies the date the legal notice was served and calculates the time elapsed since the debt was due. It also accurately states the interest rate and the date from which it is claimed, identifies the witnesses to the loan, and correctly notes the absence of a stated defense, adhering to the instruction not to invent one. This demonstrates a clear understanding of the task and the document's content."
+            }
+          }
+        ],
+        "checks_stable": {
+          "notice served 15-Jan-2024": true,
+          "interest 12%": true,
+          "interest runs from 15-Apr-2023": true,
+          "both witnesses named": true,
+          "refuses to invent a defence": true
+        },
+        "checks_passed_all_runs": 5,
+        "checks_total": 5,
+        "median_latency_s": 1.73,
+        "median_cost_usd": 0.0008505,
+        "median_quality": 5.0
+      }
+    }
+  }
+}

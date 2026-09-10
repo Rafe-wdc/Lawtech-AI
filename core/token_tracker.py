@@ -46,9 +46,11 @@ _MODEL_PRICES_USD_PER_M: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash":             (0.30,   2.50),
     "gemini-2.5-flash-lite":        (0.10,   0.40),
     "gemini-2.5-pro":               (1.25,  10.00),
+    "gemini-3.8-flash":             (0.75,   3.75),
     "google_genai:gemini-2.5-flash":      (0.30,  2.50),
     "google_genai:gemini-2.5-flash-lite": (0.10,  0.40),
     "google_genai:gemini-2.5-pro":        (1.25, 10.00),
+    "google_genai:gemini-3.8-flash":      (0.75,  3.75),
 }
 
 

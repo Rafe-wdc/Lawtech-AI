@@ -330,11 +330,43 @@ def get_gemini_flash_full(temperature: float = 0.3,
     )
 
 
+def _thinking_kwargs(model_id: str, thinking_budget: int | None) -> dict:
+    """Return the thinking kwarg that `model_id`'s MODEL GENERATION accepts.
+
+    Gemini 2.5 takes `thinking_budget` (an int token allowance). Gemini 3.x
+    REJECTS it and takes `thinking_level` instead; sending both is a 400.
+    langchain-google-genai 4.3.2 documents this directly: "Gemini 3+ models
+    use thinking_level".
+
+    This is ported from the 3.x line, where it was found the hard way - a
+    guard keyed on the literal "3.6" let every other 3.x id through and sent
+    thinking_budget to a model that rejects it. Keeping 2.5 on the budget
+    spelling means rolling a model id back to a 2.5 one stays a working
+    configuration.
+
+    Budget -> level mapping matches the 3.x line: <=2048 is "low", above is
+    "medium".
+    """
+    bare = model_id.split(":", 1)[-1]
+    if not bare.startswith("gemini-"):
+        return {}
+    if bare.startswith("gemini-2.5"):
+        return {"thinking_budget": thinking_budget if thinking_budget is not None else 0}
+    if thinking_budget is None or thinking_budget <= 2048:
+        return {"thinking_level": "low"}
+    return {"thinking_level": "medium"}
+
+
 @lru_cache(maxsize=8)
 def get_gemini_pro(temperature: float = 0.5,
                    max_output_tokens: int = 16000,
                    thinking_budget: int = 2048):
-    """Gemini 2.5 Pro — strongest. For scenario analysis, PDF chat, complex reasoning.
+    """Gemini 3.8 Flash — for scenario analysis, PDF chat, complex reasoning.
+
+    Cost swap 2026-09-10: was `gemini-2.5-pro` ($1.25/$10.00 per 1M). Moved to
+    `gemini-3.8-flash` ($0.75/$3.75) — cheaper on both input and output, and a
+    newer training cutoff. The function name is kept so callsites do not churn;
+    it no longer returns a Pro-tier model.
 
     Defaults tightened 2026-08-10: previous 65535/8192 defaults meant any caller
     that forgot to override was billing up to 8192 thinking tokens ($0.08 output-
@@ -342,11 +374,12 @@ def get_gemini_pro(temperature: float = 0.5,
     approach these bounds; drafting/refiner callsites already override. The new
     16K/2048 defaults are a safe ceiling for anything that inherits.
     """
+    _model = "google_genai:gemini-3.8-flash"
     return init_chat_model(
-        "google_genai:gemini-2.5-pro",
+        _model,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        thinking_budget=thinking_budget,
+        **_thinking_kwargs(_model, thinking_budget),
         max_retries=2,
         timeout=180,
     )

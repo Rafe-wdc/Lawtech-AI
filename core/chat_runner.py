@@ -92,7 +92,13 @@ def _sse(event: dict) -> str:
 # ``run_chat_pipeline``. See CLAUDE.md "Streaming = final invariant".
 _FINAL_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _FINAL_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
-_FINAL_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
+# Known HTML tags only, so "<Name of Court>" placeholders survive (audit 2026-09-11).
+_FINAL_TAG_RE = re.compile(
+    r"</?(?:br|hr|p|div|span|b|i|u|s|strong|em|center|font|code|pre|table|thead|tbody|"
+    r"tr|td|th|ul|ol|li|h[1-6]|a|img|sup|sub|small|big|blockquote|strike|del|ins|mark|"
+    r"html|body|head|style|script|section|article|header|footer)\b(?:\s[^>]*)?/?>",
+    flags=re.IGNORECASE,
+)
 
 
 def _br_to_layout(text: str, br_re) -> str:

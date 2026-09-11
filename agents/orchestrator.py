@@ -1337,6 +1337,14 @@ _CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment
 # stripped from a classifier-picked plan. Content agents (Legal_Concepts,
 # Scenario, Maxim, Constitution, Non_legal, Document) must be preserved
 # because they represent distinct user asks bundled with a drafting request.
+_CITATIONS_ONLY_PREFIX = (
+    "CITATIONS ONLY. The user is having a document drafted by another agent. "
+    "Do NOT draft, redraft or restate any document. Return only the relevant "
+    "authorities for the legal issues below: for each, the case name, citation, "
+    "court and year, one sentence on the ratio, and the PDF link where available. "
+    "Issues / matter: "
+)
+
 _CITATION_APPENDIX_AGENTS = frozenset({
     "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts", "Legislation",
 })
@@ -1785,8 +1793,12 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.info("Document task with file context — using Document agent directly",
                  file_names=fc.file_names)
 
-    # File context: ensure Document agent is in plan if files attached
-    if fc and fc.has_content and "Document" not in tasks_planned:
+    # File context: ensure Document agent is in plan if files attached.
+    # Not for an acknowledgement ("ok", "thanks") on a thread whose files
+    # were restored from history: audit 2026-09-11 traced "ok" after a draft
+    # with a PDF to a Document call, a rewrite and a full synthesis.
+    if (fc and fc.has_content and "Document" not in tasks_planned
+            and task != "Non_legal" and not state.get("conversational_followup")):
         tasks_planned.append("Document")
         log.info("Document agent added for file context (multi-intent support)",
                  file_names=fc.file_names)
@@ -1989,6 +2001,15 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             )
         except asyncio.TimeoutError:
             log.warning("Per-agent query rewriting timed out")
+        # Drafting-primary: citation agents get a search brief, never the
+        # drafting instruction. They inherit the shared rule 'if the user asks
+        # for a draft, return ONLY the draft' and, handed the raw prompt (which
+        # happens whenever the rewrite fails), they write a second pleading
+        # that the appendix then carried verbatim (advocate report, 2026-09-11).
+        if task == "Drafting":
+            for _ca in [a for a in tasks_planned if a in _CITATION_APPENDIX_AGENTS]:
+                _base = agent_queries.get(_ca) or query
+                agent_queries[_ca] = _CITATIONS_ONLY_PREFIX + _base[:1500]
 
     # NOTE: Previously this block concatenated 30K chars of PDF text into
     # agent_queries["Drafting"] so the drafting agent would receive the
@@ -2408,8 +2429,10 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 
         citations_text = ""
         for name, result in citation_results.items():
-            if result.content:
-                citations_text += f"\n\n### {name.upper()} CITATIONS:\n{result.content}"
+            _appendix_body = _citation_appendix_text(name, result)
+            if _appendix_body:
+                citations_text += f"\n\n### {name.upper()} CITATIONS:\n{_appendix_body}"
+            if result.content or _appendix_body:
                 total_tokens += result.tokens_consumed
                 all_serialized_sources.extend(_serialize_sources(result))
 
@@ -2837,6 +2860,69 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         "source_metadata": all_serialized_sources,
         "tokens_consumed": total_tokens,
     }
+
+
+# --- citation appendix rendering ------------------------------------------
+# A citation agent handed a drafting-shaped query sometimes writes a whole
+# second pleading (the shared discipline block says 'if the user asks for a
+# draft, return ONLY the draft'). The Draft-aware append-only synth used to
+# glue that verbatim under '### SCI_JUDGMENT CITATIONS:' - the 'double
+# draft' an advocate reported on an SLP, 2026-09-11. The appendix is now
+# built from citation-shaped content only, falling back to the agent's
+# structured sources.
+_DRAFT_SHAPE_RE = re.compile(
+    r"(?im)^[ \t#*]*(?:IN THE (?:HON'BLE )?(?:SUPREME|HIGH) COURT|IN THE COURT OF|"
+    r"SYNOPSIS|LIST OF DATES|QUESTIONS? OF LAW|STATEMENT OF FACTS|GROUNDS(?: FOR| OF)?\b|"
+    r"PRAYER|VERIFICATION|AFFIDAVIT|MOST RESPECTFULLY|BETWEEN:|VERSUS|\.{4,}(?:PETITIONER|RESPONDENT|APPLICANT))"
+)
+_CITATION_APPENDIX_MAX_CHARS = 6000
+
+
+def _is_draft_shaped(text: str) -> bool:
+    """True when a citation agent's content reads as a pleading, not a list."""
+    if not text:
+        return False
+    if len(_DRAFT_SHAPE_RE.findall(text)) >= 2:
+        return True
+    return len(text) > _CITATION_APPENDIX_MAX_CHARS
+
+
+def _sources_as_citation_list(result) -> str:
+    """Render an agent's structured sources as a citation list."""
+    lines = []
+    seen = set()
+    for src in (getattr(result, "sources", None) or []):
+        title = (getattr(src, "title", None) or "").strip()
+        if not title or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        bits = [title]
+        court = getattr(src, "court_name", None)
+        year = getattr(src, "year", None)
+        if court:
+            bits.append(str(court))
+        if year:
+            bits.append(str(year))
+        line = ", ".join(bits)
+        link = getattr(src, "doc_link", None)
+        if link:
+            line += f" ([Judgment PDF]({link}))"
+        lines.append(f"- {line}")
+    return "\n".join(lines)
+
+
+def _citation_appendix_text(name: str, result) -> str:
+    """The text to place under '### <AGENT> CITATIONS:' - never a draft."""
+    content = (getattr(result, "content", None) or "").strip()
+    if content and not _is_draft_shaped(content):
+        return content
+    rendered = _sources_as_citation_list(result)
+    if content:
+        log.warning(
+            "Citation appendix: agent content was draft-shaped; using structured sources instead",
+            agent=name, content_chars=len(content), sources=len(getattr(result, "sources", None) or []),
+        )
+    return rendered
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:

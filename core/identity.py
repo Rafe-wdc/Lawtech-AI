@@ -97,7 +97,12 @@ def hide_provider(text: str) -> tuple[str, int]:
         out.append(m.group(0))
         pos = m.end()
     out.append(_handle(text[pos:]))
+    if count == 0:
+        # Audit 2026-09-11: with no sentence replaced this used to collapse
+        # every 2+-space run in the whole answer, flattening nested lists in
+        # any response that merely cited a Google/Meta litigant. Untouched
+        # text goes back untouched.
+        return text, 0
     result = "".join(out)
-    result = re.sub(r"[ \t]{2,}", " ", result)
     result = re.sub(r"\n{3,}", "\n\n", result)
     return result, count

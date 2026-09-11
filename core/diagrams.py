@@ -38,14 +38,11 @@ def _is_drawing(body: str) -> bool:
         return True
     if _FRAME_RE.search(body):
         return True
-    lines = [l for l in body.split("\n") if l.strip()]
-    if not lines:
-        return False
-    # a markdown table inside a fence is not a drawing; unfence it instead
-    if sum(1 for l in lines if _TABLE_ROW_RE.match(l)) >= max(2, len(lines) // 2):
-        return False
-    columnar = sum(1 for l in lines if re.search(r"\S {3,}\S", l))
-    return columnar >= max(2, len(lines) // 2)
+    # Audit 2026-09-11: the old "columnar text" heuristic classified a
+    # stamp-duty schedule laid out with spaces as a drawing and deleted it.
+    # Only box characters, ascii frames and arrow chains are drawings; a
+    # space-aligned text table is unfenced and kept.
+    return False
 
 
 def strip_diagrams(text: str) -> tuple[str, dict]:

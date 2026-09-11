@@ -107,6 +107,43 @@ def _strip_internal_cite_markers(text: str) -> str:
 # bank could not cover without continuous keyword maintenance.
 
 
+# --- argument requests are analysis, not drafting -----------------------------
+# "Give me arguments in favor of the accused in a bail application under
+# Section 439 CrPC" straddles the extractor's draft trigger ("give me a
+# <doc>") and its own rule that "draft arguments for <party>" is analysis.
+# Some runs return task_intent="draft"; two code paths then promote Drafting
+# to primary and the user receives a full pleading with cause title, PRAYER
+# and placeholders (advocate test, 2026-09-11). The signal that settles it
+# deterministically: the request names arguments/submissions/points/grounds/
+# defences/strategy, and no production verb is attached to a DOCUMENT noun.
+# "Draft written arguments for the accused" and "prepare a bail application"
+# stay drafting requests.
+_ARGUMENT_CUE_RE = re.compile(
+    r"\b(?:arguments?|counter-?arguments?|submissions?|points? (?:to|i should|i can|we can) (?:argue|submit|raise|make|press)|"
+    r"talking points|grounds (?:to|i can|we can) (?:argue|urge|raise)|defen[cs]es?|"
+    r"strategy|line of argument|cross-?examination|how (?:to|should i) argue|what (?:should|can) i argue)\b"
+    r"|तर्क|दलील|बहस",
+    re.IGNORECASE,
+)
+_PRODUCTION_VERB_ON_DOC_RE = re.compile(
+    r"\b(?:draft|prepare|write|compose|create|generate|make|draw up|file|give me|i need)\b"
+    r"(?:\s+(?:a|an|the|me|us|my|our|strong|detailed|comprehensive|complete|full|formal|proper|short))*\s+"
+    r"(?:written (?:arguments?|submissions?|statement)|memorandum|memo of arguments|synopsis|"
+    r"application|petition|plaint|notice|affidavit|reply|rejoinder|complaint|appeal|deed|agreement|contract|"
+    r"will|mou|suit|writ|slp|bail application|anticipatory bail)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_argument_request(query: str) -> bool:
+    """True when the user wants arguments, not a document. Pure."""
+    if not query:
+        return False
+    if not _ARGUMENT_CUE_RE.search(query):
+        return False
+    return not _PRODUCTION_VERB_ON_DOC_RE.search(query)
+
+
 def _wants_drafting(intent: UserIntent | None) -> bool:
     """True iff the user wants the AI to PRODUCE a legal document.
 
@@ -1819,6 +1856,20 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # keyword-scan safety net. When the extractor is confident, the
     # plan reflects exactly what the user asked for; when confidence
     # is low, nothing is added (we trust the planner LLM).
+    # An argument request is analysis whatever the extractor said. Override
+    # BEFORE any consumer (multi-intent, reconciliation, draft-from-file)
+    # reads task_intent. See _is_argument_request.
+    if (
+        extracted_intent is not None
+        and getattr(extracted_intent, "task_intent", None) == "draft"
+        and _is_argument_request(_original_query)
+    ):
+        extracted_intent = extracted_intent.model_copy(update={"task_intent": "analyze"})
+        log.info("Argument request: task_intent overridden draft -> analyze",
+                 query=_original_query[:80], classifier_task=task)
+        if task == "Drafting":
+            task = "Scenario"
+            tasks_planned = ["Scenario"] + [a for a in tasks_planned if a not in ("Drafting", "Scenario")]
     if task not in ("Non_legal", "Document"):
         extra = _detect_multi_intent(extracted_intent, task)
         for agent in extra:

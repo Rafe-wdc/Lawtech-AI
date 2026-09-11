@@ -2870,21 +2870,46 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 # draft' an advocate reported on an SLP, 2026-09-11. The appendix is now
 # built from citation-shaped content only, falling back to the agent's
 # structured sources.
-_DRAFT_SHAPE_RE = re.compile(
-    r"(?im)^[ \t#*]*(?:IN THE (?:HON'BLE )?(?:SUPREME|HIGH) COURT|IN THE COURT OF|"
-    r"SYNOPSIS|LIST OF DATES|QUESTIONS? OF LAW|STATEMENT OF FACTS|GROUNDS(?: FOR| OF)?\b|"
-    r"PRAYER|VERIFICATION|AFFIDAVIT|MOST RESPECTFULLY|BETWEEN:|VERSUS|\.{4,}(?:PETITIONER|RESPONDENT|APPLICANT))"
-)
-_CITATION_APPENDIX_MAX_CHARS = 6000
+# Pleading markers by KIND. A second pleading carries several distinct kinds
+# (caption + synopsis + questions of law + prayer ...); a citation summary
+# organised under "Grounds for Quashing" or mentioning "Prayer" once carries
+# at most one. GROUNDS is deliberately absent: it is a common heading in
+# citation summaries. Measured 2026-09-11 on 9 real SCI_Judgment outputs:
+# 0 marker hits on all 9; the old 6,000-char length rule alone misclassified
+# 4 of 9 (full answers of 17-21K chars), so the length rule is now only a
+# 30K backstop that logs loudly.
+_DRAFT_SHAPE_KINDS = {
+    "caption": re.compile(r"(?im)^[ \t#*]*IN THE (?:HON'BLE )?(?:SUPREME COURT|HIGH COURT|COURT OF)\b"),
+    "parties": re.compile(r"(?im)^[ \t#*]*(?:BETWEEN:|VERSUS\b|\.{4,}[ \t]*(?:PETITIONER|RESPONDENT|APPLICANT)S?\b)"),
+    "synopsis": re.compile(r"(?im)^[ \t#*]*(?:SYNOPSIS|LIST OF DATES)\b"),
+    "questions": re.compile(r"(?im)^[ \t#*]*QUESTIONS? OF LAW\b"),
+    "facts": re.compile(r"(?im)^[ \t#*]*STATEMENT OF FACTS\b"),
+    "showeth": re.compile(r"(?im)^[ \t#*]*MOST RESPECTFULLY\b"),
+    "prayer": re.compile(r"(?im)^[ \t#*]*PRAYER\b"),
+    "verification": re.compile(r"(?im)^[ \t#*]*(?:VERIFICATION|AFFIDAVIT)\b"),
+}
+_DRAFT_SHAPE_MIN_KINDS = 3
+_CITATION_APPENDIX_HARD_CAP = 30_000
+
+
+def _draft_shape_kinds(text: str) -> list[str]:
+    return [k for k, rx in _DRAFT_SHAPE_KINDS.items() if rx.search(text)]
 
 
 def _is_draft_shaped(text: str) -> bool:
-    """True when a citation agent's content reads as a pleading, not a list."""
+    """True when a citation agent's content reads as a pleading, not a list:
+    three or more distinct pleading-marker kinds. The length backstop fires
+    only past 30K chars, far above any plausible citation list, and logs."""
     if not text:
         return False
-    if len(_DRAFT_SHAPE_RE.findall(text)) >= 2:
+    kinds = _draft_shape_kinds(text)
+    if len(kinds) >= _DRAFT_SHAPE_MIN_KINDS:
         return True
-    return len(text) > _CITATION_APPENDIX_MAX_CHARS
+    if len(text) > _CITATION_APPENDIX_HARD_CAP:
+        log.warning("Citation appendix: content over the 30K backstop treated as draft-shaped",
+                    chars=len(text), kinds=kinds)
+        return True
+    return False
 
 
 def _sources_as_citation_list(result) -> str:

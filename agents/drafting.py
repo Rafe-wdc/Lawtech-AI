@@ -675,6 +675,15 @@ def validate_draft(
             "as list items."
         )
 
+    # "[•]" is the reference templates' own blank marker. The prompt asks for
+    # a short natural label instead ("[Case No.]"); when one leaks through
+    # (batch 2026-09-11: "Special Case No. [•] of 2026") give the advocate a
+    # readable blank rather than a bullet glyph. Mechanical only.
+    _bullet_blanks = cleaned.count("[•]")
+    if _bullet_blanks:
+        cleaned = cleaned.replace("[•]", "[To Be Filled]")
+        warnings.append(f"Replaced {_bullet_blanks} template blank marker(s) with [To Be Filled].")
+
     # [CITE: ...] survivors — the generation prompt forbids them, this is
     # the defensive fallback.
     cite_hits = _CITE_PLACEHOLDER_RE.findall(cleaned)

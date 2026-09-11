@@ -166,6 +166,13 @@ def test_hyphen_run_is_capped():
     assert n == 1 and "-" * 16 not in out
 
 
+# 13. the templates' "[•]" blank marker never reaches the advocate
+def test_bullet_blank_marker_becomes_readable_placeholder():
+    out = _vd("**Special Case No. [•] of 2026**\n\nFIR No. [•] dated [Date].\n")
+    assert "[•]" not in out
+    assert "Special Case No. [To Be Filled] of 2026" in out
+
+
 # 8. an acknowledgement on a thread with restored files must not add Document
 def test_conversational_followup_never_adds_document_agent():
     import inspect

@@ -160,6 +160,7 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     _dash_n = cleaned.count("—") + cleaned.count("–")
     if _dash_n:
         cleaned = re.sub(r"(?m)^[ \t]*[—–][ \t]+", "", cleaned)
+        cleaned = re.sub(r"(?<=\d)[ \t]+[—–][ \t]+(?=\d)", "-", cleaned)   # numeric range
         cleaned = re.sub(r"[ \t]+[—–][ \t]+", ", ", cleaned)
         cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
         cleaned = cleaned.replace("—", "-").replace("–", "-")

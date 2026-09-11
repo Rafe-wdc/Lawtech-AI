@@ -1785,8 +1785,12 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.info("Document task with file context — using Document agent directly",
                  file_names=fc.file_names)
 
-    # File context: ensure Document agent is in plan if files attached
-    if fc and fc.has_content and "Document" not in tasks_planned:
+    # File context: ensure Document agent is in plan if files attached.
+    # Not for an acknowledgement ("ok", "thanks") on a thread whose files
+    # were restored from history: audit 2026-09-11 traced "ok" after a draft
+    # with a PDF to a Document call, a rewrite and a full synthesis.
+    if (fc and fc.has_content and "Document" not in tasks_planned
+            and task != "Non_legal" and not state.get("conversational_followup")):
         tasks_planned.append("Document")
         log.info("Document agent added for file context (multi-intent support)",
                  file_names=fc.file_names)

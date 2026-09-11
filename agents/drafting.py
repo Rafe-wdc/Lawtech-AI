@@ -346,7 +346,15 @@ _EMPTY_NUMBERED_PARA_RE = re.compile(r"(?m)^\s*\d+\.\s*$\n?")
 
 _HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
-_HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
+# Known HTML tags only. Audit 2026-09-11: the old any-tag pattern deleted
+# angle-bracket placeholders ("IN THE COURT OF <Name of Court>") and left
+# blank fields with no marker for the advocate.
+_HTML_ANY_TAG_RE = re.compile(
+    r"</?(?:br|hr|p|div|span|b|i|u|s|strong|em|center|font|code|pre|table|thead|tbody|"
+    r"tr|td|th|ul|ol|li|h[1-6]|a|img|sup|sub|small|big|blockquote|strike|del|ins|mark|"
+    r"html|body|head|style|script|section|article|header|footer)\b(?:\s[^>]*)?/?>",
+    flags=re.IGNORECASE,
+)
 
 # --- hard-wrap repair -------------------------------------------------------
 # A line that starts a new block. A line after a long line that does NOT
@@ -371,6 +379,16 @@ _BLOCK_START_RE = re.compile(
 )
 _TERMINAL_PUNCT = '.;:!?' + chr(0x2019) + chr(0x201D) + '"' + ")]"
 _UNWRAP_MIN_PREV_LEN = 70   # a hard-wrapped line sits near the wrap width
+# Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada,
+# Malayalam, Sinhala, Arabic/Urdu: scripts with no letter case.
+_INDIC_RE = re.compile(r"[\u0900-\u0DFF\u0600-\u06FF]")
+# "Place: Pune", "Annexure A: ...", "ठिकाण: पुणे" - a label line in any script.
+_LABEL_LINE_RE = re.compile(r"^[^\s:]{1,30}:\s")
+
+
+def _is_title_case(s: str) -> bool:
+    words = [w for w in s.split() if w[:1].isalpha()]
+    return bool(words) and all(w[:1].isupper() for w in words)
 
 
 def _unwrap_hard_wrapped_lines(text: str) -> tuple[str, int]:
@@ -407,6 +425,16 @@ def _unwrap_hard_wrapped_lines(text: str) -> tuple[str, int]:
                 and not ps.lstrip().startswith(("#", "|"))
                 and not ps.endswith(":")
                 and not _BLOCK_START_RE.match(cs)
+                # Audit 2026-09-11: Devanagari has no case, so the
+                # capital-letter exemption never fired and "ठिकाण: पुणे" /
+                # "दिनांक: ..." were merged into the paragraph; all-caps
+                # headings and Title Case furniture ("Authorised
+                # Signatory") were joined too. None of these is a wrapped
+                # tail: a wrapped tail is lowercase running prose.
+                and not _INDIC_RE.search(ps + cs)
+                and not _LABEL_LINE_RE.match(cs)
+                and not (cs.upper() == cs and any(c.isalpha() for c in cs))
+                and not (len(cs) < 40 and _is_title_case(cs))
                 and not (
                     len(cs) < 40
                     and ps[-1] in _TERMINAL_PUNCT
@@ -462,6 +490,11 @@ def _nest_subpoints_under_numbered_items(text: str) -> tuple[str, int]:
         body = [g for g in gap if g.strip()]
         if not body or any(_GAP_STOP_RE.match(g) for g in body):
             continue
+        # Audit 2026-09-11: "GROUNDS FOR BAIL" (all caps, no markdown
+        # marker) sat between clauses 8 and 9 and was indented under 8.
+        if any(g.strip().upper() == g.strip() and len(g.split()) >= 2
+               and any(c.isalpha() for c in g) for g in body):
+            continue
         if not any(not g.startswith((" ", chr(9))) for g in body):
             continue                       # already indented
         pad = " " * max(3, width)
@@ -475,7 +508,32 @@ def _nest_subpoints_under_numbered_items(text: str) -> tuple[str, int]:
 # A line opening with a bare number of three or more digits and a period.
 # Two-digit numbers are genuine paragraph numbers; three-plus are years
 # and amounts that hard-wrapping stranded at line start.
-_LINE_INITIAL_BIG_NUMBER_RE = re.compile(r"(?m)^([ \t]*\d{3,})\.(?=\s)")
+_LINE_INITIAL_BIG_NUMBER_RE = re.compile(r"^([ \t]*)(\d{3,})\.(?=\s)")
+_ANY_NUMBERED_LINE_RE = re.compile(r"^[ \t]*(\d{1,3})\.\s")
+
+
+def _escape_stranded_numbers(text: str) -> tuple[str, int]:
+    """Escape a line-initial 3+ digit number ONLY when it does not continue
+    a numbered sequence. Audit 2026-09-11: written statements answering a
+    100-paragraph plaint carry genuine "100." / "101." paragraphs, which
+    the plain regex escaped."""
+    out, n, prev_num = [], 0, None
+    for line in text.split("\n"):
+        m = _LINE_INITIAL_BIG_NUMBER_RE.match(line)
+        if m:
+            num = int(m.group(2))
+            if prev_num is not None and num == prev_num + 1:
+                out.append(line); prev_num = num
+                continue
+            out.append(f"{m.group(1)}{m.group(2)}\\." + line[m.end():]); n += 1
+            continue
+        k = _ANY_NUMBERED_LINE_RE.match(line)
+        if k:
+            prev_num = int(k.group(1))
+        elif line.strip():
+            pass  # prose inside a paragraph keeps the running number
+        out.append(line)
+    return "\n".join(out), n
 
 
 # A markdown table separator row: "|---|---|", "| :-- | --: |" etc.
@@ -610,9 +668,7 @@ def validate_draft(
     # accused ...") and render as list item number 2023 with its own
     # indent. Numbers of three or more digits are never paragraph numbers
     # in a pleading, so escaping the period is safe. Mechanical only.
-    cleaned, _stranded = _LINE_INITIAL_BIG_NUMBER_RE.subn(
-        lambda m: m.group(1) + "\\.", cleaned
-    )
+    cleaned, _stranded = _escape_stranded_numbers(cleaned)
     if _stranded:
         warnings.append(
             f"Escaped {_stranded} line-initial number(s) that would render "
@@ -730,6 +786,10 @@ def validate_draft(
     _dash_before = cleaned.count("—") + cleaned.count("–")
     if _dash_before:
         cleaned = re.sub(r"(?m)^[ \t]*[—–][ \t]+", "", cleaned)
+        # A spaced dash between two numbers is a range ("Sections 138 - 142",
+        # "2019 - 2023"): hyphenate it. Audit 2026-09-11 reproduced the old
+        # rule turning it into an enumeration, which changes the citation.
+        cleaned = re.sub(r"(?<=\d)[ \t]+[—–][ \t]+(?=\d)", "-", cleaned)
         cleaned = re.sub(r"[ \t]+[—–][ \t]+", ", ", cleaned)
         cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
         cleaned = cleaned.replace("—", "-").replace("–", "-")
@@ -2955,7 +3015,18 @@ def _drop_reemitted_sections(
     planned_n = [_normalise_heading(h) for h in planned if h]
     kept, dropped = [], []
     for head, block in _split_heading_blocks(pair_text):
-        if head and not _heading_present(head, planned_n) and _heading_present(head, already):
+        # Audit 2026-09-11: "GROUNDS FOR ANTICIPATORY BAIL" shares half
+        # its words with the document title "APPLICATION FOR ANTICIPATORY
+        # BAIL ..." and was dropped as a re-emission, then regenerated by
+        # the repair pass. A block is a re-emission only when it matches an
+        # existing heading EXACTLY or by containment, and never when it
+        # overlaps one of this pair's own planned headings.
+        planned_hit = head and (
+            _heading_present(head, planned_n)
+            or any(_substantive_word_overlap(p, head) for p in planned_n)
+        )
+        already_hit = head and any(head == got or head in got or got in head for got in already)
+        if head and already_hit and not planned_hit:
             dropped.append(head)
             continue
         kept.append(block)
@@ -3004,13 +3075,17 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
         return False
 
     seen: list[str] = []
-    in_affidavit = False
     kept, dropped = [], []
-    for head, block in blocks:
+    # The supporting affidavit restates the court caption and case number
+    # BEFORE its own heading. Audit 2026-09-11 reproduced both being
+    # dropped as repeats, leaving the affidavit opening at "**vs**". Treat
+    # the eight blocks ahead of the first affidavit heading as part of it,
+    # the same window the exact-block pass uses (_AFFIDAVIT_NEAR).
+    _aff_idx = next((i for i, (h, _b) in enumerate(blocks) if "affidavit" in h), None)
+    for idx, (head, block) in enumerate(blocks):
         first = block.lstrip().split("\n", 1)[0]
         is_head = _is_section_heading(first, head)
-        if is_head and "affidavit" in head:
-            in_affidavit = True
+        in_affidavit = _aff_idx is not None and idx >= max(0, _aff_idx - 8)
         if is_head and not in_affidavit and any(_same(head, h) for h in seen):
             dropped.append(head)
             continue

@@ -42,8 +42,26 @@ def test_citation_list_is_not_draft_shaped():
     assert _is_draft_shaped(CITATION_LIST) is False
 
 
-def test_overlong_content_is_treated_as_draft_shaped():
-    assert _is_draft_shaped("- Case v. State, (2020) 1 SCC 1\n" * 300) is True
+def test_long_citation_list_is_not_draft_shaped():
+    # 300 entries, ~10K chars, no pleading markers: a legitimate long list.
+    assert _is_draft_shaped("- Case v. State, (2020) 1 SCC 1 - ratio.\n" * 300) is False
+
+
+def test_backstop_fires_only_past_thirty_thousand_chars():
+    assert _is_draft_shaped("- Case v. State, (2020) 1 SCC 1 - ratio.\n" * 800) is True
+
+
+def test_citation_summary_organised_by_grounds_with_one_prayer_line_is_kept():
+    text = ("### Grounds for Quashing\n*State of Haryana v. Bhajan Lal*, 1992 Supp (1) SCC 335 - categories.\n\n"
+            "### Grounds relating to sanction\n*Mansukhlal v. State of Gujarat*, (1997) 7 SCC 622 - application of mind.\n\n"
+            "PRAYER for interim stay was refused in *X v. Y*, (2021) 3 SCC 1.\n")
+    assert _is_draft_shaped(text) is False
+    assert _citation_appendix_text("SCI_Judgment", SimpleNamespace(content=text, sources=[])) == text.strip()
+
+
+def test_two_marker_kinds_alone_do_not_trip_the_guard():
+    text = "VERSUS the settled position, see *A v. B*.\n\nPRAYER clauses were discussed in *C v. D*.\n"
+    assert _is_draft_shaped(text) is False
 
 
 def test_reported_shape_is_replaced_by_structured_sources():

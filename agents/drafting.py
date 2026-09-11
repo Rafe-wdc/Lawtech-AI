@@ -342,7 +342,9 @@ _MOJIBAKE_REPLACEMENTS = [
 ]
 
 _CITE_PLACEHOLDER_RE = re.compile(r"\[CITE:[^\]]*\]", flags=re.IGNORECASE)
-_EMPTY_NUMBERED_PARA_RE = re.compile(r"(?m)^\s*\d+\.\s*$\n?")
+# 1-3 digits only: "2025." alone on a line is a hard-wrapped year, not an
+# empty paragraph (an SLP lost "between 2020 and 2025." this way, 2026-09-11).
+_EMPTY_NUMBERED_PARA_RE = re.compile(r"(?m)^\s*\d{1,3}\.\s*$\n?")
 
 _HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
@@ -458,6 +460,120 @@ _GAP_STOP_RE = re.compile(
     r"place|dated?|sd/-|through|advocate|counsel|deponent)\b)",
     re.IGNORECASE,
 )
+
+
+# --- blank-line fragment rejoin -------------------------------------------
+_OPEN_BRACKET_RE = re.compile(r"\[[^\]]*$")
+# Block starts that end a blank-line rejoin. Deliberately WITHOUT the filing
+# furniture words of _BLOCK_START_RE: a fragment beginning "Petitioner], the"
+# is a continuation when the previous fragment ended mid-sentence.
+_BLANK_JOIN_STOP_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]|[-*+][ \t]|\d{1,3}[.)][ \t]|\([a-z0-9]{1,4}\)[ \t]|[a-z][.)][ \t]|"
+    r"[ivxlc]{1,6}[.)][ \t]|\||\.{3,}|_{3,}|-{3,}|\*\*[^*\n]+\*\*)", re.IGNORECASE
+)
+
+
+def _rejoin_blankline_fragments(text: str) -> tuple[str, int]:
+    """Join a paragraph fragment onto the previous one across a single
+    blank line when the previous fragment plainly ends mid-sentence.
+
+    Advocate SLP 2026-09-11: the Verification read 'presently residing at
+    [Address of' / blank line / 'Petitioner], the Petitioner above-named,'
+    and the Facts lost 'between 2020 and' / blank / '2025.' to the
+    empty-paragraph remover. The single-newline rejoin cannot see across a
+    blank line, so this pass handles that shape with a stricter test: the
+    previous fragment is long (>= 70 chars) or ends inside an open '[...]',
+    does not end with sentence punctuation or a colon, is not a heading,
+    list item, table row, label or caps line; and the next fragment starts
+    with a lowercase letter, a digit, or a closing bracket, and is not a
+    block start itself. Mechanical only."""
+    if not text or chr(10) + chr(10) not in text:
+        return text, 0
+    blocks = text.split(chr(10) + chr(10))
+    out: list[str] = []
+    joins = 0
+    for cur in blocks:
+        if out:
+            prev = out[-1]
+            ps = prev.rstrip()
+            last_line = ps.split(chr(10))[-1].strip()
+            cs = cur.strip()
+            first_line = cs.split(chr(10))[0]
+            open_bracket = bool(_OPEN_BRACKET_RE.search(last_line))
+            if (
+                cs and last_line
+                and (len(last_line) >= _UNWRAP_MIN_PREV_LEN or open_bracket)
+                and last_line[-1] not in _TERMINAL_PUNCT + ":"
+                and not last_line.lstrip().startswith(("#", "|"))
+                and not _BLOCK_START_RE.match(last_line)
+                and not (last_line.upper() == last_line and any(c.isalpha() for c in last_line))
+                # the next fragment: not a heading, list item, table row, rule,
+                # dot leader, bold label, label line or caps line. Its first
+                # letter is NOT a signal here - wrapped fragments routinely
+                # begin with a proper noun ("Leave Petition are true...",
+                # "Petitioner], the Petitioner above-named"); the mid-sentence
+                # ending of the previous fragment is the signal.
+                and not _BLANK_JOIN_STOP_RE.match(first_line)
+                and not _LABEL_LINE_RE.match(first_line)
+                and not (first_line.upper() == first_line and any(c.isalpha() for c in first_line))
+                and not _INDIC_RE.search(last_line + first_line)
+            ):
+                out[-1] = ps + " " + cs
+                joins += 1
+                continue
+        out.append(cur)
+    return (chr(10) + chr(10)).join(out), joins
+
+
+# --- position-of-parties pipe -----------------------------------------------
+_SINGLE_PIPE_LINE_RE = re.compile(r"^(?!\s*\|)([^|\n]*\S)[ \t]*\|[ \t]*(\S[^|\n]*)$", re.M)
+
+
+def _split_single_pipe_lines(text: str) -> tuple[str, int]:
+    """A line with exactly one pipe that is not a table row is the writer's
+    two-column 'position of parties' layout ('.....Petitioner |.....Petitioner',
+    'In the High Court | In this Court'). Markdown has no such column; render
+    the two halves with a slash so no raw pipe reaches the advocate."""
+    return _SINGLE_PIPE_LINE_RE.subn(lambda m: f"{m.group(1)} / {m.group(2)}", text)
+
+
+# --- heading that merely names the caption that follows it -------------------
+def _drop_heading_that_restates_next_line(text: str) -> tuple[str, int]:
+    """'## IN THE SUPREME COURT OF INDIA (...) - SPECIAL LEAVE PETITION' followed
+    by the real caption line beginning with the same words renders as the
+    caption twice. Drop the heading when the next non-blank line starts with
+    its first thirty normalised characters."""
+    lines = text.split(chr(10))
+    drop: set[int] = set()
+    for i, l in enumerate(lines):
+        if not l.lstrip().startswith("#"):
+            continue
+        head = _normalise_heading(l)
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j >= len(lines) or lines[j].lstrip().startswith("#"):
+            continue
+        nxt = _normalise_heading(lines[j])
+        if len(head) >= 30 and nxt.startswith(head[:30]):
+            drop.add(i)
+    if not drop:
+        return text, 0
+    kept = [l for i, l in enumerate(lines) if i not in drop]
+    return chr(10).join(kept), len(drop)
+
+
+# --- ground heading glued to its paragraph number ---------------------------
+_GROUND_HEADING_WITH_PARA_RE = re.compile(
+    r"^(?P<head>[A-Z]\.[ \t]+(?:BECAUSE|THAT)\b[^\n]{30,}?[.:])[ \t]+(?P<para>\d{1,3}\.[ \t]+[A-Z])", re.M
+)
+
+
+def _split_ground_heading_from_paragraph(text: str) -> tuple[str, int]:
+    """'A. BECAUSE THE HIGH COURT ERRED ... 2023. 17. The Hon'ble High Court'
+    on one line: the caps ground heading and the numbered paragraph were
+    written together. Put the paragraph on its own line."""
+    return _GROUND_HEADING_WITH_PARA_RE.subn(lambda m: m.group("head") + chr(10) + chr(10) + m.group("para"), text)
 
 
 def _nest_subpoints_under_numbered_items(text: str) -> tuple[str, int]:
@@ -656,6 +772,17 @@ def validate_draft(
 
     # Sub-points and continuation paragraphs the writer left at the left
     # margin between two numbered clauses are nested under the first.
+    cleaned, _bl_joins = _rejoin_blankline_fragments(cleaned)
+    if _bl_joins:
+        warnings.append(f"Rejoined {_bl_joins} paragraph fragment(s) split by a blank line.")
+    cleaned, _pipes = _split_single_pipe_lines(cleaned)
+    cleaned, _dup_heads = _drop_heading_that_restates_next_line(cleaned)
+    cleaned, _ground_splits = _split_ground_heading_from_paragraph(cleaned)
+    if _pipes or _dup_heads or _ground_splits:
+        warnings.append(
+            f"Layout: {_pipes} two-column line(s), {_dup_heads} caption-restating heading(s), "
+            f"{_ground_splits} ground heading(s) separated from their paragraph."
+        )
     cleaned, _nested = _nest_subpoints_under_numbered_items(cleaned)
     if _nested:
         warnings.append(

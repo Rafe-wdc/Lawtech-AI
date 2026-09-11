@@ -25,7 +25,7 @@ from core.url_filter import _BARE_URL_RE, _MD_LINK_RE, is_whitelisted_url
 
 # Underscore / dash / dot / equals runs. 15 keeps a visible signature blank
 # on a phone-width answer box; 20+ overflows it.
-_LONG_RUN_RE = re.compile(r"([_=.─-╿])\1{19,}")
+_LONG_RUN_RE = re.compile(r"([_=.\-─-╿])\1{19,}")   # ASCII hyphen included (audit 2026-09-11)
 _RUN_KEEP = 15
 # A whole line of dashes (or dashes+spaces) is a horizontal rule.
 _RULE_LINE_RE = re.compile(r"(?m)^[ \t]*-{4,}[ \t]*$")

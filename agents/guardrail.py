@@ -161,7 +161,11 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
     if _dash_n:
         cleaned = re.sub(r"(?m)^[ \t]*[—–][ \t]+", "", cleaned)
         cleaned = re.sub(r"(?<=\d)[ \t]+[—–][ \t]+(?=\d)", "-", cleaned)   # numeric range
-        cleaned = re.sub(r"[ \t]+[—–][ \t]+", ", ", cleaned)
+        # Audit 2026-09-11: a lone dash in a table cell ("| — |") is an
+        # empty-cell marker, never a parenthetical; a spaced dash becomes a
+        # comma only between letters.
+        cleaned = re.sub(r"(?<=[A-Za-zऀ-෿])[ \t]+[—–][ \t]+(?=[A-Za-zऀ-෿])", ", ", cleaned)
+        cleaned = re.sub(r"(?<=\|)[ \t]*[—–][ \t]*(?=\|)", " - ", cleaned)
         cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
         cleaned = cleaned.replace("—", "-").replace("–", "-")
         cleaned = re.sub(r",[ \t]*,", ",", cleaned)

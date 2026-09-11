@@ -790,7 +790,10 @@ def validate_draft(
         # "2019 - 2023"): hyphenate it. Audit 2026-09-11 reproduced the old
         # rule turning it into an enumeration, which changes the citation.
         cleaned = re.sub(r"(?<=\d)[ \t]+[—–][ \t]+(?=\d)", "-", cleaned)
-        cleaned = re.sub(r"[ \t]+[—–][ \t]+", ", ", cleaned)
+        # comma only between letters; a lone dash in a table cell is an
+        # empty-cell marker (audit 2026-09-11)
+        cleaned = re.sub(r"(?<=[A-Za-zऀ-෿])[ \t]+[—–][ \t]+(?=[A-Za-zऀ-෿])", ", ", cleaned)
+        cleaned = re.sub(r"(?<=\|)[ \t]*[—–][ \t]*(?=\|)", " - ", cleaned)
         cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
         cleaned = cleaned.replace("—", "-").replace("–", "-")
         cleaned = re.sub(r",[ \t]*,", ",", cleaned)

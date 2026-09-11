@@ -131,6 +131,41 @@ def test_bullets_between_clauses_are_still_nested():
     assert n == 2 and "\n    - First Partner" in out
 
 
+# 9. identity guard leaves an untouched answer byte-identical (no indentation loss)
+def test_identity_guard_returns_untouched_text_unchanged():
+    from core.identity import hide_provider
+    src = "Held in Google India Pvt Ltd v. Visakha:\n- point\n   - nested a\n   - nested b\n"
+    out, n = hide_provider(src)
+    assert n == 0 and out == src
+
+
+# 10. a space-aligned text table in a fence is unfenced, not deleted
+def test_fenced_text_table_is_kept():
+    from core.diagrams import strip_diagrams
+    src = ("```\nSl. No.   Description of instrument      Proper stamp duty\n"
+           "1.        Affidavit                      Rs. 100\n2.        Agreement                      Rs. 500\n```\nend")
+    out, stats = strip_diagrams(src)
+    assert stats["diagrams_removed"] == 0 and "Affidavit" in out and "```" not in out
+
+
+# 11. the guardrail dash rule leaves table cells and section ranges intact
+def test_guardrail_dash_rule_keeps_table_cells_and_ranges():
+    from agents.guardrail import guardrail_output_node
+    src = "| S. 138 | — |\n| S. 420 | Rs. 5,000 – Rs. 10,000 |\n\nSections 302 – 307 IPC apply – as held – by the Court.\n"
+    out = asyncio.run(guardrail_output_node({"final_response": src, "task": "Newacts"}))["final_response"]
+    assert "| S. 138 | - |" in out
+    assert "Sections 302-307 IPC" in out
+    assert "Rs. 5,000, Rs. 10,000" not in out
+    assert "apply, as held, by the Court" in out
+
+
+# 12. a run of ASCII hyphens is capped like other blanks
+def test_hyphen_run_is_capped():
+    from core.overflow import cap_long_runs
+    out, n = cap_long_runs("Name: ------------------------------ end")
+    assert n == 1 and "-" * 16 not in out
+
+
 # 8. an acknowledgement on a thread with restored files must not add Document
 def test_conversational_followup_never_adds_document_agent():
     import inspect

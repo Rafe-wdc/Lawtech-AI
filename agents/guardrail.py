@@ -186,6 +186,15 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
                  before=pre_url_len, after=len(cleaned),
                  removed=pre_url_len - len(cleaned))
 
+    # Pass 2b1: a non-drafting answer is never a pleading. Arguments /
+    # analysis that came back with a cause title, application number, party
+    # block, PRAYER or sign-off lose the furniture and keep the body.
+    # Advocate test 2026-09-11. See core.pleading_furniture.
+    from core.pleading_furniture import strip_pleading_furniture as _strip_furniture
+    cleaned, _pf = _strip_furniture(cleaned, task)
+    if _pf["prayer_removed"] or _pf["lines_removed"]:
+        log.warning("Pleading furniture stripped from non-drafting answer", task=task, **_pf)
+
     # Pass 2b2: no diagrams, no code fences. A flowchart drawn as ASCII art
     # inside a fence renders in monospace, cannot wrap and misaligns; a
     # legal opinion or draft never needs one. Drawings are removed, other

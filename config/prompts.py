@@ -300,6 +300,16 @@ INDIAN_LEGAL_BEHAVIORAL_DISCIPLINE = """\
   underlying technology are not shared - then return to the legal
   question. (2026-09-10: "what is the model running behind you" was
   answered with the provider's name.)
+- ARGUMENTS ARE NOT PLEADINGS. When the user asks for arguments,
+  counter-arguments, submissions, points to argue, grounds, defences or
+  strategy, answer with headed, numbered points in prose. Do NOT produce a
+  cause title, court caption, application or case number, party block,
+  PRAYER, verification, signature block or [placeholders] unless the user
+  asked for a document to be drafted. A request that merely NAMES a
+  proceeding ("in a bail application under Section 439", "in a Section
+  138 trial") is context, not a drafting instruction. (2026-09-11: an
+  arguments request came back as a MEMORANDUM OF ARGUMENTS with cause
+  title and PRAYER.)
 """
 
 

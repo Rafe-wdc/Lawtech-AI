@@ -121,7 +121,9 @@ def _strip_internal_cite_markers(text: str) -> str:
 _ARGUMENT_CUE_RE = re.compile(
     r"\b(?:arguments?|counter-?arguments?|submissions?|points? (?:to|i should|i can|we can) (?:argue|submit|raise|make|press)|"
     r"talking points|grounds (?:to|i can|we can) (?:argue|urge|raise)|defen[cs]es?|"
-    r"strategy|line of argument|cross-?examination|how (?:to|should i) argue|what (?:should|can) i argue)\b"
+    r"strategy|line of argument|cross-?examination|how (?:to|should i) argue|what (?:should|can) i argue|"
+    r"case (?:for|against) (?:the |my )?(?:petitioner|respondent|accused|applicant|appellant|plaintiff|defendant|prosecution|defen[cs]e|client)|"
+    r"points? (?:in favou?r of|against)|reasons? (?:why|for|against)|how (?:do|can|should) i (?:oppose|resist|defend|challenge))\b"
     r"|तर्क|दलील|बहस",
     re.IGNORECASE,
 )
@@ -142,6 +144,33 @@ def _is_argument_request(query: str) -> bool:
     if not _ARGUMENT_CUE_RE.search(query):
         return False
     return not _PRODUCTION_VERB_ON_DOC_RE.search(query)
+
+
+def _apply_argument_override(query: str, task: str, tasks_planned: list[str], intent):
+    """Correct BOTH routing signals for an argument request. Pure.
+
+    Returns (task, tasks_planned, intent, changed). The classifier and the
+    intent extractor are separate LLM calls and either can misfire alone:
+    on 2026-09-11 the extractor said draft; on 2026-09-13 the extractor
+    said analyze and the classifier picked Drafting as primary, so the
+    intent-gated override never ran and a full bail pleading shipped.
+    """
+    if not _is_argument_request(query):
+        return task, tasks_planned, intent, False
+    changed = False
+    if intent is not None and getattr(intent, "task_intent", None) == "draft":
+        intent = intent.model_copy(update={"task_intent": "analyze"})
+        changed = True
+    if task == "Drafting":
+        task = "Scenario"
+        changed = True
+    if "Drafting" in tasks_planned:
+        tasks_planned = [a for a in tasks_planned if a != "Drafting"]
+        changed = True
+    if task == "Scenario" and "Scenario" not in tasks_planned:
+        tasks_planned = ["Scenario"] + tasks_planned
+        changed = True
+    return task, tasks_planned, intent, changed
 
 
 def _wants_drafting(intent: UserIntent | None) -> bool:
@@ -1859,17 +1888,13 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # An argument request is analysis whatever the extractor said. Override
     # BEFORE any consumer (multi-intent, reconciliation, draft-from-file)
     # reads task_intent. See _is_argument_request.
-    if (
-        extracted_intent is not None
-        and getattr(extracted_intent, "task_intent", None) == "draft"
-        and _is_argument_request(_original_query)
-    ):
-        extracted_intent = extracted_intent.model_copy(update={"task_intent": "analyze"})
-        log.info("Argument request: task_intent overridden draft -> analyze",
-                 query=_original_query[:80], classifier_task=task)
-        if task == "Drafting":
-            task = "Scenario"
-            tasks_planned = ["Scenario"] + [a for a in tasks_planned if a not in ("Drafting", "Scenario")]
+    _prev = (task, list(tasks_planned))
+    task, tasks_planned, extracted_intent, _arg_changed = _apply_argument_override(
+        _original_query, task, tasks_planned, extracted_intent,
+    )
+    if _arg_changed:
+        log.warning("Argument request: routing corrected away from Drafting",
+                    query=_original_query[:80], before=_prev, after=(task, tasks_planned))
     if task not in ("Non_legal", "Document"):
         extra = _detect_multi_intent(extracted_intent, task)
         for agent in extra:

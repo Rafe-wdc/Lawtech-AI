@@ -27,12 +27,19 @@ from core.pleading_furniture import pleading_kinds, strip_pleading_furniture
     "धारा 498A IPC के मामले में अभियुक्त की ओर से बहस के लिए मुख्य तर्क क्या होने चाहिए?",
     "what defences are available to the accused in a cheque bounce case",
     "how should I argue against the anticipatory bail of the co-accused",
+    "Case for the petitioner in a writ petition under Article 226 for regularisation of service",
+    "How do I oppose the anticipatory bail application of the accused in a 498A case",
+    "Reasons why bail should be granted to the accused in a Section 376 case where FIR was delayed",
+    "Points in favour of the accused in the bail application before the Sessions Court",
+    "Provide me Arguments on behalf of iqbal in Bail application before the high court with Supporting case laws",
 ])
 def test_argument_requests_are_recognised(q):
     assert _is_argument_request(q) is True
 
 
 @pytest.mark.parametrize("q", [
+    "Draft the grounds of appeal against the conviction order",
+    "Draft a bail application with grounds of parity and delay",
     "Draft written arguments for the accused in the Section 138 trial",
     "Prepare a memorandum of arguments on behalf of the applicant",
     "Draft a bail application under Section 439 CrPC for an accused in custody for 8 months",
@@ -45,12 +52,59 @@ def test_document_requests_and_plain_questions_are_not_argument_requests(q):
     assert _is_argument_request(q) is False
 
 
-def test_plan_node_overrides_draft_intent_for_argument_requests():
+def test_plan_node_applies_the_override_on_both_signals():
     import inspect
     import agents.orchestrator as orch
     src = inspect.getsource(orch)
-    assert 'extracted_intent.model_copy(update={"task_intent": "analyze"})' in src
-    assert "_is_argument_request(_original_query)" in src
+    assert "_apply_argument_override(" in src
+    assert "_original_query, task, tasks_planned, extracted_intent" in src
+
+
+IQBAL = ("Provide me Arguments on behalf of iqbal in Bail application before the high court with Supporting "
+         "case laws or Citations with full Detatied and the Major point was: There is no Motive estabilsed")
+
+
+class _Intent:
+    def __init__(self, task_intent):
+        self.task_intent = task_intent
+
+    def model_copy(self, update):
+        return _Intent(update.get("task_intent", self.task_intent))
+
+
+def test_classifier_drafting_with_analyze_intent_is_corrected():
+    # 2026-09-13 retest: extractor said analyze, classifier picked Drafting; the
+    # intent-gated override never ran and a full pleading shipped.
+    from agents.orchestrator import _apply_argument_override
+    task, planned, intent, changed = _apply_argument_override(
+        IQBAL, "Drafting", ["Drafting", "SCI_Judgment", "Newacts"], _Intent("analyze"))
+    assert changed and task == "Scenario"
+    assert "Drafting" not in planned and planned[0] == "Scenario"
+    assert intent.task_intent == "analyze"
+
+
+def test_draft_intent_with_newacts_classifier_is_corrected():
+    # 2026-09-11 shape: extractor said draft, classifier picked Newacts.
+    from agents.orchestrator import _apply_argument_override
+    task, planned, intent, changed = _apply_argument_override(
+        IQBAL, "Newacts", ["Newacts", "Drafting"], _Intent("draft"))
+    assert changed and task == "Newacts" and "Drafting" not in planned
+    assert intent.task_intent == "analyze"
+
+
+def test_explicit_drafting_request_is_never_corrected():
+    from agents.orchestrator import _apply_argument_override
+    q = "Draft a bail application under Section 439 CrPC for Iqbal, in custody for 4 years, no recovery, no motive"
+    task, planned, intent, changed = _apply_argument_override(q, "Drafting", ["Drafting", "SCI_Judgment"], _Intent("draft"))
+    assert not changed and task == "Drafting" and planned == ["Drafting", "SCI_Judgment"]
+    assert intent.task_intent == "draft"
+
+
+def test_correct_route_is_left_untouched():
+    from agents.orchestrator import _apply_argument_override
+    task, planned, intent, changed = _apply_argument_override(
+        IQBAL, "Scenario", ["Scenario", "Newacts"], _Intent("analyze"))
+    assert not changed and task == "Scenario" and planned == ["Scenario", "Newacts"]
 
 
 # ------------------------------------------------------- output shape

@@ -203,6 +203,13 @@ def script_of(lang: str) -> str:
 # Bharatiya Nyaya Sanhita, 2023"), which is why the bar is not higher.
 OFF_TARGET_SCRIPT_THRESHOLD = 0.85
 
+# Tolerance below the threshold. A Marathi draft at a raw ratio of 0.849
+# (req 8ab2c219, 2026-09-15) was treated as off-target and paid 54s for a
+# full regeneration of a document that was in Marathi. The calibration gap
+# is 0.60 to 0.85, so an effective bar of 0.83 still catches every measured
+# failure and stops charging drafts that sit on the boundary.
+_OFF_TARGET_TOLERANCE = 0.02
+
 
 def output_script_ratio(text: str, lang: str) -> float:
     """Share of alphabetic characters that are in `lang`'s script.
@@ -239,7 +246,9 @@ def is_off_target_language(text: str, lang: str) -> bool:
     exactly these drafts, and bug 1 established that a prompt rule alone does
     not hold. See the exception recorded under CLAUDE.md drafting invariant 2.
     """
-    return output_script_ratio(text, lang) < OFF_TARGET_SCRIPT_THRESHOLD
+    return output_script_ratio(text, lang) < (
+        OFF_TARGET_SCRIPT_THRESHOLD - _OFF_TARGET_TOLERANCE
+    )
 
 
 def dominant_script(text: str) -> str | None:

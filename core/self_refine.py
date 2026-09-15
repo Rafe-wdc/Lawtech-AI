@@ -92,6 +92,31 @@ class AuditOutcome(str, Enum):
     refined_and_failed = "refined_and_failed"
     unverified_critic_failed = "unverified_critic_failed"
     unverified_budget_exhausted = "unverified_budget_exhausted"
+    # PR 2: the request deadline left too little time to refine; the critic
+    # ran (so violations are visible to the caller) but no rewrite was made.
+    budget_low_skipped_refine = "budget_low_skipped_refine"
+
+
+# --- Adaptive budget (PR 2) -------------------------------------------------
+# self_refine runs at the END of a request, after generation has spent most
+# of the 285s deadline. Measured 2026-09-15 (req 8ab2c219): two critique +
+# refine passes cost 73s and pushed a draft that had already taken 172s to
+# 245s. Below these thresholds of remaining request time the loop adapts:
+#   remaining < SELF_REFINE_SINGLE_PASS_BELOW_S  -> one critique+refine pass
+#   remaining < SELF_REFINE_SKIP_REFINE_BELOW_S  -> critique only, no rewrite
+# The critique still runs in the second case so unresolved violations reach
+# the caller's history (and the drafting banner) instead of being skipped.
+SELF_REFINE_SINGLE_PASS_BELOW_S = 120.0
+SELF_REFINE_SKIP_REFINE_BELOW_S = 60.0
+
+
+def _deadline_remaining() -> float | None:
+    """Seconds left of the request deadline, or None outside a request."""
+    try:
+        from core.deadline import remaining
+        return remaining()
+    except Exception:
+        return None
 
 
 # Live in-process counter of verifier failures, keyed by ``(agent, reason)``.
@@ -2089,7 +2114,43 @@ async def self_refine(
     original_response_len = len(response)  # for cumulative-shrink guard
     critic_failures = 0
     refiner_failures = 0
+    _max_iter = max_iterations
+    _refine_allowed = True
     for iteration in range(max_iterations + 1):  # +1 for the final critique
+        # Adaptive budget (PR 2): read the request clock before each pass.
+        _rem = _deadline_remaining()
+        if _rem is not None:
+            if _rem < SELF_REFINE_SKIP_REFINE_BELOW_S:
+                if iteration > 0:
+                    # A rewrite already happened; there is no time for the
+                    # closing critique. Ship what we have, marked exhausted.
+                    log.warning(
+                        "self_refine_completed",
+                        outcome=AuditOutcome.unverified_budget_exhausted.value,
+                        reason="deadline_low",
+                        remaining_s=round(_rem, 1),
+                        iterations=iteration,
+                        critic_failures=critic_failures,
+                        refiner_failures=refiner_failures,
+                        original_len=original_response_len,
+                        final_len=len(current),
+                    )
+                    return current, history
+                if _refine_allowed:
+                    log.warning(
+                        "self_refine budget adapted: critique only, no rewrite",
+                        remaining_s=round(_rem, 1),
+                        threshold_s=SELF_REFINE_SKIP_REFINE_BELOW_S,
+                    )
+                _refine_allowed = False
+            elif _rem < SELF_REFINE_SINGLE_PASS_BELOW_S and _max_iter > 1:
+                log.warning(
+                    "self_refine budget adapted: single critique+refine pass",
+                    remaining_s=round(_rem, 1),
+                    threshold_s=SELF_REFINE_SINGLE_PASS_BELOW_S,
+                    max_iterations_before=_max_iter,
+                )
+                _max_iter = 1
         critique = await _critique(
             user_query, critic_intent, current, critic_llm,
             retrieved_sources_whitelist=_whitelist,
@@ -2222,10 +2283,25 @@ async def self_refine(
                 violation_count=len(critique.violations),
             )
             return current, history
-        if iteration >= max_iterations:
+        if iteration >= _max_iter:
             log.warning(
                 "self_refine_completed",
                 outcome=AuditOutcome.unverified_budget_exhausted.value,
+                iterations=iteration,
+                critic_failures=critic_failures,
+                refiner_failures=refiner_failures,
+                original_len=original_response_len,
+                final_len=len(current),
+                final_violations=len(critique.violations),
+                max_iterations_effective=_max_iter,
+            )
+            return current, history
+        if not _refine_allowed:
+            # Deadline too close for a rewrite. The failing critique is in
+            # `history`, so the caller can surface the violations.
+            log.warning(
+                "self_refine_completed",
+                outcome=AuditOutcome.budget_low_skipped_refine.value,
                 iterations=iteration,
                 critic_failures=critic_failures,
                 refiner_failures=refiner_failures,

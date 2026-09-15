@@ -3045,6 +3045,13 @@ def _unresolved_review_banner(history) -> str:
         return ""
     final = history[-1]
     violations = list(getattr(final, "violations", None) or [])
+    # The critic's fail-closed sentinel ("verifier_unavailable": the critic
+    # itself could not run) is an audit status, not a review note. It is
+    # already reported through x_audit_status; listing it here leaked
+    # "Critic could not run (timeout). Response ships unverified" into a
+    # client-facing draft (live check, 2026-09-15).
+    violations = [v for v in violations
+                  if (getattr(v, "field", "") or "") != "verifier_unavailable"]
     if getattr(final, "passes", True) or not violations:
         return ""
     # Most severe first; at most four lines so the banner stays a note.

@@ -190,6 +190,22 @@ def test_banner_lists_unresolved_violations_most_severe_first():
     assert banner.endswith("\n\n")
 
 
+def test_banner_ignores_the_critic_unavailable_sentinel():
+    """A critique fabricated because the critic could not run carries one
+    synthetic 'verifier_unavailable' violation. That is an audit status
+    (x_audit_status = unverified), not a note for the user, and must not
+    surface as 'Critic could not run (timeout)' in the draft."""
+    sentinel = _viol("verifier_unavailable",
+                     "Critic could not run (timeout). Response ships unverified",
+                     "critical")
+    assert _unresolved_review_banner([_crit(False, sentinel)]) == ""
+    # mixed: the real note survives, the sentinel does not
+    banner = _unresolved_review_banner(
+        [_crit(False, sentinel, _viol("prayer", "Relief does not match grounds"))])
+    assert "prayer:" in banner and "verifier_unavailable" not in banner
+    assert "1 point(s)" in banner
+
+
 def test_banner_caps_at_four_lines_and_counts_the_rest():
     vs = [_viol(f"f{i}", f"issue {i}") for i in range(6)]
     banner = _unresolved_review_banner([_crit(False, *vs)])

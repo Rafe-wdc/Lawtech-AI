@@ -528,6 +528,13 @@ class SearchRequest(BaseModel):
         None, max_length=200000,
         description="Previous assistant response to refine.",
     )
+    # Resumable drafting (PR 4): the `completed_sections_hash` from a prior
+    # `draft_continuation` SSE event on this thread. Resumes that draft from
+    # its first failed section instead of re-running the whole request.
+    continue_draft_of: Optional[str] = Field(
+        None, max_length=128,
+        description="completed_sections_hash of the draft to resume.",
+    )
 
 
 class SearchResponse(BaseModel):
@@ -615,6 +622,7 @@ def _build_initial_state(
     preferred_language: str | None = None,
     cite_appendix: bool | None = None,
     regenerate_of: str | None = None,
+    continue_draft_of: str | None = None,
 ) -> dict:
     """Build the initial LangGraph state with all required fields."""
     # Validate and normalise preferred_language (client override for user_language)
@@ -644,6 +652,10 @@ def _build_initial_state(
         # short-circuits when this is set — see _refine_existing_response in
         # agents/orchestrator.py.
         "regenerate_of": regenerate_of,
+        # Resumable drafting (PR 4): hash echoed from a `draft_continuation`
+        # event; the orchestrator loads the checkpoint into draft_continuation.
+        "continue_draft_of": continue_draft_of,
+        "draft_continuation": None,
         "final_response": "",
         "source_metadata": [],
         "tokens_consumed": 0,
@@ -768,6 +780,7 @@ async def search(data: SearchRequest, request: Request):
         preferred_language=data.preferred_language,
         cite_appendix=data.cite_appendix,
         regenerate_of=data.regenerate_of,
+        continue_draft_of=data.continue_draft_of,
     )
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -1060,6 +1073,7 @@ async def search_stream(data: SearchRequest, request: Request):
         integration_token=getattr(data, "integration_token", None),
         cite_appendix=getattr(data, "cite_appendix", None),
         regenerate_of=getattr(data, "regenerate_of", None),
+        continue_draft_of=getattr(data, "continue_draft_of", None),
         enable_cache=True,
         enable_quality_scoring=True,
     )
@@ -1128,6 +1142,7 @@ async def chat_with_files(
     integration_token: Optional[str] = Form(None),
     cite_appendix: Optional[bool] = Form(None),
     regenerate_of: Optional[str] = Form(None),  # Sagar bug #5
+    continue_draft_of: Optional[str] = Form(None),  # PR 4: resume an incomplete draft
     # "Use it anyway" — the user's override for the blur gate. When true,
     # newly-uploaded images skip the sharpness check, AND any image this
     # thread whose OCR output was withheld as unreadable is retried and
@@ -1452,6 +1467,7 @@ async def chat_with_files(
                 integration_token=integration_token,
                 cite_appendix=cite_appendix,
                 regenerate_of=regenerate_of,
+                continue_draft_of=continue_draft_of,
                 enable_cache=False,   # uploads / integration context make caching unsafe
                 enable_quality_scoring=True,
                 skip_thread_id_event=True,  # /chat already emitted before file processing

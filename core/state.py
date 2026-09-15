@@ -244,6 +244,15 @@ class LegalAgentState(MessagesState):
     # the previous answer instead of a completely new one.
     regenerate_of: str | None
 
+    # Resumable drafting (PR 4, 2026-09-15). `continue_draft_of` is the
+    # `completed_sections_hash` the frontend received in a
+    # `draft_continuation` SSE event; when set, the orchestrator loads the
+    # thread's stored checkpoint and short-circuits straight to Drafting,
+    # which resumes from the first failed section instead of starting over.
+    # `draft_continuation` carries that loaded checkpoint into the node.
+    continue_draft_of: str | None
+    draft_continuation: dict | None
+
     # DynamicPlanner output (Move 3 Phase A). Populated by
     # orchestrator_plan_node when DYNAMIC_ORCHESTRATOR=1 so downstream
     # fan-out (route_after_orchestrator) and the synthesizer can read

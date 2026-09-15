@@ -1487,6 +1487,40 @@ async def _refine_existing_response(
     return refined, tokens
 
 
+def _continuation_plan(checkpoint: dict | None, continue_draft_of: str,
+                       thread_id: str) -> dict | None:
+    """Build the plan-node return for a resumable-draft request (PR 4).
+
+    Returns None when the stored checkpoint does not match the request —
+    missing, a different thread, or a different `completed_sections_hash`
+    (the draft the user is looking at is not the one on file). The caller
+    then falls through to normal planning. Pure function; unit-tested.
+    """
+    if not checkpoint or not continue_draft_of:
+        return None
+    if checkpoint.get("thread_id") and checkpoint["thread_id"] != thread_id:
+        return None
+    if checkpoint.get("completed_sections_hash") != continue_draft_of:
+        return None
+    if not checkpoint.get("sections") or not checkpoint.get("query"):
+        return None
+    intent = None
+    try:
+        if checkpoint.get("intent"):
+            intent = UserIntent(**checkpoint["intent"])
+    except Exception:
+        intent = None
+    return {
+        "task": "Drafting",
+        "tasks_planned": ["Drafting"],
+        "agent_queries": {"Drafting": checkpoint["query"]},
+        "response_instructions": "",
+        "user_intent": intent,
+        "user_language": checkpoint.get("user_language") or "en",
+        "draft_continuation": checkpoint,
+    }
+
+
 # --- Agent Nodes ---
 
 async def orchestrator_plan_node(state: LegalAgentState) -> dict:
@@ -1501,6 +1535,37 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     5. Return task + tasks_planned + agent_queries + response_instructions
     """
     query = state.get("query", state["original_query"])
+
+    # Resumable drafting (PR 4): the frontend sent the hash from a prior
+    # `draft_continuation` event. Load the thread's checkpoint and go
+    # straight to Drafting, which resumes from the first failed section.
+    # Any mismatch falls through to normal planning — never a silent no-op.
+    _continue_of = (state.get("continue_draft_of") or "").strip()
+    if _continue_of:
+        _thread_id = state.get("thread_id") or ""
+        _ckpt = None
+        try:
+            from core.chat_store import chat_store as _cs
+            _ckpt = await _cs.load_draft_checkpoint(_thread_id)
+        except Exception as _e:
+            log.warning("Draft checkpoint load failed", error=str(_e)[:160])
+        _plan = _continuation_plan(_ckpt, _continue_of, _thread_id)
+        if _plan is not None:
+            log.info(
+                "Continue-draft short-circuit: resuming stored checkpoint",
+                thread_id=_thread_id[:12],
+                failed_at_section_index=_ckpt.get("failed_at_section_index"),
+                total_sections=_ckpt.get("total_sections"),
+                completed_sections=len(_ckpt.get("completed_texts") or []),
+            )
+            progress("orchestrator", "Resuming your draft...", step="classify")
+            return _plan
+        log.warning(
+            "Continue-draft request did not match a stored checkpoint — planning normally",
+            thread_id=_thread_id[:12], has_checkpoint=bool(_ckpt),
+            stored_hash=(_ckpt or {}).get("completed_sections_hash", "")[:12],
+            requested_hash=_continue_of[:12],
+        )
 
     # Sagar bug #5 (2026-06-16): regenerate short-circuit. When the frontend
     # passes `regenerate_of`, the user clicked "regenerate" — they want a

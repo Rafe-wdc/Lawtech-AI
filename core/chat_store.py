@@ -133,7 +133,8 @@ class _SqliteChatHistoryStore:
                     summary_text      TEXT NOT NULL DEFAULT '',
                     summary_turn_count INTEGER NOT NULL DEFAULT 0,
                     total_turns       INTEGER NOT NULL DEFAULT 0,
-                    file_context_json TEXT NOT NULL DEFAULT ''
+                    file_context_json TEXT NOT NULL DEFAULT '',
+                    draft_checkpoint_json TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS messages (
@@ -233,6 +234,11 @@ class _SqliteChatHistoryStore:
                 conn.execute("ALTER TABLE threads ADD COLUMN file_context_json TEXT NOT NULL DEFAULT ''")
                 conn.commit()
                 log.info("Migrated threads table: added file_context_json")
+            # Migration (PR 4): resumable-draft checkpoint per thread
+            if "draft_checkpoint_json" not in cols:
+                conn.execute("ALTER TABLE threads ADD COLUMN draft_checkpoint_json TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+                log.info("Migrated threads table: added draft_checkpoint_json")
 
             # Migration: create thread_files if not present (executescript cannot use
             # datetime('now') as DEFAULT on all SQLite versions, so we create it here)
@@ -867,6 +873,54 @@ class _SqliteChatHistoryStore:
         return await asyncio.to_thread(
             self._save_file_context_sync, thread_id, file_context
         )
+
+    # --- Resumable drafting checkpoint (PR 4) ---------------------------------
+    def _save_draft_checkpoint_sync(self, thread_id: str, checkpoint: dict | None) -> None:
+        """Persist (or clear, when None) the thread's incomplete-draft checkpoint."""
+        self._ensure_schema()
+        payload = json.dumps(checkpoint, ensure_ascii=False) if checkpoint else ""
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO threads (thread_id, draft_checkpoint_json)
+                    VALUES (?, ?)
+                    ON CONFLICT(thread_id) DO UPDATE SET
+                        draft_checkpoint_json = excluded.draft_checkpoint_json,
+                        updated_at = datetime('now')
+                """, (thread_id, payload))
+                conn.commit()
+                log.info("Draft checkpoint " + ("saved" if checkpoint else "cleared"),
+                         thread_id=thread_id[:12], bytes=len(payload))
+            finally:
+                conn.close()
+
+    async def save_draft_checkpoint(self, thread_id: str, checkpoint: dict) -> None:
+        return await asyncio.to_thread(self._save_draft_checkpoint_sync, thread_id, checkpoint)
+
+    async def clear_draft_checkpoint(self, thread_id: str) -> None:
+        return await asyncio.to_thread(self._save_draft_checkpoint_sync, thread_id, None)
+
+    def _load_draft_checkpoint_sync(self, thread_id: str) -> dict | None:
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT draft_checkpoint_json FROM threads WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+            if row and row["draft_checkpoint_json"]:
+                try:
+                    return json.loads(row["draft_checkpoint_json"])
+                except (json.JSONDecodeError, TypeError) as e:
+                    log.error("Corrupted draft_checkpoint_json",
+                              thread_id=thread_id, error=str(e))
+            return None
+        finally:
+            conn.close()
+
+    async def load_draft_checkpoint(self, thread_id: str) -> dict | None:
+        return await asyncio.to_thread(self._load_draft_checkpoint_sync, thread_id)
 
     def _load_file_context_sync(self, thread_id: str) -> dict | None:
         """Load persisted file context for a thread, or None if absent."""
@@ -1718,7 +1772,8 @@ class _PostgresChatHistoryStore:
                         summary_text       TEXT NOT NULL DEFAULT '',
                         summary_turn_count INTEGER NOT NULL DEFAULT 0,
                         total_turns        INTEGER NOT NULL DEFAULT 0,
-                        file_context_json  TEXT NOT NULL DEFAULT ''
+                        file_context_json  TEXT NOT NULL DEFAULT '',
+                        draft_checkpoint_json TEXT NOT NULL DEFAULT ''
                     )""",
                     """CREATE TABLE IF NOT EXISTS messages (
                         id          BIGSERIAL PRIMARY KEY,
@@ -1820,6 +1875,15 @@ class _PostgresChatHistoryStore:
                 )
                 conn.commit()
                 log.info("PG migration: added ocr_status to thread_files")
+            except Exception:
+                conn.rollback()  # column already exists
+            # Migration (PR 4): resumable-draft checkpoint per thread
+            try:
+                conn.execute(
+                    "ALTER TABLE threads ADD COLUMN draft_checkpoint_json TEXT NOT NULL DEFAULT ''"
+                )
+                conn.commit()
+                log.info("PG migration: added draft_checkpoint_json to threads")
             except Exception:
                 conn.rollback()  # column already exists
 
@@ -2270,6 +2334,50 @@ class _PostgresChatHistoryStore:
         return await asyncio.to_thread(
             self._save_file_context_sync, thread_id, file_context
         )
+
+    # --- Resumable drafting checkpoint (PR 4) ---------------------------------
+    def _save_draft_checkpoint_sync(self, thread_id: str, checkpoint: "dict | None") -> None:
+        self._ensure_schema()
+        payload = json.dumps(checkpoint, ensure_ascii=False) if checkpoint else ""
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            conn.execute("""
+                INSERT INTO threads (thread_id, draft_checkpoint_json)
+                VALUES (%s, %s)
+                ON CONFLICT(thread_id) DO UPDATE SET
+                    draft_checkpoint_json = EXCLUDED.draft_checkpoint_json,
+                    updated_at            = NOW()
+            """, (thread_id, payload))
+            conn.commit()
+        log.info("Draft checkpoint " + ("saved" if checkpoint else "cleared"),
+                 thread_id=thread_id[:12], bytes=len(payload))
+
+    async def save_draft_checkpoint(self, thread_id: str, checkpoint: dict) -> None:
+        return await asyncio.to_thread(self._save_draft_checkpoint_sync, thread_id, checkpoint)
+
+    async def clear_draft_checkpoint(self, thread_id: str) -> None:
+        return await asyncio.to_thread(self._save_draft_checkpoint_sync, thread_id, None)
+
+    def _load_draft_checkpoint_sync(self, thread_id: str) -> "dict | None":
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT draft_checkpoint_json FROM threads WHERE thread_id = %s",
+                (thread_id,),
+            ).fetchone()
+        if row and row["draft_checkpoint_json"]:
+            try:
+                return json.loads(row["draft_checkpoint_json"])
+            except (json.JSONDecodeError, TypeError) as e:
+                log.error("Corrupted draft_checkpoint_json",
+                          thread_id=thread_id, error=str(e))
+        return None
+
+    async def load_draft_checkpoint(self, thread_id: str) -> "dict | None":
+        return await asyncio.to_thread(self._load_draft_checkpoint_sync, thread_id)
 
     def _load_file_context_sync(self, thread_id: str) -> "dict | None":
         self._ensure_schema()

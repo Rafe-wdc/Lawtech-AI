@@ -3417,6 +3417,30 @@ def _fit_plan_to_budget(
     return secs, feasible, "collapsed"
 
 
+# ---------------------------------------------------------------------------
+# Resumable drafting (PR 4).
+#
+# When section pairs fail, the sections that DID generate are not thrown
+# away. `_generate_sectionwise` fills `checkpoint_out` with the plan, the
+# completed pair texts and the first failed index; `drafting_node` stores it
+# on the thread and emits a `draft_continuation` SSE event carrying
+# `completed_sections_hash`. A follow-up request with
+# `continue_draft_of=<that hash>` is short-circuited by the orchestrator to
+# Drafting with the checkpoint on state, and generation resumes at the failed
+# pair with the completed text as `prior_text`. "Incomplete" stops being a
+# terminal state.
+# ---------------------------------------------------------------------------
+
+def _checkpoint_hash(completed_texts: list[str]) -> str:
+    """Stable id of the completed prefix, sent to and echoed by the client."""
+    import hashlib
+    h = hashlib.sha1()
+    for t in completed_texts:
+        h.update(t.encode("utf-8", "replace"))
+        h.update(b"\x00")
+    return h.hexdigest()[:16]
+
+
 _UNRESOLVED_REVIEW_BANNER_MARKER = "**Review notes outstanding**"
 
 
@@ -3821,8 +3845,17 @@ async def _generate_sectionwise(
     gathered_context: dict[str, str] | None,
     review_and_redraft_mode: bool = False,
     niche_overlay: str = "",
+    resume_from: dict | None = None,
+    checkpoint_out: dict | None = None,
 ) -> str:
     """Walk the section list in pairs of two (last is solo if odd).
+
+    `resume_from` (PR 4): a stored checkpoint — `completed_texts` become the
+    already-written prefix and the walk starts at
+    `failed_at_section_index` (1-based, the first section of the pair that
+    failed). `checkpoint_out`: when given, filled with the plan, completed
+    pair texts, the first failed index and the prefix hash whenever a pair
+    fails, so the caller can persist it and offer "Continue drafting".
 
     Each pair is one Gemini Pro call seeing the document so far AND the
     uploaded source documents. `user_facts` is threaded into every pair
@@ -3835,6 +3868,16 @@ async def _generate_sectionwise(
     completed: list[str] = []
     failed_pairs: list[dict] = []   # {position_start, headings, reason}
     total = len(sections)
+    _resume_start = 0
+    if resume_from:
+        completed = [t for t in (resume_from.get("completed_texts") or []) if t]
+        _fai = int(resume_from.get("failed_at_section_index") or 1)
+        _resume_start = max(0, min(total, _fai - 1))
+        log.info(
+            "Resuming sectionwise draft from checkpoint",
+            start_section=_resume_start + 1, total=total,
+            completed_pairs=len(completed),
+        )
 
     # Per-section source-chunk routing (opt-in via env flag).
     # When ON and user_facts is above threshold, each pair sees only the
@@ -3902,7 +3945,7 @@ async def _generate_sectionwise(
                 _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
                 break
 
-    i = 0
+    i = _resume_start
     while i < total:
         pair = sections[i:i + 2]
         position_start = i + 1
@@ -4311,11 +4354,14 @@ async def _generate_sectionwise(
         _banner_names = ", ".join(f"'{h}'" for h in failed_headings[:4])
         if len(failed_headings) > 4:
             _banner_names += f", and {len(failed_headings) - 4} more"
+        _first_failed = min(fp["position_start"] for fp in failed_pairs)
         banner = (
             "> ⚠ **Draft incomplete** — "
             f"{len(failed_sections_meta)} of {total} section(s) "
             f"could not be generated ({_banner_names}). "
-            "Please re-send your prompt to retry.\n\n"
+            f"The {total - len(failed_sections_meta)} completed section(s) are "
+            f"kept — use **Continue drafting** to resume from section "
+            f"{_first_failed}.\n\n"
         )
         draft = banner + draft
         log.warning(
@@ -4323,6 +4369,19 @@ async def _generate_sectionwise(
             failed=len(failed_sections_meta), total=total,
             failed_positions=[fp["position_start"] for fp in failed_pairs],
         )
+        if checkpoint_out is not None:
+            # Everything the resume needs that the caller does not already
+            # hold: the plan, the completed pair texts in order, where to
+            # restart, and the prefix hash the client must echo back.
+            checkpoint_out.update({
+                "sections": [s.model_dump() for s in sections],
+                "completed_texts": list(completed),
+                "failed_at_section_index": _first_failed,
+                "failed_sections": failed_sections_meta,
+                "total_sections": total,
+                "completed_sections": total - len(failed_sections_meta),
+                "completed_sections_hash": _checkpoint_hash(completed),
+            })
 
     return draft
 
@@ -4431,8 +4490,14 @@ async def _generate_draft(
     review_and_redraft_mode: bool = False,
     chat_history=None,
     english_query: str = "",
+    resume_from: dict | None = None,
+    checkpoint_out: dict | None = None,
 ) -> str:
     """Thin dispatcher: judge call decides single-pass vs section-wise.
+
+    `resume_from` / `checkpoint_out` (PR 4): see `_generate_sectionwise`.
+    On resume the niche selector and the fan-out judge are skipped — the
+    stored plan and overlay are the plan and overlay.
 
     `user_facts` is the RAW extracted text of uploaded documents, passed
     verbatim through to whichever generation strategy runs. Returns a
@@ -4451,21 +4516,26 @@ async def _generate_draft(
     # even for oversized-upload rejections (helps analytics see niche
     # distribution across attempted requests, not just successful ones).
     niche_overlay = ""
-    try:
-        from agents.drafting_niche import pick_drafting_niche
-        from config.drafting_niches import get_niche_overlay
-        niche_key = await pick_drafting_niche(query, user_facts)
-        niche_overlay = get_niche_overlay(niche_key)
-        log.info(
-            "Drafting niche resolved",
-            niche_key=niche_key or "none",
-            overlay_chars=len(niche_overlay),
-        )
-    except Exception as e:
-        log.warning(
-            "Niche selection failed; proceeding with base prompt only",
-            error=short_err(e),
-        )
+    if resume_from is not None:
+        niche_overlay = resume_from.get("niche_overlay") or ""
+        log.info("Resume: reusing stored niche overlay",
+                 overlay_chars=len(niche_overlay))
+    else:
+        try:
+            from agents.drafting_niche import pick_drafting_niche
+            from config.drafting_niches import get_niche_overlay
+            niche_key = await pick_drafting_niche(query, user_facts)
+            niche_overlay = get_niche_overlay(niche_key)
+            log.info(
+                "Drafting niche resolved",
+                niche_key=niche_key or "none",
+                overlay_chars=len(niche_overlay),
+            )
+        except Exception as e:
+            log.warning(
+                "Niche selection failed; proceeding with base prompt only",
+                error=short_err(e),
+            )
 
     # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens. English
     # text tokenises at ~4 chars/token so the raw-char ceiling is ~4M
@@ -4533,13 +4603,27 @@ async def _generate_draft(
     # LLM call. `user_language` is still passed through unchanged, so the
     # judge continues to emit headings in the user's script — only the
     # PLANNING becomes language-invariant.
-    strategy = await _judge_fanout(
-        query=english_query or query,
-        reference_draft=reference_draft,
-        user_language=user_language,
-        user_intent=user_intent,
-        chat_history=chat_history,
-    )
+    if checkpoint_out is not None:
+        # The node persists the overlay with the checkpoint so a resume
+        # writes the remaining sections under the same niche rules.
+        checkpoint_out["niche_overlay"] = niche_overlay
+
+    if resume_from is not None:
+        # The plan is the stored plan. Re-judging could produce a different
+        # section list, and the completed prefix would no longer line up.
+        strategy = _FanoutStrategy(
+            should_fanout=True,
+            sections=[_Section(**s) for s in resume_from.get("sections") or []],
+            reasoning="resume from stored checkpoint",
+        )
+    else:
+        strategy = await _judge_fanout(
+            query=english_query or query,
+            reference_draft=reference_draft,
+            user_language=user_language,
+            user_intent=user_intent,
+            chat_history=chat_history,
+        )
 
     # Diagnostic: splits the regional-language section deficit into its three
     # possible causes. Some languages deliver 4-6 sections where English
@@ -4602,7 +4686,7 @@ async def _generate_draft(
     # can the remaining request budget write, after reserving time for the
     # language gate and self-refine? Every trim is logged with the numbers
     # so the reserves and the p90 constant can be tuned from the logs.
-    if strategy.should_fanout and strategy.sections:
+    if strategy.should_fanout and strategy.sections and resume_from is None:
         from core.deadline import remaining as _plan_remaining
         _rem = _plan_remaining()
         if _rem is not None:
@@ -4680,6 +4764,8 @@ async def _generate_draft(
         gathered_context=gathered_context,
         review_and_redraft_mode=review_and_redraft_mode,
         niche_overlay=niche_overlay,
+        resume_from=resume_from,
+        checkpoint_out=checkpoint_out,
     )
 
     # --- Off-target language gate ------------------------------------------
@@ -4726,6 +4812,7 @@ async def _generate_draft(
                 progress_emit=progress_emit,
                 gathered_context=gathered_context,
                 review_and_redraft_mode=review_and_redraft_mode,
+                checkpoint_out=checkpoint_out,
             )
             retry_ratio = output_script_ratio(retry, user_language)
             log.info("Off-target regeneration finished",
@@ -4777,6 +4864,12 @@ async def drafting_node(state: LegalAgentState) -> dict:
     # polish/redraft follow-ups and stay single-pass (Bug #9 fix).
     _chat_history = state.get("chat_history") or []
     _judge_chat_history = _chat_history[-4:] if _chat_history else []
+    # Resumable drafting (PR 4): a checkpoint placed on state by the
+    # orchestrator's continue-draft short-circuit, and the dict the
+    # generator fills when pairs fail this time round.
+    _resume_ckpt: dict | None = state.get("draft_continuation") or None
+    _ckpt_out: dict = {}
+    _thread_id_for_ckpt = state.get("thread_id") or ""
 
     # --- 2. Build user_facts blob from attachments / pasted context / integrations ---
     #
@@ -4962,6 +5055,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
         _new_upload_this_turn = bool(fc and fc.has_content)
         if (
             _fast_path_enabled()
+            and not _resume_ckpt
             and _is_drafting_followup_directive(
                 original_query, _prev_kind, _prev_content, _new_upload_this_turn,
             )
@@ -5040,7 +5134,25 @@ async def drafting_node(state: LegalAgentState) -> dict:
         use_upload_as_ref = _is_review_and_redraft_of_upload(
             original_query, user_facts
         )
-        if use_upload_as_ref:
+        if _resume_ckpt:
+            # Resume (PR 4): the reference, legal context and query are the
+            # ones the failed run used. Re-acquiring could pick a different
+            # template and the completed prefix would no longer match.
+            query = _resume_ckpt.get("query") or query
+            reference_text = _resume_ckpt.get("reference_text") or ""
+            reference_source = _resume_ckpt.get("reference_source") or "<resume>"
+            reference_kind = _resume_ckpt.get("reference_kind") or "web"
+            english_query = _resume_ckpt.get("english_query") or ""
+            gathered_ctx = _resume_ckpt.get("gathered_ctx") or None
+            use_upload_as_ref = bool(_resume_ckpt.get("review_and_redraft_mode"))
+            log.info(
+                "Resume: reusing stored reference and context",
+                reference_kind=reference_kind, reference_chars=len(reference_text),
+                context_blocks=list((gathered_ctx or {}).keys()),
+                failed_at_section_index=_resume_ckpt.get("failed_at_section_index"),
+            )
+            progress("drafting", "Resuming from your saved draft...", step="reference")
+        elif use_upload_as_ref:
             # Restore the raw user prompt for downstream generation. The
             # per-agent rewriter compresses "Review the attached word document
             # and Find out every legal error from the application and redraft
@@ -5154,6 +5266,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
             review_and_redraft_mode=use_upload_as_ref,
             chat_history=_judge_chat_history,
             english_query=english_query,
+            resume_from=_resume_ckpt,
+            checkpoint_out=_ckpt_out,
         )
 
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
@@ -5451,6 +5565,63 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 if draft_warnings else {"reference_kind": reference_kind}
             ),
         )
+
+        # --- 10. Resumable checkpoint (PR 4) ---------------------------------
+        # Pairs failed this run: store everything a resume needs on the
+        # thread and tell the client. A resume that completed cleanly
+        # clears the stored checkpoint so a stale "Continue" cannot replay.
+        try:
+            from core.chat_store import chat_store as _ckpt_store
+            if _ckpt_out.get("failed_at_section_index"):
+                _ckpt = {
+                    "thread_id": _thread_id_for_ckpt,
+                    "query": query,
+                    "user_language": user_language,
+                    "intent": (intent_obj.model_dump()
+                               if hasattr(intent_obj, "model_dump") else None),
+                    "reference_text": reference_text,
+                    "reference_source": reference_source,
+                    "reference_kind": reference_kind,
+                    "english_query": english_query,
+                    "gathered_ctx": gathered_ctx or None,
+                    "niche_overlay": _ckpt_out.get("niche_overlay", ""),
+                    "review_and_redraft_mode": bool(use_upload_as_ref),
+                    **{k: _ckpt_out[k] for k in (
+                        "sections", "completed_texts", "failed_at_section_index",
+                        "failed_sections", "total_sections", "completed_sections",
+                        "completed_sections_hash",
+                    )},
+                }
+                await _ckpt_store.save_draft_checkpoint(_thread_id_for_ckpt, _ckpt)
+                result.meta["draft_continuation"] = {
+                    "thread_id": _thread_id_for_ckpt,
+                    "failed_at_section_index": _ckpt["failed_at_section_index"],
+                    "completed_sections_hash": _ckpt["completed_sections_hash"],
+                    "total_sections": _ckpt["total_sections"],
+                    "completed_sections": _ckpt["completed_sections"],
+                }
+                try:
+                    from langgraph.config import get_stream_writer as _gsw_ck
+                    _gsw_ck()({"type": "draft_continuation",
+                               **result.meta["draft_continuation"]})
+                except (RuntimeError, ImportError):
+                    pass  # batch endpoint
+                log.warning(
+                    "Draft checkpoint stored — resumable",
+                    thread_id=_thread_id_for_ckpt[:12],
+                    failed_at_section_index=_ckpt["failed_at_section_index"],
+                    completed_sections=_ckpt["completed_sections"],
+                    total_sections=_ckpt["total_sections"],
+                    hash=_ckpt["completed_sections_hash"],
+                )
+            elif _resume_ckpt:
+                await _ckpt_store.clear_draft_checkpoint(_thread_id_for_ckpt)
+                log.info("Resume completed — checkpoint cleared",
+                         thread_id=_thread_id_for_ckpt[:12])
+        except Exception as _ckpt_err:
+            log.warning("Draft checkpoint persistence failed",
+                        error=short_err(_ckpt_err))
+
         state_update = {"agent_results": {"Drafting": result}}
 
     except Exception as e:

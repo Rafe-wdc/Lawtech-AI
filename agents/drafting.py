@@ -738,7 +738,12 @@ def _strip_planner_label_headings(text: str) -> tuple[str, int]:
             # a descriptive label joins two nominal parts with "and" and runs long
             # ("Statement of Facts and Chronology of Medical Negligence");
             # conventional pleading headings are short.
-            many_parts = (h.count(",") >= 2 and len(h) > 40) or (" and " in h and len(h) > 45)
+            # Filed pleadings carry ALL-CAPS headings ("JURISDICTION, LIMITATION,
+            # AND VALUATION"); the planner's descriptive labels arrive in Title
+            # Case. An all-caps heading is never treated as a label.
+            _raw = s.lstrip("#").strip()
+            _all_caps = _raw.upper() == _raw and any(c.isalpha() for c in _raw)
+            many_parts = (not _all_caps) and ((h.count(",") >= 2 and len(h) > 40) or (" and " in h and len(h) > 45))
             if label_hits >= 1 and (label_hits >= 2 or "," in h or " and " in h) or composite or many_parts:
                 n += 1
                 continue
@@ -755,6 +760,27 @@ def _bold_court_caption(text: str) -> tuple[str, int]:
     if line.startswith("**") or line.startswith("#"):
         return text, 0
     return text[:m.start()] + f"{m.group('ind')}**{line}**" + text[m.end():], 1
+
+
+_DOUBLED_WORD_RE = re.compile(r"\b([A-Z][A-Z.'()]{1,}) \1\b")
+
+
+def _dedupe_caption_words(text: str) -> tuple[str, int]:
+    """'SPECIAL CIVIL CIVIL SUIT NO.' -> 'SPECIAL CIVIL SUIT NO.' on all-caps
+    caption lines only (live rerun 2026-09-15). Prose is never touched: a
+    doubled word there can be deliberate ("that that")."""
+    out, n = [], 0
+    for line in text.split("\n"):
+        s = line.strip().strip("*")
+        # placeholders ("[Suit No.]") are mixed case; judge the caps test without them
+        _t = re.sub(r"\[[^\]]*\]", "", s)
+        if _t and _t.upper() == _t and any(c.isalpha() for c in _t) and len(s) < 120:
+            new, k = _DOUBLED_WORD_RE.subn(r"\1", line)
+            n += k
+            out.append(new)
+        else:
+            out.append(line)
+    return "\n".join(out), n
 
 
 def _drop_duplicate_valuation_block(text: str) -> tuple[str, int]:
@@ -1035,7 +1061,8 @@ def validate_draft(
     cleaned, _labels = _strip_planner_label_headings(cleaned)
     cleaned, _bolded = _bold_court_caption(cleaned)
     cleaned, _valuation = _drop_duplicate_valuation_block(cleaned)
-    if _labels or _bolded or _valuation:
+    cleaned, _doubled = _dedupe_caption_words(cleaned)
+    if _labels or _bolded or _valuation or _doubled:
         warnings.append(
             f"Layout: removed {_labels} planner label heading(s); caption bolded: {bool(_bolded)}; "
             f"duplicate valuation block removed: {bool(_valuation)}."

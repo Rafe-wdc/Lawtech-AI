@@ -69,6 +69,27 @@ def test_conventional_pleading_headings_are_never_removed():
     assert n == 0 and out == src
 
 
+def test_all_caps_composite_headings_are_kept():
+    # filed pleadings carry all-caps headings; only Title Case labels are planner labels
+    src = ("## JURISDICTION, LIMITATION, AND VALUATION OF THE SUIT\n\ntext\n\n"
+           "## GROUNDS OF MEDICAL NEGLIGENCE AND APPLICATION OF RES IPSA LOQUITUR\n\ntext\n\n"
+           "## VERIFICATION AND SUPPORTING AFFIDAVIT\n\ntext\n")
+    out, n = _strip_planner_label_headings(src)
+    assert n == 0 and out == src
+
+
+def test_doubled_word_in_caption_is_collapsed_and_prose_untouched():
+    from agents.drafting import _dedupe_caption_words
+    src = ("**SPECIAL CIVIL CIVIL SUIT NO. [Suit No.] OF 2024**\n\n"
+           "IN THE COURT OF THE THE CIVIL JUDGE, PUNE\n\n"
+           "1. The Plaintiff submits that that clause was never agreed, and the the record shows it.\n")
+    out, n = _dedupe_caption_words(src)
+    assert n == 2
+    assert "**SPECIAL CIVIL SUIT NO. [Suit No.] OF 2024**" in out
+    assert "IN THE COURT OF THE CIVIL JUDGE, PUNE" in out
+    assert "that that clause" in out and "the the record" in out
+
+
 def test_memo_of_parties_label_is_removed():
     out, n = _strip_planner_label_headings("## Cause Title and Memo of Parties\n\nIN THE HIGH COURT OF DELHI\n")
     assert n == 1 and out.lstrip().startswith("IN THE HIGH COURT")

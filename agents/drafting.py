@@ -3797,6 +3797,7 @@ async def _generate_sectionwise(
                     user_intent=user_intent,
                     user_language=user_language,
                     review_and_redraft_mode=review_and_redraft_mode,
+                    niche_overlay=niche_overlay,
                 )
                 if text.strip():
                     repaired.append(text.strip())
@@ -4884,6 +4885,15 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         )
                     else:
                         draft = refined_draft
+                        # Audit 2026-09-15: the refiner re-emits the whole
+                        # draft, so rerun the mechanical repairs (idempotent)
+                        # or anything it reintroduces ships unrepaired.
+                        draft, _post_refine_warnings = validate_draft(draft)
+                        try:
+                            from core.statute_citation_check import correct_cross_pairs as _post_ccp
+                            draft, _ = _post_ccp(draft, (gathered_ctx or {}).get("newacts", ""))
+                        except Exception as _post_err:
+                            log.warning("Post-refine cross-pair check skipped", error=str(_post_err)[:120])
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))

@@ -153,7 +153,8 @@ async def _handle_legal_concepts(query: str, chat_history: list,
 async def _handle_constitution_or_maxim(task: str, query: str, chat_history: list,
                                          user_language: str = "en",
                                          user_intent=None,
-                                         file_prefix: str = "") -> AgentResult:
+                                         file_prefix: str = "",
+                                         retrieval_query: str | None = None) -> AgentResult:
     """Handle Constitution or Maxim task — ES retrieval + web enrichment + LLM generation.
 
     `file_prefix` (Gap #1): pre-rendered `## UPLOADED SOURCE DOCUMENTS`
@@ -181,7 +182,9 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
     from core.agent_fallback import get_web_context
     with log_time(log, "ES + web enrichment (parallel)", task=task):
         docs, web_context = await asyncio.gather(
-            asyncio.to_thread(_retrieve_from_es, task, query),
+            # Audit 2026-09-15: ES input is capped at 500 chars, so retrieving
+            # on context+question searched the pasted context, never the question.
+            asyncio.to_thread(_retrieve_from_es, task, retrieval_query or query),
             get_web_context(query, task),
         )
 
@@ -348,7 +351,7 @@ async def constitution_node(state: LegalAgentState) -> dict:
     try:
         result = await _handle_constitution_or_maxim("Constitution", gen_query, chat_history,
                                                       user_language, state.get("user_intent"),
-                                                      file_prefix=_file_prefix)
+                                                      file_prefix=_file_prefix, retrieval_query=query)
     except Exception as e:
         from core.metrics import record_agent_error
         record_agent_error("Constitution", e)
@@ -388,7 +391,7 @@ async def maxim_node(state: LegalAgentState) -> dict:
     try:
         result = await _handle_constitution_or_maxim("Maxim", gen_query, chat_history,
                                                       user_language, state.get("user_intent"),
-                                                      file_prefix=_file_prefix)
+                                                      file_prefix=_file_prefix, retrieval_query=query)
     except Exception as e:
         from core.metrics import record_agent_error
         record_agent_error("Maxim", e)

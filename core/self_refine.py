@@ -2132,7 +2132,9 @@ async def self_refine(
                     user_query, critic_intent, current, critique, refiner_llm,
                     retrieved_sources_whitelist=_whitelist,
                 )
-                if fallback and fallback != current:
+                # Audit 2026-09-15: same cumulative shrink floor as the main
+                # loop; a rewrite that lost >15% of the draft is not accepted.
+                if fallback and fallback != current and len(fallback) >= 0.85 * len(current):
                     current = fallback
                 else:
                     refiner_failures += 1

@@ -116,7 +116,7 @@ async def non_legal_node(state: LegalAgentState) -> dict:
             ),
             sources=[],
             tokens_consumed=0,
-            error=short_err(e),
+            fallback_used=True,
         )
 
     return {"agent_results": {"Non_legal": result}}

@@ -2752,17 +2752,20 @@ async def _generate_section_pair(
     # reference block below already tells the model to treat the block
     # as the authoritative source in review-and-redraft mode, so
     # skipping source_docs_block here loses zero information.
-    source_docs_block = (
-        "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every party "
-        "name, date, address, amount, statutory reference, and paragraph-"
-        "level assertion in your output MUST be sourced from this block or "
-        "the USER QUERY below. When your section requires walking the "
-        "source paragraph-by-paragraph — para-wise reply, rejoinder "
-        "denials, counter-affidavit response — use the paragraph structure "
-        "and numbering from this block directly, quoting or paraphrasing "
-        "the specific assertions your section is responding to.)\n"
-        f"{user_facts.strip()}\n\n"
-    ) if user_facts and user_facts.strip() and not review_and_redraft_mode else ""
+    def _source_block(facts: str) -> str:
+        return (
+            "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every party "
+            "name, date, address, amount, statutory reference, and paragraph-"
+            "level assertion in your output MUST be sourced from this block or "
+            "the USER QUERY below. When your section requires walking the "
+            "source paragraph-by-paragraph — para-wise reply, rejoinder "
+            "denials, counter-affidavit response — use the paragraph structure "
+            "and numbering from this block directly, quoting or paraphrasing "
+            "the specific assertions your section is responding to.)\n"
+            f"{facts.strip()}\n\n"
+        ) if facts and facts.strip() and not review_and_redraft_mode else ""
+
+    source_docs_block = _source_block(user_facts)
 
     context_block = ""
     if gathered_context:
@@ -2849,29 +2852,32 @@ async def _generate_section_pair(
         "date and the source is silent. Never infer such a date from other "
         "dates in the matter.\n\n"
     )
-    user_block = (
-        f"{_today_block}"
-        f"{context_block}"
-        f"{reference_block}"
-        f"{prior_block}"
-        f"{source_docs_block}"
-        "## USER QUERY (the full document the user asked for — your section(s) "
-        "are part of this larger document)\n"
-        f"{query.strip()}\n\n"
-        "## SECTIONS YOU MUST WRITE NOW\n"
-        f"{sections_block}\n\n"
-        "Produce ONLY the section bodies named above, in order, each starting "
-        "with its own `## ` heading line. No preamble. No postscript. No "
-        "transition text between two sections. Continue paragraph numbering "
-        "from DOCUMENT SO FAR. Every party name, date, address, monetary "
-        "amount, and case-specific detail MUST come VERBATIM from the "
-        "UPLOADED SOURCE DOCUMENTS or the USER QUERY. Do NOT substitute "
-        "canonical Indian-legal example values (e.g. 'Priyanka', 'Sneha', "
-        "'Bhausaheb', 'Sakore', 'Anjali Deshmukh', 'Nashik', 'Sangamner', "
-        "'Ahmednagar', '29 May 2022', '1 June 2020') for the real parties "
-        "and dates named in the source — that is a CRITICAL error. Cite "
-        "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
-    )
+    def _assemble_user_block(source_block: str) -> str:
+        return (
+            f"{_today_block}"
+            f"{context_block}"
+            f"{reference_block}"
+            f"{prior_block}"
+            f"{source_block}"
+            "## USER QUERY (the full document the user asked for — your section(s) "
+            "are part of this larger document)\n"
+            f"{query.strip()}\n\n"
+            "## SECTIONS YOU MUST WRITE NOW\n"
+            f"{sections_block}\n\n"
+            "Produce ONLY the section bodies named above, in order, each starting "
+            "with its own `## ` heading line. No preamble. No postscript. No "
+            "transition text between two sections. Continue paragraph numbering "
+            "from DOCUMENT SO FAR. Every party name, date, address, monetary "
+            "amount, and case-specific detail MUST come VERBATIM from the "
+            "UPLOADED SOURCE DOCUMENTS or the USER QUERY. Do NOT substitute "
+            "canonical Indian-legal example values (e.g. 'Priyanka', 'Sneha', "
+            "'Bhausaheb', 'Sakore', 'Anjali Deshmukh', 'Nashik', 'Sangamner', "
+            "'Ahmednagar', '29 May 2022', '1 June 2020') for the real parties "
+            "and dates named in the source — that is a CRITICAL error. Cite "
+            "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
+        )
+
+    user_block = _assemble_user_block(source_docs_block)
 
     llm = get_drafting_llm(
         max_output_tokens=20000,
@@ -3002,6 +3008,55 @@ async def _generate_section_pair(
     def _finish_reason(r) -> str:
         meta = getattr(r, "response_metadata", None) or {}
         return str(meta.get("finish_reason") or "").upper()
+
+    # --- Attachment preflight (PR 2) ------------------------------------
+    # Estimate the assembled prompt before the first call. Over the ceiling
+    # with an upload present: route the upload through retrieval sized to
+    # the room that is left, rebuild the block, re-estimate. Still over, or
+    # over with no upload to trim: fail fast — no 400, no failover, no retry.
+    _est_before = _estimate_tokens(system_prompt) + _estimate_tokens(user_block)
+    if _est_before > PAIR_INPUT_TOKEN_CEILING:
+        if source_docs_block:
+            _fixed_tokens = _est_before - _estimate_tokens(source_docs_block)
+            _room_tokens = PAIR_INPUT_TOKEN_CEILING - _fixed_tokens
+            _target_chars = int(_room_tokens * _chars_per_token(user_facts) * 0.9)
+            if _target_chars < _SOURCE_RETRIEVAL_MIN_CHARS:
+                raise AttachmentTooLarge(
+                    f"attachment_too_large: prompt ~{_est_before:,} tokens; only "
+                    f"~{max(_room_tokens, 0):,} tokens of room for the upload"
+                )
+            _brief = " ".join(
+                f"{sec.heading}. {sec.summary or ''}" for sec in sections_to_write
+            ) + " " + query[:500]
+            with log_time(log, f"Attachment retrieval ({section_label})"):
+                _reduced, _rinfo = await asyncio.to_thread(
+                    _retrieve_source_for_pair, user_facts, _brief, _target_chars,
+                )
+            _reduced += (
+                "\n\n[Note: the uploaded source was too large to include in "
+                "full; the paragraphs above were selected for this section. "
+                "Split the upload into smaller files for full-verbatim access.]"
+            )
+            source_docs_block = _source_block(_reduced)
+            user_block = _assemble_user_block(source_docs_block)
+            _est_after = _estimate_tokens(system_prompt) + _estimate_tokens(user_block)
+            log.warning(
+                "Attachment preflight: upload routed through retrieval",
+                section_label=section_label,
+                est_tokens_before=_est_before, est_tokens_after=_est_after,
+                ceiling=PAIR_INPUT_TOKEN_CEILING, target_chars=_target_chars,
+                **_rinfo,
+            )
+            if _est_after > PAIR_INPUT_TOKEN_CEILING:
+                raise AttachmentTooLarge(
+                    f"attachment_too_large: prompt ~{_est_after:,} tokens after "
+                    f"retrieval, ceiling {PAIR_INPUT_TOKEN_CEILING:,}"
+                )
+        else:
+            raise AttachmentTooLarge(
+                f"attachment_too_large: prompt ~{_est_before:,} tokens with no "
+                f"upload block to trim, ceiling {PAIR_INPUT_TOKEN_CEILING:,}"
+            )
 
     try:
         with log_time(log, f"Section pair gen ({section_label})"):
@@ -3136,6 +3191,145 @@ PAIR_TOTAL_BUDGET_S = 90
 # Do not start another attempt for this pair with less than this much of
 # its budget left — the call would be clamped to a few seconds and fail.
 _PAIR_RETRY_MIN_REMAINING_S = 20
+
+
+# ---------------------------------------------------------------------------
+# Attachment preflight for section-pair calls (PR 2).
+#
+# Gemini's input ceiling is 1,048,576 tokens. The prod audit of 2026-08-11
+# logged 84 `INVALID_ARGUMENT (input token count exceeds 1048576)` errors in
+# 16 hours — every one on a section-pair call carrying the raw text of a
+# large upload, and every one paid twice per pair per provider before the
+# section was recorded as "could not be generated". This estimates the size
+# of the assembled prompt BEFORE the call, and when it will not fit, routes
+# the uploaded text through retrieval (paragraph chunks, local embeddings,
+# top-k by similarity to the section brief) so the writer sees the parts of
+# the record its section needs instead of a 400.
+# ---------------------------------------------------------------------------
+
+# Headroom below the hard ceiling for the response (up to 24K output
+# tokens), tokenizer variance on mixed-script text, and the few thousand
+# tokens of instructions the estimate does not see.
+PAIR_INPUT_TOKEN_CEILING = 900_000
+
+# Below this many characters of retrievable source there is nothing useful
+# a section-writer can do — fail fast rather than send a fragment.
+_SOURCE_RETRIEVAL_MIN_CHARS = 20_000
+
+# Unicode block range covering Devanagari through Malayalam (and Sinhala):
+# the dense scripts that tokenise at roughly 2.5 chars/token.
+_INDIC_BLOCK_LO, _INDIC_BLOCK_HI = "ऀ", "෿"
+
+
+def _chars_per_token(text: str) -> float:
+    """4.0 for Latin-dominant text, 2.5 when the sample is Indic-dominant."""
+    sample = text[:20_000]
+    if not sample:
+        return 4.0
+    indic = sum(1 for c in sample if _INDIC_BLOCK_LO <= c <= _INDIC_BLOCK_HI)
+    return 2.5 if indic / len(sample) > 0.3 else 4.0
+
+
+def _estimate_tokens(text: str) -> int:
+    """Script-aware character-based token estimate. Deliberately simple and
+    slightly pessimistic; the ceiling above carries the headroom."""
+    if not text:
+        return 0
+    return int(len(text) / _chars_per_token(text)) + 1
+
+
+class AttachmentTooLarge(RuntimeError):
+    """The section-pair prompt cannot be made to fit under the input
+    ceiling even after routing the upload through retrieval. Raised BEFORE
+    any LLM call so the pair fails in milliseconds, not after two 400s per
+    provider. Surfaces in the incomplete-draft banner as its reason."""
+
+
+# Chunk-embedding cache keyed on the upload text, so the embedding cost is
+# paid once per request rather than once per section pair. Tiny LRU: the
+# key space is "uploads in flight on this worker".
+_CHUNK_EMBED_CACHE: dict[str, tuple[list[str], list[list[float]]]] = {}
+_CHUNK_EMBED_CACHE_MAX = 4
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _retrieve_source_for_pair(
+    user_facts: str,
+    query_text: str,
+    target_chars: int,
+    embed=None,
+) -> tuple[str, dict]:
+    """Reduce `user_facts` to the paragraph chunks most relevant to
+    `query_text`, keeping at most ~`target_chars`, in original order.
+
+    chunk (paragraphs) -> embed (qa embeddings, cached per upload) -> top-k
+    by cosine until the char budget is spent -> re-sort by position -> join,
+    marking every gap so the writer knows material was elided.
+
+    `embed` is any object with `embed_documents(list[str])` and
+    `embed_query(str)` (LangChain embeddings interface); defaults to the
+    upload QA embeddings singleton. Returns (reduced_text, info).
+    """
+    import hashlib
+
+    chunks = _chunk_user_facts(user_facts)
+    info: dict = {"chunks_total": len(chunks), "chunks_kept": 0,
+                  "chars_before": len(user_facts), "chars_after": 0,
+                  "mode": "retrieval"}
+    if len(chunks) < 4:
+        # No paragraph structure to retrieve over: keep the head, which in
+        # a legal record carries the caption, parties and prayer.
+        info["mode"] = "head_truncate"
+        reduced = user_facts[:target_chars]
+        info["chars_after"] = len(reduced)
+        return reduced, info
+
+    if embed is None:
+        from core.clients import get_qa_embeddings
+        embed = get_qa_embeddings()
+
+    key = hashlib.sha1(user_facts.encode("utf-8", "replace")).hexdigest()
+    cached = _CHUNK_EMBED_CACHE.get(key)
+    if cached is None:
+        vecs = embed.embed_documents(chunks)
+        if len(_CHUNK_EMBED_CACHE) >= _CHUNK_EMBED_CACHE_MAX:
+            _CHUNK_EMBED_CACHE.pop(next(iter(_CHUNK_EMBED_CACHE)))
+        _CHUNK_EMBED_CACHE[key] = (chunks, vecs)
+        info["embed_cache"] = "miss"
+    else:
+        chunks, vecs = cached
+        info["embed_cache"] = "hit"
+
+    qvec = embed.embed_query(query_text)
+    ranked = sorted(range(len(chunks)), key=lambda i: _cosine(qvec, vecs[i]),
+                    reverse=True)
+    kept: list[int] = []
+    used = 0
+    for i in ranked:
+        n = len(chunks[i]) + 2
+        if used + n > target_chars:
+            continue
+        kept.append(i)
+        used += n
+    kept.sort()
+    parts: list[str] = []
+    prev = -1
+    for i in kept:
+        if prev >= 0 and i != prev + 1:
+            parts.append(f"[… {i - prev - 1} paragraph(s) of the source omitted "
+                         "as not relevant to this section …]")
+        parts.append(chunks[i])
+        prev = i
+    reduced = "\n\n".join(parts)
+    info["chunks_kept"] = len(kept)
+    info["chars_after"] = len(reduced)
+    return reduced, info
 
 
 _UNRESOLVED_REVIEW_BANNER_MARKER = "**Review notes outstanding**"
@@ -3807,6 +4001,15 @@ async def _generate_sectionwise(
                 break
             except Exception as e:
                 _pair_err = e
+                if isinstance(e, AttachmentTooLarge):
+                    # Raised before any LLM call; the prompt cannot fit and
+                    # a second attempt would compute the same answer.
+                    log.warning(
+                        "Section pair skipped: attachment too large for the "
+                        "input ceiling even after retrieval",
+                        position_start=position_start, error=short_err(e),
+                    )
+                    break
                 if attempt == 1:
                     # Gate the retry on the PAIR's own budget, not the
                     # request deadline. The request-level check (<=15s)

@@ -560,6 +560,7 @@ async def run_chat_pipeline(
     # query would get the wrong branch pinned for the TTL. See the
     # RESPONSE_CACHE_ENABLED comment in core/settings.py.
     any_fallback_used = False
+    any_agent_errored = False  # audit 2026-09-15: degraded answers are not cached
     # Track whether the guardrail rewrote final_response into a block
     # message. Caching a block would replay it to every subsequent user
     # of the same query text for the TTL.
@@ -704,6 +705,8 @@ async def run_chat_pipeline(
                             # init comment above.
                             if getattr(r, "fallback_used", False):
                                 any_fallback_used = True
+                            if getattr(r, "error", None):
+                                any_agent_errored = True
                             # Mark the turn as producing a modifiable draft
                             # artefact whenever Drafting returned content
                             # without an error. Level 2 uses this signal to
@@ -879,6 +882,7 @@ async def run_chat_pipeline(
         and not integration_context_dict
         and not turn_is_blocked
         and not any_fallback_used
+        and not any_agent_errored
         and _emitted_total > 0
     )
     if cacheable:

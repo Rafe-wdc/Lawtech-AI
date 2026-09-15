@@ -856,6 +856,12 @@ async def search(data: SearchRequest, request: Request):
         _agent_fallback_used(r)
         for r in final_state.get("agent_results", {}).values()
     )
+    # Audit 2026-09-15: an answer assembled while a planned agent errored
+    # (timeout, ReAct overrun) is degraded; do not replay it for an hour.
+    _degraded = any(
+        (r.get("error") if isinstance(r, dict) else getattr(r, "error", None))
+        for r in final_state.get("agent_results", {}).values()
+    )
     _fire_and_forget(chat_store.log_request(
         thread_id=thread_id,
         endpoint="/pyapi/search",
@@ -970,6 +976,7 @@ async def search(data: SearchRequest, request: Request):
         and final_response
         and not final_state.get("is_blocked")
         and not _fallback_used
+        and not _degraded
         and _emitted_total > 0
     ):
         response_cache.set(

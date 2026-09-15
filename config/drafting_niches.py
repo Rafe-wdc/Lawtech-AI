@@ -99,7 +99,7 @@ NICHE_KEYS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # Bail — regular bail application under Section 480 BNSS (formerly s.437/439 CrPC)
 # ---------------------------------------------------------------------------
-BAIL_APPLICATION_REGULAR = """## NICHE OVERLAY — REGULAR BAIL APPLICATION (Section 480 BNSS / erstwhile Sections 437 & 439 CrPC)
+BAIL_APPLICATION_REGULAR = """## NICHE OVERLAY — REGULAR BAIL APPLICATION (Sections 480 / 483 BNSS / erstwhile Sections 437 & 439 CrPC)
 
 **Structural skeleton (in this order):**
 1. Cause title — Court name, "BAIL APPLICATION NO. ___ OF [YEAR]", "IN THE MATTER OF: FIR No. ___ / [Year] at P.S. [name], u/s [BNS/IPC sections]", Applicant vs State (through the PP).
@@ -113,8 +113,8 @@ BAIL_APPLICATION_REGULAR = """## NICHE OVERLAY — REGULAR BAIL APPLICATION (Sec
 9. VERIFICATION — separate paragraphs of FACT (personal knowledge) from paragraphs of LEGAL SUBMISSION (advice of counsel).
 
 **Mandatory statutory anchors:**
-- Section 480 BNSS (bail powers of Court of Session / High Court) — primary enabling provision.
-- Where in Magistrate's court: Section 478 BNSS.
+- Section 483 BNSS (special powers of the Court of Session / High Court regarding bail; erstwhile Section 439 CrPC) — primary enabling provision before those courts.
+- Where in Magistrate's court: Section 480 BNSS (erstwhile Section 437 CrPC). Bailable offences: Section 478 BNSS (erstwhile Section 436 CrPC).
 - Statutory bail: Section 187(3) BNSS (formerly Section 167(2) CrPC).
 - Cite the actual BNS/IPC sections invoked in the FIR (both, per statutory-currency Rule 4A of the base prompt).
 
@@ -130,7 +130,7 @@ BAIL_APPLICATION_REGULAR = """## NICHE OVERLAY — REGULAR BAIL APPLICATION (Sec
 (b) pass any such other or further order(s) as this Hon'ble Court may deem fit and proper in the facts and circumstances of the case in the interest of justice."
 
 **Do not do:**
-- Do not cite Section 439 CrPC as the operative enabling provision for offences on or after 01.07.2024 without also naming Section 480 BNSS.
+- Do not cite Section 439 CrPC as the operative enabling provision for offences on or after 01.07.2024 without also naming the BNSS counterpart (Section 483 BNSS before the Court of Session / High Court; Section 480 BNSS before a Magistrate).
 - Do not omit the previous-bail-applications disclosure paragraph — Indian courts treat non-disclosure as a serious lapse.
 - Do not cite the police report / FIR as if it were proved — say "as per the FIR" or "as alleged".
 """
@@ -146,7 +146,7 @@ BAIL_APPLICATION_ANTICIPATORY = """## NICHE OVERLAY — ANTICIPATORY BAIL APPLIC
 2. Memo of parties.
 3. "MOST RESPECTFULLY SHOWETH".
 4. FACTS AND CIRCUMSTANCES — chronological, including the apprehension of arrest (notice u/s 41A CrPC / 35(3) BNSS received, allegations reaching applicant, or otherwise).
-5. GROUNDS FOR ANTICIPATORY BAIL — 10-15 numbered grounds; MANDATORY subheadings: (i) no prima facie case / mala fide implication (ii) roots in society / no flight risk (iii) cooperation with investigation offered (iv) custodial interrogation NOT required — explain why written interrogation / notice u/s 179 BNSS / production of documents would suffice.
+5. GROUNDS FOR ANTICIPATORY BAIL — 10-15 numbered grounds; MANDATORY subheadings: (i) no prima facie case / mala fide implication (ii) roots in society / no flight risk (iii) cooperation with investigation offered (iv) custodial interrogation NOT required — explain why written interrogation / notice u/s 35(3) BNSS (erstwhile 41A CrPC) / production of documents would suffice.
 6. CUSTODIAL INTERROGATION — separate paragraph explaining why the applicant's custodial interrogation is not warranted. This is dispositive in most anticipatory-bail matters — do not omit.
 7. PREVIOUS ANTICIPATORY BAIL APPLICATIONS — mandatory disclosure paragraph.
 8. PRAYER — grant of anticipatory bail on terms u/s 482(2) BNSS.
@@ -186,7 +186,7 @@ QUASHING_PETITION_BNSS528 = """## NICHE OVERLAY — QUASHING PETITION (Section 5
 
 **Mandatory statutory anchors:**
 - Section 528 BNSS (formerly Section 482 CrPC) — primary enabling provision.
-- Where a Magistrate's summoning order is challenged, cite the relevant Sections of BNSS on cognizance / process (Sections 223, 226 BNSS / former 190, 204 CrPC).
+- Where a Magistrate's summoning order is challenged, cite the relevant Sections of BNSS on cognizance / process (Sections 210, 227 BNSS / former 190, 204 CrPC).
 
 **Doctrinal anchors (cite by exact category invoked):**
 - State of Haryana v. Bhajan Lal, 1992 Supp (1) SCC 335 — the seven Bhajan Lal categories are the gold standard; identify which of the seven applies to your matter and quote the language of that category.
@@ -646,14 +646,14 @@ MACT_CLAIM_PETITION = """## NICHE OVERLAY — MOTOR ACCIDENT CLAIM PETITION (Mot
 4. CAUSE OF ACTION AND JURISDICTION — Section 166(2) MV Act — Tribunal within whose jurisdiction the accident occurred / Claimant resides / Respondent resides / carries on business.
 5. RASH AND NEGLIGENT DRIVING — a separate paragraph attributing the accident to the rash and negligent driving of the Respondent driver of the offending vehicle, supported by the FIR / eye-witness account / MVI report.
 6. HEADS OF DAMAGES — sub-lettered enumeration under the Sarla Verma / Pranay Sethi framework:
-   (a) loss of dependency (income × dependency multiplier per Sarla Verma / Pranay Sethi; +40% for age <40 as future prospects for a permanent employee, +25% for age 40-50, +10% for age 50-60);
+   (a) loss of dependency (income × dependency multiplier per Sarla Verma / Pranay Sethi; +50% for age <40 as future prospects for a permanent employee, +30% for age 40-50, +15% for age 50-60; for a self-employed or fixed-salary deceased +40% / +25% / +10%);
    (b) loss of consortium — Rs. 40,000 per dependant per Pranay Sethi;
    (c) loss of estate — Rs. 15,000 per Pranay Sethi;
    (d) funeral expenses — Rs. 15,000 per Pranay Sethi;
    (e) medical expenses (for injury claims) — with hospital bills;
    (f) pain and suffering / loss of amenities (for injury claims);
    (g) interest at the rate of 6-9% p.a. from the date of the claim till realisation.
-7. INSURER'S LIABILITY — Section 149 MV Act (insurer's duty to satisfy the judgment).
+7. INSURER'S LIABILITY — Section 150 MV Act (insurer's duty to satisfy judgments and awards; erstwhile Section 149 before the 2019 amendment).
 8. PRAYER — grant of compensation quantified at Rs. [total], with interest, and costs; direction to Respondent No. 3 to satisfy the award.
 9. Place / Date / Signature.
 10. VERIFICATION.
@@ -662,7 +662,7 @@ MACT_CLAIM_PETITION = """## NICHE OVERLAY — MOTOR ACCIDENT CLAIM PETITION (Mot
 
 **Mandatory statutory anchors:**
 - Sections 166 and 168 MV Act, 1988.
-- Section 149 MV Act (insurer's liability).
+- Section 150 MV Act (insurer's duty to satisfy judgments and awards; erstwhile Section 149 before the 2019 amendment).
 - Section 173 MV Act (appeal) — for background.
 
 **Doctrinal anchors:**
@@ -807,8 +807,8 @@ AFFIDAVIT_GENERIC = """## NICHE OVERLAY — AFFIDAVIT (Order XIX CPC / Section 2
 
 **Mandatory statutory anchors:**
 - Order XIX Rules 1-3 CPC (affidavits — form, contents, verification).
-- Section 297 BNSS (formerly Section 297 CrPC) — affidavits in criminal proceedings.
-- Sections 138-141 of the Indian Evidence Act, 1872 / Sections 145-148 BSA, 2023 (affidavit-based evidence).
+- Section 336 BNSS (formerly Section 297 CrPC) — authorities before whom affidavits may be sworn.
+- Order XIX of the Code of Civil Procedure, 1908 — affidavits in civil proceedings.
 - Notaries Act, 1952 — for notarised affidavits.
 - Sections 191-193 IPC / Sections 227-229 BNS — perjury (false statement on oath).
 

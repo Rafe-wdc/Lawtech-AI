@@ -2029,6 +2029,11 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     tasks_planned = _validate_and_enrich_plan(
         tasks_planned, extracted_intent, log,
     )
+    # Audit 2026-09-15: the Newacts veto can remove the primary agent; a task
+    # whose agent never runs falls to the anchor-less generic synthesis.
+    if task == "Legislation" and "Legislation" not in tasks_planned and "Newacts" in tasks_planned:
+        log.info("Plan veto removed the Legislation primary; task moved to Newacts")
+        task = "Newacts"
 
     # Review-and-Redraft with upload: strip citation agents.
     #
@@ -2173,13 +2178,36 @@ _STOP_WORDS = frozenset((
 ))
 
 
+# Audit 2026-09-15: markers pasted into the merge/synthesis input must
+# never survive into the answer if the model echoes them.
+_CLIP_MARKER_RE = re.compile(r"[ \t]*\[\.\.\. truncated for (?:merge|synthesis)\][ \t]*\r?\n?")
+
+
+def _audit_intent(intent, user_language: str):
+    """The critic and refiner must audit under the language the answer was
+    actually written in (the resolved user_language), not the extractor's
+    guess; when they disagree the refiner rewrites into the wrong language."""
+    if intent is None or not user_language:
+        return intent
+    if getattr(intent, "language", None) == user_language:
+        return intent
+    try:
+        return intent.model_copy(update={"language": user_language})
+    except Exception:
+        return intent
+
+
 def _content_token_set(text: str) -> set[str]:
     """Token bag for overlap comparison. Lowercase, drop stop words, keep
     legal-meaningful tokens (act names, section numbers, doctrine names).
     """
     if not text:
         return set()
-    tokens = re.findall(r"[A-Za-z]{3,}|\d{3,}", text.lower())
+    # Unicode-aware (Devanagari and other Indic runs count as words) and
+    # URL-free, so a Hindi supporter is judged on its prose, not on the
+    # English anchors and links every agent shares.
+    text = re.sub(r"https?://\S+", " ", text)
+    tokens = re.findall(r"[\u0900-\u0DFF]{3,}|[^\W\d_]{3,}|\d{2,}", text.lower())
     return {t for t in tokens if t not in _STOP_WORDS}
 
 
@@ -2712,7 +2740,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         try:
             # Build merge input — flag primary as anchor so the LLM
             # recognises which agent owns layout/shape for THIS task.
-            _MAX_AGENT_CONTENT = 12000
+            _MAX_AGENT_CONTENT = 30000  # audit 2026-09-15: 12K cut SCI answers (17-21K) mid-citation
             _primary_clip = primary if len(primary) <= _MAX_AGENT_CONTENT else \
                 primary[:_MAX_AGENT_CONTENT] + "\n\n[... truncated for merge]"
             merge_input = (
@@ -2747,7 +2775,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "retrieved_sources": source_registry.serialize_for_prompt(),
             }, timeout=180)
 
-            merged = response.content
+            merged = _CLIP_MARKER_RE.sub("", response.content)
             from core.token_tracker import record as _record_tokens
             merge_tokens = _record_tokens("Orchestrator", "merge_synthesis", response)
             total_tokens += merge_tokens
@@ -2771,7 +2799,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 refined, _crit_history = await _self_refine(
                     merged,
                     query,
-                    state.get("user_intent"),
+                    _audit_intent(state.get("user_intent"), user_language),
                     source_registry=source_registry,
                 )
                 if refined and refined != merged:
@@ -2818,7 +2846,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     total_tokens = 0
     all_serialized_sources = []
 
-    _MAX_AGENT_CONTENT = 8000  # per-agent cap to prevent token explosion
+    _MAX_AGENT_CONTENT = 30000  # per-agent cap; 8K cut SCI answers (17-21K) mid-citation (audit 2026-09-15)
     for name, result in valid_results.items():
         content = result.content
         if len(content) > _MAX_AGENT_CONTENT:
@@ -2893,6 +2921,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             log.warning("Synthesis output too large, truncating",
                         original_len=len(synthesized), cap=_MAX_SYNTHESIS_LEN)
             synthesized = synthesized[:_MAX_SYNTHESIS_LEN] + "\n\n*[Response truncated for length]*"
+            synthesized = _CLIP_MARKER_RE.sub("", synthesized)
 
         total_tokens += synth_tokens
         log.info("Synthesis completed",
@@ -2912,7 +2941,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 refined_synth, _crit_hist = await _self_refine_pkg(
                     synthesized,
                     query,
-                    state.get("user_intent"),
+                    _audit_intent(state.get("user_intent"), user_language),
                     source_registry=source_registry,
                 )
                 if refined_synth and refined_synth != synthesized:

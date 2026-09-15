@@ -1924,7 +1924,7 @@ markdown, with every fact anchored to the source material.
 
     When the overlay names a required element (e.g. "PRAYER must include
     a sub-clause for tribunal fees under Section 31A A&C Act"), include
-    it. When it names a required anchor (e.g. "cite Section 480 BNSS as
+    it. When it names a required anchor (e.g. "cite Section 482 BNSS as
     the enabling provision for anticipatory bail"), cite it correctly.
     When it names a required section heading, use that exact heading.
 

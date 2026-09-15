@@ -298,6 +298,9 @@ PLAINT_CIVIL_SUIT = """## NICHE OVERLAY — PLAINT IN CIVIL SUIT (Code of Civil 
 6. JURISDICTION — a separate paragraph invoking pecuniary and territorial jurisdiction (Sections 15-20 CPC), with the specific ground (defendant resides / carries on business / cause of action arose within jurisdiction).
 7. LIMITATION — separate paragraph stating that the suit is within limitation, with the applicable Article of the Limitation Act, 1963.
 8. VALUATION AND COURT FEE — separate paragraph valuing the suit and specifying the court fee paid, referring to the Court Fees Act / State Court Fees Act.
+   State the valuation ONCE, here. Do not repeat a "SUIT VALUATION FOR THE PURPOSES
+   OF JURISDICTION AND COURT FEES" block in the title area; the title carries only
+   the suit description ("SUIT FOR RECOVERY OF DAMAGES OF RS. ...").
 9. RELIEF / PRAYER — enumerated sub-lettered reliefs (a) main relief (b) interim relief if any (c) costs (d) omnibus.
 10. Place / Date / Signature — of Plaintiff AND Advocate.
 11. VERIFICATION under Order VI Rule 15 CPC — "I, [Name], the Plaintiff above named, do hereby verify that the contents of paragraphs [___] to [___] of the plaint are true to my personal knowledge and paragraphs [___] to [___] are true on advice received from counsel which I believe to be true. No part of it is false and no material has been concealed therefrom. Verified at [place] on this [day] of [month], [year]."

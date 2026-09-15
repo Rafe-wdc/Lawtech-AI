@@ -701,6 +701,77 @@ def _br_to_layout(text: str, br_re) -> str:
         out.append(line)
     return "\n".join(out)
 
+# --- planner labels, caption bold, duplicate valuation --------------------
+# Advocate mark-up on a medical-negligence plaint (2026-09-13): the planner's
+# section label "Court Heading, Cause Title, and Description of Parties" was
+# printed above the caption; the court name was not bold; the suit valuation
+# appeared in the title block and again, correctly, before the prayer.
+_PLANNER_LABEL_WORDS = (
+    "court heading", "cause title", "description of parties", "memo of parties",
+    "memorandum of parties", "court caption", "parties to the suit",
+)
+_COMPOSITE_LABEL_RE = re.compile(r"\(prayer\)|reliefs? claimed|list of documents", re.IGNORECASE)
+_CAPTION_COURT_RE = re.compile(
+    r"^(?P<ind>[ \t]*)(?P<line>IN THE (?:HON'BLE )?(?:COURT OF|HIGH COURT|SUPREME COURT|DISTRICT COURT|"
+    r"COURT OF THE|NATIONAL COMPANY LAW|DEBT RECOVERY|CONSUMER)[^\n]*?)(?P<trail>[ \t]*)$",
+    re.MULTILINE,
+)
+_VALUATION_BLOCK_RE = re.compile(
+    r"(?im)^[ \t*]*(?:SUIT )?VALUATION (?:OF THE SUIT )?FOR (?:THE )?PURPOSES? OF (?:JURISDICTION|COURT FEES?)[^\n]*(?:\n(?![ \t]*\n)[^\n]*)*"
+)
+_LATER_VALUATION_RE = re.compile(r"(?i)\b(?:suit (?:has been|is) valued at|valued (?:the suit )?at rs|court[- ]fee (?:of|paid))")
+
+
+def _strip_planner_label_headings(text: str) -> tuple[str, int]:
+    """Drop headings that are the planner's internal labels, not pleading
+    headings. Two shapes: the opening-block label (cause title / parties /
+    court heading words) and a composite label that bundles the prayer,
+    verification or list of documents into one heading; the conventional
+    PRAYER / VERIFICATION headings below it carry the document."""
+    out, n = [], 0
+    for line in text.split("\n"):
+        s = line.strip()
+        if s.startswith("#"):
+            h = _normalise_heading(s)
+            label_hits = sum(1 for w in _PLANNER_LABEL_WORDS if w in h)
+            composite = bool(_COMPOSITE_LABEL_RE.search(h)) and ("," in h or " and " in h)
+            # a descriptive label joins two nominal parts with "and" and runs long
+            # ("Statement of Facts and Chronology of Medical Negligence");
+            # conventional pleading headings are short.
+            many_parts = (h.count(",") >= 2 and len(h) > 40) or (" and " in h and len(h) > 45)
+            if label_hits >= 1 and (label_hits >= 2 or "," in h or " and " in h) or composite or many_parts:
+                n += 1
+                continue
+        out.append(line)
+    return "\n".join(out), n
+
+
+def _bold_court_caption(text: str) -> tuple[str, int]:
+    """The first court-name line of the caption is bold in a filing."""
+    m = _CAPTION_COURT_RE.search(text)
+    if not m:
+        return text, 0
+    line = m.group("line").strip()
+    if line.startswith("**") or line.startswith("#"):
+        return text, 0
+    return text[:m.start()] + f"{m.group('ind')}**{line}**" + text[m.end():], 1
+
+
+def _drop_duplicate_valuation_block(text: str) -> tuple[str, int]:
+    """A 'SUIT VALUATION FOR THE PURPOSES OF JURISDICTION AND COURT FEES'
+    block in the title area is surplus when the valuation / court-fee
+    paragraph exists later in the plaint (where it belongs, before the
+    prayer). Removed only when that later paragraph is present."""
+    m = _VALUATION_BLOCK_RE.search(text)
+    if not m:
+        return text, 0
+    if not _LATER_VALUATION_RE.search(text[m.end():]):
+        return text, 0
+    out = text[:m.start()] + text[m.end():]
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out, 1
+
+
 def validate_draft(
     full_draft: str,
     stance=None,  # kept for signature compatibility; unused
@@ -958,6 +1029,18 @@ def validate_draft(
     # future. Whether a given case is REAL still needs the retrieved-source
     # whitelist and is tracked separately — this only removes provenance that
     # was manufactured to make a citation look verified.
+    # Planner labels, caption bold, duplicate valuation (advocate mark-up
+    # 2026-09-13). Runs LAST: the heading-based repairs above still need the
+    # planner labels present to detect sections.
+    cleaned, _labels = _strip_planner_label_headings(cleaned)
+    cleaned, _bolded = _bold_court_caption(cleaned)
+    cleaned, _valuation = _drop_duplicate_valuation_block(cleaned)
+    if _labels or _bolded or _valuation:
+        warnings.append(
+            f"Layout: removed {_labels} planner label heading(s); caption bolded: {bool(_bolded)}; "
+            f"duplicate valuation block removed: {bool(_valuation)}."
+        )
+
     from core.fabricated_provenance import strip_fabricated_provenance
     cleaned, provenance_warnings = strip_fabricated_provenance(cleaned)
     if provenance_warnings:

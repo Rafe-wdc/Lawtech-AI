@@ -2264,6 +2264,11 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
    - Do NOT add a preamble like "Here is the next section:" or a postscript like "[Next section follows]" or "[Continued in next section]".
 
 2. USE THE EXACT HEADING TEXT GIVEN FOR EACH SECTION.
+   - EXCEPTION - the opening block. When the section is the cause title / court
+     caption / parties block, the court name IS the heading: print the caption
+     lines (court name in bold) and do NOT print the planner's label ("Court
+     Heading, Cause Title, and Description of Parties") as a heading. A filed
+     pleading never carries that label (advocate mark-up, 2026-09-13).
    - The judge has already adapted each heading to the user's matter and rendered it in the user's target language. Use the heading exactly as given.
    - Format each heading as `## ` followed by the heading text. Sub-headings inside a section use `### `.
 

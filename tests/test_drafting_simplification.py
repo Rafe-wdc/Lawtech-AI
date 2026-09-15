@@ -741,6 +741,7 @@ class TestGenerateSectionwise:
             query, user_facts, reference_draft, prior_text,
             gathered_context, user_intent, user_language,
             review_and_redraft_mode=False, niche_overlay="",
+            pair_remaining=None,
         ):
             calls.append({
                 "sections_to_write": list(sections_to_write),

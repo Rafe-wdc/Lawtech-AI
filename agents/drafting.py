@@ -42,6 +42,7 @@ from datetime import date
 import asyncio
 import os
 import re
+import time
 import unicodedata
 
 from pydantic import BaseModel, Field
@@ -2634,9 +2635,16 @@ async def _generate_section_pair(
     user_language: str,
     review_and_redraft_mode: bool = False,
     niche_overlay: str = "",
+    pair_remaining=None,
 ) -> str:
     """Produce 1 or 2 consecutive sections of the document in one Gemini
     2.5 Pro call. Mirrors the safety / retry pattern of single-pass.
+
+    `pair_remaining` is the caller's per-pair clock (see `_make_pair_clock`):
+    a zero-arg callable returning the seconds left of this pair's TOTAL
+    budget across all attempts. Every LLM call in here is clamped to
+    `min(_SECTION_PAIR_LOCAL_TIMEOUT, pair_remaining())`, and no call starts
+    once it reads zero. `None` (legacy callers / tests) means no pair cap.
 
     `user_facts` is the RAW extracted text of uploaded documents, threaded
     into every section-pair call so any section that walks the source
@@ -2905,6 +2913,12 @@ async def _generate_section_pair(
     # consistency day to day.
     _SECTION_PAIR_LOCAL_TIMEOUT = 60
 
+    if len(sections_to_write) == 1:
+        section_label = f"section {section_position_start}"
+    else:
+        _end = section_position_start + len(sections_to_write) - 1
+        section_label = f"sections {section_position_start}-{_end}"
+
     def _messages(extra_instruction: str) -> list:
         final_user_block = (
             user_block + "\n\n" + extra_instruction if extra_instruction
@@ -2913,13 +2927,35 @@ async def _generate_section_pair(
         return [SystemMessage(content=cacheable_system(system_prompt)),
                 HumanMessage(content=final_user_block)]
 
+    def _pair_timeout(stage: str) -> float:
+        """Per-call timeout clamped to what is left of the PAIR budget.
+
+        Logged at every call so the countdown is visible in agent.log:
+        primary -> flash_failover -> (retry) primary -> flash_failover must
+        read strictly decreasing `pair_remaining_s` for the same pair.
+        """
+        if pair_remaining is None:
+            return _SECTION_PAIR_LOCAL_TIMEOUT
+        left = pair_remaining()
+        log.info(
+            "Section pair call budget",
+            section_label=section_label, stage=stage,
+            pair_remaining_s=round(left, 1),
+            local_timeout_s=round(min(_SECTION_PAIR_LOCAL_TIMEOUT, left), 1),
+        )
+        if left <= 0:
+            raise asyncio.TimeoutError(
+                f"Pair budget of {PAIR_TOTAL_BUDGET_S}s exhausted before {stage}"
+            )
+        return min(_SECTION_PAIR_LOCAL_TIMEOUT, left)
+
     async def _invoke_once(extra_instruction: str = "") -> object:
         from core.deadline import bounded_wait_for
         msgs = _messages(extra_instruction)
         try:
             return await bounded_wait_for(
                 asyncio.to_thread(llm.invoke, msgs),
-                local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
+                local_timeout=_pair_timeout("primary"),
             )
         except Exception as primary_err:
             # 2026-09-02: fallback switched from OpenAI GPT-4o to Gemini
@@ -2953,7 +2989,7 @@ async def _generate_section_pair(
             )
             resp = await bounded_wait_for(
                 asyncio.to_thread(fb.invoke, msgs),
-                local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
+                local_timeout=_pair_timeout("flash_failover"),
             )
             log.info(
                 "Gemini Flash fallback produced the section pair",
@@ -2966,12 +3002,6 @@ async def _generate_section_pair(
     def _finish_reason(r) -> str:
         meta = getattr(r, "response_metadata", None) or {}
         return str(meta.get("finish_reason") or "").upper()
-
-    if len(sections_to_write) == 1:
-        section_label = f"section {section_position_start}"
-    else:
-        end = section_position_start + len(sections_to_write) - 1
-        section_label = f"sections {section_position_start}-{end}"
 
     try:
         with log_time(log, f"Section pair gen ({section_label})"):
@@ -3091,6 +3121,83 @@ def _is_mandatory_section(sec: "_Section") -> bool:
 # A full redraft costs about as much as the first pass (~150s measured), and
 # the request ceiling is 300s. Only retry with real budget left.
 _OFF_TARGET_RETRY_MIN_BUDGET_S = 150
+
+# Wall-clock cap for ONE section pair across every attempt it makes:
+# primary call, Flash failover, retry, and the retry's failover. Measured
+# 2026-09-15 (replay of 40 prod prompts, req 8ab2c219): the per-call timeout
+# is 60s and each pair may make up to four calls, so a single stalled pair
+# could hold the request for 240s of a 285s budget — every section after it
+# then failed instantly with "deadline already exceeded" and shipped as
+# "N of M sections could not be generated". Healthy pairs run 9-56s
+# (p90 32s), so 90s leaves room for one slow call plus one failover and
+# still bounds the damage a hung provider can do to the rest of the draft.
+PAIR_TOTAL_BUDGET_S = 90
+
+# Do not start another attempt for this pair with less than this much of
+# its budget left — the call would be clamped to a few seconds and fail.
+_PAIR_RETRY_MIN_REMAINING_S = 20
+
+
+_UNRESOLVED_REVIEW_BANNER_MARKER = "**Review notes outstanding**"
+
+
+def _unresolved_review_banner(history) -> str:
+    """Banner for a draft self_refine could not bring to a pass.
+
+    `history` is the list of Critique objects self_refine returns; the last
+    one is the final verdict. When it still lists violations the draft was
+    flagged by our own critic and shipped anyway — previously with nothing
+    but a log line (`self_refine_completed | unverified_budget_exhausted |
+    final_violations=3`, req 8ab2c219). Returns "" when there is nothing
+    to say. Pure function so it is unit-testable.
+    """
+    if not history:
+        return ""
+    final = history[-1]
+    violations = list(getattr(final, "violations", None) or [])
+    # The critic's fail-closed sentinel ("verifier_unavailable": the critic
+    # itself could not run) is an audit status, not a review note. It is
+    # already reported through x_audit_status; listing it here leaked
+    # "Critic could not run (timeout). Response ships unverified" into a
+    # client-facing draft (live check, 2026-09-15).
+    violations = [v for v in violations
+                  if (getattr(v, "field", "") or "") != "verifier_unavailable"]
+    if getattr(final, "passes", True) or not violations:
+        return ""
+    # Most severe first; at most four lines so the banner stays a note.
+    _rank = {"critical": 0, "major": 1, "minor": 2}
+    violations.sort(key=lambda v: _rank.get(getattr(v, "severity", "minor"), 3))
+    lines = []
+    for v in violations[:4]:
+        field = (getattr(v, "field", "") or "").strip()
+        issue = (getattr(v, "issue", "") or "").strip().rstrip(".")
+        sev = (getattr(v, "severity", "") or "").strip()
+        head = f"{field}: " if field else ""
+        lines.append(f"> - {head}{issue}" + (f" ({sev})" if sev else ""))
+    more = len(violations) - len(lines)
+    if more > 0:
+        lines.append(f"> - and {more} more")
+    return (
+        f"> ⚠ {_UNRESOLVED_REVIEW_BANNER_MARKER} — our review flagged "
+        f"{len(violations)} point(s) in this draft that could not be "
+        f"resolved automatically. Please check them before filing:\n"
+        + "\n".join(lines) + "\n\n"
+    )
+
+
+def _make_pair_clock(budget_s: float = PAIR_TOTAL_BUDGET_S):
+    """Return a `remaining()` closure counting down `budget_s` from NOW.
+
+    Created ONCE per pair in the caller's retry loop — never inside
+    `_generate_section_pair`, where it would reset on every attempt and
+    silently turn the per-pair cap into a per-attempt cap.
+    """
+    start = time.monotonic()
+
+    def remaining() -> float:
+        return max(0.0, budget_s - (time.monotonic() - start))
+
+    return remaining
 
 
 def _normalise_heading(text: str) -> str:
@@ -3652,6 +3759,12 @@ async def _generate_sectionwise(
         # 90s. Retry fires on either exception or empty content.
         pair_text = ""
         _pair_err: Exception | None = None
+        # ONE clock for the whole pair, created here in the caller — NOT
+        # inside `_generate_section_pair`, which runs twice per pair and
+        # would reset it on attempt 2 (turning the 90s cap into 180s).
+        # Both attempts and both Flash failovers count down the same
+        # PAIR_TOTAL_BUDGET_S; see `_pair_timeout` for the per-call clamp.
+        pair_remaining = _make_pair_clock()
         for attempt in (1, 2):
             try:
                 pair_text = await _generate_section_pair(
@@ -3667,15 +3780,27 @@ async def _generate_sectionwise(
                     user_language=user_language,
                     review_and_redraft_mode=review_and_redraft_mode,
                     niche_overlay=niche_overlay,
+                    pair_remaining=pair_remaining,
                 )
                 _pair_err = None
                 if pair_text.strip():
                     break
-                # Empty content on attempt 1 → retry once.
+                # Empty content on attempt 1 → retry once, but only while
+                # the PAIR still has budget for a real call.
                 if attempt == 1:
+                    _left = pair_remaining()
+                    if _left <= _PAIR_RETRY_MIN_REMAINING_S:
+                        log.warning(
+                            "Section pair returned empty content; skipping retry "
+                            "(pair budget exhausted)",
+                            position_start=position_start,
+                            pair_remaining_s=round(_left, 1),
+                        )
+                        break
                     log.info(
                         "Section pair returned empty content; retrying once",
                         position_start=position_start,
+                        pair_remaining_s=round(_left, 1),
                     )
                     await asyncio.sleep(1)
                     continue
@@ -3683,23 +3808,25 @@ async def _generate_sectionwise(
             except Exception as e:
                 _pair_err = e
                 if attempt == 1:
-                    # Deadline check: don't retry if we've already
-                    # blown the request budget. The retry itself would
-                    # just fail again after another N seconds.
-                    from core.deadline import remaining as _remaining
-                    rem = _remaining()
-                    if rem is not None and rem <= 15:
+                    # Gate the retry on the PAIR's own budget, not the
+                    # request deadline. The request-level check (<=15s)
+                    # let a pair that had already spent 120s on attempt 1
+                    # spend another 120s on attempt 2 while the request
+                    # still had 140s — starving every section after it.
+                    _left = pair_remaining()
+                    if _left <= _PAIR_RETRY_MIN_REMAINING_S:
                         log.warning(
-                            "Section pair failed; skipping retry (budget exhausted)",
+                            "Section pair failed; skipping retry (pair budget exhausted)",
                             position_start=position_start,
                             error=short_err(e),
-                            remaining_s=round(rem, 1),
+                            pair_remaining_s=round(_left, 1),
                         )
                         break
                     log.warning(
                         "Section pair failed; retrying once",
                         position_start=position_start,
                         error=short_err(e),
+                        pair_remaining_s=round(_left, 1),
                     )
                     await asyncio.sleep(1)
                     continue
@@ -4246,7 +4373,10 @@ async def _generate_draft(
         budget = _remaining()
         log.warning(
             "Draft came back off-target language",
-            user_language=user_language, script_ratio=round(ratio, 2),
+            user_language=user_language,
+            # Three decimals: a raw 0.849 logged as "0.85" made a boundary
+            # regeneration (req 8ab2c219, 54s) look like a threshold bug.
+            script_ratio=round(ratio, 3),
             remaining_s=budget,
         )
         if budget is None or budget > _OFF_TARGET_RETRY_MIN_BUDGET_S:
@@ -4894,6 +5024,34 @@ async def drafting_node(state: LegalAgentState) -> dict:
                             draft, _ = _post_ccp(draft, (gathered_ctx or {}).get("newacts", ""))
                         except Exception as _post_err:
                             log.warning("Post-refine cross-pair check skipped", error=str(_post_err)[:120])
+                # Unresolved review notes must be visible, not just logged.
+                # self_refine returns after max_iterations with the last
+                # critique still failing; before this the draft shipped
+                # with no signal (req 8ab2c219: final_violations=3, silent).
+                _review_banner = _unresolved_review_banner(refine_history)
+                if _review_banner and _UNRESOLVED_REVIEW_BANNER_MARKER not in draft:
+                    _final_crit = refine_history[-1]
+                    log.warning(
+                        "Draft ships with unresolved review notes",
+                        violations=len(_final_crit.violations),
+                        severities=sorted(
+                            {v.severity for v in _final_crit.violations}
+                        ),
+                        iterations=len(refine_history),
+                    )
+                    try:
+                        from langgraph.config import get_stream_writer as _gsw_rv
+                        _gsw_rv()({
+                            "type": "status",
+                            "message": (
+                                f"Review found {len(_final_crit.violations)} "
+                                "point(s) to check before filing"
+                            ),
+                            "step": "review_unresolved",
+                        })
+                    except (RuntimeError, ImportError):
+                        pass  # batch endpoint — no stream to write to
+                    draft = _review_banner + draft
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))

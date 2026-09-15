@@ -206,6 +206,18 @@ def test_banner_ignores_the_critic_unavailable_sentinel():
     assert "1 point(s)" in banner
 
 
+def test_banner_never_contains_the_critic_unavailable_text():
+    """Regression pin for the live miss of 2026-09-15: the user-facing draft
+    must never carry the critic's sentinel wording, alone or mixed in."""
+    sentinel = _viol("verifier_unavailable",
+                     "Critic could not run (timeout). Response ships unverified",
+                     "critical")
+    real = _viol("prayer", "Relief does not match grounds")
+    for history in ([_crit(False, sentinel)], [_crit(False, sentinel, real)],
+                    [_crit(False, real), _crit(False, sentinel)]):
+        assert "Critic could not run" not in _unresolved_review_banner(history)
+
+
 def test_banner_caps_at_four_lines_and_counts_the_rest():
     vs = [_viol(f"f{i}", f"issue {i}") for i in range(6)]
     banner = _unresolved_review_banner([_crit(False, *vs)])

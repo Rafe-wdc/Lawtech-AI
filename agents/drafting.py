@@ -3222,6 +3222,91 @@ def _retrieve_source_for_pair(
     return reduced, info
 
 
+# ---------------------------------------------------------------------------
+# Budget-aware planning (PR 3).
+#
+# The fan-out judge sizes the plan from the document type and the reference
+# template; it never sees the clock. Template acquisition can already have
+# spent 25-60s of the 285s request budget (web-synthesised references), and
+# the section pairs run sequentially at a measured 9-56s per call. A 7-8
+# section plan that fits on a fast day is 3-4 sections short on a slow one,
+# and the shortfall arrives as "N of M sections could not be generated".
+# This check runs AFTER template acquisition and the judge, BEFORE the pair
+# loop, and shrinks the plan to what the remaining budget can actually
+# write — reserving time for the language gate and self-refine that follow.
+# ---------------------------------------------------------------------------
+
+# Time to hold back for what runs after the pair loop. Self-refine at the
+# adaptive single-pass band (PR 2) is one critique + one refine ≈ 5s + 32s;
+# the language gate and the deterministic guards are cheap unless they
+# regenerate, which the reserve does not attempt to fund.
+SELF_REFINE_RESERVE_S = 45.0
+LANG_GATE_RESERVE_S = 20.0
+
+# p90 wall time of ONE section-pair call (two sections). Constant for now,
+# taken from the 2026-09-15 replay (13 pairs: 9-39s) and the timeout
+# calibration comment in _generate_section_pair (124 calls: p90 32s); the
+# margin covers the odd failover. Wire to telemetry once the
+# `Section pair gen` timings are aggregated.
+OBSERVED_PAIR_TIME_P90_S = 45.0
+
+
+def _fit_plan_to_budget(
+    sections: list["_Section"],
+    budget_left_s: float,
+    pair_p90_s: float = OBSERVED_PAIR_TIME_P90_S,
+) -> tuple[list["_Section"], int, str]:
+    """Shrink a section plan to what `budget_left_s` can write.
+
+    Sections are written two per call, so feasibility is counted in pairs.
+    Returns (sections, feasible_sections, action) with action one of:
+      "kept"        — the plan fits; sections returned unchanged
+      "collapsed"   — adjacent middle sections merged until it fits; the
+                      FIRST (cause title / addressee) and LAST (prayer /
+                      verification / execution) sections are never merged
+                      away, for the reason the MAX_SECTIONS trim gives
+      "single_pass" — fewer than one pair fits; caller should single-pass
+    Pure function; no clock access, so it is unit-testable.
+    """
+    n = len(sections)
+    feasible_pairs = int(max(0.0, budget_left_s) // pair_p90_s)
+    feasible = feasible_pairs * 2
+    if n <= feasible:
+        return list(sections), feasible, "kept"
+    if feasible < 2:
+        return [], feasible, "single_pass"
+    secs = list(sections)
+    while len(secs) > feasible and len(secs) > 2:
+        # Merge the adjacent MIDDLE pair whose combined brief is shortest,
+        # so no single merged section becomes a disproportionate write.
+        best_i, best_len = 1, None
+        for i in range(1, len(secs) - 2):
+            L = len(secs[i].summary or "") + len(secs[i + 1].summary or "")
+            if best_len is None or L < best_len:
+                best_i, best_len = i, L
+        if len(secs) - 2 < 2:  # only one middle section left; cannot merge
+            break
+        a, b = secs[best_i], secs[best_i + 1]
+        merged = _Section(
+            id=f"{a.id}_{b.id}"[:80],
+            heading=f"{a.heading} and {b.heading}",
+            summary=" ".join(s for s in (a.summary, b.summary) if s).strip(),
+        )
+        secs[best_i:best_i + 2] = [merged]
+    if len(secs) > feasible:
+        # Could not collapse far enough (e.g. feasible == 2 with a 3-section
+        # plan whose middle is a single section) — merge the middle into
+        # the first section rather than dropping the closing block.
+        while len(secs) > feasible and len(secs) > 2:
+            a, b = secs[0], secs[1]
+            secs[0:2] = [_Section(
+                id=f"{a.id}_{b.id}"[:80],
+                heading=f"{a.heading} and {b.heading}",
+                summary=" ".join(s for s in (a.summary, b.summary) if s).strip(),
+            )]
+    return secs, feasible, "collapsed"
+
+
 _UNRESOLVED_REVIEW_BANNER_MARKER = "**Review notes outstanding**"
 
 
@@ -4401,6 +4486,49 @@ async def _generate_draft(
         strategy.sections = (
             strategy.sections[:MAX_SECTIONS - 1] + strategy.sections[-1:]
         )
+
+    # --- Budget-aware plan (PR 3) -------------------------------------------
+    # Feasibility check between the judge and the pair loop: how many pairs
+    # can the remaining request budget write, after reserving time for the
+    # language gate and self-refine? Every trim is logged with the numbers
+    # so the reserves and the p90 constant can be tuned from the logs.
+    if strategy.should_fanout and strategy.sections:
+        from core.deadline import remaining as _plan_remaining
+        _rem = _plan_remaining()
+        if _rem is not None:
+            _budget_left = _rem - SELF_REFINE_RESERVE_S - LANG_GATE_RESERVE_S
+            _fitted, _feasible, _action = _fit_plan_to_budget(
+                strategy.sections, _budget_left,
+            )
+            if _action == "kept":
+                log.info(
+                    "Plan fits budget",
+                    planned=len(strategy.sections), feasible=_feasible,
+                    budget_left_s=round(_budget_left, 1),
+                    remaining_s=round(_rem, 1),
+                )
+            else:
+                log.warning(
+                    "Plan trimmed for budget",
+                    planned=len(strategy.sections), feasible=_feasible,
+                    budget_left_s=round(_budget_left, 1),
+                    remaining_s=round(_rem, 1),
+                    self_refine_reserve_s=SELF_REFINE_RESERVE_S,
+                    lang_gate_reserve_s=LANG_GATE_RESERVE_S,
+                    pair_p90_s=OBSERVED_PAIR_TIME_P90_S,
+                    action=_action,
+                    planned_headings=[s.heading[:24] for s in strategy.sections],
+                    fitted_headings=[s.heading[:40] for s in _fitted],
+                )
+                if _action == "single_pass":
+                    strategy.should_fanout = False
+                    strategy.sections = []
+                    strategy.reasoning = (
+                        f"{strategy.reasoning} [trimmed to single-pass: "
+                        f"budget_left={_budget_left:.0f}s]"
+                    )
+                else:
+                    strategy.sections = _fitted
 
     if not strategy.should_fanout or not strategy.sections:
         log.info(

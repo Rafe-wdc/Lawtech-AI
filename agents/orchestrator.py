@@ -1595,6 +1595,10 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # ("draft FIR + charge sheet + cite Supreme Court judgments") to one
     # agent. Rule 7 of CLASSIFY_AND_PLAN_PROMPT already routes pure SCI
     # lookups correctly; the ~2s latency saving was not worth the collapse.
+    # Audit 2026-09-15: the greeting short-circuit skipped the assignment at
+    # the DynamicPlanner branch, so 'hi' / 'hello' raised UnboundLocalError
+    # at the `if dynamic_plan is not None` tail (present since 6ece09a).
+    dynamic_plan = None
     # --- Short-circuit: greeting resolved ---
     if is_greeting:
         log.info("Greeting detected, short-circuiting classification",

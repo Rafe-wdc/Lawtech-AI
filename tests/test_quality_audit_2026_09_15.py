@@ -201,3 +201,13 @@ def test_verifier_unavailable_fallback_refine_has_shrink_floor():
     block = src[src.index("_critique_is_verifier_unavailable(critique)"):]
     block = block[:block.index("return current, history")]
     assert "len(fallback) >= 0.85 * len(current)" in block
+
+
+# ------------------------------------------------ 12. greeting crash (live)
+def test_greeting_short_circuit_initialises_dynamic_plan():
+    # "hello" as a fresh message raised UnboundLocalError('dynamic_plan') on
+    # dev @9cdcad1: the greeting short-circuit skipped the assignment that only
+    # the non-greeting branch made, and the tail read the variable.
+    import agents.orchestrator as orch
+    src = inspect.getsource(orch.orchestrator_plan_node)
+    assert src.index("dynamic_plan = None") < src.index("if is_greeting:")

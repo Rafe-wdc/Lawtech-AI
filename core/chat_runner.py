@@ -53,7 +53,6 @@ class ChatRunnerInputs:
     integration_token: str | None = None        # FSD JWT for Google/Notion
     cite_appendix: bool | None = None           # Drafting: include REFERENCES & CITATIONS block
     regenerate_of: str | None = None            # Sagar bug #5: refine previous response
-    continue_draft_of: str | None = None        # PR 4: resume an incomplete draft (hash)
     enable_cache: bool = True                   # /chat disables for uploads
     enable_quality_scoring: bool = True         # 10% sampling
     skip_thread_id_event: bool = False          # caller already emitted it
@@ -494,7 +493,6 @@ async def run_chat_pipeline(
         preferred_language=i.preferred_language,
         cite_appendix=i.cite_appendix,
         regenerate_of=i.regenerate_of,
-        continue_draft_of=i.continue_draft_of,
     )
     if integration_context_dict:
         initial_state["integration_context"] = integration_context_dict
@@ -640,18 +638,6 @@ async def run_chat_pipeline(
                                 "failed_sections": chunk["failed_sections"],
                                 "total_sections": chunk["total_sections"],
                                 "completed_sections": chunk["completed_sections"],
-                            })
-                        elif kind == "draft_continuation":
-                            # PR 4: the draft can be resumed. The frontend
-                            # renders "Continue drafting" and sends
-                            # `continue_draft_of=<completed_sections_hash>`.
-                            yield _sse({
-                                "type": "draft_continuation",
-                                "thread_id": chunk.get("thread_id"),
-                                "failed_at_section_index": chunk.get("failed_at_section_index"),
-                                "completed_sections_hash": chunk.get("completed_sections_hash"),
-                                "total_sections": chunk.get("total_sections"),
-                                "completed_sections": chunk.get("completed_sections"),
                             })
                         elif kind == "queue_status":
                             yield _sse({

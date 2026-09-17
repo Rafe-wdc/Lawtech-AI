@@ -3074,14 +3074,18 @@ def _is_draft_shaped(text: str) -> bool:
 def _has_citable_identity(src) -> bool:
     """True when a source carries something a reader can cite or open.
 
-    A judgment has a PDF link or a court; a statute has a section or an act.
-    A source with none of these is a label, not a citation: Scenario attaches
-    one titled "AI-Generated Legal Analysis" when web grounding returns no
-    pages, and rendering it printed that label as a bullet under
-    "## Additional Analysis" in a lawyer-reported answer (2026-09-17).
+    A judgment has a PDF link, a court, or at least a case-name title
+    ("X v. Y"); a statute has a section or an act. A source with none of
+    these is a label, not a citation: Scenario attaches one titled
+    "AI-Generated Legal Analysis" when web grounding returns no pages, and
+    rendering it printed that label as a bullet under "## Additional Analysis"
+    in a lawyer-reported answer (2026-09-17).
     """
-    return any(getattr(src, f, None) for f in
-               ("doc_link", "court_name", "section_number", "act_name"))
+    if any(getattr(src, f, None) for f in
+           ("doc_link", "court_name", "section_number", "act_name")):
+        return True
+    title = getattr(src, "title", None) or ""
+    return bool(re.search(r"\s(?:v\.?|vs\.?|versus)\s", title, re.I))
 
 
 def _sources_as_citation_list(result) -> str:

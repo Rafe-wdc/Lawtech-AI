@@ -230,6 +230,14 @@ MAX_FILE_SIZE_MB = 1024             # per-file size limit (1 GB)
 MAX_THREAD_STORAGE_MB = 1024        # 1 GB total per thread
 GEMINI_URI_EXPIRY_BUFFER_HOURS = 2  # re-upload if Gemini URI expires within this window
 
+# Per-plan upload limits, keyed by the plan in the URL: POST /pyapi/chat/{plan}.
+# The document count per plan (499: 2, 999: 5) is enforced by the frontend.
+# The plain /pyapi/chat route has no page limit.
+PLAN_UPLOAD_LIMITS = {
+    "499": {"max_pages_per_doc": 30},
+    "999": {"max_pages_per_doc": 30},
+}
+
 # --- In-app file GC (Gap #4, 2026-09-02) ---
 # Removes reliance on the .github/workflows/prod-daily-cleanup.yml cron
 # so any deployment (dev / local / new prod box / one-off VM) cleans

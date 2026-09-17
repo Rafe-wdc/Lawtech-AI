@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from typing import Optional
+from urllib.parse import quote
 
 import requests
 from langchain.tools import tool
@@ -95,7 +96,11 @@ def generate_s3_link(court: str, file_name: str, title: str) -> Optional[str]:
 
     if not _s3_key_exists(S3_BUCKET, s3_key):
         return None
-    return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
+    # The key is checked raw (boto3 wants it unencoded) but the URL must be
+    # percent-encoded: court folders ("kerala high court/") and SC titles
+    # ("STATE (NCT OF DELHI)") carry spaces and parentheses, and either one
+    # ends a markdown link early, so the answer showed a raw, unclickable URL.
+    return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{quote(s3_key, safe='/')}"
 
 
 # --- PDF Chat History ---

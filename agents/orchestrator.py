@@ -2448,6 +2448,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             cleaned = _strip_internal_cite_markers(result.content)
             log.info("Drafting solo — passing through unmodified (BUG-03 fix)",
                      draft_len=len(result.content), cleaned_len=len(cleaned))
+            # The draft body stays untouched; the lookup only appends links
+            # for the judgments it cites (see core/judgments_cited.py).
+            from core.judgments_cited import append_judgments_cited
+            cleaned = await append_judgments_cited(
+                cleaned, user_query=state.get("original_query") or query)
             return {
                 "final_response": cleaned,
                 "source_metadata": _serialize_sources(result),
@@ -2548,6 +2553,12 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         # [CITE: ...] placeholder markers (BUG-09), append a References section.
         try:
             enriched = _strip_internal_cite_markers(drafting_result.content)
+            # Look up only the judgments the DRAFT cites, before the
+            # references appendix is attached (that appendix carries its own
+            # links and would otherwise be scanned too).
+            from core.judgments_cited import append_judgments_cited
+            enriched = await append_judgments_cited(
+                enriched, user_query=state.get("original_query") or query)
             if citations_text.strip():
                 enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
 
@@ -3062,13 +3073,30 @@ def _is_draft_shaped(text: str) -> bool:
     return False
 
 
+def _has_citable_identity(src) -> bool:
+    """True when a source carries something a reader can cite or open.
+
+    A judgment has a PDF link, a court, or at least a case-name title
+    ("X v. Y"); a statute has a section or an act. A source with none of
+    these is a label, not a citation: Scenario attaches one titled
+    "AI-Generated Legal Analysis" when web grounding returns no pages, and
+    rendering it printed that label as a bullet under "## Additional Analysis"
+    in a lawyer-reported answer (2026-09-17).
+    """
+    if any(getattr(src, f, None) for f in
+           ("doc_link", "court_name", "section_number", "act_name")):
+        return True
+    title = getattr(src, "title", None) or ""
+    return bool(re.search(r"\s(?:v\.?|vs\.?|versus)\s", title, re.I))
+
+
 def _sources_as_citation_list(result) -> str:
     """Render an agent's structured sources as a citation list."""
     lines = []
     seen = set()
     for src in (getattr(result, "sources", None) or []):
         title = (getattr(src, "title", None) or "").strip()
-        if not title or title.lower() in seen:
+        if not title or title.lower() in seen or not _has_citable_identity(src):
             continue
         seen.add(title.lower())
         bits = [title]
@@ -3241,7 +3269,9 @@ def _new_source_citations(result, known_cites: set[str], known_names: set[str]) 
 
     Used when a supporter's prose is redundant or over-long: the prose goes,
     but a judgment the primary never mentioned still reaches the user with
-    its court, year and PDF link intact.
+    its court, year and PDF link intact. Label-only sources are already
+    excluded by `_sources_as_citation_list`, so an agent with nothing citable
+    returns "" and the caller drops its heading.
     """
     lines = []
     for line in _sources_as_citation_list(result).splitlines():

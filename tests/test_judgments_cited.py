@@ -207,3 +207,25 @@ def test_drafting_with_citation_agents_scans_only_the_draft(monkeypatch):
     assert HEADING in answer
     assert "Kusum Sharma" not in seen  # appendix content is not looked up
     assert answer.index(HEADING) < answer.index("REFERENCES & CITATIONS")
+
+
+# ---------------------------------------------------------------------------
+# Index spellings seen live on 2026-09-17
+# ---------------------------------------------------------------------------
+
+def test_acronym_matches_the_full_name_and_back():
+    # draft: "Satender Kumar Antil v. CBI"; SCI index: "... VS CENTRAL BUREAU OF INVESTIGATION"
+    case = CitedCase("Satender Kumar Antil", "CBI")
+    assert _parties_match(case, "SATENDER KUMAR ANTIL", "CENTRAL BUREAU OF INVESTIGATION")
+    full = CitedCase("Sanjay Chandra", "Central Bureau of Investigation")
+    assert _parties_match(full, "SANJAY CHANDRA", "C.B.I.")
+
+
+def test_joined_initial_in_the_index_still_matches():
+    # SCI index: "NIZAM'S INSTITUTE OF MEDICAL SCIENCES VS PRASANTH S.DHANANKA ."
+    case = CitedCase("Nizam's Institute of Medical Sciences", "Prasanth S. Dhananka and Others")
+    assert _parties_match(case, "NIZAM'S INSTITUTE OF MEDICAL SCIENCES", "PRASANTH S.DHANANKA .")
+
+
+def test_query_forms_cover_both_spellings():
+    assert set(jc._query_forms("CBI")) == {"cbi", "bureau central investigation"}

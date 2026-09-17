@@ -104,9 +104,74 @@ class CitedCase:
         return int(m.group(1)) if m else None
 
 
+# Parties written as an acronym in a draft and in full in the index, or the
+# reverse ("Satender Kumar Antil v. CBI" is stored as "... VS CENTRAL BUREAU
+# OF INVESTIGATION").
+_ALIASES: dict[str, tuple[str, ...]] = {
+    "cbi": ("central", "bureau", "investigation"),
+    "ed": ("directorate", "enforcement"),
+    "nia": ("national", "investigation", "agency"),
+    "ncb": ("narcotics", "control", "bureau"),
+    "uoi": ("union", "india"),
+    "rbi": ("reserve", "bank", "india"),
+    "sebi": ("securities", "exchange", "board", "india"),
+    "lic": ("life", "insurance", "corporation", "india"),
+    "dda": ("delhi", "development", "authority"),
+}
+
+
+def _raw_tokens(text: str) -> list[str]:
+    """Words of `text`, with runs of single letters joined ("C.B.I." -> "cbi").
+
+    Dots split words, so a joined initial ("PRASANTH S.DHANANKA") still yields
+    "dhananka"; lone initials ("V.", "P.B.") drop out as too short.
+    """
+    out: list[str] = []
+    run = ""
+    for w in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if len(w) == 1 and w.isalpha():
+            run += w
+            continue
+        if run:
+            out.append(run)
+            run = ""
+        out.append(w)
+    if run:
+        out.append(run)
+    return out
+
+
 def _tokens(text: str) -> set[str]:
-    words = re.findall(r"[a-z0-9]+", re.sub(r"\.", "", (text or "").lower()))
-    return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
+    """Distinctive words of a party name, with acronyms and their expansions
+    both present so either spelling matches the other."""
+    words = {w for w in _raw_tokens(text)
+             if (len(w) > 2 or w in _ALIASES) and w not in _STOPWORDS}
+    for acr, expansion in _ALIASES.items():
+        if acr in words or set(expansion) <= words:
+            words.add(acr)
+            words.update(expansion)
+    return words
+
+
+def _query_forms(text: str) -> list[str]:
+    """Query strings for the index: the name as written, and with acronyms
+    swapped for their expansions (and vice versa)."""
+    base = {w for w in _raw_tokens(text)
+            if (len(w) > 2 or w in _ALIASES) and w not in _STOPWORDS}
+    expanded, contracted = set(base), set(base)
+    for acr, expansion in _ALIASES.items():
+        if acr in base:
+            expanded.discard(acr)
+            expanded.update(expansion)
+        if set(expansion) <= base:
+            contracted.difference_update(expansion)
+            contracted.add(acr)
+    forms = []
+    for f in (base, expanded, contracted):
+        q = " ".join(sorted(f))
+        if q and q not in forms:
+            forms.append(q)
+    return forms
 
 
 # Abbreviations that end in a full stop inside a party name.
@@ -199,12 +264,14 @@ def _party_query(case: CitedCase, pet_field: str, resp_field: str) -> dict:
         {"match_phrase": {pet_field: {"query": case.petitioner, "boost": 5}}},
         {"match_phrase": {resp_field: {"query": case.respondent, "boost": 3}}},
     ]
+    def _any_form(field: str, text: str, **opts) -> dict:
+        return {"bool": {"minimum_should_match": 1, "should": [
+            {"match": {field: {"query": q, **opts}}} for q in _query_forms(text)]}}
+
     return {"bool": {
         "must": [
-            {"match": {pet_field: {"query": " ".join(sorted(_tokens(case.petitioner))),
-                                   "operator": "and"}}},
-            {"match": {resp_field: {"query": " ".join(sorted(_tokens(case.respondent))),
-                                    "minimum_should_match": "60%"}}},
+            _any_form(pet_field, case.petitioner, operator="and"),
+            _any_form(resp_field, case.respondent, minimum_should_match="60%"),
         ],
         "should": should,
     }}

@@ -3062,13 +3062,26 @@ def _is_draft_shaped(text: str) -> bool:
     return False
 
 
+def _has_citable_identity(src) -> bool:
+    """True when a source carries something a reader can cite or open.
+
+    A judgment has a PDF link or a court; a statute has a section or an act.
+    A source with none of these is a label, not a citation: Scenario attaches
+    one titled "AI-Generated Legal Analysis" when web grounding returns no
+    pages, and rendering it printed that label as a bullet under
+    "## Additional Analysis" in a lawyer-reported answer (2026-09-17).
+    """
+    return any(getattr(src, f, None) for f in
+               ("doc_link", "court_name", "section_number", "act_name"))
+
+
 def _sources_as_citation_list(result) -> str:
     """Render an agent's structured sources as a citation list."""
     lines = []
     seen = set()
     for src in (getattr(result, "sources", None) or []):
         title = (getattr(src, "title", None) or "").strip()
-        if not title or title.lower() in seen:
+        if not title or title.lower() in seen or not _has_citable_identity(src):
             continue
         seen.add(title.lower())
         bits = [title]
@@ -3241,7 +3254,9 @@ def _new_source_citations(result, known_cites: set[str], known_names: set[str]) 
 
     Used when a supporter's prose is redundant or over-long: the prose goes,
     but a judgment the primary never mentioned still reaches the user with
-    its court, year and PDF link intact.
+    its court, year and PDF link intact. Label-only sources are already
+    excluded by `_sources_as_citation_list`, so an agent with nothing citable
+    returns "" and the caller drops its heading.
     """
     lines = []
     for line in _sources_as_citation_list(result).splitlines():

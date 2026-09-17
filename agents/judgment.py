@@ -442,14 +442,24 @@ async def judgment_node(state: LegalAgentState) -> dict:
         _user_language,
         _intent,
     )
+    # Gap #1: inject uploaded-document text so Judgment sees the user's
+    # matter (e.g. "which HC cases match this fact pattern?" with an FIR
+    # or complaint attached). Empty when no files — normal flow unchanged.
+    from core.state import FileContextData as _FileContextData
+    from core.file_context import format_file_context_prefix as _fmt_files
+    _file_prefix = _fmt_files(_FileContextData.from_state(state))
+    if _file_prefix:
+        _system_prompt = _system_prompt + "\n\n" + _file_prefix
     log.info("Agent started", query=query[:100],
-             using_agent_query="Judgment" in agent_queries)
+             using_agent_query="Judgment" in agent_queries,
+             has_file_context=bool(_file_prefix))
 
     try:
         # Steps 1 + 2: Run metadata extraction and preliminary ES search in parallel.
         progress("judgment", "Extracting case details from query...", step="metadata")
         # Preliminary search uses regex-fallback metadata (fast) while GPT-4o extracts
         # richer metadata. If preliminary hits are found, we skip the refined search.
+        
         def _preliminary_search():
             prelim_meta = _judgment_regex_fallback(query)
             prelim_court, _ = _normalize_court_filter(prelim_meta.court_name)

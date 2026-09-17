@@ -297,9 +297,19 @@ async def legislation_node(state: LegalAgentState) -> dict:
         _user_language,
         intent,
     )
+    # Gap #1 (file-attachment tracker): inject any uploaded-document text
+    # so Legislation sees the user's actual matter when they've attached a
+    # file (e.g. "which sections apply?" with an FIR attached). Empty when
+    # no files are attached — normal flow unchanged.
+    from core.state import FileContextData as _FileContextData
+    from core.file_context import format_file_context_prefix as _fmt_files
+    _file_prefix = _fmt_files(_FileContextData.from_state(state))
+    if _file_prefix:
+        _system_prompt = _system_prompt + "\n\n" + _file_prefix
     log.info("Agent started", query=query[:100],
              using_agent_query="Legislation" in agent_queries,
-             named_acts_count=len(named_acts))
+             named_acts_count=len(named_acts),
+             has_file_context=bool(_file_prefix))
 
     try:
         progress("legislation", "Parsing query for section references...", step="parse")

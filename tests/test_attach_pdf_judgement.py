@@ -18,7 +18,8 @@ from typing import Any
 import httpx
 
 BASE = "https://tool.lawttorney.com/pyapiv2"
-API_KEY = "ff6c3e959de2bf4f73901db1ff797ea484d326ac6e2622067493352435f23a51"
+import os
+API_KEY = os.environ["LAWTECH_API_KEY"]
 PDF_PATH = Path(__file__).resolve().parents[1] / "test_pdfs" / "judgement123.pdf"
 PDF_MIME = "application/pdf"
 

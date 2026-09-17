@@ -7,7 +7,7 @@ Agents return partial dicts — LangGraph merges them into the full state.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Annotated
+from typing import Any, Literal, Annotated, NotRequired
 from langchain_core.messages import BaseMessage
 from langgraph.graph import MessagesState
 
@@ -214,6 +214,11 @@ class LegalAgentState(MessagesState):
                                 # modifiable draft artefact; "" otherwise
     previous_artifact_content: str  # the prior turn's ai_response (raw
                                     # content of the modifiable artefact)
+    conversational_followup: bool   # True when this turn is an
+                                    # acknowledgement ("ok", "thanks",
+                                    # "yes") with no new ask - set by the
+                                    # memory node, read by the planner and
+                                    # the Non_legal agent. See core.followup.
 
     # Agent results — uses custom merge so parallel agents don't overwrite each other
     agent_results: Annotated[dict[str, AgentResult], _merge_agent_results]
@@ -238,6 +243,14 @@ class LegalAgentState(MessagesState):
     # over `regenerate_of` so "regenerate" produces a polished version of
     # the previous answer instead of a completely new one.
     regenerate_of: str | None
+
+    # DynamicPlanner output (Move 3 Phase A). Populated by
+    # orchestrator_plan_node when DYNAMIC_ORCHESTRATOR=1 so downstream
+    # fan-out (route_after_orchestrator) and the synthesizer can read
+    # planner-decided flags (cite_appendix_recommended, overall_confidence,
+    # self_critique). Typed as Any to avoid importing config.intent at
+    # state-module load time. NotRequired: legacy path (flag off) omits it.
+    _dynamic_plan: NotRequired[Any]
 
     # Final output
     final_response: str
@@ -287,6 +300,14 @@ class FileContextData:
     file_names: list[str] = field(default_factory=list)
     summary: str = ""
     extracted_texts: list[dict] = field(default_factory=list)
+    # Gap #3 (2026-09-02): per-file kind classifier verdicts, populated
+    # by core.file_classifier at ingest and surfaced via
+    # FileContext.to_dict(). Each entry: {"name": str, "kind": str,
+    # "confidence": float}. `kind` is one of core.file_classifier.ALL_KINDS
+    # or "" (classifier didn't run) or "other" (couldn't decide). Consumed
+    # by orchestrator plan-node file-hint + core.file_context prefix
+    # renderer + Document agent's per-kind specialised prompt picker.
+    file_kinds: list[dict] = field(default_factory=list)
 
     @property
     def has_content(self) -> bool:

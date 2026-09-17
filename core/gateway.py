@@ -134,19 +134,89 @@ _APP_START_TIME = time.time()
 _pg_pool = None  # kept for graceful shutdown
 
 
+def _clear_caches_on_startup() -> None:
+    """Wipe chroma_store/ (OCR cache + all collection dirs) on every startup.
+
+    Rationale (2026-09-06 policy):
+
+      * OCR cache — file-hash-keyed OCR text. Earlier failed / partial
+        OCR runs (e.g. Gemini 2.5-flash 504s) can persist incomplete text
+        that every re-upload of the same PDF then reuses. Wiping forces
+        a fresh OCR pass after every restart.
+      * ChromaDB collection dirs — per-thread PDF embeddings. Wiping
+        means users LOSE access to files uploaded in previous turns
+        after any restart / deploy. Trade-off: deterministic clean
+        state on every deploy vs multi-turn attachment persistence.
+      * In-memory response_cache — naturally empty on process boot; no
+        action needed.
+
+    Opt out with `SKIP_CACHE_CLEAR_ON_STARTUP=1` when persistent
+    multi-turn state is desired (e.g. prod with rare restarts).
+
+    Race safety: under gunicorn preload_app=True, this fires per-worker.
+    All workers race to wipe/recreate the same dir; rmtree(ignore_errors)
+    + mkdir(exist_ok=True) tolerates the race. End state is always an
+    empty chroma_store/. Chroma client is lazy-initialized after this
+    (`get_chroma_client` on first request), so no in-flight file handles.
+    """
+    if os.environ.get("SKIP_CACHE_CLEAR_ON_STARTUP", "").strip().lower() in ("1", "true", "yes"):
+        log.info("Startup: cache clear SKIPPED (SKIP_CACHE_CLEAR_ON_STARTUP set)")
+        return
+    from pathlib import Path
+    root = Path(CHROMA_STORE_ROOT)
+    if not root.exists():
+        log.info("Startup: chroma_store not present, nothing to clear",
+                 path=str(root))
+        return
+    try:
+        subdirs = sum(1 for c in root.iterdir() if c.is_dir())
+        files = sum(1 for c in root.iterdir() if c.is_file())
+    except Exception:
+        subdirs = files = -1
+    try:
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True, exist_ok=True)
+        log.info("Startup: chroma_store wiped",
+                 subdirs_removed=subdirs, files_removed=files,
+                 path=str(root))
+    except Exception as e:
+        log.error("Startup: chroma_store wipe failed", error=str(e)[:200])
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _pg_pool
     log.info("Startup: initializing checkpointer and compiling agent graph")
+    _clear_caches_on_startup()
     checkpointer, _pg_pool = await create_checkpointer()
     app.state.agent_graph = compile_graph(checkpointer=checkpointer)
     # Seed the in-flight gate gauges per worker (multiproc-safe — each
     # worker writes to its own gauge file, MultiProcessCollector sums them).
     METRICS["inflight_gate_capacity"].set(_MAX_INFLIGHT)
     METRICS["inflight_gate_available"].set(_MAX_INFLIGHT)
+
+    # Gap #4 (2026-09-02): spawn in-app file GC loop so uploads/ and
+    # chroma_store/ get swept every FILE_GC_INTERVAL_HOURS without
+    # depending on the prod-daily-cleanup.yml cron. Task lives for the
+    # lifetime of the app; cancelled cleanly on shutdown below.
+    from .settings import FILE_GC_ENABLED
+    _gc_task = None
+    if FILE_GC_ENABLED:
+        from .file_gc import start_gc_loop
+        _gc_task = asyncio.create_task(start_gc_loop(), name="file_gc_loop")
+        log.info("Startup: file GC loop scheduled")
+    else:
+        log.info("Startup: file GC disabled (FILE_GC_ENABLED=0)")
+
     log.info("Startup complete")
     yield
     # Shutdown
+    if _gc_task is not None:
+        _gc_task.cancel()
+        try:
+            await _gc_task
+        except (asyncio.CancelledError, Exception):
+            pass
     if _pg_pool is not None:
         log.info("Shutdown: closing PostgreSQL checkpointer pool")
         await _pg_pool.close()
@@ -356,7 +426,8 @@ async def metrics_middleware(request: Request, call_next):
 _MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT_PER_WORKER", "10"))
 _inflight_sem = asyncio.Semaphore(_MAX_INFLIGHT)
 _INFLIGHT_EXCLUDE_PATHS = {
-    "/", "/pyapi/health", "/pyapi/health/detailed", "/pyapi/metrics",
+    "/", "/pyapi/health", "/pyapi/health/detailed",
+    "/pyapi/health/verifier_stats", "/pyapi/metrics",
 }
 _INFLIGHT_RETRY_AFTER_SEC = 5
 
@@ -785,6 +856,12 @@ async def search(data: SearchRequest, request: Request):
         _agent_fallback_used(r)
         for r in final_state.get("agent_results", {}).values()
     )
+    # Audit 2026-09-15: an answer assembled while a planned agent errored
+    # (timeout, ReAct overrun) is degraded; do not replay it for an hour.
+    _degraded = any(
+        (r.get("error") if isinstance(r, dict) else getattr(r, "error", None))
+        for r in final_state.get("agent_results", {}).values()
+    )
     _fire_and_forget(chat_store.log_request(
         thread_id=thread_id,
         endpoint="/pyapi/search",
@@ -899,6 +976,7 @@ async def search(data: SearchRequest, request: Request):
         and final_response
         and not final_state.get("is_blocked")
         and not _fallback_used
+        and not _degraded
         and _emitted_total > 0
     ):
         response_cache.set(
@@ -1090,6 +1168,15 @@ async def chat_with_files(
                 detail=f"Maximum {MAX_FILES} files allowed",
             )
 
+        # Per-file size cap (in bytes) used by the pre-read + chunked-read
+        # checks below. Duplicated from validate_upload so we reject BEFORE
+        # any body allocation. validate_upload still runs after as a
+        # belt-and-suspenders re-check.
+        from core.settings import MAX_FILE_SIZE_MB as _MAX_FILE_SIZE_MB
+        from core.file_processor import ALLOWED_EXTENSIONS as _ALLOWED_EXTENSIONS
+        _size_cap_bytes = _MAX_FILE_SIZE_MB * 1024 * 1024
+        _read_chunk = 4 * 1024 * 1024   # 4 MB chunks bound peak allocation
+
         for f in files:
             if not f.filename or f.filename == "":
                 continue
@@ -1097,23 +1184,113 @@ async def chat_with_files(
             original_name = f.filename
             filename = safe_upload_name(original_name)
 
-            # Save to temp file
-            suffix = os.path.splitext(filename)[1]
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                f.file.seek(0)
-                content = await f.read()
-                tmp.write(content)
-                tmp_path = tmp.name
-                temp_paths.append(tmp_path)
-
-            err = validate_upload(filename, len(content))
-            if err:
-                log.warning("File rejected in chat", file=original_name,
-                            sanitized=filename, reason=err)
-                rejected_files.append({"name": original_name, "reason": err})
+            # Gap #2 defence 1 — cheap extension check BEFORE any body read.
+            # Rejects .exe / .zip / other non-whitelisted uploads without
+            # allocating a single byte of Python memory.
+            _ext = os.path.splitext(filename)[1].lower()
+            if _ext not in _ALLOWED_EXTENSIONS:
+                log.warning("File rejected pre-read (extension)",
+                            file=original_name, sanitized=filename, ext=_ext)
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": f"Unsupported file type: {_ext}. Allowed: "
+                              f"{', '.join(sorted(_ALLOWED_EXTENSIONS))}",
+                })
+                continue
+            if _ext == ".doc":
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": "Old .doc format is not supported. "
+                              "Please convert to .docx",
+                })
                 continue
 
-            file_tuples.append((tmp_path, filename, len(content)))
+            # Gap #2 defence 2 — Content-Length pre-check when the client
+            # supplied one (FastAPI populates UploadFile.size from the
+            # multipart Content-Length header). Rejects declared-oversized
+            # uploads without reading a single byte.
+            _declared_size = getattr(f, "size", None)
+            if _declared_size is not None and _declared_size > _size_cap_bytes:
+                _declared_mb = _declared_size / (1024 * 1024)
+                log.warning("File rejected pre-read (Content-Length)",
+                            file=original_name, sanitized=filename,
+                            declared_mb=round(_declared_mb, 1),
+                            cap_mb=_MAX_FILE_SIZE_MB)
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": f"File too large ({_declared_mb:.1f} MB). "
+                              f"Max: {_MAX_FILE_SIZE_MB} MB",
+                })
+                continue
+
+            # Gap #2 defence 3 — chunked read with early-terminate cap.
+            # Bounds peak memory to `_read_chunk` (4 MB) + already-written
+            # bytes up to `_size_cap_bytes`. Catches clients that omit or
+            # lie about Content-Length. Previous code did
+            # `content = await f.read()` (no size arg) which loaded the
+            # entire body into a single bytes object — 30 × 1 GB uploads
+            # would OOM the worker before any validation could run.
+            suffix = os.path.splitext(filename)[1]
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp_path = tmp.name
+            total_bytes = 0
+            exceeded_cap = False
+            try:
+                try:
+                    f.file.seek(0)
+                except (AttributeError, ValueError):
+                    pass  # some UploadFile impls don't support pre-read seek
+                while True:
+                    chunk = await f.read(_read_chunk)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > _size_cap_bytes:
+                        exceeded_cap = True
+                        break
+                    tmp.write(chunk)
+            finally:
+                tmp.close()
+
+            if exceeded_cap:
+                # Clean up the partial temp file, do NOT append to file_tuples.
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                log.warning("File rejected mid-read (cap exceeded)",
+                            file=original_name, sanitized=filename,
+                            partial_mb=round(total_bytes / (1024 * 1024), 1),
+                            cap_mb=_MAX_FILE_SIZE_MB)
+                rejected_files.append({
+                    "name": original_name,
+                    "reason": f"File exceeded {_MAX_FILE_SIZE_MB} MB cap "
+                              "during upload (Content-Length may have been "
+                              "missing or inaccurate)",
+                })
+                continue
+
+            temp_paths.append(tmp_path)
+
+            # Belt-and-suspenders: validate_upload re-checks extension + size.
+            # Should always pass at this point since the pre-read checks
+            # above are strictly stronger, but keep for defence-in-depth
+            # in case validate_upload gains new checks (magic-byte sniff,
+            # per-format min-size, etc.) that don't have a pre-read
+            # equivalent yet.
+            err = validate_upload(filename, total_bytes)
+            if err:
+                log.warning("File rejected in chat (post-read validator)",
+                            file=original_name, sanitized=filename, reason=err)
+                rejected_files.append({"name": original_name, "reason": err})
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                temp_paths.remove(tmp_path)
+                continue
+
+            file_tuples.append((tmp_path, filename, total_bytes))
 
     async def event_generator():
         # Process files before invoking the pipeline (they need to be staged
@@ -1145,6 +1322,13 @@ async def chat_with_files(
                 _fp_events: asyncio.Queue = asyncio.Queue()
                 _FP_SENTINEL = object()
 
+                # Gap #8: one UUID per multipart upload request. All files
+                # in this request share the same batch_id, so memory node's
+                # _restore_file_context can group them deterministically
+                # (instead of the fragile ±10s created_at window that
+                # merged double-clicks and split slow saves).
+                _batch_id = uuid.uuid4().hex
+
                 def _fp_writer(evt: dict) -> None:
                     # Called from process_files; runs on the same event loop.
                     # put_nowait is safe because the queue is unbounded.
@@ -1155,6 +1339,7 @@ async def chat_with_files(
                         return await process_files(
                             file_tuples, thread_id, writer=_fp_writer,
                             force_ocr=bool(force_ocr),
+                            batch_id=_batch_id,
                         )
                     finally:
                         _fp_events.put_nowait(_FP_SENTINEL)
@@ -1638,6 +1823,35 @@ async def health(request: Request):
 # tripwires (str(e).splitlines()[0]) were the last residual crash sites
 # in this file. Live-ping health checks now happen inline via a
 # post-deploy smoke workflow instead of a persistent admin endpoint.
+
+
+@app.get("/pyapi/health/verifier_stats")
+async def health_verifier_stats():
+    """Live snapshot of verifier-unavailability counters.
+
+    Added 2026-09-09 alongside the self_refine fail-closed cutover. The
+    process-local counter in ``core.self_refine._verifier_failure_counters``
+    increments every time the critic (or any future verifier layer) had
+    to ship a response behind ``x_audit_status="unverified"`` because it
+    could not run — transport error, parse failure, timeout, rate limit,
+    circuit-open.
+
+    Payload shape::
+
+        {
+          "total": 3,
+          "by_agent_reason": [
+             {"agent": "self_refine", "reason": "timeout",         "count": 2},
+             {"agent": "self_refine", "reason": "flash_circuit_open","count": 1}
+          ]
+        }
+
+    Empty when everything is healthy. Ops greps for ``total > 0``.
+    Resets on process restart (in-memory counter, no persistence — the
+    goal is trend visibility, not durable metrics).
+    """
+    from .self_refine import get_verifier_stats
+    return get_verifier_stats()
 
 
 # ============================================================

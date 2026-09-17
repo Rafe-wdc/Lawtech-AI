@@ -1,0 +1,5 @@
+﻿Connection: keep-alive
+Content-Length: 20376
+Content-Type: application/json
+Date: Sun, 26 Jul 2026 10:25:14 GMT
+Server: nginx/1.24.0 (Ubuntu)

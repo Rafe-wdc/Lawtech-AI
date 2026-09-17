@@ -1,0 +1,434 @@
+"""One-shot build script for the Lawtech AI tester brief PDF.
+
+Uses PyMuPDF's Story API for automatic pagination with Unicode fallback
+fonts (Nirmala UI on Windows for Devanagari / Bengali / Tamil / etc.).
+Produces `tester_brief_2026_08_19.pdf` at the project root.
+
+Discardable after running — this script isn't part of the app.
+"""
+
+from __future__ import annotations
+
+import fitz  # PyMuPDF
+from pathlib import Path
+
+
+HTML_BODY = r"""
+<h1>Lawtech AI &mdash; quality upgrade rollout</h1>
+<p class="lede">Please help us test. This document lists the twelve behaviours we recently fixed. For each one there is a description of the intended behaviour, example prompts you can send, and what "good" looks like.</p>
+
+<p><b>Timing:</b> please spend 20&#8211;30 minutes over the next few days running the scenarios below. Report any prompt where the output doesn't match the "what good looks like" line. Include the exact prompt you sent, a screenshot or PDF of the response, and a one&#8209;line note on what went wrong.</p>
+
+<hr/>
+
+<h2>1. Multilingual responses &mdash; statute names and numerals</h2>
+<p><b>What changed:</b> When you ask for a response in Hindi, Marathi, Tamil, Telugu, Bengali, Kannada, Gujarati, Punjabi, or any Indian language, statute references and numbers now stay in English inline while the rest of the response stays in your language.</p>
+
+<p><b>What good looks like:</b></p>
+<ul>
+  <li>Statute references appear as one English span: <i>"Section 138 of the Negotiable Instruments Act, 1881 च्या तरतुदींनुसार..."</i></li>
+  <li>NOT translated to native script &mdash; <i>"परक्राम्य लिखत अधिनियम, १८८१ च्या कलम १३८"</i> is wrong.</li>
+  <li>All digits stay Latin (1, 2, 3, 2024) &mdash; not Devanagari (१, २, ३, २०२४).</li>
+  <li>Case citations (party names + reporter) stay in English.</li>
+</ul>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li>मुझे धारा 138 NI Act पर आधारित एक demand notice हिंदी में तैयार कर के दो</li>
+  <li>BNSS ची कलम 480 आणि CrPC ची कलम 438 यांतील फरक मराठीत सांगा</li>
+  <li>धारा 302 IPC और BNS की धारा 103 का तुलनात्मक विश्लेषण हिंदी में करें</li>
+  <li>वयस्क वारसदाराच्या हक्कावर कायदेशीर मत मराठीत द्या</li>
+</ul>
+
+<p><b>What to watch for:</b> any statute name translated to native script, any digit that isn't Latin, any Marathi/Hindi grammar drift (Hindi possessives का/की/के used in a Marathi response, or Marathi चा/ची/चे used in a Hindi response).</p>
+
+<hr/>
+
+<h2>2. Multilingual responses &mdash; depth should equal English depth</h2>
+<p><b>What changed:</b> Regional&#8209;language responses were previously coming back materially shorter than the same request in English. Fixed.</p>
+
+<p><b>What good looks like:</b> if you ask the same substantive question in English and in Hindi, both should have the same number of paragraphs, same landmark case citations woven in, same structural completeness. The Hindi response should not be a compressed summary of the English one.</p>
+
+<p><b>Example prompts (send both English and regional, compare):</b></p>
+<ul>
+  <li>English: <i>Explain Section 498A IPC and BNS Section 85 in detail &mdash; grounds, procedure, safeguards, and landmark judgments.</i></li>
+  <li>Hindi: धारा 498A IPC और BNS की धारा 85 विस्तार से समझाइए &mdash; grounds, procedure, safeguards, और landmark judgments के साथ।</li>
+  <li>English: <i>Draft a detailed anticipatory bail application under Section 438 CrPC / Section 482 BNSS.</i></li>
+  <li>Marathi: धारा 438 CrPC / 482 BNSS अंतर्गत तपशीलवार anticipatory bail application मराठीत तयार करा.</li>
+</ul>
+
+<p><b>What to watch for:</b> the regional version being noticeably thinner (fewer paragraphs, fewer case citations, fewer numbered grounds).</p>
+
+<hr/>
+
+<h2>3. Regional&#8209;language queries &mdash; count directives should be honoured</h2>
+<p><b>What changed:</b> Previously, if you asked in Hindi "give me 5 SC judgments", the system would sometimes return 1 or 3 or 20. The count directive is now preserved through the multi&#8209;agent routing.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li>मुझे धारा 138 NI Act पर सुप्रीम कोर्ट के 5 landmark judgments दो</li>
+  <li>BNSS ची कलम 480 (anticipatory bail) वर 7 महत्त्वाच्या SC / HC judgments मराठीत द्या</li>
+  <li>धारा 302 IPC पर 3 सबसे प्रसिद्ध सुप्रीम कोर्ट के फैसले दिखाएं</li>
+  <li>Article 21 वर 4 मूलभूत Supreme Court judgments मराठीत सांगा</li>
+</ul>
+
+<p><b>What good looks like:</b> you get exactly the count you asked for, or a clear statement if fewer are available in the database.</p>
+
+<hr/>
+
+<h2>4. Citations &mdash; real cases only, no fake placeholders</h2>
+<p><b>What changed:</b> The system will no longer emit fake citation placeholders like [verify], [citation to be verified], [TBD], [citation needed], or [CITE: No matching case found]. Every visible citation is either a real case from our verified corpus, or the sentence stands on its own without an authority.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li><i>Draft a bail application under Section 439 CrPC / 480 BNSS for an accused in an NDPS case. Include supporting case law.</i></li>
+  <li><i>Prepare a writ petition under Article 226 challenging arbitrary termination. Cite landmark SC judgments on natural justice.</i></li>
+  <li><i>Write a Section 138 NI Act demand notice with citations from recent Supreme Court judgments.</i></li>
+  <li><i>Draft a partition suit for ancestral property with all relevant statutory references and case law.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> every case name you see should be a real case with a real citation. No square&#8209;bracket placeholders anywhere. If the system doesn't have a good case to cite, the sentence just states the legal principle without a case name.</p>
+
+<hr/>
+
+<h2>5. Drafting &mdash; right document type, not scaffolded up</h2>
+<p><b>What changed:</b> When you ask for a short document (legal notice, RTI application, demand letter, one&#8209;page application), the system will produce that document &mdash; not a full plaint with Schedule of Properties, Valuation Statement, and Verification bolted on unnecessarily.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li><i>Draft a Section 138 NI Act demand notice for a dishonoured cheque of Rs. 5,00,000.</i></li>
+  <li><i>Prepare an RTI application under Section 6 to the PIO of the Municipal Corporation of Greater Mumbai seeking information about building plan approvals.</i></li>
+  <li><i>Draft a leave application on behalf of my client to his employer for 30 days of medical leave.</i></li>
+  <li><i>Prepare an application for a copy of the FIR to the Superintendent of Police, Pune.</i></li>
+  <li><i>Draft a notice for eviction under Rent Control Act to a defaulting tenant.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> the response is the SHAPE of the document you asked for. A demand notice ends with your advocate's signature block &mdash; not a Prayer clause or Schedule of Properties. An RTI application looks like an RTI application &mdash; not a court petition.</p>
+
+<hr/>
+
+<h2>6. Drafting &mdash; detailed short documents should complete on time</h2>
+<p><b>What changed:</b> Previously, asking for a legal notice or demand letter "in detail" would sometimes time out. Fixed.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li><i>Draft a detailed Section 138 NI Act demand notice &mdash; comprehensive statement of facts, all statutory citations, exhaustive prayer for compliance.</i></li>
+  <li><i>Prepare a detailed reply to a legal notice for wrongful termination. Cover all grounds, controvert every allegation, cite relevant case law.</i></li>
+  <li><i>Draft a comprehensive rejoinder to a written statement in a contract dispute, addressing every paragraph point&#8209;by&#8209;point.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> response completes in under 90 seconds (usually much faster) AND is substantively detailed. Not a timeout, not a skeleton.</p>
+
+<hr/>
+
+<h2>7. Drafting &mdash; long documents must include Prayer and Verification</h2>
+<p><b>What changed:</b> For long documents (writ petitions, plaints, written statements), the closing blocks &mdash; Prayer clause, Verification, Signature &mdash; are now always preserved even when the document spans many sections.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li><i>Draft a full writ petition under Article 226 challenging denial of pension. Include Parts I, II, III, all Grounds, Prayer, and Verification.</i></li>
+  <li><i>Prepare a detailed plaint for specific performance of a sale agreement worth Rs. 2 Crores. Include Cause Title, Facts, Issues, Grounds, Prayer, Verification, and Schedule of Properties.</i></li>
+  <li><i>Draft a comprehensive written statement in a suit for eviction &mdash; preliminary objections, para&#8209;wise reply, additional pleas, prayer, and verification.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> the response has a real Prayer clause with (a), (b), (c) sub&#8209;reliefs at the end, followed by a Verification block, followed by a signature line. If any of these is missing, that's a bug.</p>
+
+<hr/>
+
+<h2>8. Drafting &mdash; your facts, not fake ones</h2>
+<p><b>What changed:</b> The system will no longer substitute standard training&#8209;example names/places/dates (like "Priyanka", "Sneha", "Anjali Deshmukh", "Nashik", "Sangamner", "29 May 2022") for the real client facts you provide. Even near&#8209;variants ("Nasik" for Nashik, "Priya" for Priyanka) get caught.</p>
+
+<p><b>Example prompts (include distinctive real&#8209;looking facts):</b></p>
+<ul>
+  <li><i>Draft a bail application on behalf of Ravindra Menon, 42 years, resident of Ejipura, Bengaluru, arrested on 12 August 2024 in FIR No. 445/2024 at HAL Police Station under Section 420 IPC.</i></li>
+  <li><i>Prepare a plaint for recovery of Rs. 18,50,000 against M/s Sunraj Enterprises Pvt. Ltd., 3rd Floor, Aditya Trade Centre, Ameerpet, Hyderabad, based on an unpaid invoice dated 15 January 2024.</i></li>
+  <li><i>Draft a divorce petition for Alka Prashant Bagade of Chembur, Mumbai, against her husband Prashant Ganesh Bagade on grounds of cruelty and desertion &mdash; marriage dated 22 December 2018, last cohabitation April 2023.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> every name, place, date, address, and amount in the final draft matches EXACTLY what you provided. No substitutions. No swapping "Ravindra Menon" for "Ram Kumar" or "Bengaluru" for "Nashik".</p>
+
+<hr/>
+
+<h2>9. Case law lookup &mdash; correct court attribution</h2>
+<p><b>What changed:</b> When you look up a judgment from a District Court, Sessions Court, or tribunal, the response should attribute it to the correct court by name &mdash; not blanket&#8209;label everything as "High Court".</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li><i>Find recent District Court decisions on Section 138 NI Act from Karnataka.</i></li>
+  <li><i>Show me Sessions Court judgments on bail in NDPS cases.</i></li>
+  <li><i>Search for family court rulings on Section 125 CrPC maintenance in Maharashtra.</i></li>
+  <li><i>Find POCSO Special Court decisions from Delhi in 2023.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> each judgment is correctly attributed &mdash; "the Sessions Court, Pune held...", "the Family Court, Bengaluru observed...", not "the High Court held..." when it wasn't actually a High Court.</p>
+
+<hr/>
+
+<h2>10. Compound questions &mdash; all parts get addressed</h2>
+<p><b>What changed:</b> When you bundle multiple asks in one message ("draft X AND cite case laws AND explain statute Y AND explain scenario Z"), the system now addresses all of them instead of collapsing to just one.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li><i>Draft an anticipatory bail application under Section 482 BNSS AND cite the top 3 Supreme Court cases on anticipatory bail AND explain the Arnesh Kumar guidelines.</i></li>
+  <li><i>Give me the format of a Section 138 NI Act notice AND landmark Supreme Court judgments on cheque bounce AND the difference between Section 138 and Section 420 IPC.</i></li>
+  <li><i>Prepare a writ petition under Article 226 for denial of pension AND cite Article 300A jurisprudence AND explain the ratio in D.S. Nakara case.</i></li>
+  <li><i>Draft a plaint for specific performance AND cite Section 10 of the Specific Relief Act AND compare with the position under the 2018 amendment.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> the response has a section for EACH ask. If you asked for four things, you should see four distinct headings/sections in the response &mdash; not just the drafted document with the other three asks silently ignored.</p>
+
+<hr/>
+
+<h2>11. Comparison tables &mdash; your columns should be honoured</h2>
+<p><b>What changed:</b> When you specify comparison columns in your query, the response table should use them.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li><i>Compare Section 131 and Section 132 of the Indian Evidence Act by scope, applicability, exceptions, and punishment &mdash; as a table.</i></li>
+  <li><i>Give me a table comparing IPC Section 302, BNS Section 103, and BNS Section 104 by definition, punishment, cognizability, bailable status, and triable by.</i></li>
+  <li><i>Table comparing Article 14, Article 19, and Article 21 by scope of protection, permissible restrictions, remedies, and landmark cases.</i></li>
+  <li><i>Compare Section 41A CrPC and Section 35 BNSS by procedure, safeguards, and Arnesh Kumar compliance &mdash; in tabular form.</i></li>
+</ul>
+
+<p><b>What good looks like:</b> the response is a table with exactly the columns you named. Not a prose response with "In essence..." padding. Not a table with different columns.</p>
+
+<hr/>
+
+<h2>12. Regional&#8209;language queries to non&#8209;retrieval agents</h2>
+<p><b>What changed:</b> When you ask a scenario question, a legal&#8209;concepts question, or upload a document and ask about it &mdash; in a regional language &mdash; the response now comes back in your language. Previously it sometimes silently switched to English.</p>
+
+<p><b>Example prompts:</b></p>
+<ul>
+  <li>मेरे मुवक्किल को Section 138 NI Act में गिरफ्तार किया गया है &mdash; क्या defences उपलब्ध हैं?</li>
+  <li>मला Article 21 चा personal liberty म्हणून काय अर्थ आहे ते समजावून सांगा.</li>
+  <li>Upload a Marathi FIR PDF and ask: या FIR मध्ये कोणत्या कलमांचा उल्लेख आहे आणि त्या कलमांचे स्पष्टीकरण मराठीत द्या?</li>
+</ul>
+
+<p><b>What good looks like:</b> the response is in the same language as your question. The reasoning is substantive. Statutory references stay in English (per point 1 above).</p>
+
+<hr/>
+
+<h2>How to report issues</h2>
+<p>For each problem you find, please send us:</p>
+<ol>
+  <li><b>The exact prompt</b> you typed (copy&#8209;paste, don't paraphrase).</li>
+  <li><b>A screenshot or PDF</b> of the response.</li>
+  <li><b>One&#8209;line description</b> of what went wrong (e.g. "asked in Marathi, got English response" or "Prayer clause missing at end").</li>
+  <li><b>Time of the query</b> (approximate, so we can trace logs).</li>
+  <li><b>Bonus:</b> if you can, run the same prompt 2&#8209;3 more times &mdash; some issues are intermittent.</li>
+</ol>
+
+<p><b>Where to send:</b> [WhatsApp group / bug tracker / email &mdash; fill in the address you use].</p>
+
+<p><b>What NOT to worry about:</b> minor stylistic preferences (formal vs semi&#8209;formal tone), font/rendering issues, or the exact wording of legal boilerplate. Focus on the substantive behaviours above.</p>
+
+<p>Thank you for the time. Your feedback is the tightest quality signal we have, and each of these fixes exists because a user reported the underlying problem.</p>
+"""
+
+
+CSS = """
+@font-face {
+  font-family: nirmala;
+  src: url(Nirmala.ttc);
+}
+@font-face {
+  font-family: arial;
+  src: url(arial.ttf);
+}
+@font-face {
+  font-family: arial;
+  font-weight: bold;
+  src: url(arialbd.ttf);
+}
+@font-face {
+  font-family: arial;
+  font-style: italic;
+  src: url(ariali.ttf);
+}
+* { box-sizing: border-box; }
+body {
+  font-family: nirmala, arial, sans-serif;
+  font-size: 10.5pt;
+  color: #1a1a1a;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0;
+}
+h1 {
+  font-size: 22pt;
+  font-weight: bold;
+  color: #0a3d62;
+  margin: 0 0 6pt 0;
+  line-height: 1.2;
+}
+h2 {
+  font-size: 13pt;
+  font-weight: bold;
+  color: #0a3d62;
+  margin: 14pt 0 6pt 0;
+  line-height: 1.3;
+  page-break-after: avoid;
+}
+p.lede {
+  font-size: 11pt;
+  font-style: italic;
+  color: #333;
+  margin: 0 0 10pt 0;
+}
+p {
+  margin: 4pt 0 6pt 0;
+}
+ul, ol {
+  margin: 4pt 0 8pt 0;
+  padding-left: 20pt;
+}
+li {
+  margin: 2pt 0;
+  line-height: 1.5;
+}
+hr {
+  border: none;
+  border-top: 0.5pt solid #bbb;
+  margin: 12pt 0;
+}
+i { font-style: italic; }
+b { font-weight: bold; }
+"""
+
+
+def build_pdf(out_path: Path) -> None:
+    MEDIABOX = fitz.paper_rect("A4")
+    MARGIN = 54
+    WHERE = MEDIABOX + (MARGIN, MARGIN, -MARGIN, -MARGIN - 20)
+
+    html_doc = f"<!DOCTYPE html><html><body>{HTML_BODY}</body></html>"
+
+    # Register the Windows Unicode fonts so @font-face declarations in CSS
+    # resolve. Nirmala UI covers Devanagari / Bengali / Tamil / Telugu /
+    # Kannada / Malayalam / Gujarati / Gurmukhi / Odia. Arial as the Latin
+    # base + falls back to Nirmala for Indic.
+    fonts_dir = r"C:\Windows\Fonts"
+    archive = fitz.Archive()
+    with open(fonts_dir + r"\Nirmala.ttc", "rb") as f:
+        archive.add(f.read(), "Nirmala.ttc")
+    with open(fonts_dir + r"\arial.ttf", "rb") as f:
+        archive.add(f.read(), "arial.ttf")
+    with open(fonts_dir + r"\arialbd.ttf", "rb") as f:
+        archive.add(f.read(), "arialbd.ttf")
+    with open(fonts_dir + r"\ariali.ttf", "rb") as f:
+        archive.add(f.read(), "ariali.ttf")
+
+    # Stage 1 — render the story into a temp PDF using DocumentWriter (the
+    # supported multi-page rendering path).
+    tmp_path = out_path.with_suffix(".pre.pdf")
+    story = fitz.Story(html=html_doc, user_css=CSS, archive=archive)
+    writer = fitz.DocumentWriter(str(tmp_path))
+    page_num = 0
+    more = 1
+    while more:
+        device = writer.begin_page(MEDIABOX)
+        more, _ = story.place(WHERE)
+        story.draw(device, matrix=fitz.Identity)
+        writer.end_page()
+        page_num += 1
+        if page_num > 30:
+            break
+    writer.close()
+
+    # Stage 2 — reopen and stamp a footer on each page. DocumentWriter can't
+    # add stamps directly, so we do it post-hoc.
+    doc = fitz.open(str(tmp_path))
+    total = doc.page_count
+    for i, page in enumerate(doc, start=1):
+        footer_y = MEDIABOX.height - 24
+        page.insert_text(
+            (MARGIN, footer_y),
+            "Lawtech AI - tester brief 2026-08-19",
+            fontsize=8,
+            color=(0.5, 0.5, 0.5),
+        )
+        page.insert_text(
+            (MEDIABOX.width - MARGIN - 60, footer_y),
+            f"Page {i} of {total}",
+            fontsize=8,
+            color=(0.5, 0.5, 0.5),
+        )
+    doc.save(str(out_path), garbage=4, deflate=True)
+    doc.close()
+    # Small delay + retry loop to work around Windows file-lock lag.
+    import time, os
+    for _ in range(5):
+        try:
+            if tmp_path.exists():
+                os.remove(str(tmp_path))
+            break
+        except PermissionError:
+            time.sleep(0.2)
+    print(f"Wrote {out_path} ({total} pages)")
+
+
+HTML_CSS_FOR_BROWSER = """
+* { box-sizing: border-box; }
+html, body {
+  font-family: "Segoe UI", "Nirmala UI", "Arial Unicode MS", "Arial", sans-serif;
+  font-size: 11pt;
+  color: #1a1a1a;
+  line-height: 1.55;
+  max-width: 780px;
+  margin: 32px auto;
+  padding: 0 20px;
+  background: #fff;
+}
+h1 {
+  font-size: 22pt;
+  font-weight: bold;
+  color: #0a3d62;
+  margin: 0 0 8pt 0;
+  line-height: 1.2;
+}
+h2 {
+  font-size: 14pt;
+  font-weight: bold;
+  color: #0a3d62;
+  margin: 22pt 0 6pt 0;
+  line-height: 1.3;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 3pt;
+}
+p.lede {
+  font-size: 12pt;
+  font-style: italic;
+  color: #444;
+  margin: 0 0 12pt 0;
+}
+p { margin: 6pt 0 8pt 0; }
+ul, ol { margin: 6pt 0 10pt 0; padding-left: 24pt; }
+li { margin: 3pt 0; }
+hr { border: none; border-top: 1px solid #ccc; margin: 16pt 0; }
+i { font-style: italic; }
+b { font-weight: bold; }
+@media print {
+  body { max-width: none; margin: 20mm; }
+  h2 { page-break-after: avoid; }
+}
+"""
+
+
+def build_html(out_path: Path) -> None:
+    html_doc = (
+        "<!DOCTYPE html><html lang='en'><head>"
+        "<meta charset='utf-8'>"
+        "<title>Lawtech AI - tester brief 2026-08-19</title>"
+        f"<style>{HTML_CSS_FOR_BROWSER}</style>"
+        "</head><body>"
+        f"{HTML_BODY}"
+        "</body></html>"
+    )
+    out_path.write_text(html_doc, encoding="utf-8")
+    print(f"Wrote {out_path}")
+
+
+if __name__ == "__main__":
+    root = Path(__file__).parent
+    build_pdf(root / "tester_brief_2026_08_19.pdf")
+    build_html(root / "tester_brief_2026_08_19.html")

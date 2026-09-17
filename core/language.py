@@ -203,6 +203,13 @@ def script_of(lang: str) -> str:
 # Bharatiya Nyaya Sanhita, 2023"), which is why the bar is not higher.
 OFF_TARGET_SCRIPT_THRESHOLD = 0.85
 
+# Tolerance below the threshold. A Marathi draft at a raw ratio of 0.849
+# (req 8ab2c219, 2026-09-15) was treated as off-target and paid 54s for a
+# full regeneration of a document that was in Marathi. The calibration gap
+# is 0.60 to 0.85, so an effective bar of 0.83 still catches every measured
+# failure and stops charging drafts that sit on the boundary.
+_OFF_TARGET_TOLERANCE = 0.02
+
 
 def output_script_ratio(text: str, lang: str) -> float:
     """Share of alphabetic characters that are in `lang`'s script.
@@ -239,7 +246,9 @@ def is_off_target_language(text: str, lang: str) -> bool:
     exactly these drafts, and bug 1 established that a prompt rule alone does
     not hold. See the exception recorded under CLAUDE.md drafting invariant 2.
     """
-    return output_script_ratio(text, lang) < OFF_TARGET_SCRIPT_THRESHOLD
+    return output_script_ratio(text, lang) < (
+        OFF_TARGET_SCRIPT_THRESHOLD - _OFF_TARGET_TOLERANCE
+    )
 
 
 def dominant_script(text: str) -> str | None:
@@ -418,8 +427,33 @@ def _format_intent_directives(intent) -> str:
     depth = getattr(intent, "response_depth", "standard")
     if depth == "brief":
         parts.append(
-            "USER DEPTH: keep the response under 200 words. Prefer the most "
-            "load-bearing facts. Skip background and elaboration."
+            "USER DEPTH: brief. Skip background, motivation, and elaboration; "
+            "cut every sentence that does not directly answer the user's "
+            "question or extract a load-bearing fact from the material.\n"
+            "\n"
+            "\"Brief\" is CONTEXT-SCALED, not a hard word cap. In Indian "
+            "legal English \"brief\" means a substantive case-brief a lawyer "
+            "can hand to counsel — NOT a five-line TL;DR. Match the response "
+            "size to the material:\n"
+            "\n"
+            "  - Q&A on a statute, principle, or doctrine ('is X allowed', "
+            "'what is the limitation period for Y') → 150-250 words.\n"
+            "  - Q&A on a specific document fact ('who is the plaintiff?', "
+            "'what is the claim amount?') → 20-60 words. One sentence is "
+            "often enough.\n"
+            "  - Summary / brief of an attached DOCUMENT: honour the depth "
+            "guidance the domain agent's own prompt sets for source-scaled "
+            "summaries (typically 300-4,500 chars depending on source "
+            "length — a 29-page court filing brief is naturally 2,500-"
+            "4,500 chars even in brief mode; a 2-page notice brief is "
+            "300-800 chars). Do NOT collapse a 29-page filing into 200 "
+            "words — that loses material facts a lawyer needs to brief "
+            "the client.\n"
+            "\n"
+            "The rule of thumb: a lawyer receiving your response should not "
+            "need to re-read the source to answer their next tactical "
+            "question. If cutting more words would force them back to the "
+            "source, you have cut too much."
         )
     elif depth == "detailed":
         parts.append(

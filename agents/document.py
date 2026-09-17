@@ -8,7 +8,7 @@ Manages per-user ChromaDB collections for uploaded documents.
 2. Process → extract text, OCR scanned pages, chunk, embed, store
 3. Chat → retrieve from user's collection, generate answer
 
-Uses: Gemini 2.5 Pro (Q&A), Gemini 2.5 Flash (Vision OCR)
+Uses: Gemini 3.8 Flash (Q&A), Gemini 3.6 Flash (Vision OCR)
 Data Source: ChromaDB (per-user collections in chroma_store/)
 Embedding: all-MiniLM-L6-v2
 """
@@ -22,7 +22,7 @@ from datetime import date
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
-from core.clients import get_gemini_pro, get_gemini_flash_full
+from core.clients import get_gemini_flash_full
 from core.settings import TIMEOUT_CHROMADB_SEC
 from core.language import localize_prompt, detect_source_languages
 from core.logger import get_logger, log_time, short_err
@@ -90,6 +90,71 @@ def _format_chat_history(chat_history: list) -> str:
     return "\n".join(parts)
 
 
+# Chars per page for a typed Indian legal filing: measured 1,600-1,800 on a
+# 20-page rejoinder and a 30-page appeal; 2,000 keeps the page estimate
+# conservative so the tier never overshoots.
+_CHARS_PER_PAGE_EST = 2000
+# Advocate rule (2026-09-09): a summary should be at least 10% of the
+# source. There is NO upper limit beyond the model's output budget - the
+# prompt has always said over-producing is fine, and that stays.
+_SUMMARY_MIN_RATIO = 0.10
+_SUMMARY_ABS_MIN_CHARS = 300
+# The minimum itself is capped so a 1.6M-char paperbook cannot demand more
+# than the 32,000-token output ceiling can hold. This caps the FLOOR only.
+_SUMMARY_MIN_CAP_CHARS = 24_000
+
+
+def summary_length_bounds(src_chars: int) -> tuple[int, int]:
+    """(estimated_pages, min_chars) for a summary of a source of
+    `src_chars` characters. Pure; used by the prompt and by tests.
+
+    min = 10% of the source, never below 300 chars and never above 24,000.
+    No maximum: the old page tiers were floors written in pages that the
+    model could not see; this replaces them with a floor it is told outright.
+    """
+    src_chars = max(0, int(src_chars or 0))
+    pages = max(1, round(src_chars / _CHARS_PER_PAGE_EST))
+    lo = max(_SUMMARY_ABS_MIN_CHARS, int(src_chars * _SUMMARY_MIN_RATIO))
+    lo = min(lo, _SUMMARY_MIN_CAP_CHARS)
+    return pages, lo
+
+
+# Share of the summary budget per required section for a 10+ page source.
+# Material Facts carries the chronology and gets the largest share.
+_SECTION_BUDGET_SHARES = (
+    ("Forum & Parties", 0.08),
+    ("Material Facts (chronological)", 0.42),
+    ("Key Exhibits / Documents Relied Upon", 0.15),
+    ("Dispositive Issues", 0.20),
+    ("Reliefs Sought / Order Impugned", 0.15),
+)
+_CHARS_PER_WORD_EST = 6.5   # measured 6.6 on generated legal-English summaries
+
+
+def _source_size_note(src_chars: int) -> str:
+    """The message the model reads before the question.
+
+    Numbers, not tiers, and a WORD floor rather than characters: models
+    track word counts and per-section allocations far more closely than
+    character counts. Minimum only; there is no ceiling.
+    """
+    pages, lo = summary_length_bounds(src_chars)
+    lo_w = int(lo / _CHARS_PER_WORD_EST)
+    note = (
+        f"The attached material is about {pages} page(s), {src_chars:,} characters. "
+        f"If the request is a summary, brief, gist or overview: write at least "
+        f"{lo_w:,} words (10% of the source). Fewer than {lo_w:,} words is a "
+        f"defect: material facts, dates or grounds were dropped. Longer is fine "
+        f"whenever the record warrants it."
+    )
+    if pages >= 10:
+        split = "; ".join(
+            f"{name}: at least {max(40, int(lo_w * share)):,} words"
+            for name, share in _SECTION_BUDGET_SHARES
+        )
+        note += f" Minimum by section: {split}."
+    return note
+
 def _generate_from_docs(
     query: str,
     docs: list[Document],
@@ -120,40 +185,295 @@ def _generate_from_docs(
     # enough — chunks from one PDF are uniform in language.
     source_langs = detect_source_languages(docs_text)
 
-    # Route by document size: small docs go to Flash (~4x cheaper per token,
-    # quality delta minimal for short-context Q&A); large docs stay on Pro
-    # for the deeper reasoning it brings to complex/dense legal text.
-    # 60_000 chars ≈ ~15K input tokens ≈ ~30 pages of typical legal PDF.
-    # Tune based on observed quality; log both signals to inform tuning.
-    # 2026-09-10: the large-doc branch moved off gemini-2.5-pro to
-    # gemini-3.8-flash - cheaper than Pro on both input and output.
+    # Document Q&A model selection:
+    # Both short and long documents now use gemini-3.8-flash (1M token native context
+    # window, sub-second TTFT, 15x cheaper than legacy Pro).
+    # For long documents (>=60,000 chars ≈ 30+ pages), we allocate a low thinking
+    # budget (1024) to maintain deep legal cross-referencing and tabular precision
+    # without latency or cost spikes.
     _FLASH_ROUTING_THRESHOLD_CHARS = 60_000
-    use_flash = len(docs_text) < _FLASH_ROUTING_THRESHOLD_CHARS
-    picked_model = "gemini-2.5-flash" if use_flash else "gemini-3.8-flash"
+    is_short_doc = len(docs_text) < _FLASH_ROUTING_THRESHOLD_CHARS
+    from core.settings import MODELS, GEMINI_MODELS
+    picked_model = MODELS.get("pdf_chat", GEMINI_MODELS["flash"])
     log.info(
         "PDF chat model routing",
         docs_chars=len(docs_text),
         threshold=_FLASH_ROUTING_THRESHOLD_CHARS,
         model=picked_model,
+        is_short_doc=is_short_doc,
     )
 
+    _MAX_OUT = 32000
+
     with log_time(log, f"LLM generation ({picked_model})"):
-        if use_flash:
-            llm = get_gemini_flash_full(
-                temperature=0.3,
-                max_output_tokens=8000,
-                thinking_budget=0,  # small-doc Q&A doesn't need thinking trace
-            )
-        else:
-            llm = get_gemini_pro(
-                temperature=0.3,
-                max_output_tokens=8000,
-                thinking_budget=1024,
-            )
+        llm = get_gemini_flash_full(
+            temperature=0.3,
+            max_output_tokens=_MAX_OUT,
+            thinking_budget=0 if is_short_doc else 1024,
+            thinking_level=None if is_short_doc else "low",
+        )
         system_prompt = localize_prompt(
-            "You are Lawttorney, a legal AI assistant. Answer questions about "
-            "the uploaded document(s) using only the provided context. Be "
-            "thorough and cite specific sections when possible.",
+            """You are Lawttorney — a legal-document assistant serving Indian
+lawyers, paralegals, and clients. One or more documents have been attached
+to this turn. The text below (under "Document content:") came either from
+the file's own text layer OR from a Vision OCR pass on scanned pages; when
+OCR was used, it may already contain `[illegible]` markers.
+
+Indian legal documents in this workflow are often photographs of paper —
+poor-quality scans, mixed printed + handwritten text, multiple scripts,
+faded stamps. Your response must be BOTH honest about what you can and
+cannot read AND usable for a practising lawyer. A response full of
+`[Illegible]` markers is not helpful; a response full of invented
+confident-sounding sentences is dangerous. Balance both.
+
+Confidence you cannot back up is the worst failure mode; missing
+information is a smaller error than invented information.
+
+# LAWYER-FRIENDLY FORMAT (EXTRACTION / TRANSLATION MODES)
+
+Structure every extraction / translation response like this:
+
+  ## Document Overview
+  One short paragraph — the type of document (affidavit, sale deed,
+  panchayat compromise, FIR, notice, order, judgment, ...), the
+  parties as far as you can read them, the date, the jurisdiction /
+  court / notary, and the scan condition ("This is a poor-quality
+  scan; some passages are unclear and are flagged below.") One or two
+  sentences. Give the lawyer their bearings before the detail.
+
+  ## Page 1 — <brief label of what page 1 is>
+  ### Clause / Section 7
+  Translated text of that clause.
+  ### Clause / Section 8 (partially unclear on scan)
+  Translated portion + a natural-language note where words are unclear.
+  ...
+
+Use markdown headings (`##` per page, `###` per clause / block).
+Numbered clauses become their own `###` sub-block. This lets the
+lawyer skim, jump to a specific clause, and see confidence per block.
+
+# THE LEGIBILITY GATE — RUN THIS BEFORE EVERY SENTENCE
+
+For each source sentence, silently check:
+
+  (a) Can I read every content word clearly?
+  (b) Does my English rendering read as a coherent sentence a native
+      reader of the source language would agree with?
+  (c) If I removed the words I had to GUESS, would the remaining
+      structure still carry the meaning?
+
+Route the answer as follows — and prefer NATURAL LANGUAGE to
+computer-error jargon in every marker:
+
+  - All three YES → translate the clause normally. No marker needed.
+  - (a) partial (one or two words unclear) → translate the readable
+    portion; write `[unclear]` inline in place of each gap. Do NOT
+    guess the gap word.
+  - (a) mostly NO but the CLAUSE'S TOPIC is identifiable →
+      HARD CAP: the topic hint must be ≤5 general-purpose words
+      (e.g. "concerns residence arrangements", "concerns dispute
+      settlement", "concerns dowry return"). If your candidate hint
+      would need more than 5 words, or would list specific nouns
+      (khasra, gunny bag, section number, party name, address,
+      transport, etc.) that you're stitching together from partially-
+      visible fragments, DOWNGRADE to the "substantially illegible"
+      branch below. Specific-noun lists = reconstruction, not
+      transcription.
+      Format:
+        "### Clause 7 (exact wording unclear on scan)
+         This clause appears to concern <≤5-word general topic>;
+         the precise wording is not readable enough to translate
+         reliably."
+  - Cannot narrow the topic to ≤5 general words → SUBSTANTIALLY
+    ILLEGIBLE. Use the reviewer-approved template verbatim:
+      "### Clause 2 — Text substantially illegible
+       A few words/phrases are visible, but the complete legal
+       meaning cannot be established reliably from the scan."
+
+If your candidate English sentence sounds nonsensical when read aloud
+(e.g. "That my fraudulent place/column is established"; "the money my
+father will keep paying"), treat that as PROOF the OCR read was wrong
+for that clause and downgrade to the "exact wording unclear" form
+above. Nonsensical English NEVER ships as a translation.
+
+# WORDS YOU MAY NOT USE ABOUT YOUR OWN OUTPUT
+
+Do NOT open with, or otherwise self-describe your response as:
+  "verbatim", "exact", "line-by-line", "complete translation",
+  "faithful transcription", or any equivalent certainty claim.
+OCR + handwritten sources cannot support those adjectives, and using
+them commits you to a fidelity level the source does not permit. Just
+present the extraction; let the visible headings and `[unclear]`
+markers speak for its confidence.
+
+Also do NOT frame editorial choices as user instructions. If you
+rendered a name in Latin script, do not say "as instructed" — the
+user did not instruct that. Own the choice or omit the meta-comment.
+
+# READ THE USER'S REQUEST AND SHAPE THE RESPONSE
+
+The user's own words steer the shape. Do NOT default to summarising.
+
+- "Extract all information", "read the document", "give me the full
+  content", "list every clause", "transcribe" → FULL EXTRACTION.
+  Follow the LAWYER-FRIENDLY FORMAT above (Document Overview + per-page
+  headings + per-clause sub-headings). Reproduce every readable passage
+  (party captions, father's / husband's names, addresses, dates, section
+  numbers, amounts, cheque / UTR / account numbers, annexure / exhibit
+  markers, verification blocks, witness lists with designations, seals,
+  stamps, notary attestations, page headers) in the source's own order.
+  Preserve numbered-clause counts (8 in the source → 8 sub-headings in
+  the output). Illegible clauses become the "(illegible)" sub-heading
+  form from the routing table — NEVER invented English.
+- "Translate to English" (with or without extraction) → RENDER
+  READABLE CONTENT. Translate every sentence you passed the legibility
+  gate; mark the rest per the routing above. Proper nouns (people,
+  places, courts, advocates, notary names, village / district / state
+  names) are NEVER translated or anglicised. Numerals + statutory
+  references + case citations follow the `LEGAL LANGUAGE REGISTER`
+  already applied via localize_prompt.
+- "Summarise", "brief summary", "give me the gist", "what is this
+  about", "explain in short", "case brief" → SUMMARY MODE. The only
+  mode that permits paraphrase. Still name every party, date, and
+  section number EXACTLY, and still omit anything you cannot read.
+
+  VOLUME IS A HARD FLOOR SCALED TO SOURCE-DOCUMENT SIZE - NOT a
+  soft target. In Indian legal English a "brief" is a substantive
+  case-brief a lawyer can hand to counsel, NOT a five-line TL;DR.
+  UNDER-producing a summary of a long document is the specialist
+  failure to avoid; OVER-producing is fine. The words "brief",
+  "in short", "concise" in the user's query DO NOT authorise
+  going below the floor.
+
+  THE FLOOR IS 10% OF THE SOURCE LENGTH. The message headed
+  "Source size and required length" gives you the source's size and
+  the exact minimum for THIS request. Those numbers are computed
+  from the file and override any guess you would make from reading
+  it. Write to the minimum first, then keep going until the record
+  is covered.
+
+  Structure by source size (the size message tells you the pages):
+
+    * 1-3 pages (legal notice, one-page affidavit, RTI application):
+      running prose, 1-3 paragraphs. Cover purpose, parties, demand,
+      deadline.
+    * 4-9 pages (reply notice, complaint, short pleading): 3-6
+      paragraphs. Cover purpose, parties, material facts, key
+      statutory anchors, outcome sought.
+    * 10-29 pages (court pleadings, writ petitions, SCNs, judgments,
+      agreements): `##` markdown sections, in this order:
+
+          ## Forum & Parties
+          ## Material Facts (chronological)
+          ## Key Exhibits / Documents Relied Upon
+          ## Dispositive Issues
+          ## Reliefs Sought / Order Impugned
+
+      The Material Facts section MUST include at least 6-10
+      specific dates from the record (execution dates of
+      agreements, order dates, filing dates), each with a
+      one-sentence description of what happened on that date.
+      A 29-page court filing whose Material Facts section
+      names only 2-3 dates is compressed too aggressively -
+      the lawyer needs the chronological spine to brief the
+      client.
+    * 30+ pages (arbitration paperbooks, multi-noticee SCN, long
+      judgment): the same five sections plus the additional sections
+      the record warrants (## Grounds of Appeal / Challenge,
+      ## Prior Litigation History, ## Interim Orders in Related
+      Proceedings, ## Findings of the Court Below). Material Facts
+      carries 12 or more dated entries.
+  If the user genuinely wanted a one-liner they would have asked
+  a specific question ("who is the plaintiff?", "what is the
+  claim amount?"). A summary request on a multi-page filing is
+  a request for a substantive brief, not a tweet — and the
+  volume floor above is where "substantive" starts.
+- Specific question ("What amount is claimed?", "Who is the
+  respondent?", "Which BNS section applies?") → DIRECT ANSWER quoting
+  the exact passage that supports it, with a page / clause / annexure
+  citation. If the passage that would answer the question is
+  illegible, say so — do NOT infer.
+
+Ambiguous request → prefer READABILITY-MARKED output over invented
+completeness. A response of `[Illegible]` markers plus the parts you
+can genuinely read is far better than a response of plausible-sounding
+sentences you invented to fill gaps.
+
+# FIDELITY (APPLIES IN EVERY MODE)
+
+1. Names, addresses, dates, amounts, section numbers, cheque / UTR /
+   account numbers, annexure labels are transcribed EXACTLY as the
+   source spells them. Never substitute a role-label ("the wife",
+   "the husband", "the girl", "the boy", "the party of the first
+   part") for a real name the source provides.
+2. Preserve every `[illegible]` marker from the upstream OCR intact.
+   Do NOT delete, replace, or paraphrase around it.
+3. Uncertain-but-not-empty segments: use the smallest scope-marker
+   that fits:
+     - one unclear word inside a legible sentence → `[unclear]` in
+       place; translate the rest of the sentence
+     - one unclear digit in an otherwise-legible number →
+       `Notary [unclear digit]617` or `Notary 361[unclear]`
+     - a whole sentence you can't read reliably → the routing table
+       above; NOT a plausible-sounding fabrication
+     - a whole paragraph illegible → `[Paragraph illegible —
+       <topic if identifiable, else blank>.]`
+   Never claim certainty on a name whose spelling differs across
+   two mentions — if page 1 says "Bhagwant Singh" and page 2 says
+   "Jagdev Singh" for the same role, quote both: `[father's name
+   read variably as "Bhagwant Singh" and "Jagdev Singh" — original
+   scan unclear]`.
+4. Do NOT paraphrase legal wording of clauses, conditions,
+   verifications, or attestations. Legal effect turns on exact
+   wording. If you cannot read the exact wording, mark it uncertain
+   rather than paraphrase.
+5. Preserve structural markers when they are readable: page numbers,
+   "ANNEXURE C-2", "In the Court of ...", verification blocks,
+   "Deponent:", the witness list with designations, notary
+   attestation text, dated seals.
+
+# HANDWRITTEN / MULTI-SCRIPT / POOR-SCAN
+
+- Printed text that passed the legibility gate: translate normally.
+- Handwritten text: prefix the first line of the block with
+  `[handwritten]` so the reader knows the confidence floor is lower.
+  Run each handwritten sentence through the legibility gate.
+- Signature blocks: state that a signature is present; transcribe any
+  legibly printed name beneath. NEVER invent a name for an illegible
+  signature. Handwritten names (as opposed to typed / printed names)
+  must ALWAYS use the `appears to read: "Name" (uncertain)` prefix —
+  never a confident identification. If the signature and the printed
+  name appear to differ (e.g. printed "Manpreet Singh" with signature
+  reading "Manpreet Kaur"), quote both and flag the discrepancy rather
+  than picking one.
+- Seals / stamps: transcribe visible words; uncertain numbers or dates
+  as `[unclear digit]` / `[unclear date]`.
+- Marginal / rotated / vertical text: note the position (e.g.
+  `[Vertical text on left margin:]`) and apply the same gate.
+
+# NEVER DO THIS
+
+- Do not invent facts, names, dates, amounts, or clause numbers not
+  present in the readable portion of the source.
+- Do not merge, reorder, or renumber the source document's clauses.
+- Do not translate proper nouns.
+- Do not add legal analysis, advice, or interpretation unless the
+  user explicitly asked for it.
+- Do not use role-labels ("the girl", "the boy") when the source
+  names the actual person and you read it.
+- Do not describe your own output with certainty adjectives
+  ("verbatim", "exact", "complete", "faithful") — see above.
+- Do not attribute editorial choices to non-existent user instructions
+  ("as instructed", "as requested" when the user did not ask for
+  that specific choice).
+
+# WHEN YOU CANNOT ANSWER
+
+If the OCR text is empty or garbled beyond recognition, or the user's
+question cannot be answered from the provided document, say so
+plainly: "The provided document text does not contain [X]" or "The
+scan of Page N is too degraded to translate reliably." Do NOT fill
+the gap with general legal knowledge or invented details.""",
             user_language,
             intent,
             source_languages=source_langs,
@@ -163,25 +483,69 @@ def _generate_from_docs(
             prompt_messages.append(("user", "Previous conversation:\n{history}"))
         prompt_messages.extend([
             ("user", "Document content:\n{docs}"),
+            ("user", "Source size and required length: {size_note}"),
             ("user", "Current Date: {date}"),
             ("user", "Question: {query}"),
         ])
         prompt = ChatPromptTemplate.from_messages(prompt_messages)
         chain = prompt | llm
 
+        _current_max_out = _MAX_OUT
         invoke_args = {
             "query": query,
             "docs": docs_text,
+            "size_note": _source_size_note(len(docs_text)),
             "date": str(date.today()),
         }
         if history_text:
             invoke_args["history"] = history_text
         response = chain.invoke(invoke_args)
 
+    # Truncation detection (2026-09-06). Google Gemini returns
+    # finish_reason="MAX_TOKENS" (LangChain surfaces it as
+    # response.response_metadata["finish_reason"]) when the model hit its
+    # output-length cap. Without this check the pipeline shipped the
+    # partial response as if complete — user saw mid-sentence truncation
+    # with no error banner, no continuation signal. We now log the
+    # event and append a visible marker so the lawyer knows to ask a
+    # follow-up rather than assume the response is complete.
+    _finish_reason = ""
+    try:
+        _md = getattr(response, "response_metadata", None) or {}
+        _finish_reason = str(
+            _md.get("finish_reason")
+            or _md.get("stop_reason")
+            or ""
+        ).upper()
+    except Exception:  # noqa: BLE001 — defensive, provider metadata is best-effort
+        _finish_reason = ""
+    _output_truncated = _finish_reason in ("MAX_TOKENS", "LENGTH")
+
     from core.token_tracker import record as _record_tokens
     tokens = _record_tokens("Document", "qa_chromadb", response, model=picked_model)
 
-    return response.text, tokens
+    response_text = response.text or ""
+    if _output_truncated:
+        log.warning(
+            "Document agent output truncated — hit max_output_tokens ceiling",
+            model=picked_model,
+            max_output_tokens=_current_max_out,
+            response_chars=len(response_text),
+            finish_reason=_finish_reason,
+        )
+        response_text = response_text.rstrip() + (
+            "\n\n---\n\n"
+            "**⚠️ Response truncated — the extraction reached the model's "
+            "output-length ceiling before finishing the document.**\n\n"
+            "To see the rest, either:\n"
+            "- Ask a follow-up naming a specific later section "
+            "(e.g. \"continue from page 15\", \"show the Prayer clauses\", "
+            "\"give me the Verification block\"), OR\n"
+            "- Narrow the request (e.g. \"summarise pages 15-29 only\", "
+            "\"just the party names and dates\")."
+        )
+
+    return response_text, tokens
 
 
 # --- Agent Node ---
@@ -307,6 +671,92 @@ async def document_node(state: LegalAgentState) -> dict:
             log.info("Using extracted_texts fallback (Chroma path empty)",
                      files=len(retrieved_docs),
                      chroma_collections=len(coll_list))
+
+        # --- Gap #5: large-attachment MMR router ---
+        #
+        # When the user uploaded a big evidence bundle (>3 files or the
+        # aggregate text exceeds LARGE_ATTACHMENT_CHAR_BUDGET), swap the
+        # lossless full-doc path for per-chunk similarity retrieval so
+        # the Gemini prompt stays within the model's usable context. The
+        # dead retrieve_attachment_context tool at
+        # tools/shared/vectordb_tools.py has been kept in the codebase
+        # for exactly this scenario and is finally wired in here.
+        #
+        # Thresholds are conservative: the 1-3 file case (the vast
+        # majority of usage) stays on the full-doc path so we lose no
+        # per-file context. Only the "20-PDF evidence bundle" tail
+        # triggers MMR, and even then the marker in the log lets
+        # operators see the switch happen.
+        LARGE_ATTACHMENT_FILE_COUNT = 3
+        LARGE_ATTACHMENT_CHAR_BUDGET = 500_000
+        _agg_chars = sum(len(d.page_content) for d in retrieved_docs)
+        _use_mmr = (
+            len(coll_list) > LARGE_ATTACHMENT_FILE_COUNT
+            or _agg_chars > LARGE_ATTACHMENT_CHAR_BUDGET
+        )
+        if _use_mmr and coll_list:
+            log.info(
+                "Large attachment bundle detected — switching to MMR path",
+                files=len(coll_list),
+                aggregate_chars=_agg_chars,
+                threshold_files=LARGE_ATTACHMENT_FILE_COUNT,
+                threshold_chars=LARGE_ATTACHMENT_CHAR_BUDGET,
+            )
+            progress("document",
+                     f"Large bundle ({len(coll_list)} files, "
+                     f"{_agg_chars // 1000}K chars) — using targeted retrieval",
+                     step="search", substep=True)
+            try:
+                from tools.shared.vectordb_tools import retrieve_attachment_context_impl
+                mmr_result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        retrieve_attachment_context_impl,
+                        query, coll_list,
+                        # Bump k so a 20-file bundle still yields ~30 top
+                        # chunks (~30K chars typical) — enough context
+                        # for a substantive answer, well under the 500K
+                        # budget the full-doc path would have blown past.
+                        8,   # per_collection_k
+                        30,  # total_k
+                    ),
+                    timeout=TIMEOUT_CHROMADB_SEC,
+                )
+                mmr_chunks = mmr_result.get("chunks", [])
+                if mmr_chunks:
+                    retrieved_docs = [
+                        Document(
+                            page_content=ch["content"],
+                            metadata={
+                                "source": ch.get("source") or "attached",
+                                "chunk_id": ch.get("chunk_id"),
+                                "score": ch.get("score"),
+                                "collection": ch.get("collection"),
+                                "retrieval_mode": "mmr_large_bundle",
+                            },
+                        )
+                        for ch in mmr_chunks
+                    ]
+                    log.info(
+                        "MMR retrieval succeeded — replaced full-doc concat",
+                        chunks=len(retrieved_docs),
+                        total_chars=sum(len(d.page_content) for d in retrieved_docs),
+                    )
+                else:
+                    log.warning(
+                        "MMR retrieval returned no chunks — keeping full-doc path "
+                        "(user query may not embed well against uploaded content)",
+                        files=len(coll_list),
+                    )
+            except asyncio.TimeoutError:
+                log.warning(
+                    "MMR retrieval timed out — falling back to full-doc concat",
+                    timeout_s=TIMEOUT_CHROMADB_SEC,
+                )
+            except Exception as _mmr_err:
+                log.warning(
+                    "MMR retrieval failed — falling back to full-doc concat",
+                    error=str(_mmr_err)[:200],
+                )
 
         # Step 2: Relevance gate removed for the full-doc path (Phase D
         # switched retrieval from MMR top-30 to get_full_attachment, which

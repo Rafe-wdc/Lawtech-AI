@@ -67,3 +67,4 @@ gunicorn>=22.0.0
 # PostgreSQL checkpointer (P0-4: persistent LangGraph conversation state)
 langgraph-checkpoint-postgres>=3.0.4
 psycopg[binary,pool]>=3.3.0
+langchain-anthropic>=1.7.1

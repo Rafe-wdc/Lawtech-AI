@@ -1,0 +1,88 @@
+**IN THE COURT OF THE [DESIGNATION OF MAGISTRATE], [CITY]**
+
+**COMPLAINT CASE NO. ______ OF 2024**
+
+IN THE MATTER OF:
+
+[Name of Complainant]
+S/o [Father's Name]
+Aged [Age] years,
+Resident of [Complete Address of Complainant]
+
+..... Complainant
+
+**vs**
+
+1. [Name of Accused No. 1], S/o [Father's Name], R/o [Address]
+2. [Name of Accused No. 2], S/o [Father's Name], R/o [Address]
+3. [Name of Accused No. 3], S/o [Father's Name], R/o [Address]
+4. [Other Accused Persons with details]
+
+..... Accused
+
+**COMPLAINT UNDER SECTION 200 OF THE CODE OF CRIMINAL PROCEDURE, 1973 FOR OFFENCES PUNISHABLE UNDER SECTIONS 143, 147, 149, 323, 504, AND 506 OF THE INDIAN PENAL CODE, 1860**
+
+MOST RESPECTFULLY SHOWETH:
+
+1. That the Complainant is a law-abiding citizen of India, residing at the aforementioned address. The Complainant is engaged in the business of [Specify Business/Profession].
+
+2. That the Accused persons are known to the Complainant and reside in the same locality. The Accused persons bear ill will and animosity towards the Complainant due to [mention reason for animosity, e.g., a pending civil dispute, business rivalry, etc.].
+
+3. That on [Date of Incident], at approximately [Time of Incident], at [Place of Incident], the Accused persons, in furtherance of their common object, formed an unlawful assembly with the intent to intimidate, assault, and cause harm to the Complainant.
+
+4. That on the said date and time, the Complainant was [describe what the complainant was doing]. The Accused persons, numbering more than five, arrived at the spot armed with [e.g., sticks, rods, etc.] and started shouting abuses and threats at the Complainant.
+
+5. That Accused No. 1 intentionally insulted the Complainant by using filthy and provocative language, with the intent to breach the public peace, thereby committing an offence punishable under Section 504 of the Indian Penal Code, 1860.
+
+6. That thereafter, all the Accused persons, in prosecution of their common object, wrongfully restrained the Complainant and voluntarily caused hurt to him by [describe the assault, e.g., beating him with fists, kicks, and sticks]. This act constitutes an offence punishable under Section 323 read with Section 149 of the Indian Penal Code, 1860.
+
+7. That the Accused persons also criminally intimidated the Complainant, threatening to cause grievous hurt and kill him and his family members if he reported the matter to the police. This constitutes an offence punishable under Section 506 of the Indian Penal Code, 1860.
+
+8. That the aforementioned acts of the Accused persons clearly make out offences punishable under Sections 143 (unlawful assembly), 147 (rioting), 504 (intentional insult with intent to provoke breach of the peace), 323 (voluntarily causing hurt), and 506 (criminal intimidation), all read with Section 149 (every member of unlawful assembly guilty of offence committed in prosecution of common object) of the Indian Penal Code, 1860.
+
+9. That the Complainant immediately approached the [Name of Police Station] to lodge a First Information Report (FIR) regarding the incident. However, the police officials, for reasons best known to them, refused to register the FIR and advised the Complainant to settle the matter privately. A copy of the complaint made to the police dated [Date] is annexed hereto and marked as **Annexure C-1**.
+
+10. That since the police have failed to take action, the Complainant is constrained to file the present complaint before this Hon'ble Court, which has the territorial jurisdiction to try and entertain the same as the entire cause of action arose within its jurisdiction.
+
+11. That the present complaint is being filed within the period of limitation prescribed under the Code of Criminal Procedure, 1973.
+
+**PRAYER**
+
+In view of the facts and circumstances stated above, it is most respectfully prayed that this Hon'ble Court may be pleased to:
+
+(a) Take cognizance of the offences committed by the Accused persons under Sections 143, 147, 149, 323, 504, and 506 of the Indian Penal Code, 1860;
+
+(b) Examine the Complainant and his witnesses on oath as per the provisions of the Code of Criminal Procedure, 1973;
+
+(c) Issue summons/warrants against the Accused persons to secure their presence before this Hon'ble Court;
+
+(d) Try the Accused persons in accordance with law and punish them for the aforesaid offences; and
+
+(e) Pass such other and further orders as this Hon'ble Court may deem fit and proper in the interest of justice.
+
+**VERIFICATION**
+
+I, [Name of Complainant], the Complainant above-named, do hereby solemnly affirm and declare that the contents of paragraphs 1 to 11 of the complaint are true and correct to the best of my knowledge and belief and the legal submissions are based on advice received and believed to be true.
+
+Verified at [City] on this [Day] day of [Month], 2024.
+
+DEPONENT
+
+**ADVOCATE DETAILS**
+
+COMPLAINANT
+THROUGH
+
+[Name of Advocate]
+Advocate for the Complainant
+[Enrollment No.]
+[Address of Advocate]
+[Email Address]
+[Mobile No.]
+
+Place: [City]
+Date:
+
+
+---
+**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.

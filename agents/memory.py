@@ -66,6 +66,10 @@ async def _load_chat_history(thread_id: str) -> ChatHistoryResult:
     )
 
 
+class _SkipRewrite(Exception):
+    """Raised inside the rewrite try-block to bypass the LLM rewrite."""
+
+
 # --- Query Rewriting ---
 
 REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query that incorporates relevant context from the conversation history.
@@ -469,30 +473,44 @@ async def _restore_file_context(thread_id: str) -> dict | None:
         return None
 
     # Only use files from the MOST RECENT upload batch.
-    # Files uploaded in the same turn share the same created_at timestamp
-    # (within a few seconds). We use the latest file's timestamp and include
-    # all files within 60 seconds of it (covers multi-file uploads).
-    latest_ts = all_thread_files[-1].get("created_at", "")  # already sorted ASC
-    thread_files = []
-    for record in reversed(all_thread_files):
-        ts = record.get("created_at", "")
-        if ts and latest_ts:
-            # Simple comparison — both are ISO datetime strings
-            # Include files from the same batch (within ~10s of latest)
-            try:
-                from datetime import datetime
-                t_latest = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
-                t_this = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                if abs((t_latest - t_this).total_seconds()) <= 10:
-                    thread_files.append(record)
-                else:
-                    break  # older batch, stop
-            except (ValueError, TypeError):
-                thread_files.append(record)  # can't parse, include
-        else:
-            thread_files.append(record)
+    #
+    # Gap #8 (2026-09-02): prefer the deterministic `batch_id` (UUID
+    # minted per multipart request in the gateway; stored in the
+    # SQLite thread_files row) when it's populated. Falls back to the
+    # ±10s created_at window for legacy rows (pre-migration `batch_id`
+    # is ""). The legacy path had two known failure modes:
+    #   (a) double-click uploads within 10s got merged as one batch;
+    #   (b) a slow save that straddled the boundary split one batch
+    #       into two, losing the earlier files from the restored context.
+    # Both go away when both rows carry the same batch_id.
+    latest_record = all_thread_files[-1]  # already sorted ASC
+    latest_batch_id = (latest_record.get("batch_id") or "").strip()
+    latest_ts = latest_record.get("created_at", "")
 
-    thread_files.reverse()  # restore chronological order
+    thread_files: list[dict] = []
+    if latest_batch_id:
+        # Deterministic path: same batch_id => same batch.
+        for record in all_thread_files:
+            if (record.get("batch_id") or "").strip() == latest_batch_id:
+                thread_files.append(record)
+    else:
+        # Legacy fallback: ±10s timestamp window (behaviour before Gap #8).
+        for record in reversed(all_thread_files):
+            ts = record.get("created_at", "")
+            if ts and latest_ts:
+                try:
+                    from datetime import datetime
+                    t_latest = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
+                    t_this = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if abs((t_latest - t_this).total_seconds()) <= 10:
+                        thread_files.append(record)
+                    else:
+                        break  # older batch, stop
+                except (ValueError, TypeError):
+                    thread_files.append(record)  # can't parse, include
+            else:
+                thread_files.append(record)
+        thread_files.reverse()  # restore chronological order
 
     if not thread_files:
         return None
@@ -500,6 +518,7 @@ async def _restore_file_context(thread_id: str) -> dict | None:
     log.info("Restoring file context (latest batch only)",
              total_thread_files=len(all_thread_files),
              latest_batch_files=len(thread_files),
+             latest_batch_id=(latest_batch_id or "(legacy-ts-window)"),
              latest_ts=latest_ts)
 
     # Phase F (RAG attachment routing plan, 2026-06-28): only
@@ -508,6 +527,12 @@ async def _restore_file_context(thread_id: str) -> dict | None:
     # content via get_full_attachment(collection_id) on demand.
     chromadb_collections: list[str] = []
     file_names: list[str] = []
+    # Gap #3 (2026-09-02): restore per-file classifier verdicts from
+    # SQLite so file-kind-aware routing survives across turns. Empty
+    # entries for files that predate the classifier (migration default
+    # is empty string) are still surfaced as `{"kind": "", ...}` so
+    # consumers can distinguish "unknown" from "not classified yet".
+    file_kinds: list[dict] = []
 
     for record in thread_files:
         if record.get("upload_error") and not record.get("local_path"):
@@ -520,6 +545,12 @@ async def _restore_file_context(thread_id: str) -> dict | None:
         if coll and coll not in chromadb_collections:
             chromadb_collections.append(coll)
 
+        file_kinds.append({
+            "name": filename,
+            "kind": record.get("file_kind", "") or "",
+            "confidence": float(record.get("file_kind_confidence") or 0.0),
+        })
+
     if not chromadb_collections:
         return None
 
@@ -527,6 +558,7 @@ async def _restore_file_context(thread_id: str) -> dict | None:
         "chromadb_collections": chromadb_collections,
         "summary": f"Restored {len(file_names)} file(s) from thread history",
         "file_names": file_names,
+        "file_kinds": file_kinds,
     }
 
 
@@ -637,6 +669,20 @@ async def memory_node(state: LegalAgentState) -> dict:
                          files=restored_file_context.get("file_names", []),
                          chromadb=len(restored_file_context.get("chromadb_collections", [])))
 
+            # Acknowledgements ("ok", "thanks", "hmm", "yes") carry no new
+            # ask. The rewriter only knows SEARCH and DIRECTIVE shapes and
+            # reconstructs these into the full prior request, which then
+            # re-runs a 2-3 minute draft for an "ok" (advocate report,
+            # 2026-09-10; measured 3 of 5 acks re-drafted). Detect them
+            # deterministically BEFORE the rewriter and keep the raw text.
+            from core.followup import is_conversational_followup
+            if turns > 0 and is_conversational_followup(original_query):
+                conversational = True
+                log.info("Conversational follow-up - skipping rewrite",
+                         query=original_query[:40], prev_task=prev_task)
+                progress("memory", "Acknowledgement noted", substep=True, step="rewrite")
+            else:
+                conversational = False
             progress("memory", "Rewriting follow-up query...", step="rewrite")
             # Bound the rewrite call: without a local ceiling, a slow
             # Gemini Flash blocks the memory step for the entire outer
@@ -645,6 +691,8 @@ async def memory_node(state: LegalAgentState) -> dict:
             # can SKIP itself on short directive follow-ups after Drafting
             # — see PR 3b in _rewrite_query.
             try:
+                if conversational:
+                    raise _SkipRewrite
                 query = await asyncio.wait_for(
                     asyncio.to_thread(
                         _rewrite_query, query, chat_history,
@@ -652,6 +700,8 @@ async def memory_node(state: LegalAgentState) -> dict:
                     ),
                     timeout=15,
                 )
+            except _SkipRewrite:
+                pass
             except asyncio.TimeoutError:
                 log.warning("Rewrite timed out; using original query",
                             timeout_s=15, query=query[:80])
@@ -669,6 +719,7 @@ async def memory_node(state: LegalAgentState) -> dict:
 
     result: dict = {
         "query": query,
+        "conversational_followup": bool(locals().get("conversational", False)),
         "chat_history": chat_history,
         "summary_text": summary_text,
         "user_language": user_language,

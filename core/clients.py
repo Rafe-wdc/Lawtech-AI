@@ -42,6 +42,8 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from google import genai
 
 from .settings import (
+    GEMINI_MODELS,
+    GEMINI_THINKING_DEFAULT,
     ELASTICSEARCH_URL,
     ES_USER,
     ES_PASSWORD,
@@ -284,21 +286,161 @@ def get_gpt4o_mini(temperature: float = 0.3):
 # for visible output. For tool-use / analytical tasks (ReAct agents, scenario,
 # PDF chat), leave thinking_budget at the default to allow planning.
 
+# --- Gemini 2.5 -> 3.x thinking-parameter bridge ---
+#
+# Gemini 3.x REPLACED the integer `thinking_budget` with the enum
+# `thinking_level` (minimal | low | medium | high). Passing `thinking_budget`
+# to a 3.x Lite model returns 400 INVALID_ARGUMENT, and passing BOTH is a 400
+# on every 3.x model. This codebase has ~11 callsites that pass
+# `thinking_budget`, so rather than rewrite them all, the tier factories keep
+# accepting `thinking_budget` and translate it here.
+#
+# Mapping (deliberately never emits "minimal" — measured regression):
+#   budget <= 0     -> "low"     (2.5-era "thinking off"; 3.x cannot fully
+#                                 disable thinking, and "minimal" scored
+#                                 3/5 vs 5/5 for "low" on drafting format
+#                                 detection, 2026-09-04)
+#   budget <= 2048  -> "low"
+#   budget >  2048  -> "medium"
+#
+# Callers may pass `thinking_level=` directly to bypass the translation.
+def _split_provider(model_id: str) -> tuple[str, str]:
+    """Split a tier value into (provider, bare_model_id).
+
+    Tier values may be provider-qualified (`anthropic:claude-opus-5`,
+    `openai:gpt-5.4`) or bare, in which case google_genai is assumed so every
+    pre-existing GEMINI_*_MODEL value keeps working unchanged.
+
+    This is what makes a cross-provider move a config change: setting
+    GEMINI_FLASH_MODEL=anthropic:claude-opus-5 routes the whole Flash tier to
+    Claude without touching code.
+    """
+    if ":" in model_id:
+        provider, _, bare = model_id.partition(":")
+        return provider, bare
+    return "google_genai", model_id
+
+
+def _provider_kwargs(provider: str, temperature: float | None) -> dict:
+    """Sampling kwargs that the target provider actually accepts.
+
+    Anthropic's current models (claude-opus-5, claude-sonnet-5, and the
+    4.6/4.7/4.8 family) REJECT `temperature` with a 400 — sampling params were
+    removed. Gemini 3.x Flash-Lite accepts it but silently ignores it. Passing
+    it blindly across providers is therefore a hard failure on Claude, so it is
+    dropped for anthropic and passed through elsewhere.
+    """
+    if provider == "anthropic":
+        # Claude rejects `temperature` (sampling params removed on current
+        # models). Thinking is configured here rather than in
+        # _thinking_kwargs, which speaks Gemini's dialect only.
+        #
+        # `{"type": "adaptive"}` is the only on-mode for Sonnet 5 — omitting
+        # `thinking` also runs adaptive, but stating it makes the intent
+        # explicit and survives a future default change. `output_config.effort`
+        # controls depth; drafting is the product's highest-stakes output, so
+        # it gets "high" (also Anthropic's own default) rather than a
+        # cost-tuned lower level.
+        # MEASURED 2026-09-07 — effort is NOT set by default.
+        # Forcing output_config.effort="high" on the S.138 drafting task made
+        # things strictly worse: 110-133s vs ~68s unset, and $0.25-0.38 vs
+        # $0.21, with no gain on the quality checks. effort=low/medium were
+        # cheaper but did not fix the substantive miss either (Claude omits
+        # the s.138(b) 30-day limitation plea inconsistently at every level).
+        # Anthropic's own default is already "high"; setting it explicitly
+        # measurably changed behaviour for the worse here, so the default is
+        # left alone and exposed for tuning rather than pinned.
+        kw = {"thinking": {"type": "adaptive"}}
+        _effort = os.getenv("ANTHROPIC_EFFORT", "").strip()
+        if _effort:
+            kw["output_config"] = {"effort": _effort}
+        return kw
+    return {} if temperature is None else {"temperature": temperature}
+
+
+def _output_tokens_kwarg(provider: str, max_output_tokens: int) -> dict:
+    """Map the output-token-limit parameter to the provider's name.
+
+    - google_genai / openai: `max_output_tokens`
+    - anthropic: `max_tokens` (Claude rejects `max_output_tokens` with a
+      TypeError). Claude Sonnet 5's hard ceiling is 16384; passing a higher
+      value is silently capped by the API, but we clamp here to be explicit.
+    """
+    if provider == "anthropic":
+        # 16384 is NOT Claude's ceiling — the Models API reports
+        # max_tokens=128000 for claude-sonnet-5. It is a NON-STREAMING guard:
+        # the SDK requires streaming for values large enough to risk the
+        # 10-minute HTTP timeout, and this codebase invokes drafting
+        # non-streaming. Raise ANTHROPIC_MAX_TOKENS only alongside switching
+        # that path to .stream(); the API rejects large non-streaming requests
+        # with "Streaming is required for operations that may take longer than
+        # 10 minutes" (verified 2026-09-07 at 32000).
+        cap = int(os.getenv("ANTHROPIC_MAX_TOKENS", "16384"))
+        return {"max_tokens": min(max_output_tokens, cap)}
+    return {"max_output_tokens": max_output_tokens}
+
+
+def _thinking_kwargs(model_id: str,
+                     thinking_budget: int | None,
+                     thinking_level: str | None) -> dict:
+    """Return the correct thinking kwarg for `model_id`'s generation.
+
+    Gemini 2.5 models keep `thinking_budget` so that rolling GEMINI_*_MODEL
+    back to a 2.5 id stays a working configuration.
+
+    Non-Gemini providers get NOTHING from this function. Both `thinking_budget`
+    and `thinking_level` are Gemini-specific spellings; Anthropic uses
+    `thinking={"type": "adaptive"}` plus `output_config.effort`, and sending a
+    Gemini kwarg to Claude is a 400. Wiring Anthropic's thinking controls is
+    deliberately left undone until the path can be tested against a real key.
+    """
+    provider, bare = _split_provider(model_id)
+    if provider != "google_genai":
+        return {}
+    model_id = bare
+    is_25 = model_id.startswith("gemini-2.5")
+    if is_25:
+        # 2.5 does not understand thinking_level — map it back to a budget.
+        if thinking_level is not None and thinking_budget is None:
+            return {"thinking_budget": {"minimal": 0, "low": 1024,
+                                        "medium": 4096, "high": 8192}
+                    .get(thinking_level, 0)}
+        return {"thinking_budget": thinking_budget if thinking_budget is not None else 0}
+
+    # Gemini 3.x — thinking_level only. Never send both (400).
+    if thinking_level is not None:
+        return {"thinking_level": thinking_level}
+    if thinking_budget is None:
+        return {"thinking_level": GEMINI_THINKING_DEFAULT}
+    if thinking_budget <= 2048:
+        return {"thinking_level": "low"}
+    return {"thinking_level": "medium"}
+
+
 @lru_cache(maxsize=8)
 def get_gemini_flash_lite(temperature: float = 0.3,
                           max_output_tokens: int = 8192,
-                          thinking_budget: int = 0):
-    """Gemini 2.5 Flash Lite — fastest. For classification, metadata, query rewrite.
+                          thinking_budget: int | None = None,
+                          thinking_level: str | None = None):
+    """Cheapest tier — classification, routing, metadata, query rewrite.
 
-    Defaults: 8K tokens cap, no thinking (lite is for fast/cheap, not reasoning).
+    Model comes from settings.GEMINI_MODELS["flash_lite"]
+    (default `gemini-3.5-flash-lite`).
+
+    NOTE: Gemini 3.x Flash-Lite uses FIXED sampling defaults and IGNORES
+    `temperature` (LangChain emits a UserWarning). Code that relied on
+    temperature=0.0 for deterministic output no longer gets that guarantee
+    on this tier — see MODEL_UPGRADE_PLAN.md §4.
     """
+    model_id = GEMINI_MODELS["flash_lite"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        "google_genai:gemini-2.5-flash-lite",
-        temperature=temperature,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
-        thinking_budget=thinking_budget,
         max_retries=2,
         timeout=60,
+        **_provider_kwargs(provider, temperature),
+        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 
 
@@ -307,100 +449,278 @@ get_gemini_flash = get_gemini_flash_lite
 
 
 @lru_cache(maxsize=8)
-def get_gemini_flash_full(temperature: float = 0.3,
-                          max_output_tokens: int = 65535,
-                          thinking_budget: int = 0):
-    """Gemini 2.5 Flash — balanced. For response generation, synthesis, ReAct agents.
+def get_gemini_flash_planning(temperature: float = 0.0,
+                               max_output_tokens: int = 8192,
+                               thinking_budget: int | None = None,
+                               thinking_level: str | None = None):
+    """Gemini-only Flash tier for internal planning / structured-output tasks.
 
-    Defaults: max output ceiling (65K), thinking disabled (0).
-
-    Pure-generation paths (legislation, judgment, newacts, drafting, synthesis)
-    don't need thinking and tolerate latency poorly — keep the default.
-
-    ReAct agents (SCI/GST/Judgment) that benefit from tool-planning reasoning
-    should explicitly opt in: `get_gemini_flash_full(temperature=0, thinking_budget=2048)`.
+    Always targets GEMINI_MODELS["flash"] (default gemini-3.8-flash), regardless
+    of what the generation tier is set to.  Used by:
+      - The drafting fan-out judge (with_structured_output → _FanoutStrategy)
+      - Feedback / critic calls that run structured output against Pydantic
+    These MUST stay on Gemini because:
+      1. They use `with_structured_output()` which has different semantics on
+         Anthropic (tool_choice vs function_call).
+      2. They are internal planning calls, not user-facing answers.
     """
+    model_id = GEMINI_MODELS["flash"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        "google_genai:gemini-2.5-flash",
-        temperature=temperature,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
-        thinking_budget=thinking_budget,
         max_retries=2,
         timeout=120,
+        **_provider_kwargs(provider, temperature),
+        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 
 
-def _thinking_kwargs(model_id: str, thinking_budget: int | None) -> dict:
-    """Return the thinking kwarg that `model_id`'s MODEL GENERATION accepts.
-
-    Gemini 2.5 takes `thinking_budget` (an int token allowance). Gemini 3.x
-    REJECTS it and takes `thinking_level` instead; sending both is a 400.
-    langchain-google-genai 4.3.2 documents this directly: "Gemini 3+ models
-    use thinking_level".
-
-    This is ported from the 3.x line, where it was found the hard way - a
-    guard keyed on the literal "3.6" let every other 3.x id through and sent
-    thinking_budget to a model that rejects it. Keeping 2.5 on the budget
-    spelling means rolling a model id back to a 2.5 one stays a working
-    configuration.
-
-    Budget -> level mapping matches the 3.x line: <=2048 is "low", above is
-    "medium".
-    """
-    bare = model_id.split(":", 1)[-1]
-    if not bare.startswith("gemini-"):
-        return {}
-    if bare.startswith("gemini-2.5"):
-        return {"thinking_budget": thinking_budget if thinking_budget is not None else 0}
-    if thinking_budget is None or thinking_budget <= 2048:
-        return {"thinking_level": "low"}
-    return {"thinking_level": "medium"}
+import os as _os  # noqa: E402
+# Back-compat alias for rohit/dev's 2026-09-06 Flash upgrade.
+#
+# That change introduced GEMINI_FLASH_MODEL_ID after a WhatsApp-screenshot OCR
+# incident where gemini-2.5-flash returned 504 DEADLINE_EXCEEDED on 2 of 3
+# pages ("RPC from prefill to decode failed"); the 3.x Flash model OCR'd all 3
+# in 36s vs 273s. That rationale still holds — the tier map in settings just
+# generalises it to all three tiers. The GEMINI_FLASH_MODEL env var is
+# unchanged and still rolls the Flash tier back (e.g. gemini-2.5-flash).
+#
+# `_flash_thinking_kwargs` was removed in the 2026-09-07 merge. It guarded on
+# `"3.6" in GEMINI_FLASH_MODEL_ID`, so setting GEMINI_FLASH_MODEL to any other
+# 3.x id (e.g. gemini-3.8-flash) slipped past it and sent thinking_budget=0 to
+# a model that rejects it. It also returned {} on 3.6, which silently selected
+# Gemini 3's DEFAULT thinking level — "high" — on every Flash generation call.
+# `_thinking_kwargs` above replaces it: model-generation aware, and explicit.
+GEMINI_FLASH_MODEL_ID = GEMINI_MODELS["flash"]
 
 
 @lru_cache(maxsize=8)
-def get_gemini_pro(temperature: float = 0.5,
-                   max_output_tokens: int = 16000,
-                   thinking_budget: int = 2048):
-    """Gemini 3.8 Flash — for scenario analysis, PDF chat, complex reasoning.
+def get_gemini_flash_full(temperature: float = 0.3,
+                          max_output_tokens: int = 65535,
+                          thinking_budget: int | None = None,
+                          thinking_level: str | None = None):
+    """Balanced Flash tier — response generation, synthesis, ReAct agents.
 
-    Cost swap 2026-09-10: was `gemini-2.5-pro` ($1.25/$10.00 per 1M). Moved to
-    `gemini-3.8-flash` ($0.75/$3.75) — cheaper on both input and output, and a
-    newer training cutoff. The function name is kept so callsites do not churn;
-    it no longer returns a Pro-tier model.
+    Model comes from settings.GEMINI_MODELS["flash"] (default
+    `gemini-3.8-flash` — both newer AND cheaper than 3.5-flash:
+    $0.75/$3.75 vs $1.50/$9.00 per 1M tokens). Override with
+    GEMINI_FLASH_MODEL env var.
 
-    Defaults tightened 2026-08-10: previous 65535/8192 defaults meant any caller
-    that forgot to override was billing up to 8192 thinking tokens ($0.08 output-
-    priced) plus a 65K output ceiling per call. The typical Pro workload doesn't
-    approach these bounds; drafting/refiner callsites already override. The new
-    16K/2048 defaults are a safe ceiling for anything that inherits.
+    For Gemini targets, thinking defaults to "low" rather than the 2.5-era
+    "off". See MODEL_UPGRADE_PLAN.md §1.
     """
-    _model = "google_genai:gemini-3.8-flash"
+    model_id = GEMINI_MODELS["flash"]
+    provider, _bare = _split_provider(model_id)
     return init_chat_model(
-        _model,
-        temperature=temperature,
+        model_id if ":" in model_id else f"google_genai:{model_id}",
+        **_output_tokens_kwarg(provider, max_output_tokens),
+        max_retries=2,
+        timeout=120,
+        **_provider_kwargs(provider, temperature),
+        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
+    )
+
+
+@lru_cache(maxsize=8)
+def get_gemini_vision(temperature: float = 0.0,
+                      max_output_tokens: int = 8192,
+                      thinking_budget: int | None = None,
+                      thinking_level: str | None = None):
+    """Vision OCR tier — scanned PDFs and image uploads.
+
+    Model comes from settings.GEMINI_MODELS["vision"] (default
+    `gemini-3.6-flash`), pinned SEPARATELY from the flash tier: this choice
+    rests on the 2026-09-06 production OCR incident, not on benchmarks, and
+    should not drift when the general flash tier is bumped. See the
+    GEMINI_MODELS comment in core/settings.py before changing it.
+    """
+    model_id = GEMINI_MODELS["vision"]
+    provider, _bare = _split_provider(model_id)
+    return init_chat_model(
+        model_id if ":" in model_id else f"google_genai:{model_id}",
         max_output_tokens=max_output_tokens,
-        **_thinking_kwargs(_model, thinking_budget),
         max_retries=2,
         timeout=180,
+        **_provider_kwargs(provider, temperature),
+        **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )
 
 
 @lru_cache(maxsize=8)
 def get_drafting_llm(max_output_tokens: int = 65535,
-                     thinking_budget: int = 0):
-    """Gemini 2.5 Flash for legal drafting — fast, high-quality sections.
+                     thinking_budget: int | None = None,
+                     thinking_level: str | None = None):
+    """Legal drafting — the highest-stakes output in the product.
 
-    Defaults: max output ceiling, no thinking (format-following beats reasoning
-    for drafts; the drafting prompt is highly structured).
+    Uses settings.GEMINI_MODELS["generation"] (default
+    `anthropic:claude-sonnet-5`). Override with GENERATION_MODEL env var.
+
+    Claude Sonnet 5 is the default because drafting is constrained
+    format-following against a retrieved template — a production workload
+    where Anthropic's own guidance recommends Sonnet over Opus. It runs in
+    adaptive thinking mode; `temperature` is fixed at 0.4 for Gemini
+    fallbacks and suppressed for Claude.
+
+    If Anthropic Claude encounters an error (e.g. credit limit, network,
+    or service degradation), it automatically falls back to Gemini 3.8 Flash
+    so drafts never fail.
+
+    To revert to Gemini Flash permanently: set GENERATION_MODEL=gemini-3.8-flash.
     """
-    return init_chat_model(
-        "google_genai:gemini-2.5-flash",
-        temperature=0.4,
-        max_output_tokens=max_output_tokens,
-        thinking_budget=thinking_budget,
-        max_retries=2,
-        timeout=180,
-    )
+    model_id = GEMINI_MODELS["generation"]
+    provider, _bare = _split_provider(model_id)
+    def _gemini_generation_llm():
+        """The Gemini flash tier, used whenever the configured tier can't run."""
+        fb = GEMINI_MODELS["flash"]
+        return init_chat_model(
+            fb if ":" in fb else f"google_genai:{fb}",
+            max_output_tokens=min(max_output_tokens, 65535),
+            max_retries=2,
+            timeout=180,
+            **_provider_kwargs("google_genai", 0.4),
+            **_thinking_kwargs(fb, thinking_budget, thinking_level),
+        )
+
+    try:
+        primary = init_chat_model(
+            model_id if ":" in model_id else f"google_genai:{model_id}",
+            **_output_tokens_kwarg(provider, max_output_tokens),
+            max_retries=1,
+            timeout=180,
+            **_provider_kwargs(provider, 0.4),
+            **_thinking_kwargs(model_id, thinking_budget, thinking_level),
+        )
+    except Exception as _e:
+        # CONSTRUCTION failure — a missing provider package, a malformed model
+        # id, an unsupported kwarg. `.with_fallbacks()` cannot rescue any of
+        # these because they happen while BUILDING the primary, so without this
+        # every drafting request raises. Measured 2026-09-07: a server running
+        # from a virtualenv without langchain-anthropic failed every draft with
+        # ImportError; the orchestrator fell through to web_search_fallback and
+        # returned a generic web answer, and section-wise drafts came back as a
+        # 297-char stub after all 5 sections failed.
+        if provider == "google_genai":
+            raise
+        _log.error(
+            "Generation tier failed to initialise — falling back to the Gemini "
+            "flash tier. Output will NOT come from the configured model.",
+            configured=model_id, using=GEMINI_MODELS["flash"],
+            error=str(_e)[:200],
+        )
+        return _gemini_generation_llm()
+    def _anthropic_unavailable() -> str:
+        """Why Anthropic can't be used right now, or '' if it can.
+
+        Checks BOTH the credential and the package. The package check matters:
+        on 2026-09-07 a server running from a different virtualenv had the key
+        but not langchain-anthropic, and drafting died with
+        `ImportError: Initializing ChatAnthropic requires the langchain-anthropic
+        package`. `.with_fallbacks()` cannot rescue that — it is raised while
+        BUILDING the primary — so every draft failed, the orchestrator fell
+        through to web_search_fallback, and users received a generic web-sourced
+        answer instead of a draft. Section-wise drafts fared worse: all 5
+        sections failed and the agent returned a 297-char stub.
+        """
+        if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):
+            return "no ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN is set"
+        try:
+            import langchain_anthropic  # noqa: F401
+        except ImportError:
+            return "langchain-anthropic is not installed (pip install langchain-anthropic)"
+        return ""
+
+    _blocked = _anthropic_unavailable() if provider == "anthropic" else ""
+    if _blocked:
+        # NO ANTHROPIC CREDENTIAL — degrade to Gemini at CONSTRUCTION time.
+        #
+        # `.with_fallbacks()` only rescues failures raised during invoke. A
+        # missing key raises inside the Anthropic client and the Gemini
+        # fallback cannot help if it is also mid-flight, so an environment
+        # without the key would surface an error event to the user rather than
+        # a degraded answer. That matters beyond drafting: get_drafting_llm is
+        # also called by the orchestrator's citation injection
+        # (agents/orchestrator.py) and tools/shared/llm_tools.py, so a
+        # credential-less deploy would break ordinary non-drafting queries too.
+        #
+        # Any server whose .env predates the Claude generation tier lands here.
+        # Loud, because a Gemini-served draft must never be mistaken for Claude.
+        _log.warning(
+            "Generation tier is Anthropic but unusable — falling back to the "
+            "Gemini flash tier. Drafts will NOT be produced by the configured "
+            "model. Fix the cause below, or set GENERATION_MODEL to a Gemini id "
+            "to make the choice explicit.",
+            configured=model_id, using=GEMINI_MODELS["flash"], reason=_blocked,
+        )
+        fb_model = GEMINI_MODELS["flash"]
+        return init_chat_model(
+            fb_model if ":" in fb_model else f"google_genai:{fb_model}",
+            max_output_tokens=min(max_output_tokens, 65535),
+            max_retries=2,
+            timeout=180,
+            **_provider_kwargs("google_genai", 0.4),
+            **_thinking_kwargs(fb_model, thinking_budget, thinking_level),
+        )
+
+    if provider == "anthropic":
+        # LOUD FALLBACK.
+        #
+        # 2026-09-07: a full "Claude Sonnet 5 vs Gemini" drafting evaluation
+        # was run and reported as a Claude win. Every one of those calls was
+        # actually served by Gemini: the Anthropic account had no credit, the
+        # 400 was swallowed by this fallback, and nothing in the logs, the
+        # response, or the test output said so. The conclusion was Gemini
+        # compared against Gemini.
+        #
+        # A fallback that hides which model answered makes every downstream
+        # measurement untrustworthy, so it now announces itself. Callers that
+        # must know can read `response.response_metadata["model_name"]` — and
+        # any test asserting a model change MUST assert on that field rather
+        # than on the call merely succeeding.
+        _log.warning(
+            "Generation tier is Anthropic — a Gemini fallback is armed. If "
+            "Anthropic errors (credit, quota, outage) the response will be "
+            "served by Gemini and will NOT be the configured model. Verify "
+            "with response_metadata['model_name'] before drawing conclusions.",
+            configured=model_id, fallback=GEMINI_MODELS["flash"],
+        )
+        fb_model = GEMINI_MODELS["flash"]
+        fallback = init_chat_model(
+            fb_model if ":" in fb_model else f"google_genai:{fb_model}",
+            max_output_tokens=min(max_output_tokens, 65535),
+            max_retries=2,
+            timeout=180,
+            **_provider_kwargs("google_genai", 0.4),
+            **_thinking_kwargs(fb_model, thinking_budget, thinking_level),
+        )
+        return primary.with_fallbacks([fallback])
+    return primary
+
+
+
+def cacheable_system(text: str) -> "str | list":
+    """System-message content that Anthropic will prompt-cache.
+
+    Returns the string unchanged for Gemini/OpenAI. For Anthropic, wraps it in
+    a single text block carrying `cache_control: ephemeral` so the prefix is
+    written to cache once and read back at 0.1x input price
+    ($0.20/MTok vs $2.00 on claude-sonnet-5).
+
+    This matters here because DRAFTING_SYSTEM_PROMPT is ~10,100 tokens and is
+    byte-identical on every request for a given language + niche combination —
+    it is the single largest repeated cost in the drafting path. Caching is a
+    PREFIX match, so anything volatile must stay in the user message, which is
+    already how drafting is structured (facts and query go in the human block).
+
+    Minimum cacheable prefix is 1024-4096 tokens depending on model; the
+    drafting prompt clears it comfortably. A shorter prompt simply won't cache
+    and costs the same as today, so this is safe to apply unconditionally.
+    """
+    provider, _bare = _split_provider(GEMINI_MODELS["generation"])
+    if provider != "anthropic":
+        return text
+    return [{"type": "text", "text": text,
+             "cache_control": {"type": "ephemeral"}}]
 
 
 # --- Google GenAI client (for Gemini with Google Search grounding) ---

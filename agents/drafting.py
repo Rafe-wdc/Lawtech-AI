@@ -37,9 +37,12 @@ See `docs/drafting_simplification_plan.md` for the full design and rationale.
 
 from __future__ import annotations
 
+from datetime import date
+
 import asyncio
 import os
 import re
+import time
 import unicodedata
 
 from pydantic import BaseModel, Field
@@ -50,7 +53,8 @@ from core.state import (
     IntegrationContextData, FileContextData,
 )
 from core.clients import (
-    get_es_client, get_gemini_pro,
+    get_es_client, get_gemini_flash_lite, cacheable_system,
+    get_gemini_flash_full, get_gemini_flash_planning, get_drafting_llm,
     # Circuit-breaker helpers referenced from `try/except` blocks in
     # `_pick_relevant_chunk_indices` and `_judge_fanout`. Must be imported
     # at module scope so the `except:` handler can still call
@@ -61,7 +65,7 @@ from core.clients import (
     is_gemini_flash_available, record_gemini_flash_failure,
     record_gemini_flash_success,
 )
-from core.settings import ES_INDICES
+from core.settings import GEMINI_MODELS, MODELS, ES_INDICES
 from core.language import (
     localize_prompt, detect_source_languages, language_name,
     is_off_target_language, output_script_ratio,
@@ -339,11 +343,460 @@ _MOJIBAKE_REPLACEMENTS = [
 ]
 
 _CITE_PLACEHOLDER_RE = re.compile(r"\[CITE:[^\]]*\]", flags=re.IGNORECASE)
-_EMPTY_NUMBERED_PARA_RE = re.compile(r"(?m)^\s*\d+\.\s*$\n?")
+# 1-3 digits only: "2025." alone on a line is a hard-wrapped year, not an
+# empty paragraph (an SLP lost "between 2020 and 2025." this way, 2026-09-11).
+_EMPTY_NUMBERED_PARA_RE = re.compile(r"(?m)^\s*\d{1,3}\.\s*$\n?")
 
 _HTML_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
 _HTML_HR_RE = re.compile(r"<hr\s*/?>", flags=re.IGNORECASE)
-_HTML_ANY_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
+# Known HTML tags only. Audit 2026-09-11: the old any-tag pattern deleted
+# angle-bracket placeholders ("IN THE COURT OF <Name of Court>") and left
+# blank fields with no marker for the advocate.
+_HTML_ANY_TAG_RE = re.compile(
+    r"</?(?:br|hr|p|div|span|b|i|u|s|strong|em|center|font|code|pre|table|thead|tbody|"
+    r"tr|td|th|ul|ol|li|h[1-6]|a|img|sup|sub|small|big|blockquote|strike|del|ins|mark|"
+    r"html|body|head|style|script|section|article|header|footer)\b(?:\s[^>]*)?/?>",
+    flags=re.IGNORECASE,
+)
+
+# --- hard-wrap repair -------------------------------------------------------
+# A line that starts a new block. A line after a long line that does NOT
+# match this is the continuation of a hard-wrapped paragraph.
+_BLOCK_START_RE = re.compile(
+    r"^[ \t]*(?:"
+    r"#{1,6}[ \t]|"                              # heading
+    r"[-*+][ \t]|"                               # bullet
+    r"\d{1,3}[.)][ \t]|"                        # 1. / 12)
+    r"\([a-z0-9]{1,4}\)[ \t]|"                # (a) (iv) (12)
+    r"[a-z][.)][ \t]|"                            # a. / b)
+    r"[ivxlc]{1,6}[.)][ \t]|"                     # iv. / x)
+    r"\||>|"                                     # table row, quote
+    r"\.{3,}|_{3,}|-{3,}|"                       # dot leader, blank line, rule
+    r"\*\*[^*\n]+\*\*:?[ \t]*$|"                  # bold-only label line
+    r"\[[^\]\n]{1,60}\][ \t]*$|"                     # placeholder-only line
+    r"(?:verified at|place|dated?|sd/-|signature|through|advocate|counsel|"
+    r"deponent|applicant|petitioner|respondent|complainant|accused|plaintiff|"
+    r"defendant|appellant|filed by|drawn by|settled by|to,|dear|subject|ref)\b"
+    r")",
+    re.IGNORECASE,
+)
+_TERMINAL_PUNCT = '.;:!?' + chr(0x2019) + chr(0x201D) + '"' + ")]"
+_UNWRAP_MIN_PREV_LEN = 70   # a hard-wrapped line sits near the wrap width
+# Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada,
+# Malayalam, Sinhala, Arabic/Urdu: scripts with no letter case.
+_INDIC_RE = re.compile(r"[\u0900-\u0DFF\u0600-\u06FF]")
+# "Place: Pune", "Annexure A: ...", "ठिकाण: पुणे" - a label line in any script.
+_LABEL_LINE_RE = re.compile(r"^[^\s:]{1,30}:\s")
+
+
+def _is_title_case(s: str) -> bool:
+    words = [w for w in s.split() if w[:1].isalpha()]
+    return bool(words) and all(w[:1].isupper() for w in words)
+
+
+def _unwrap_hard_wrapped_lines(text: str) -> tuple[str, int]:
+    """Join lines the writer hard-wrapped inside one paragraph.
+
+    Advocate screenshot 2026-09-10: paragraphs 1-9 of a bail application
+    wrapped at ~100 columns with each continuation at the left margin, so
+    the client rendered every fragment on its own line; paragraphs 29-33
+    of the same draft were single lines and rendered correctly. The prompt
+    rule "one paragraph = one line" does not hold (measured 26 wrapped
+    joins in a single-pass notice), so the repair is mechanical.
+
+    A line is joined onto the previous one when the previous line is long
+    (>= 70 chars: a wrapped line sits near the wrap width, while cause
+    titles, party lines and signature lines are short), is not a heading,
+    table row or label ending in ':', and the current line does not start
+    a new block (list marker, heading, table, dot leader, bold label,
+    placeholder-only line, or filing furniture such as 'Verified at',
+    'Place:', 'Sd/-', 'DEPONENT'). A short capitalised line after a
+    sentence-ending line is treated as furniture, not a wrapped tail.
+    """
+    if not text or chr(10) not in text:
+        return text, 0
+    out: list[str] = []
+    joins = 0
+    for cur in text.split(chr(10)):
+        if out:
+            prev = out[-1]
+            ps = prev.rstrip()
+            cs = cur.strip()
+            if (
+                cs
+                and len(ps) >= _UNWRAP_MIN_PREV_LEN
+                and not ps.lstrip().startswith(("#", "|"))
+                and not ps.endswith(":")
+                and not _BLOCK_START_RE.match(cs)
+                # Audit 2026-09-11: Devanagari has no case, so the
+                # capital-letter exemption never fired and "ठिकाण: पुणे" /
+                # "दिनांक: ..." were merged into the paragraph; all-caps
+                # headings and Title Case furniture ("Authorised
+                # Signatory") were joined too. None of these is a wrapped
+                # tail: a wrapped tail is lowercase running prose.
+                and not _INDIC_RE.search(ps + cs)
+                and not _LABEL_LINE_RE.match(cs)
+                and not (cs.upper() == cs and any(c.isalpha() for c in cs))
+                and not (len(cs) < 40 and _is_title_case(cs))
+                and not (
+                    len(cs) < 40
+                    and ps[-1] in _TERMINAL_PUNCT
+                    and (cs[0].isupper() or cs[0] in "[(")
+                    and not cs[:1].isdigit()
+                )
+            ):
+                out[-1] = ps + " " + cs
+                joins += 1
+                continue
+        out.append(cur)
+    return chr(10).join(out), joins
+
+
+# --- sub-point nesting -------------------------------------------------------
+_NUMBERED_ITEM_RE = re.compile(r"^(\d{1,3})\.[ \t]+\S")
+_GAP_STOP_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]|\||\.{3,}|-{3,}[ \t]*$|_{3,}|"
+    r"\*\*[^*\n]+\*\*:?[ \t]*$|"
+    r"(?:in witness|signed|witnesses|schedule|annexure|verification|prayer|"
+    r"place|dated?|sd/-|through|advocate|counsel|deponent)\b)",
+    re.IGNORECASE,
+)
+
+
+# --- blank-line fragment rejoin -------------------------------------------
+_OPEN_BRACKET_RE = re.compile(r"\[[^\]]*$")
+# Block starts that end a blank-line rejoin. Deliberately WITHOUT the filing
+# furniture words of _BLOCK_START_RE: a fragment beginning "Petitioner], the"
+# is a continuation when the previous fragment ended mid-sentence.
+_BLANK_JOIN_STOP_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]|[-*+][ \t]|\d{1,3}[.)][ \t]|\([a-z0-9]{1,4}\)[ \t]|[a-z][.)][ \t]|"
+    r"[ivxlc]{1,6}[.)][ \t]|\||\.{3,}|_{3,}|-{3,}|\*\*[^*\n]+\*\*)", re.IGNORECASE
+)
+
+
+def _rejoin_blankline_fragments(text: str) -> tuple[str, int]:
+    """Join a paragraph fragment onto the previous one across a single
+    blank line when the previous fragment plainly ends mid-sentence.
+
+    Advocate SLP 2026-09-11: the Verification read 'presently residing at
+    [Address of' / blank line / 'Petitioner], the Petitioner above-named,'
+    and the Facts lost 'between 2020 and' / blank / '2025.' to the
+    empty-paragraph remover. The single-newline rejoin cannot see across a
+    blank line, so this pass handles that shape with a stricter test: the
+    previous fragment is long (>= 70 chars) or ends inside an open '[...]',
+    does not end with sentence punctuation or a colon, is not a heading,
+    list item, table row, label or caps line; and the next fragment starts
+    with a lowercase letter, a digit, or a closing bracket, and is not a
+    block start itself. Mechanical only."""
+    if not text or chr(10) + chr(10) not in text:
+        return text, 0
+    blocks = text.split(chr(10) + chr(10))
+    out: list[str] = []
+    joins = 0
+    for cur in blocks:
+        if out:
+            prev = out[-1]
+            ps = prev.rstrip()
+            last_line = ps.split(chr(10))[-1].strip()
+            cs = cur.strip()
+            first_line = cs.split(chr(10))[0]
+            open_bracket = bool(_OPEN_BRACKET_RE.search(last_line))
+            if (
+                cs and last_line
+                and (len(last_line) >= _UNWRAP_MIN_PREV_LEN or open_bracket)
+                and last_line[-1] not in _TERMINAL_PUNCT + ":"
+                and not last_line.lstrip().startswith(("#", "|"))
+                and not _BLOCK_START_RE.match(last_line)
+                and not (last_line.upper() == last_line and any(c.isalpha() for c in last_line))
+                # the next fragment: not a heading, list item, table row, rule,
+                # dot leader, bold label, label line or caps line. Its first
+                # letter is NOT a signal here - wrapped fragments routinely
+                # begin with a proper noun ("Leave Petition are true...",
+                # "Petitioner], the Petitioner above-named"); the mid-sentence
+                # ending of the previous fragment is the signal.
+                and not _BLANK_JOIN_STOP_RE.match(first_line)
+                and not _LABEL_LINE_RE.match(first_line)
+                and not (first_line.upper() == first_line and any(c.isalpha() for c in first_line))
+                and not _INDIC_RE.search(last_line + first_line)
+            ):
+                out[-1] = ps + " " + cs
+                joins += 1
+                continue
+        out.append(cur)
+    return (chr(10) + chr(10)).join(out), joins
+
+
+# --- position-of-parties pipe -----------------------------------------------
+_SINGLE_PIPE_LINE_RE = re.compile(r"^(?!\s*\|)([^|\n]*\S)[ \t]*\|[ \t]*(\S[^|\n]*)$", re.M)
+
+
+def _split_single_pipe_lines(text: str) -> tuple[str, int]:
+    """A line with exactly one pipe that is not a table row is the writer's
+    two-column 'position of parties' layout ('.....Petitioner |.....Petitioner',
+    'In the High Court | In this Court'). Markdown has no such column; render
+    the two halves with a slash so no raw pipe reaches the advocate."""
+    return _SINGLE_PIPE_LINE_RE.subn(lambda m: f"{m.group(1)} / {m.group(2)}", text)
+
+
+# --- heading that merely names the caption that follows it -------------------
+def _drop_heading_that_restates_next_line(text: str) -> tuple[str, int]:
+    """'## IN THE SUPREME COURT OF INDIA (...) - SPECIAL LEAVE PETITION' followed
+    by the real caption line beginning with the same words renders as the
+    caption twice. Drop the heading when the next non-blank line starts with
+    its first thirty normalised characters."""
+    lines = text.split(chr(10))
+    drop: set[int] = set()
+    for i, l in enumerate(lines):
+        if not l.lstrip().startswith("#"):
+            continue
+        head = _normalise_heading(l)
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j >= len(lines) or lines[j].lstrip().startswith("#"):
+            continue
+        nxt = _normalise_heading(lines[j])
+        if len(head) >= 30 and nxt.startswith(head[:30]):
+            drop.add(i)
+    if not drop:
+        return text, 0
+    kept = [l for i, l in enumerate(lines) if i not in drop]
+    return chr(10).join(kept), len(drop)
+
+
+# --- ground heading glued to its paragraph number ---------------------------
+_GROUND_HEADING_WITH_PARA_RE = re.compile(
+    r"^(?P<head>[A-Z]\.[ \t]+(?:BECAUSE|THAT)\b[^\n]{30,}?[.:])[ \t]+(?P<para>\d{1,3}\.[ \t]+[A-Z])", re.M
+)
+
+
+def _split_ground_heading_from_paragraph(text: str) -> tuple[str, int]:
+    """'A. BECAUSE THE HIGH COURT ERRED ... 2023. 17. The Hon'ble High Court'
+    on one line: the caps ground heading and the numbered paragraph were
+    written together. Put the paragraph on its own line."""
+    return _GROUND_HEADING_WITH_PARA_RE.subn(lambda m: m.group("head") + chr(10) + chr(10) + m.group("para"), text)
+
+
+def _nest_subpoints_under_numbered_items(text: str) -> tuple[str, int]:
+    """Indent left-margin content that sits between two numbered clauses
+    so it nests under the first of them.
+
+    Advocate screenshot 2026-09-10 (partnership deed): clause 10 ended
+    with "in the following amounts and proportions:", then three bullets
+    at the left margin, then a continuation paragraph at the left margin,
+    then clause 11. Markdown ends clause 10 at the first left-margin
+    bullet, so the bullets rendered as a separate list and the paragraph
+    as loose text outside the clause. Gemini indents such sub-points;
+    Claude does not, and the prompt rule asking for it does not hold.
+
+    Only the gap BETWEEN two numbered items (both at column 0) is
+    touched, so the closing block after the last clause (IN WITNESS
+    WHEREOF, signatures, schedule) is never pulled into a clause. A gap
+    holding a heading, table, rule, dot leader, bold label or filing
+    furniture is left alone as well. Lines already indented keep their
+    own deeper indentation. Structural and mechanical.
+    """
+    lines = text.split(chr(10))
+    items = [(i, len(m.group(0)) - 1) for i, l in enumerate(lines)
+             for m in [_NUMBERED_ITEM_RE.match(l)] if m]
+    if len(items) < 2:
+        return text, 0
+    changed = 0
+    for (a, width), (b, _w) in zip(items, items[1:]):
+        gap = lines[a + 1:b]
+        body = [g for g in gap if g.strip()]
+        if not body or any(_GAP_STOP_RE.match(g) for g in body):
+            continue
+        # Audit 2026-09-11: "GROUNDS FOR BAIL" (all caps, no markdown
+        # marker) sat between clauses 8 and 9 and was indented under 8.
+        if any(g.strip().upper() == g.strip() and len(g.split()) >= 2
+               and any(c.isalpha() for c in g) for g in body):
+            continue
+        if not any(not g.startswith((" ", chr(9))) for g in body):
+            continue                       # already indented
+        pad = " " * max(3, width)
+        for k in range(a + 1, b):
+            if lines[k].strip() and not lines[k].startswith((" ", chr(9))):
+                lines[k] = pad + lines[k]
+                changed += 1
+    return chr(10).join(lines), changed
+
+
+# A line opening with a bare number of three or more digits and a period.
+# Two-digit numbers are genuine paragraph numbers; three-plus are years
+# and amounts that hard-wrapping stranded at line start.
+_LINE_INITIAL_BIG_NUMBER_RE = re.compile(r"^([ \t]*)(\d{3,})\.(?=\s)")
+_ANY_NUMBERED_LINE_RE = re.compile(r"^[ \t]*(\d{1,3})\.\s")
+
+
+def _escape_stranded_numbers(text: str) -> tuple[str, int]:
+    """Escape a line-initial 3+ digit number ONLY when it does not continue
+    a numbered sequence. Audit 2026-09-11: written statements answering a
+    100-paragraph plaint carry genuine "100." / "101." paragraphs, which
+    the plain regex escaped."""
+    out, n, prev_num = [], 0, None
+    for line in text.split("\n"):
+        m = _LINE_INITIAL_BIG_NUMBER_RE.match(line)
+        if m:
+            num = int(m.group(2))
+            if prev_num is not None and num == prev_num + 1:
+                out.append(line); prev_num = num
+                continue
+            out.append(f"{m.group(1)}{m.group(2)}\\." + line[m.end():]); n += 1
+            continue
+        k = _ANY_NUMBERED_LINE_RE.match(line)
+        if k:
+            prev_num = int(k.group(1))
+        elif line.strip():
+            pass  # prose inside a paragraph keeps the running number
+        out.append(line)
+    return "\n".join(out), n
+
+
+# A markdown table separator row: "|---|---|", "| :-- | --: |" etc.
+_SEP_ROW_RE = r"^\s*\|[\s:|-]{3,}\|\s*$"
+
+
+def _party_pipes_to_dot_leader(text: str) -> str:
+    """Turn a leftover party-block table row into filing-format plain text.
+
+    After an orphan `|---|---|` separator is dropped, the content row it came
+    with is left looking like:
+
+        R/at: [TO_FILL: full residential address] |.....Applicant/Accused |
+
+    which is neither a table nor a cause title. Real Indian filings put the
+    party label on its own line behind a dot leader — the Supreme Court's own
+    writ format uses ".....Petitioner" / "....Respondents". So the trailing
+    pipe is dropped and the label moves to its own line.
+
+    Only lines carrying a dot-leader label are rewritten; any other stray pipe
+    is left alone so genuine tables elsewhere in the draft are untouched.
+    """
+    text = re.sub(
+        r"[ \t]*\|[ \t]*(\.{2,}[^|\n]*?)[ \t]*\|?[ \t]*$",
+        lambda m: "\n\n" + m.group(1).strip(),
+        text,
+        flags=re.MULTILINE,
+    )
+    # Any remaining trailing pipe on a party line is cosmetic debris.
+    return re.sub(r"[ \t]*\|[ \t]*$", "", text, flags=re.MULTILINE)
+
+
+
+
+def _br_to_layout(text: str, br_re) -> str:
+    """Turn <br> into layout the markdown renderer keeps.
+
+    Outside a table a <br> becomes a paragraph break, the only line break
+    that survives rendering. Inside a table row it becomes a space: a
+    newline there splits the row and the whole table falls apart (the
+    table prompt explicitly allows <br> between bullets inside a cell,
+    config/prompts.py). Found 2026-09-09 on the IPC 420 / BNS 318 comparison.
+    """
+    out = []
+    for line in text.split("\n"):
+        if "<br" in line.lower():
+            is_row = line.lstrip().startswith("|") or line.count("|") >= 2
+            line = br_re.sub(" " if is_row else "\n\n", line)
+        out.append(line)
+    return "\n".join(out)
+
+# --- planner labels, caption bold, duplicate valuation --------------------
+# Advocate mark-up on a medical-negligence plaint (2026-09-13): the planner's
+# section label "Court Heading, Cause Title, and Description of Parties" was
+# printed above the caption; the court name was not bold; the suit valuation
+# appeared in the title block and again, correctly, before the prayer.
+_PLANNER_LABEL_WORDS = (
+    "court heading", "cause title", "description of parties", "memo of parties",
+    "memorandum of parties", "court caption", "parties to the suit",
+)
+_COMPOSITE_LABEL_RE = re.compile(r"\(prayer\)|reliefs? claimed|list of documents", re.IGNORECASE)
+_CAPTION_COURT_RE = re.compile(
+    r"^(?P<ind>[ \t]*)(?P<line>IN THE (?:HON'BLE )?(?:COURT OF|HIGH COURT|SUPREME COURT|DISTRICT COURT|"
+    r"COURT OF THE|NATIONAL COMPANY LAW|DEBT RECOVERY|CONSUMER)[^\n]*?)(?P<trail>[ \t]*)$",
+    re.MULTILINE,
+)
+_VALUATION_BLOCK_RE = re.compile(
+    r"(?im)^[ \t*]*(?:SUIT )?VALUATION (?:OF THE SUIT )?FOR (?:THE )?PURPOSES? OF (?:JURISDICTION|COURT FEES?)[^\n]*(?:\n(?![ \t]*\n)[^\n]*)*"
+)
+_LATER_VALUATION_RE = re.compile(r"(?i)\b(?:suit (?:has been|is) valued at|valued (?:the suit )?at rs|court[- ]fee (?:of|paid))")
+
+
+def _strip_planner_label_headings(text: str) -> tuple[str, int]:
+    """Drop headings that are the planner's internal labels, not pleading
+    headings. Two shapes: the opening-block label (cause title / parties /
+    court heading words) and a composite label that bundles the prayer,
+    verification or list of documents into one heading; the conventional
+    PRAYER / VERIFICATION headings below it carry the document."""
+    out, n = [], 0
+    for line in text.split("\n"):
+        s = line.strip()
+        if s.startswith("#"):
+            h = _normalise_heading(s)
+            label_hits = sum(1 for w in _PLANNER_LABEL_WORDS if w in h)
+            composite = bool(_COMPOSITE_LABEL_RE.search(h)) and ("," in h or " and " in h)
+            # a descriptive label joins two nominal parts with "and" and runs long
+            # ("Statement of Facts and Chronology of Medical Negligence");
+            # conventional pleading headings are short.
+            # Filed pleadings carry ALL-CAPS headings ("JURISDICTION, LIMITATION,
+            # AND VALUATION"); the planner's descriptive labels arrive in Title
+            # Case. An all-caps heading is never treated as a label.
+            _raw = s.lstrip("#").strip()
+            _all_caps = _raw.upper() == _raw and any(c.isalpha() for c in _raw)
+            many_parts = (not _all_caps) and ((h.count(",") >= 2 and len(h) > 40) or (" and " in h and len(h) > 45))
+            if label_hits >= 1 and (label_hits >= 2 or "," in h or " and " in h) or composite or many_parts:
+                n += 1
+                continue
+        out.append(line)
+    return "\n".join(out), n
+
+
+def _bold_court_caption(text: str) -> tuple[str, int]:
+    """The first court-name line of the caption is bold in a filing."""
+    m = _CAPTION_COURT_RE.search(text)
+    if not m:
+        return text, 0
+    line = m.group("line").strip()
+    if line.startswith("**") or line.startswith("#"):
+        return text, 0
+    return text[:m.start()] + f"{m.group('ind')}**{line}**" + text[m.end():], 1
+
+
+_DOUBLED_WORD_RE = re.compile(r"\b([A-Z][A-Z.'()]{1,}) \1\b")
+
+
+def _dedupe_caption_words(text: str) -> tuple[str, int]:
+    """'SPECIAL CIVIL CIVIL SUIT NO.' -> 'SPECIAL CIVIL SUIT NO.' on all-caps
+    caption lines only (live rerun 2026-09-15). Prose is never touched: a
+    doubled word there can be deliberate ("that that")."""
+    out, n = [], 0
+    for line in text.split("\n"):
+        s = line.strip().strip("*")
+        # placeholders ("[Suit No.]") are mixed case; judge the caps test without them
+        _t = re.sub(r"\[[^\]]*\]", "", s)
+        if _t and _t.upper() == _t and any(c.isalpha() for c in _t) and len(s) < 120:
+            new, k = _DOUBLED_WORD_RE.subn(r"\1", line)
+            n += k
+            out.append(new)
+        else:
+            out.append(line)
+    return "\n".join(out), n
+
+
+def _drop_duplicate_valuation_block(text: str) -> tuple[str, int]:
+    """A 'SUIT VALUATION FOR THE PURPOSES OF JURISDICTION AND COURT FEES'
+    block in the title area is surplus when the valuation / court-fee
+    paragraph exists later in the plaint (where it belongs, before the
+    prayer). Removed only when that later paragraph is present."""
+    m = _VALUATION_BLOCK_RE.search(text)
+    if not m:
+        return text, 0
+    if not _LATER_VALUATION_RE.search(text[m.end():]):
+        return text, 0
+    out = text[:m.start()] + text[m.end():]
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out, 1
 
 
 def validate_draft(
@@ -391,16 +844,70 @@ def validate_draft(
         log.info("Validator: mojibake auto-fixed (substring fallback)",
                  patterns_fixed=fixed_count)
 
-    # HTML strip — convert <br> / <hr> to markdown equivalents first so
-    # newlines survive, then drop any remaining tag scaffolding. Inner
-    # text is preserved.
-    cleaned = _HTML_BR_RE.sub("\n", cleaned)
+    # HTML strip. The prompt forbids HTML outright (2026-09-09; until then
+    # it whitelisted <center>/<br>), so any tag here is a model slip. <br>
+    # used to become a single "\n", which the markdown renderer collapses
+    # into the previous line - that is how "NAME: X<br>SIGNATURE" reached
+    # an advocate as one run-on line. A paragraph break is the only line
+    # break that survives rendering, so that is what a stray <br> becomes.
+    # Inner text of every other tag is preserved.
+    cleaned = _br_to_layout(cleaned, _HTML_BR_RE)
     cleaned = _HTML_HR_RE.sub("\n---\n", cleaned)
     cleaned, html_strip_count = _HTML_ANY_TAG_RE.subn("", cleaned)
     if html_strip_count:
         warnings.append(
             f"Stripped {html_strip_count} HTML tag(s) from draft."
         )
+
+    # Hard-wrapped prose: join continuation lines back into their paragraph
+    # BEFORE the line-initial-number guard below, so a year that was only
+    # stranded by wrapping is rejoined rather than escaped.
+    cleaned, _unwrapped = _unwrap_hard_wrapped_lines(cleaned)
+    if _unwrapped:
+        warnings.append(
+            f"Rejoined {_unwrapped} hard-wrapped line(s) into their paragraphs."
+        )
+
+    # Sub-points and continuation paragraphs the writer left at the left
+    # margin between two numbered clauses are nested under the first.
+    cleaned, _bl_joins = _rejoin_blankline_fragments(cleaned)
+    if _bl_joins:
+        warnings.append(f"Rejoined {_bl_joins} paragraph fragment(s) split by a blank line.")
+    cleaned, _pipes = _split_single_pipe_lines(cleaned)
+    cleaned, _dup_heads = _drop_heading_that_restates_next_line(cleaned)
+    cleaned, _ground_splits = _split_ground_heading_from_paragraph(cleaned)
+    if _pipes or _dup_heads or _ground_splits:
+        warnings.append(
+            f"Layout: {_pipes} two-column line(s), {_dup_heads} caption-restating heading(s), "
+            f"{_ground_splits} ground heading(s) separated from their paragraph."
+        )
+    cleaned, _nested = _nest_subpoints_under_numbered_items(cleaned)
+    if _nested:
+        warnings.append(
+            f"Nested {_nested} left-margin line(s) under their numbered clause."
+        )
+
+    # A line that opens with a bare number and a period is a markdown
+    # ordered-list item. When the writer hard-wraps prose, a year or an
+    # amount can land at line start ("... arrested on 12 March\n2023. The
+    # accused ...") and render as list item number 2023 with its own
+    # indent. Numbers of three or more digits are never paragraph numbers
+    # in a pleading, so escaping the period is safe. Mechanical only.
+    cleaned, _stranded = _escape_stranded_numbers(cleaned)
+    if _stranded:
+        warnings.append(
+            f"Escaped {_stranded} line-initial number(s) that would render "
+            "as list items."
+        )
+
+    # "[•]" is the reference templates' own blank marker. The prompt asks for
+    # a short natural label instead ("[Case No.]"); when one leaks through
+    # (batch 2026-09-11: "Special Case No. [•] of 2026") give the advocate a
+    # readable blank rather than a bullet glyph. Mechanical only.
+    _bullet_blanks = cleaned.count("[•]")
+    if _bullet_blanks:
+        cleaned = cleaned.replace("[•]", "[To Be Filled]")
+        warnings.append(f"Replaced {_bullet_blanks} template blank marker(s) with [To Be Filled].")
 
     # [CITE: ...] survivors — the generation prompt forbids them, this is
     # the defensive fallback.
@@ -409,6 +916,123 @@ def validate_draft(
         cleaned = _CITE_PLACEHOLDER_RE.sub("", cleaned)
         warnings.append(
             f"Stripped {len(cite_hits)} leftover [CITE: ...] placeholder(s)."
+        )
+
+    # Malformed cause-title tables. The prompt used to license a one-row
+    # markdown table to right-align the party label; claude-sonnet-5 emitted the
+    # CONTENT row first and the `|---|---|` separator after it, which is not
+    # valid markdown, so the client rendered raw pipes and the separator as
+    # literal text in a filed draft (advocates 2026-09-08):
+    #
+    #     R/at: [TO_FILL: address] |.....Applicant/Accused |
+    #     |---|---|
+    #
+    # The prompt now bans the table outright, but a prompt rule alone has not
+    # held anywhere else in this pipeline, so the guarantee is also mechanical.
+    # A separator row is legitimate ONLY when a data row follows it; an orphan
+    # is dropped and the stray pipes on the party line become a dot-leader,
+    # which is what Supreme Court filing format uses.
+    _lines = cleaned.split("\n")
+    _sep = re.compile(_SEP_ROW_RE)
+    _fixed: list[str] = []
+    _orphans = 0
+    for _i, _ln in enumerate(_lines):
+        if _sep.match(_ln):
+            _nxt = next((x for x in _lines[_i + 1:_i + 3] if x.strip()), "")
+            if "|" not in _nxt:          # nothing follows -> orphan separator
+                _orphans += 1
+                continue
+        _fixed.append(_ln)
+    if _orphans:
+        cleaned = "\n".join(_fixed)
+        # Party line left behind as "text |.....Label |" -> "text" + dot-leader.
+        cleaned = _party_pipes_to_dot_leader(cleaned)
+        warnings.append(
+            f"Repaired {_orphans} malformed cause-title table row(s)."
+        )
+    # Accidental repeated blocks. Advocates 2026-09-08 reported duplicated
+    # content. Reproduced on BOTH models, so it is a pipeline defect, not a
+    # model one: each section-pair call receives `prior_text` (the document so
+    # far) and DRAFTING_SECTION_PAIR_PROMPT rule 5 tells it to avoid
+    # "re-emission of content already pled earlier". That rule is routinely
+    # ignored, so the guarantee moves into code (CLAUDE.md invariant 2: prompt
+    # rules that do not hold become deterministic checks).
+    #
+    # CRITICAL EXEMPTION - an affidavit legitimately repeats the cause title.
+    # A bail application ends with a supporting affidavit carrying its OWN
+    # court name, case number and party block, then "AFFIDAVIT IN SUPPORT OF..."
+    # and the deponent verification. Measured on a real draft: all four
+    # "duplicate" blocks were exactly that, and stripping them would leave an
+    # unfilable affidavit. So a repeat is preserved when an affidavit or
+    # verification title appears nearby; anything else is a genuine repeat.
+    _AFFIDAVIT_NEAR = re.compile(
+        r"(AFFIDAVIT|VERIFICATION|SOLEMNLY AFFIRM|ON SOLEMN AFFIRMATION|DEPONENT)",
+        re.IGNORECASE,
+    )
+    _blocks = re.split(r"(\n\s*\n)", cleaned)
+    _seen: dict[str, int] = {}
+    _dropped = 0
+    _out: list[str] = []
+    for _i, _blk in enumerate(_blocks):
+        _norm = re.sub(r"\s+", " ", _blk).strip().lower()
+        # Only consider substantial prose blocks; short lines (VERSUS, dates,
+        # numbering) repeat legitimately all over a filing.
+        if len(_norm) < 80 or _blk.strip().startswith("#"):
+            _out.append(_blk); continue
+        if _norm in _seen:
+            _ctx = "".join(_blocks[max(0, _i - 8):_i + 9])
+            if _AFFIDAVIT_NEAR.search(_ctx):
+                _out.append(_blk)          # legitimate affidavit caption
+            else:
+                _dropped += 1              # genuine duplicate - drop it
+            continue
+        _seen[_norm] = _i
+        _out.append(_blk)
+    if _dropped:
+        cleaned = "".join(_out)
+        cleaned = re.sub(r"(\n\s*){3,}", "\n\n", cleaned)
+        warnings.append(
+            f"Removed {_dropped} duplicated block(s) (affidavit captions preserved)."
+        )
+
+    # No section heading appears twice (a supporting affidavit is the one
+    # exception). Paraphrased repeats slip past the exact-block pass
+    # above; this catches them by heading. Reported 2026-09-09: s.239 discharge application shipped
+    # with PRAYER and VERIFICATION twice.
+    cleaned, _repeated = _collapse_repeated_sections(cleaned)
+    if _repeated:
+        warnings.append(
+            f"Removed repeated section(s): {', '.join(_repeated)}."
+        )
+    # Em / en dashes — the "ChatGPT dash". Flagged by advocates 2026-09-08 as
+    # reading machine-written. Indian legal drafting sets off a parenthetical
+    # with commas, semicolons or parentheses; an em-dash in a statutory notice
+    # marks the document as generated. No prompt rule forbade it and nothing
+    # normalised it, so it survived to the client.
+    #
+    # Mechanical and unambiguous, so it lives here rather than in
+    # CRITIQUE_PROMPT (invariant 4). Three shapes, most specific first:
+    #   "word — word"  spaced, parenthetical  -> ", "
+    #   "word—word"    unspaced, range/compound -> "-"
+    #   leading "— "   list/aside marker      -> ""
+    # Measured on real drafts: claude-sonnet-5 emitted 1-3 per notice,
+    # gemini-3.8-flash 0-2. This fixes both.
+    _dash_before = cleaned.count("—") + cleaned.count("–")
+    if _dash_before:
+        cleaned = re.sub(r"(?m)^[ \t]*[—–][ \t]+", "", cleaned)
+        # A spaced dash between two numbers is a range ("Sections 138 - 142",
+        # "2019 - 2023"): hyphenate it. Audit 2026-09-11 reproduced the old
+        # rule turning it into an enumeration, which changes the citation.
+        cleaned = re.sub(r"(?<=\d)[ \t]+[—–][ \t]+(?=\d)", "-", cleaned)
+        # comma only between letters; a lone dash in a table cell is an
+        # empty-cell marker (audit 2026-09-11)
+        cleaned = re.sub(r"(?<=[A-Za-zऀ-෿])[ \t]+[—–][ \t]+(?=[A-Za-zऀ-෿])", ", ", cleaned)
+        cleaned = re.sub(r"(?<=\|)[ \t]*[—–][ \t]*(?=\|)", " - ", cleaned)
+        cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
+        cleaned = cleaned.replace("—", "-").replace("–", "-")
+        cleaned = re.sub(r",[ \t]*,", ",", cleaned)
+        warnings.append(
+            f"Normalised {_dash_before} em/en dash(es) to legal-register punctuation."
         )
 
     # Empty numbered paragraphs — a bare `N.` line with no body.
@@ -432,6 +1056,19 @@ def validate_draft(
     # future. Whether a given case is REAL still needs the retrieved-source
     # whitelist and is tracked separately — this only removes provenance that
     # was manufactured to make a citation look verified.
+    # Planner labels, caption bold, duplicate valuation (advocate mark-up
+    # 2026-09-13). Runs LAST: the heading-based repairs above still need the
+    # planner labels present to detect sections.
+    cleaned, _labels = _strip_planner_label_headings(cleaned)
+    cleaned, _bolded = _bold_court_caption(cleaned)
+    cleaned, _valuation = _drop_duplicate_valuation_block(cleaned)
+    cleaned, _doubled = _dedupe_caption_words(cleaned)
+    if _labels or _bolded or _valuation or _doubled:
+        warnings.append(
+            f"Layout: removed {_labels} planner label heading(s); caption bolded: {bool(_bolded)}; "
+            f"duplicate valuation block removed: {bool(_valuation)}."
+        )
+
     from core.fabricated_provenance import strip_fabricated_provenance
     cleaned, provenance_warnings = strip_fabricated_provenance(cleaned)
     if provenance_warnings:
@@ -509,13 +1146,9 @@ async def _translate_query_for_es_match(
     if not user_language or user_language == "en":
         return ""
     try:
-        from langchain.chat_models import init_chat_model
         from core.language import language_name
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        )
+        llm = get_gemini_flash_lite(temperature=0.0)
         source_lang = language_name(user_language)
         prompt = (
             f"Translate the following legal-drafting query from {source_lang} "
@@ -577,13 +1210,9 @@ async def _pick_reference_source(
     if not file_paths:
         return None
     try:
-        from langchain.chat_models import init_chat_model
         from config.prompts import DRAFTING_PICKER_PROMPT
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        ).with_structured_output(_PickerChoice, include_raw=True)
+        llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_PickerChoice, include_raw=True)
 
         candidates_block = "\n".join(f"- {p}" for p in file_paths)
         prompt = ChatPromptTemplate.from_template(DRAFTING_PICKER_PROMPT)
@@ -629,6 +1258,23 @@ async def _pick_reference_source(
         return None
 
 
+
+# Template-pick cache: (niche_key, normalised query) -> ES source path.
+# Process-local and unbounded-guarded; a worker restart simply re-picks. Small
+# because the key space is drafting queries, not arbitrary user text.
+_TEMPLATE_PICK_CACHE: dict[str, str] = {}
+_TEMPLATE_PICK_CACHE_MAX = 512
+
+
+def _normalise_pick_query(q: str) -> str:
+    """Collapse a query to a stable cache key.
+
+    Lowercase, strip punctuation, collapse whitespace. "Draft a general bail
+    application" and "draft a general bail application." must share a key, or
+    the cache never hits on the paraphrases users actually type.
+    """
+    return re.sub(r"[^a-z0-9 ]+", " ", (q or "").lower())[:400].strip()
+
 async def _acquire_reference_draft(
     query: str,
     progress_emit,
@@ -636,6 +1282,7 @@ async def _acquire_reference_draft(
     user_language: str = "en",
     intent=None,
     original_query: str = "",
+    niche_key: str = "",
 ) -> tuple[str, str, str, str]:
     """Stage 1 of the simplified drafting pipeline (v1 DraftRetriever pattern).
 
@@ -718,7 +1365,62 @@ async def _acquire_reference_draft(
     # the LLM reasons about English file names against English intent —
     # regional-script tokens against English paths produced picker-rejections
     # even when a good template existed in the corpus.
-    picked = await _pick_reference_source(search_query, file_paths)
+    # STRUCTURAL STABILITY (2026-09-08). ES scores for a generic drafting
+    # query are near-ties - measured 3.7 / 3.6 / 3.6 / 3.4 on "Draft a general
+    # bail application" - so the LLM tie-break flipped between runs and took
+    # the whole document structure with it: run 1 produced a Sessions Court
+    # bail application, runs 2-4 a High Court one. The fan-out judge uses the
+    # picked template as its skeleton, so the forum, headings and paragraph
+    # breakdown all changed for the SAME query.
+    #
+    # Two deterministic layers ahead of the picker, cheapest first:
+    #   1. Canonical pin - niche detection is stable (4/4 in the same test),
+    #      so a niche with one obviously-correct template skips the tie-break.
+    #   2. Pick cache - identical (niche, query) reuses the previous choice.
+    #      Deliberately caches the TEMPLATE PATH, not the draft: prompt fixes,
+    #      statute updates and refiner changes still apply on every request.
+    #      That is the difference from RESPONSE_CACHE_ENABLED, which serves a
+    #      whole stale draft and hid our own fixes from testers.
+    picked = None
+    _cache_key = f"{niche_key}|{_normalise_pick_query(search_query)}"
+
+    if niche_key:
+        from config.drafting_niches import NICHE_CANONICAL_TEMPLATE
+        _want = NICHE_CANONICAL_TEMPLATE.get(niche_key, "")
+        if _want:
+            # Match the FILE NAME with startswith, not a substring anywhere in
+            # the path. Substring matching pinned the wrong template: for
+            # notice_ni_act_s138 the pattern "Notice under Section 138 of
+            # Negotiable Instruments Act" also matches "Reply to Legal Notice
+            # under Section 138 of Negotiable Instruments Act" - a reply to a
+            # notice, which is the opposite document. Stable-but-wrong is worse
+            # than the flip-flop this pin exists to fix.
+            _wl = _want.lower()
+            for _p in file_paths:
+                _base = _p.rsplit("/", 1)[-1].rsplit(chr(92), 1)[-1].lower()
+                if _base.startswith(_wl):
+                    picked = _p
+                    log.info("Reference pinned by niche (picker skipped)",
+                             niche_key=niche_key, picked=_p[:90])
+                    break
+            if picked is None:
+                log.info("Niche has a canonical template but it is not in the "
+                         "ES candidates - falling through to the picker",
+                         niche_key=niche_key, want=_want[:60])
+
+    if picked is None:
+        _cached = _TEMPLATE_PICK_CACHE.get(_cache_key)
+        if _cached and _cached in file_paths:
+            picked = _cached
+            log.info("Reference pick served from cache",
+                     niche_key=niche_key or "none", picked=_cached[:90])
+
+    if picked is None:
+        picked = await _pick_reference_source(search_query, file_paths)
+        if picked:
+            if len(_TEMPLATE_PICK_CACHE) >= _TEMPLATE_PICK_CACHE_MAX:
+                _TEMPLATE_PICK_CACHE.clear()
+            _TEMPLATE_PICK_CACHE[_cache_key] = picked
 
     if picked is None:
         log.info("Picker rejected all candidates; synthesizing via web")
@@ -857,6 +1559,31 @@ def _topical_query(query: str) -> str:
     return " ".join(kept[:_SCI_QUERY_MAX_WORDS])
 
 
+def _parse_statute_refs(query: str) -> tuple[list[str] | None, str | None]:
+    """(section_numbers, act_name) parsed out of a drafting query.
+
+    Delegates to the Newacts agent's own parser so the two paths cannot
+    drift apart — it already handles "Sections 316(2) and 318(4) of the
+    Bharatiya Nyaya Sanhita, 2023" and the abbreviation map (IPC, BNS,
+    CrPC, BNSS, IEA, BSA).
+
+    Returns (None, None) on any failure. Retrieval then behaves exactly as
+    it did before: a plain BM25 query. Degraded, never broken.
+    """
+    if not query:
+        return None, None
+    try:
+        from agents.newacts import _regex_fallback_metadata
+        md = _regex_fallback_metadata(query)
+        secs = getattr(md, "section_number", None) or None
+        act = getattr(md, "act_name", None) or None
+        return (list(secs) if secs else None), act
+    except Exception as e:
+        log.warning("Statute-ref parse failed; falling back to plain query",
+                    error=short_err(e))
+        return None, None
+
+
 class _ContextBlocks(dict):
     """Prompt blocks, carrying the SourceRegistry built from the same hits.
 
@@ -985,9 +1712,38 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
     )
     from tools.shared import sci_judgment_tools
 
+    # Statute retrieval gets the SECTION and ACT parsed out of the query,
+    # not just the query text.
+    #
+    # `search_newacts` supports exact `section_numbers` / `act_name` filters
+    # and drafting was passing neither. Every row in the index begins
+    # "Section Number: Section N of The <Act> Section Name: ...", so a plain
+    # BM25 match on a query like "...under Sections 316(2) and 318(4) of the
+    # Bharatiya Nyaya Sanhita, 2023..." scores the SHORTEST rows highest —
+    # the short-title clauses. Measured: the query-only call returns
+    # sections [1, 1, 1, 1, 1, 1, 10, 10] and never the section asked for,
+    # while the same call with section_numbers=["309"] returns exactly the
+    # right row.
+    #
+    # That is why the citation registry was full of "Section 1, BNS" and
+    # "Section 10, IPC" — treated at the time as chunk-level noise and
+    # worked around by dropping statutes to Act level. It was this bug.
+    #
+    # The Newacts agent already parses both correctly, so reuse its parser
+    # rather than writing a second one that can drift out of step.
+    _sec_nums, _act_name = _parse_statute_refs(query)
+    _newacts_args: dict = {"query": query}
+    if _sec_nums:
+        _newacts_args["section_numbers"] = _sec_nums
+    if _act_name:
+        _newacts_args["act_name"] = _act_name
+    if _sec_nums or _act_name:
+        log.info("Statute retrieval filters parsed from query",
+                 sections=_sec_nums, act=_act_name)
+
     # Run all retrievers in parallel.
     newacts_t, legis_t, judg_t, sci_t = await asyncio.gather(
-        _run(search_newacts, {"query": query}),
+        _run(search_newacts, _newacts_args),
         _run(search_legislation, {"query": query}),
         _run(search_judgments, {"query": query}),
         # SCI gets a SHORTENED query. Its semantic search builds one boolean
@@ -1125,6 +1881,7 @@ async def _generate_single_pass(
     progress_emit,
     gathered_context: dict[str, str] | None = None,
     review_and_redraft_mode: bool = False,
+    niche_overlay: str = "",
 ) -> str:
     """Produce the full document in one Gemini 2.5 Pro call.
 
@@ -1138,11 +1895,20 @@ async def _generate_single_pass(
     window can consume multi-100K-char PDFs; a raw source is required for
     tasks like rejoinder / para-wise reply where the model must walk the
     source document paragraph-by-paragraph.
+
+    `niche_overlay` is the resolved ``## NICHE OVERLAY`` block from
+    ``config.drafting_niches``. When non-empty, it's appended to the
+    system prompt AFTER localisation so overlay heading anchors and
+    statutory citations survive the localiser (which does not translate
+    English legal terms of art). Empty string is a no-op — the base
+    prompt handles the matter on its own.
     """
     from config.prompts import DRAFTING_SYSTEM_PROMPT
     from langchain_core.messages import SystemMessage, HumanMessage
 
     system_prompt = localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language, user_intent)
+    if niche_overlay:
+        system_prompt = system_prompt + "\n\n" + niche_overlay
     if review_and_redraft_mode:
         # The default system prompt frames REFERENCE DRAFT as "from a
         # different matter — MUST NOT appear in your output". In
@@ -1153,8 +1919,18 @@ async def _generate_single_pass(
         # OVERRIDE that flips the framing at the system-prompt level.
         system_prompt = _REVIEW_AND_REDRAFT_MODE_OVERRIDE + "\n\n---\n\n" + system_prompt
 
+    # In review-and-redraft mode, `reference_draft` IS `user_facts` (the
+    # caller sets `reference_text = user_facts` in drafting_node when
+    # `_is_review_and_redraft_of_upload` fires). Emitting BOTH blocks
+    # duplicates the same content and blows the 1M-token ceiling on
+    # multi-MB uploads. Live 2026-09-03: 1.9M-char arbitration paperbook
+    # upload -> pair_user_facts + reference_draft = ~3.8M chars ≈ 1M+
+    # tokens → 400 INVALID_ARGUMENT on both Pro and Flash. The reference
+    # block's flipped wording ("PRESERVE these values verbatim") already
+    # tells the model to treat the block as authoritative source, so
+    # skipping source_docs_block here loses zero information.
     source_docs_block = ""
-    if user_facts and user_facts.strip():
+    if user_facts and user_facts.strip() and not review_and_redraft_mode:
         source_docs_block = (
             "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every "
             "party name, date, address, amount, statutory reference, and "
@@ -1172,19 +1948,26 @@ async def _generate_single_pass(
         # us to REVIEW-AND-REDRAFT their own document — every party name,
         # court name, case number, statutory citation, and case-specific
         # detail must be PRESERVED VERBATIM. Only the substantive legal
-        # errors and formatting are to be corrected.
+        # errors and formatting are to be corrected. This block is the
+        # ONLY carrier of the source content in review-and-redraft mode
+        # (source_docs_block is intentionally skipped above to avoid
+        # doubling the payload).
         reference_block = (
-            "## REFERENCE DRAFT (this is the SAME document the user uploaded — "
-            "the user is performing a REVIEW-AND-REDRAFT of THEIR OWN document. "
-            "PRESERVE every party name, court name, case number, forum, statutory "
-            "citation, address, date, monetary amount, and case-specific detail "
-            "in this block VERBATIM. Correct ONLY the substantive legal errors "
-            "(wrong statute, wrong Act name, missing procedural section, "
-            "misstated law, missing verification / prayer conventions) and the "
-            "formatting. Do NOT rewrite this as a generic template. Do NOT "
-            "replace real values with `[placeholders]`. Do NOT introduce a "
-            "contract-analysis / memorandum / MOU / lease-deed shape unless the "
-            "uploaded document itself is one of those.)\n"
+            "## REFERENCE DRAFT / UPLOADED SOURCE DOCUMENT (this is the "
+            "SAME document the user uploaded — the user is performing a "
+            "REVIEW-AND-REDRAFT of THEIR OWN document. PRESERVE every "
+            "party name, court name, case number, forum, statutory "
+            "citation, address, date, monetary amount, and case-specific "
+            "detail in this block VERBATIM. Every fact, paragraph number, "
+            "and stated assertion in your output MUST be sourced from "
+            "this block or the USER QUERY. Correct ONLY the substantive "
+            "legal errors (wrong statute, wrong Act name, missing "
+            "procedural section, misstated law, missing verification / "
+            "prayer conventions) and the formatting. Do NOT rewrite this "
+            "as a generic template. Do NOT replace real values with "
+            "`[placeholders]`. Do NOT introduce a contract-analysis / "
+            "memorandum / MOU / lease-deed shape unless the uploaded "
+            "document itself is one of those.)\n"
             f"{reference_draft.strip()}\n\n"
         )
     else:
@@ -1220,7 +2003,28 @@ async def _generate_single_pass(
                 + "\n"
             )
 
+    # TODAY'S DATE - required by the MISSING-FACT POLICY rule, which tells the
+    # model "today's date and the drafting place are legitimate defaults if the
+    # source is silent". Until 2026-09-07 the drafting prompt never said what
+    # today WAS, so a model following that rule had to guess. Measured:
+    # claude-sonnet-5 emitted "Date: 05 August 2026" on a notice drafted
+    # 07 September 2026 - neither today nor a supplied date - while
+    # gemini-3.8-flash sidestepped the rule with [TO_FILL:]. Neither is right on
+    # a statutory notice where limitation runs from the notice date. Every other
+    # agent already passes "Current Date" (document, legislation, judgment,
+    # newacts, constitution_maxim); drafting was the outlier.
+    #
+    # Deliberately in the USER block, not the system prompt: the system prompt
+    # carries cache_control for Anthropic, and a date that changes daily inside
+    # the cached prefix would invalidate the cache every day.
+    _today_block = (
+        f"## TODAY'S DATE\n{date.today().strftime('%d %B %Y')}\n"
+        "Use this when the document needs a notice / verification / drafting "
+        "date and the source is silent. Never infer such a date from other "
+        "dates in the matter.\n\n"
+    )
     user_block = (
+        f"{_today_block}"
         f"{context_block}"
         f"{reference_block}"
         f"{source_docs_block}"
@@ -1254,8 +2058,7 @@ async def _generate_single_pass(
     # not a creative one — zero temperature forces strict instruction
     # following; the larger thinking budget gives the model headroom to
     # cross-reference each emitted entity back to the CASE FACTS block.
-    llm = get_gemini_pro(
-        temperature=0.0,
+    llm = get_drafting_llm(
         max_output_tokens=24000,
         thinking_budget=4096,
     )
@@ -1278,7 +2081,7 @@ async def _generate_single_pass(
         )
         return await asyncio.to_thread(
             llm.invoke,
-            [SystemMessage(content=system_prompt),
+            [SystemMessage(content=cacheable_system(system_prompt)),
              HumanMessage(content=final_user_block)],
         )
 
@@ -1489,19 +2292,25 @@ async def _pick_relevant_chunk_indices(
     section: "_Section",
     query: str,
     preview_chars_per_chunk: int = 300,
-) -> list[int]:
+) -> list[int] | None:
     """Ask Gemini Flash Lite which chunks the section-writer will need.
 
-    Returns a list of valid indices into `user_facts_chunks` (0-based, in
-    the router's picked order, deduplicated by the caller). On any failure
-    or empty selection, returns [] — the caller then falls back to sending
-    the full raw source unchanged, preserving the current pipeline's
-    "raw source into every pair-call" behaviour.
+    Returns:
+      * `list[int]` — router SUCCEEDED. May be empty when the model
+        genuinely thinks the section needs no source-doc content
+        (typical for Verification / signature / cause-title sections
+        that generate cleanly from the system prompt + reference draft
+        alone).
+      * `None` — router FAILED (timeout, provider error, malformed
+        output). The caller must distinguish this from a legitimate
+        empty pick so it can honour the CLAUDE.md drafting invariant #6
+        and fall back to raw source, rather than sending empty
+        user_facts (which caused the writer to copy the reference
+        template's cause title verbatim on 2026-09-06).
     """
     if not user_facts_chunks:
         return []
     try:
-        from langchain.chat_models import init_chat_model
         from config.prompts import DRAFTING_CHUNK_ROUTER_PROMPT
 
         preview_lines: list[str] = []
@@ -1512,10 +2321,7 @@ async def _pick_relevant_chunk_indices(
             preview_lines.append(f"[{i}] {preview}")
         catalog = "\n".join(preview_lines)
 
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash-lite",
-            temperature=0.0,
-        ).with_structured_output(_SelectedChunks, include_raw=True)
+        llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_SelectedChunks, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_CHUNK_ROUTER_PROMPT)
         chain = prompt | llm
@@ -1563,7 +2369,12 @@ async def _pick_relevant_chunk_indices(
             section=section.heading[:40],
             error=short_err(e),
         )
-        return []
+        # Return None (not []) so the caller can distinguish router
+        # FAILURE from legitimate empty picks. Returning [] here was
+        # the root cause of the 2026-09-06 canonical-name-substitution
+        # regression (caller sent empty user_facts, writer copied the
+        # reference template's cause title verbatim).
+        return None
 
 
 def _reference_excerpt(
@@ -1686,7 +2497,6 @@ async def _judge_fanout(
     single-pass on any error so traffic never breaks.
     """
     try:
-        from langchain.chat_models import init_chat_model
         from core.language import language_name
         from config.prompts import DRAFTING_FANOUT_JUDGE_PROMPT
 
@@ -1719,7 +2529,7 @@ async def _judge_fanout(
                 "Apply the default fan-out rules above."
             )
 
-        # Planner model: Gemini 2.5 Flash (full) with a thinking budget,
+        # Planner model: Flash (full) tier with a thinking budget,
         # upgraded from flash-lite.
         #
         # This is a deliberate TRADE, measured on hi/gu/ta/te + en, 3 runs
@@ -1743,10 +2553,13 @@ async def _judge_fanout(
         # means a shorter document. If drafts regress in length, revisit
         # this before touching the writer — the writer honours whatever plan
         # it is given (instrumentation shows planned == emitted).
-        llm = init_chat_model(
-            "google_genai:gemini-2.5-flash",
-            temperature=0.0,
-            thinking_budget=2048,
+        # Routed through get_gemini_flash_planning (Gemini-only, NOT the
+        # generation tier) because this is a structured-output call:
+        # with_structured_output() has different semantics on Anthropic vs
+        # Gemini, and the fan-out judge is an internal planning step, not a
+        # user-facing answer.
+        llm = get_gemini_flash_planning(
+            temperature=0.0, thinking_budget=2048,
         ).with_structured_output(_FanoutStrategy, include_raw=True)
 
         prompt = ChatPromptTemplate.from_template(DRAFTING_FANOUT_JUDGE_PROMPT)
@@ -1821,22 +2634,77 @@ async def _generate_section_pair(
     user_intent,
     user_language: str,
     review_and_redraft_mode: bool = False,
+    niche_overlay: str = "",
+    pair_remaining=None,
 ) -> str:
     """Produce 1 or 2 consecutive sections of the document in one Gemini
     2.5 Pro call. Mirrors the safety / retry pattern of single-pass.
+
+    `pair_remaining` is the caller's per-pair clock (see `_make_pair_clock`):
+    a zero-arg callable returning the seconds left of this pair's TOTAL
+    budget across all attempts. Every LLM call in here is clamped to
+    `min(_SECTION_PAIR_LOCAL_TIMEOUT, pair_remaining())`, and no call starts
+    once it reads zero. `None` (legacy callers / tests) means no pair cap.
 
     `user_facts` is the RAW extracted text of uploaded documents, threaded
     into every section-pair call so any section that walks the source
     paragraph-by-paragraph (para-wise reply, rejoinder denials, counter-
     affidavit response) has direct access to the source's paragraph
     structure and numbering.
+
+    `niche_overlay` is the resolved ``## NICHE OVERLAY`` block from
+    ``config.drafting_niches``. When non-empty, appended to the section-
+    pair system prompt AFTER localisation so overlay statutory anchors
+    and section headings survive the localiser.
     """
     from config.prompts import DRAFTING_SECTION_PAIR_PROMPT
     from langchain_core.messages import SystemMessage, HumanMessage
 
+    # In review-and-redraft mode, `reference_draft` is the entire uploaded
+    # source (drafting_node sets `reference_text = user_facts`). Multi-MB
+    # uploads will push the pair-call over Gemini's 1M-token ceiling even
+    # after skipping source_docs_block. Cap here to the same script-aware
+    # budget the caller uses for user_facts, with a truncation marker so
+    # counsel knows to split the upload.
+    if review_and_redraft_mode and reference_draft:
+        # Detect dense Indic scripts on the reference_draft sample.
+        _ref_indic_ranges = (
+            ("devanagari", "ऀ", "ॿ"), ("bengali", "ঀ", "৿"),
+            ("gurmukhi", "਀", "੿"), ("gujarati", "઀", "૿"),
+            ("oriya", "଀", "୿"),   ("tamil", "஀", "௿"),
+            ("telugu", "ఀ", "౿"),  ("kannada", "ಀ", "೿"),
+            ("malayalam", "ഀ", "ൿ"),
+        )
+        _ref_budget = 1_800_000  # Latin default — reference occupies the
+                                  # source slot; leaves ~200K chars headroom
+                                  # for system prompt + niche overlay +
+                                  # gathered context + prior_text.
+        _ref_sample = reference_draft[:20_000]
+        _ref_sample_len = max(len(_ref_sample), 1)
+        for _name, _lo, _hi in _ref_indic_ranges:
+            if sum(1 for c in _ref_sample if _lo <= c <= _hi) / _ref_sample_len > 0.3:
+                _ref_budget = 1_200_000  # Dense Indic scripts (~2.5 chars/token).
+                break
+        if len(reference_draft) > _ref_budget:
+            _orig_ref_len = len(reference_draft)
+            reference_draft = (
+                reference_draft[:_ref_budget]
+                + f"\n\n[…uploaded document truncated to fit model context: "
+                + f"showing first {_ref_budget:,} of {_orig_ref_len:,} chars. "
+                + f"Split the upload into smaller sections for full coverage.]"
+            )
+            log.warning(
+                "Review-and-redraft reference_draft exceeded budget — truncated with marker",
+                original_chars=_orig_ref_len,
+                truncated_chars=len(reference_draft),
+                budget=_ref_budget,
+            )
+
     system_prompt = localize_prompt(
         DRAFTING_SECTION_PAIR_PROMPT, user_language, user_intent,
     )
+    if niche_overlay:
+        system_prompt = system_prompt + "\n\n" + niche_overlay
     if review_and_redraft_mode:
         # See rationale in _generate_single_pass — the section-pair prompt
         # carries the same "REFERENCE DRAFT belongs to a DIFFERENT matter"
@@ -1875,17 +2743,29 @@ async def _generate_section_pair(
         )
     sections_block = "\n\n".join(section_lines)
 
-    source_docs_block = (
-        "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every party "
-        "name, date, address, amount, statutory reference, and paragraph-"
-        "level assertion in your output MUST be sourced from this block or "
-        "the USER QUERY below. When your section requires walking the "
-        "source paragraph-by-paragraph — para-wise reply, rejoinder "
-        "denials, counter-affidavit response — use the paragraph structure "
-        "and numbering from this block directly, quoting or paraphrasing "
-        "the specific assertions your section is responding to.)\n"
-        f"{user_facts.strip()}\n\n"
-    ) if user_facts and user_facts.strip() else ""
+    # In review-and-redraft mode, `reference_draft` IS `user_facts`
+    # (drafting_node sets `reference_text = user_facts`). Emitting both
+    # blocks duplicates the same content and blows the 1M-token ceiling
+    # on multi-MB uploads. Live 2026-09-03: 1.9M-char arbitration
+    # paperbook -> pair_user_facts + reference_draft = ~3.8M chars
+    # ≈ 1M+ tokens → 400 INVALID_ARGUMENT on both Pro and Flash. The
+    # reference block below already tells the model to treat the block
+    # as the authoritative source in review-and-redraft mode, so
+    # skipping source_docs_block here loses zero information.
+    def _source_block(facts: str) -> str:
+        return (
+            "## UPLOADED SOURCE DOCUMENTS (verbatim raw text — every party "
+            "name, date, address, amount, statutory reference, and paragraph-"
+            "level assertion in your output MUST be sourced from this block or "
+            "the USER QUERY below. When your section requires walking the "
+            "source paragraph-by-paragraph — para-wise reply, rejoinder "
+            "denials, counter-affidavit response — use the paragraph structure "
+            "and numbering from this block directly, quoting or paraphrasing "
+            "the specific assertions your section is responding to.)\n"
+            f"{facts.strip()}\n\n"
+        ) if facts and facts.strip() and not review_and_redraft_mode else ""
+
+    source_docs_block = _source_block(user_facts)
 
     context_block = ""
     if gathered_context:
@@ -1905,18 +2785,28 @@ async def _generate_section_pair(
             )
 
     if review_and_redraft_mode:
+        # This block is the ONLY carrier of the source content in
+        # review-and-redraft mode (source_docs_block is intentionally
+        # skipped above to avoid doubling the payload past 1M tokens).
         reference_block = (
-            "## REFERENCE DRAFT (this is the SAME document the user uploaded — "
-            "the user is performing a REVIEW-AND-REDRAFT of THEIR OWN document. "
-            "PRESERVE every party name, court name, case number, forum, statutory "
-            "citation, address, date, monetary amount, and case-specific detail "
-            "VERBATIM. Correct ONLY the substantive legal errors (wrong statute, "
-            "wrong Act name, missing procedural section, misstated law, missing "
-            "verification / prayer conventions) and formatting. Do NOT rewrite "
-            "this as a generic template. Do NOT replace real values with "
-            "`[placeholders]`. Do NOT introduce a contract-analysis / "
-            "memorandum / MOU / lease-deed shape unless the uploaded document "
-            "itself is one of those.)\n"
+            "## REFERENCE DRAFT / UPLOADED SOURCE DOCUMENT (this is the "
+            "SAME document the user uploaded — the user is performing a "
+            "REVIEW-AND-REDRAFT of THEIR OWN document. PRESERVE every "
+            "party name, court name, case number, forum, statutory "
+            "citation, address, date, monetary amount, paragraph number, "
+            "and case-specific detail in this block VERBATIM. Every fact, "
+            "stated assertion, and paragraph reference in your output "
+            "MUST be sourced from this block or the USER QUERY. When "
+            "your section is a para-wise reply, rejoinder, or "
+            "counter-affidavit, mirror the paragraph numbering from this "
+            "block. Correct ONLY the substantive legal errors (wrong "
+            "statute, wrong Act name, missing procedural section, "
+            "misstated law, missing verification / prayer conventions) "
+            "and formatting. Do NOT rewrite this as a generic template. "
+            "Do NOT replace real values with `[placeholders]`. Do NOT "
+            "introduce a contract-analysis / memorandum / MOU / "
+            "lease-deed shape unless the uploaded document itself is "
+            "one of those.)\n"
             f"{reference_draft.strip()}\n\n"
         )
     else:
@@ -1942,39 +2832,62 @@ async def _generate_section_pair(
             "global paragraph counter at 1 where appropriate.)\n\n"
         )
 
-    user_block = (
-        f"{context_block}"
-        f"{reference_block}"
-        f"{prior_block}"
-        f"{source_docs_block}"
-        "## USER QUERY (the full document the user asked for — your section(s) "
-        "are part of this larger document)\n"
-        f"{query.strip()}\n\n"
-        "## SECTIONS YOU MUST WRITE NOW\n"
-        f"{sections_block}\n\n"
-        "Produce ONLY the section bodies named above, in order, each starting "
-        "with its own `## ` heading line. No preamble. No postscript. No "
-        "transition text between two sections. Continue paragraph numbering "
-        "from DOCUMENT SO FAR. Every party name, date, address, monetary "
-        "amount, and case-specific detail MUST come VERBATIM from the "
-        "UPLOADED SOURCE DOCUMENTS or the USER QUERY. Do NOT substitute "
-        "canonical Indian-legal example values (e.g. 'Priyanka', 'Sneha', "
-        "'Bhausaheb', 'Sakore', 'Anjali Deshmukh', 'Nashik', 'Sangamner', "
-        "'Ahmednagar', '29 May 2022', '1 June 2020') for the real parties "
-        "and dates named in the source — that is a CRITICAL error. Cite "
-        "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
+    # TODAY'S DATE - required by the MISSING-FACT POLICY rule, which tells the
+    # model "today's date and the drafting place are legitimate defaults if the
+    # source is silent". Until 2026-09-07 the drafting prompt never said what
+    # today WAS, so a model following that rule had to guess. Measured:
+    # claude-sonnet-5 emitted "Date: 05 August 2026" on a notice drafted
+    # 07 September 2026 - neither today nor a supplied date - while
+    # gemini-3.8-flash sidestepped the rule with [TO_FILL:]. Neither is right on
+    # a statutory notice where limitation runs from the notice date. Every other
+    # agent already passes "Current Date" (document, legislation, judgment,
+    # newacts, constitution_maxim); drafting was the outlier.
+    #
+    # Deliberately in the USER block, not the system prompt: the system prompt
+    # carries cache_control for Anthropic, and a date that changes daily inside
+    # the cached prefix would invalidate the cache every day.
+    _today_block = (
+        f"## TODAY'S DATE\n{date.today().strftime('%d %B %Y')}\n"
+        "Use this when the document needs a notice / verification / drafting "
+        "date and the source is silent. Never infer such a date from other "
+        "dates in the matter.\n\n"
     )
+    def _assemble_user_block(source_block: str) -> str:
+        return (
+            f"{_today_block}"
+            f"{context_block}"
+            f"{reference_block}"
+            f"{prior_block}"
+            f"{source_block}"
+            "## USER QUERY (the full document the user asked for — your section(s) "
+            "are part of this larger document)\n"
+            f"{query.strip()}\n\n"
+            "## SECTIONS YOU MUST WRITE NOW\n"
+            f"{sections_block}\n\n"
+            "Produce ONLY the section bodies named above, in order, each starting "
+            "with its own `## ` heading line. No preamble. No postscript. No "
+            "transition text between two sections. Continue paragraph numbering "
+            "from DOCUMENT SO FAR. Every party name, date, address, monetary "
+            "amount, and case-specific detail MUST come VERBATIM from the "
+            "UPLOADED SOURCE DOCUMENTS or the USER QUERY. Do NOT substitute "
+            "canonical Indian-legal example values (e.g. 'Priyanka', 'Sneha', "
+            "'Bhausaheb', 'Sakore', 'Anjali Deshmukh', 'Nashik', 'Sangamner', "
+            "'Ahmednagar', '29 May 2022', '1 June 2020') for the real parties "
+            "and dates named in the source — that is a CRITICAL error. Cite "
+            "statutes inline from RELEVANT LEGAL CONTEXT where applicable."
+        )
 
-    llm = get_gemini_pro(
-        temperature=0.0,
-        max_output_tokens=12000,
+    user_block = _assemble_user_block(source_docs_block)
+
+    llm = get_drafting_llm(
+        max_output_tokens=20000,
         thinking_budget=2048,
     )
 
     # Bound to the request deadline, then fail over to OpenAI.
     #
     # This call used to be an unbounded `asyncio.to_thread(llm.invoke, ...)`.
-    # `get_gemini_pro` is configured timeout=180, max_retries=2, so the SDK
+    # `get_drafting_llm` is configured timeout=180, max_retries=1, so the SDK
     # could spend ~540 s+ inside a single call against a 300 s request
     # budget. Observed in production logs: one section-pair call ran for
     # 592 s, the connection dropped, the retry was then skipped as "budget
@@ -2006,13 +2919,41 @@ async def _generate_section_pair(
     # consistency day to day.
     _SECTION_PAIR_LOCAL_TIMEOUT = 60
 
+    if len(sections_to_write) == 1:
+        section_label = f"section {section_position_start}"
+    else:
+        _end = section_position_start + len(sections_to_write) - 1
+        section_label = f"sections {section_position_start}-{_end}"
+
     def _messages(extra_instruction: str) -> list:
         final_user_block = (
             user_block + "\n\n" + extra_instruction if extra_instruction
             else user_block
         )
-        return [SystemMessage(content=system_prompt),
+        return [SystemMessage(content=cacheable_system(system_prompt)),
                 HumanMessage(content=final_user_block)]
+
+    def _pair_timeout(stage: str) -> float:
+        """Per-call timeout clamped to what is left of the PAIR budget.
+
+        Logged at every call so the countdown is visible in agent.log:
+        primary -> flash_failover -> (retry) primary -> flash_failover must
+        read strictly decreasing `pair_remaining_s` for the same pair.
+        """
+        if pair_remaining is None:
+            return _SECTION_PAIR_LOCAL_TIMEOUT
+        left = pair_remaining()
+        log.info(
+            "Section pair call budget",
+            section_label=section_label, stage=stage,
+            pair_remaining_s=round(left, 1),
+            local_timeout_s=round(min(_SECTION_PAIR_LOCAL_TIMEOUT, left), 1),
+        )
+        if left <= 0:
+            raise asyncio.TimeoutError(
+                f"Pair budget of {PAIR_TOTAL_BUDGET_S}s exhausted before {stage}"
+            )
+        return min(_SECTION_PAIR_LOCAL_TIMEOUT, left)
 
     async def _invoke_once(extra_instruction: str = "") -> object:
         from core.deadline import bounded_wait_for
@@ -2020,32 +2961,45 @@ async def _generate_section_pair(
         try:
             return await bounded_wait_for(
                 asyncio.to_thread(llm.invoke, msgs),
-                local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
+                local_timeout=_pair_timeout("primary"),
             )
         except Exception as primary_err:
-            from core.clients import (
-                get_openai_drafting_fallback, is_openai_fallback_configured,
-            )
-            if not is_openai_fallback_configured():
-                log.warning(
-                    "Gemini section-pair failed and no OpenAI fallback is "
-                    "configured; set OPENAI_API_KEY to enable failover",
-                    error=short_err(primary_err),
-                )
-                raise
+            # 2026-09-02: fallback switched from OpenAI GPT-4o to Gemini
+            # 2.5 Flash. The old GPT-4o fallback had a 128 K token limit,
+            # which is smaller than legal source-document uploads
+            # routinely reach (a full arbitration paperbook can push
+            # 500 K-1 M tokens even after Gap #5's MMR router). Observed
+            # in a live test 2026-09-02: primary Gemini Pro hit its 1 M
+            # cap, failover to GPT-4o hit ITS 128 K cap ~immediately,
+            # both retries failed identically -- fallback added zero
+            # value while burning latency + OpenAI cost. Gemini Flash
+            # shares the 1 M context ceiling AND is markedly cheaper
+            # than either Gemini Pro or GPT-4o, so as a second-provider
+            # substitute for Pro's tool-planning / reasoning quirks it's
+            # an unambiguous win: same reach, lower cost, no cross-
+            # provider tokenizer surprise. Anything genuinely over 1 M
+            # tokens needs Gap #5's MMR router or per-section chunking
+            # (DRAFTING_PER_SECTION_CHUNKING=1); the fallback path was
+            # never the right lever for that class of overflow.
+            from core.clients import get_gemini_flash_full
             log.warning(
-                "Gemini section-pair failed — failing over to OpenAI GPT-4o",
+                "Section-pair generation failed — failing over to the Flash tier",
                 error=short_err(primary_err),
-                provider_from="gemini-2.5-pro", provider_to="gpt-4o",
+                provider_from=MODELS["drafting"],
+                provider_to=GEMINI_MODELS["flash"],
             )
-            fb = get_openai_drafting_fallback()
+            fb = get_gemini_flash_full(
+                temperature=0.0,
+                max_output_tokens=12000,
+                thinking_budget=0,
+            )
             resp = await bounded_wait_for(
                 asyncio.to_thread(fb.invoke, msgs),
-                local_timeout=_SECTION_PAIR_LOCAL_TIMEOUT,
+                local_timeout=_pair_timeout("flash_failover"),
             )
             log.info(
-                "OpenAI fallback produced the section pair",
-                provider="gpt-4o",
+                "Gemini Flash fallback produced the section pair",
+                provider=GEMINI_MODELS["flash"],
             )
             return resp
 
@@ -2055,11 +3009,54 @@ async def _generate_section_pair(
         meta = getattr(r, "response_metadata", None) or {}
         return str(meta.get("finish_reason") or "").upper()
 
-    if len(sections_to_write) == 1:
-        section_label = f"section {section_position_start}"
-    else:
-        end = section_position_start + len(sections_to_write) - 1
-        section_label = f"sections {section_position_start}-{end}"
+    # --- Attachment preflight (PR 2) ------------------------------------
+    # Estimate the assembled prompt before the first call. Over the ceiling
+    # with an upload present: route the upload through retrieval sized to
+    # the room that is left, rebuild the block, re-estimate. Still over, or
+    # over with no upload to trim: fail fast — no 400, no failover, no retry.
+    _est_before = _estimate_tokens(system_prompt) + _estimate_tokens(user_block)
+    if _est_before > PAIR_INPUT_TOKEN_CEILING:
+        if source_docs_block:
+            _fixed_tokens = _est_before - _estimate_tokens(source_docs_block)
+            _room_tokens = PAIR_INPUT_TOKEN_CEILING - _fixed_tokens
+            _target_chars = int(_room_tokens * _chars_per_token(user_facts) * 0.9)
+            if _target_chars < _SOURCE_RETRIEVAL_MIN_CHARS:
+                raise AttachmentTooLarge(
+                    f"attachment_too_large: prompt ~{_est_before:,} tokens; only "
+                    f"~{max(_room_tokens, 0):,} tokens of room for the upload"
+                )
+            _brief = " ".join(
+                f"{sec.heading}. {sec.summary or ''}" for sec in sections_to_write
+            ) + " " + query[:500]
+            with log_time(log, f"Attachment retrieval ({section_label})"):
+                _reduced, _rinfo = await asyncio.to_thread(
+                    _retrieve_source_for_pair, user_facts, _brief, _target_chars,
+                )
+            _reduced += (
+                "\n\n[Note: the uploaded source was too large to include in "
+                "full; the paragraphs above were selected for this section. "
+                "Split the upload into smaller files for full-verbatim access.]"
+            )
+            source_docs_block = _source_block(_reduced)
+            user_block = _assemble_user_block(source_docs_block)
+            _est_after = _estimate_tokens(system_prompt) + _estimate_tokens(user_block)
+            log.warning(
+                "Attachment preflight: upload routed through retrieval",
+                section_label=section_label,
+                est_tokens_before=_est_before, est_tokens_after=_est_after,
+                ceiling=PAIR_INPUT_TOKEN_CEILING, target_chars=_target_chars,
+                **_rinfo,
+            )
+            if _est_after > PAIR_INPUT_TOKEN_CEILING:
+                raise AttachmentTooLarge(
+                    f"attachment_too_large: prompt ~{_est_after:,} tokens after "
+                    f"retrieval, ceiling {PAIR_INPUT_TOKEN_CEILING:,}"
+                )
+        else:
+            raise AttachmentTooLarge(
+                f"attachment_too_large: prompt ~{_est_before:,} tokens with no "
+                f"upload block to trim, ceiling {PAIR_INPUT_TOKEN_CEILING:,}"
+            )
 
     try:
         with log_time(log, f"Section pair gen ({section_label})"):
@@ -2180,6 +3177,307 @@ def _is_mandatory_section(sec: "_Section") -> bool:
 # the request ceiling is 300s. Only retry with real budget left.
 _OFF_TARGET_RETRY_MIN_BUDGET_S = 150
 
+# Wall-clock cap for ONE section pair across every attempt it makes:
+# primary call, Flash failover, retry, and the retry's failover. Measured
+# 2026-09-15 (replay of 40 prod prompts, req 8ab2c219): the per-call timeout
+# is 60s and each pair may make up to four calls, so a single stalled pair
+# could hold the request for 240s of a 285s budget — every section after it
+# then failed instantly with "deadline already exceeded" and shipped as
+# "N of M sections could not be generated". Healthy pairs run 9-56s
+# (p90 32s), so 90s leaves room for one slow call plus one failover and
+# still bounds the damage a hung provider can do to the rest of the draft.
+PAIR_TOTAL_BUDGET_S = 90
+
+# Do not start another attempt for this pair with less than this much of
+# its budget left — the call would be clamped to a few seconds and fail.
+_PAIR_RETRY_MIN_REMAINING_S = 20
+
+
+# ---------------------------------------------------------------------------
+# Attachment preflight for section-pair calls (PR 2).
+#
+# Gemini's input ceiling is 1,048,576 tokens. The prod audit of 2026-08-11
+# logged 84 `INVALID_ARGUMENT (input token count exceeds 1048576)` errors in
+# 16 hours — every one on a section-pair call carrying the raw text of a
+# large upload, and every one paid twice per pair per provider before the
+# section was recorded as "could not be generated". This estimates the size
+# of the assembled prompt BEFORE the call, and when it will not fit, routes
+# the uploaded text through retrieval (paragraph chunks, local embeddings,
+# top-k by similarity to the section brief) so the writer sees the parts of
+# the record its section needs instead of a 400.
+# ---------------------------------------------------------------------------
+
+# Headroom below the hard ceiling for the response (up to 24K output
+# tokens), tokenizer variance on mixed-script text, and the few thousand
+# tokens of instructions the estimate does not see.
+PAIR_INPUT_TOKEN_CEILING = 900_000
+
+# Below this many characters of retrievable source there is nothing useful
+# a section-writer can do — fail fast rather than send a fragment.
+_SOURCE_RETRIEVAL_MIN_CHARS = 20_000
+
+# Unicode block range covering Devanagari through Malayalam (and Sinhala):
+# the dense scripts that tokenise at roughly 2.5 chars/token.
+_INDIC_BLOCK_LO, _INDIC_BLOCK_HI = "ऀ", "෿"
+
+
+def _chars_per_token(text: str) -> float:
+    """4.0 for Latin-dominant text, 2.5 when the sample is Indic-dominant."""
+    sample = text[:20_000]
+    if not sample:
+        return 4.0
+    indic = sum(1 for c in sample if _INDIC_BLOCK_LO <= c <= _INDIC_BLOCK_HI)
+    return 2.5 if indic / len(sample) > 0.3 else 4.0
+
+
+def _estimate_tokens(text: str) -> int:
+    """Script-aware character-based token estimate. Deliberately simple and
+    slightly pessimistic; the ceiling above carries the headroom."""
+    if not text:
+        return 0
+    return int(len(text) / _chars_per_token(text)) + 1
+
+
+class AttachmentTooLarge(RuntimeError):
+    """The section-pair prompt cannot be made to fit under the input
+    ceiling even after routing the upload through retrieval. Raised BEFORE
+    any LLM call so the pair fails in milliseconds, not after two 400s per
+    provider. Surfaces in the incomplete-draft banner as its reason."""
+
+
+# Chunk-embedding cache keyed on the upload text, so the embedding cost is
+# paid once per request rather than once per section pair. Tiny LRU: the
+# key space is "uploads in flight on this worker".
+_CHUNK_EMBED_CACHE: dict[str, tuple[list[str], list[list[float]]]] = {}
+_CHUNK_EMBED_CACHE_MAX = 4
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _retrieve_source_for_pair(
+    user_facts: str,
+    query_text: str,
+    target_chars: int,
+    embed=None,
+) -> tuple[str, dict]:
+    """Reduce `user_facts` to the paragraph chunks most relevant to
+    `query_text`, keeping at most ~`target_chars`, in original order.
+
+    chunk (paragraphs) -> embed (qa embeddings, cached per upload) -> top-k
+    by cosine until the char budget is spent -> re-sort by position -> join,
+    marking every gap so the writer knows material was elided.
+
+    `embed` is any object with `embed_documents(list[str])` and
+    `embed_query(str)` (LangChain embeddings interface); defaults to the
+    upload QA embeddings singleton. Returns (reduced_text, info).
+    """
+    import hashlib
+
+    chunks = _chunk_user_facts(user_facts)
+    info: dict = {"chunks_total": len(chunks), "chunks_kept": 0,
+                  "chars_before": len(user_facts), "chars_after": 0,
+                  "mode": "retrieval"}
+    if len(chunks) < 4:
+        # No paragraph structure to retrieve over: keep the head, which in
+        # a legal record carries the caption, parties and prayer.
+        info["mode"] = "head_truncate"
+        reduced = user_facts[:target_chars]
+        info["chars_after"] = len(reduced)
+        return reduced, info
+
+    if embed is None:
+        from core.clients import get_qa_embeddings
+        embed = get_qa_embeddings()
+
+    key = hashlib.sha1(user_facts.encode("utf-8", "replace")).hexdigest()
+    cached = _CHUNK_EMBED_CACHE.get(key)
+    if cached is None:
+        vecs = embed.embed_documents(chunks)
+        if len(_CHUNK_EMBED_CACHE) >= _CHUNK_EMBED_CACHE_MAX:
+            _CHUNK_EMBED_CACHE.pop(next(iter(_CHUNK_EMBED_CACHE)))
+        _CHUNK_EMBED_CACHE[key] = (chunks, vecs)
+        info["embed_cache"] = "miss"
+    else:
+        chunks, vecs = cached
+        info["embed_cache"] = "hit"
+
+    qvec = embed.embed_query(query_text)
+    ranked = sorted(range(len(chunks)), key=lambda i: _cosine(qvec, vecs[i]),
+                    reverse=True)
+    kept: list[int] = []
+    used = 0
+    for i in ranked:
+        n = len(chunks[i]) + 2
+        if used + n > target_chars:
+            continue
+        kept.append(i)
+        used += n
+    kept.sort()
+    parts: list[str] = []
+    prev = -1
+    for i in kept:
+        if prev >= 0 and i != prev + 1:
+            parts.append(f"[… {i - prev - 1} paragraph(s) of the source omitted "
+                         "as not relevant to this section …]")
+        parts.append(chunks[i])
+        prev = i
+    reduced = "\n\n".join(parts)
+    info["chunks_kept"] = len(kept)
+    info["chars_after"] = len(reduced)
+    return reduced, info
+
+
+# ---------------------------------------------------------------------------
+# Budget-aware planning (PR 3).
+#
+# The fan-out judge sizes the plan from the document type and the reference
+# template; it never sees the clock. Template acquisition can already have
+# spent 25-60s of the 285s request budget (web-synthesised references), and
+# the section pairs run sequentially at a measured 9-56s per call. A 7-8
+# section plan that fits on a fast day is 3-4 sections short on a slow one,
+# and the shortfall arrives as "N of M sections could not be generated".
+# This check runs AFTER template acquisition and the judge, BEFORE the pair
+# loop, and shrinks the plan to what the remaining budget can actually
+# write — reserving time for the language gate and self-refine that follow.
+# ---------------------------------------------------------------------------
+
+# Time to hold back for what runs after the pair loop. Self-refine at the
+# adaptive single-pass band (PR 2) is one critique + one refine ≈ 5s + 32s;
+# the language gate and the deterministic guards are cheap unless they
+# regenerate, which the reserve does not attempt to fund.
+SELF_REFINE_RESERVE_S = 45.0
+LANG_GATE_RESERVE_S = 20.0
+
+# p90 wall time of ONE section-pair call (two sections). Constant for now,
+# taken from the 2026-09-15 replay (13 pairs: 9-39s) and the timeout
+# calibration comment in _generate_section_pair (124 calls: p90 32s); the
+# margin covers the odd failover. Wire to telemetry once the
+# `Section pair gen` timings are aggregated.
+OBSERVED_PAIR_TIME_P90_S = 45.0
+
+
+def _fit_plan_to_budget(
+    sections: list["_Section"],
+    budget_left_s: float,
+    pair_p90_s: float = OBSERVED_PAIR_TIME_P90_S,
+) -> tuple[list["_Section"], int, str]:
+    """Shrink a section plan to what `budget_left_s` can write.
+
+    Sections are written two per call, so feasibility is counted in pairs.
+    Returns (sections, feasible_sections, action) with action one of:
+      "kept"        — the plan fits; sections returned unchanged
+      "collapsed"   — adjacent middle sections merged until it fits; the
+                      FIRST (cause title / addressee) and LAST (prayer /
+                      verification / execution) sections are never merged
+                      away, for the reason the MAX_SECTIONS trim gives
+      "single_pass" — fewer than one pair fits; caller should single-pass
+    Pure function; no clock access, so it is unit-testable.
+    """
+    n = len(sections)
+    feasible_pairs = int(max(0.0, budget_left_s) // pair_p90_s)
+    feasible = feasible_pairs * 2
+    if n <= feasible:
+        return list(sections), feasible, "kept"
+    if feasible < 2:
+        return [], feasible, "single_pass"
+    secs = list(sections)
+    while len(secs) > feasible and len(secs) > 2:
+        # Merge the adjacent MIDDLE pair whose combined brief is shortest,
+        # so no single merged section becomes a disproportionate write.
+        best_i, best_len = 1, None
+        for i in range(1, len(secs) - 2):
+            L = len(secs[i].summary or "") + len(secs[i + 1].summary or "")
+            if best_len is None or L < best_len:
+                best_i, best_len = i, L
+        if len(secs) - 2 < 2:  # only one middle section left; cannot merge
+            break
+        a, b = secs[best_i], secs[best_i + 1]
+        merged = _Section(
+            id=f"{a.id}_{b.id}"[:80],
+            heading=f"{a.heading} and {b.heading}",
+            summary=" ".join(s for s in (a.summary, b.summary) if s).strip(),
+        )
+        secs[best_i:best_i + 2] = [merged]
+    if len(secs) > feasible:
+        # Could not collapse far enough (e.g. feasible == 2 with a 3-section
+        # plan whose middle is a single section) — merge the middle into
+        # the first section rather than dropping the closing block.
+        while len(secs) > feasible and len(secs) > 2:
+            a, b = secs[0], secs[1]
+            secs[0:2] = [_Section(
+                id=f"{a.id}_{b.id}"[:80],
+                heading=f"{a.heading} and {b.heading}",
+                summary=" ".join(s for s in (a.summary, b.summary) if s).strip(),
+            )]
+    return secs, feasible, "collapsed"
+
+
+_UNRESOLVED_REVIEW_BANNER_MARKER = "**Review notes outstanding**"
+
+
+def _unresolved_review_banner(history) -> str:
+    """Banner for a draft self_refine could not bring to a pass.
+
+    `history` is the list of Critique objects self_refine returns; the last
+    one is the final verdict. When it still lists violations the draft was
+    flagged by our own critic and shipped anyway — previously with nothing
+    but a log line (`self_refine_completed | unverified_budget_exhausted |
+    final_violations=3`, req 8ab2c219). Returns "" when there is nothing
+    to say. Pure function so it is unit-testable.
+    """
+    if not history:
+        return ""
+    final = history[-1]
+    violations = list(getattr(final, "violations", None) or [])
+    # The critic's fail-closed sentinel ("verifier_unavailable": the critic
+    # itself could not run) is an audit status, not a review note. It is
+    # already reported through x_audit_status; listing it here leaked
+    # "Critic could not run (timeout). Response ships unverified" into a
+    # client-facing draft (live check, 2026-09-15).
+    violations = [v for v in violations
+                  if (getattr(v, "field", "") or "") != "verifier_unavailable"]
+    if getattr(final, "passes", True) or not violations:
+        return ""
+    # Most severe first; at most four lines so the banner stays a note.
+    _rank = {"critical": 0, "major": 1, "minor": 2}
+    violations.sort(key=lambda v: _rank.get(getattr(v, "severity", "minor"), 3))
+    lines = []
+    for v in violations[:4]:
+        field = (getattr(v, "field", "") or "").strip()
+        issue = (getattr(v, "issue", "") or "").strip().rstrip(".")
+        sev = (getattr(v, "severity", "") or "").strip()
+        head = f"{field}: " if field else ""
+        lines.append(f"> - {head}{issue}" + (f" ({sev})" if sev else ""))
+    more = len(violations) - len(lines)
+    if more > 0:
+        lines.append(f"> - and {more} more")
+    return (
+        f"> ⚠ {_UNRESOLVED_REVIEW_BANNER_MARKER} — our review flagged "
+        f"{len(violations)} point(s) in this draft that could not be "
+        f"resolved automatically. Please check them before filing:\n"
+        + "\n".join(lines) + "\n\n"
+    )
+
+
+def _make_pair_clock(budget_s: float = PAIR_TOTAL_BUDGET_S):
+    """Return a `remaining()` closure counting down `budget_s` from NOW.
+
+    Created ONCE per pair in the caller's retry loop — never inside
+    `_generate_section_pair`, where it would reset on every attempt and
+    silently turn the per-pair cap into a per-attempt cap.
+    """
+    start = time.monotonic()
+
+    def remaining() -> float:
+        return max(0.0, budget_s - (time.monotonic() - start))
+
+    return remaining
+
 
 def _normalise_heading(text: str) -> str:
     """Fold a heading for comparison: strip markdown, punctuation, case, space.
@@ -2193,25 +3491,283 @@ def _normalise_heading(text: str) -> str:
     return t
 
 
+# Sections whose "heading" is inherently the document's opening block rather
+# than a descriptive label. The writer legitimately adapts the planner's
+# abstract placeholder ("BEFORE THE HON'BLE COURT / TRIBUNAL", "Cause Title
+# and Parties", "TO,") into the actual court caption or addressee block for
+# THIS matter. Substring matching between the abstract and adapted forms
+# systematically fails ("cause title" vs "before the adjudicating authority,
+# central goods & services tax..." share no substring), so these ids are
+# treated as PRESENT whenever the draft has any heading in its opening
+# portion — the actual court name IS the heading.
+_OPENING_BLOCK_SECTION_IDS = frozenset({
+    "cause_title", "cause", "court_title", "court_caption", "caption",
+    "heading", "addressee", "addressee_block", "party_block", "parties",
+    "title", "court_and_parties", "cause_and_parties",
+})
+
+
+def _substantive_word_overlap(want: str, got: str, min_ratio: float = 0.5) -> bool:
+    """Fuzzy match — do these two headings share at least `min_ratio` of
+    their substantive words (ignoring stopwords)?
+
+    Catches legitimate heading adaptations the strict substring check misses:
+      "Preliminary Objections" vs "Preliminary Submissions and Objections"
+        -> {preliminary, objections} vs {preliminary, submissions, objections}
+        -> 2/2 want words present = 1.0 -> matched
+      "Reply on Merits" vs "Para-wise Reply and Denial on Merits"
+        -> {reply, merits} vs {para, wise, reply, denial, merits}
+        -> 2/2 want words present = 1.0 -> matched
+      "Grounds for Bail" vs "Legal Grounds"
+        -> {grounds, bail} vs {legal, grounds}
+        -> 1/2 want words present = 0.5 -> matched at threshold
+    """
+    _STOP = frozenset({
+        "the", "a", "an", "of", "and", "or", "for", "to", "on", "in", "at",
+        "by", "with", "as", "is", "are", "be", "this", "that",
+    })
+    def _words(t: str) -> set[str]:
+        return {w for w in re.split(r"[^a-z0-9]+", t.lower()) if w and w not in _STOP and len(w) > 2}
+    w_want = _words(want)
+    w_got = _words(got)
+    if not w_want or not w_got:
+        return False
+    shared = w_want & w_got
+    return len(shared) / len(w_want) >= min_ratio
+
+
+
+def _insert_repaired_in_plan_order(
+    draft: str,
+    sections: list["_Section"],
+    missing: list["_Section"],
+    repaired: list[str],
+) -> str:
+    """Splice repaired sections back at their planned positions.
+
+    The repair pass regenerates sections the writer skipped. Appending them
+    put a missing "Statement of Facts" after the Prayer - structurally wrong
+    for a filing, and what advocates flagged 2026-09-08 as sections being
+    "up and down".
+
+    For each repaired chunk, find the planned section that FOLLOWS it and is
+    present in the draft, then insert immediately before that heading. When
+    no following section is present the gap is at the end, so appending is
+    correct there. Never loses content: an unlocatable anchor degrades to the
+    previous append behaviour.
+    """
+    if not repaired:
+        return draft
+
+    heading_pos: dict[str, int] = {}
+    for line in draft.splitlines():
+        st = line.strip()
+        if st.startswith("#") or (st.startswith("**") and st.endswith("**")):
+            norm = _normalise_heading(st)
+            if norm and norm not in heading_pos:
+                heading_pos[norm] = draft.find(line)
+
+    def _anchor_for(sec: "_Section") -> int:
+        try:
+            idx = next(i for i, s in enumerate(sections) if s.id == sec.id)
+        except StopIteration:
+            return -1
+        for later in sections[idx + 1:]:
+            pos = heading_pos.get(_normalise_heading(later.heading))
+            if pos is not None and pos >= 0:
+                return pos
+        return -1
+
+    plan_order = {s.id: i for i, s in enumerate(sections)}
+    paired = list(zip(missing, repaired))[: len(repaired)]
+    # Insert from the LAST planned position backwards so earlier offsets stay
+    # valid as the string grows.
+    paired.sort(key=lambda pr: plan_order.get(pr[0].id, 10_000), reverse=True)
+
+    appended: list[str] = []
+    for sec, chunk in paired:
+        at = _anchor_for(sec)
+        if at > 0:
+            draft = draft[:at] + chunk.strip() + "\n\n" + draft[at:]
+        else:
+            appended.append(chunk)
+    if appended:
+        draft = draft + "\n\n" + "\n\n".join(reversed(appended))
+    return draft
+
+# A heading line: `## Text`, `### Text`, or a bold-only line `**TEXT**`.
+# Bold-only counts because the writer marks some sections that way and
+# _missing_planned_sections already treats them as headings.
+_SECTION_HEADING_LINE_RE = re.compile(
+    r"(?m)^[ \t]*(?:#{1,6}[ \t]+\S.*|\*\*[^*\n]{2,118}\*\*[ \t]*:?)[ \t]*$"
+)
+
+
+def _split_heading_blocks(text: str) -> list[tuple[str, str]]:
+    """Split text into (normalised_heading, block_text) in document order.
+
+    The first element may have heading "" when text starts without one.
+    """
+    blocks: list[tuple[str, str]] = []
+    cur_head, cur_start = "", 0
+    for m in _SECTION_HEADING_LINE_RE.finditer(text):
+        if m.start() > cur_start or cur_head:
+            blocks.append((cur_head, text[cur_start:m.start()]))
+        cur_head, cur_start = _normalise_heading(m.group(0)), m.start()
+    blocks.append((cur_head, text[cur_start:]))
+    return [(h, b) for h, b in blocks if b.strip()]
+
+
+def _heading_present(want: str, have: list[str]) -> bool:
+    """Same three-tier test _missing_planned_sections uses, on one heading."""
+    if not want:
+        return False
+    if any(want in got or got in want for got in have):
+        return True
+    return any(_substantive_word_overlap(want, got) for got in have)
+
+
+def _drop_reemitted_sections(
+    pair_text: str, planned: list[str], already: list[str],
+) -> tuple[str, list[str]]:
+    """Remove sections a pair wrote that it was not asked for and that
+    already exist in the document so far.
+
+    Reported 2026-09-09 on a s.239 discharge application: the pair writer
+    re-emitted MOST RESPECTFULLY SHOWETH, PRAYER, an advocate block and
+    VERIFICATION after they were already drafted, so the filed draft carried
+    each twice (the second copies paraphrased, so exact-block dedupe missed
+    them). Rule 1 of DRAFTING_SECTION_PAIR_PROMPT forbids this and does not
+    hold on its own, which is the same lesson as the doc-type flip (CLAUDE.md
+    invariant 2, exception).
+
+    A block is kept when its heading matches one of THIS pair's planned
+    headings, or when it matches nothing already present. Headless leading
+    text is always kept. Returns (cleaned_text, dropped_headings).
+    """
+    if not pair_text or not already:
+        return pair_text, []
+    planned_n = [_normalise_heading(h) for h in planned if h]
+    kept, dropped = [], []
+    for head, block in _split_heading_blocks(pair_text):
+        # Audit 2026-09-11: "GROUNDS FOR ANTICIPATORY BAIL" shares half
+        # its words with the document title "APPLICATION FOR ANTICIPATORY
+        # BAIL ..." and was dropped as a re-emission, then regenerated by
+        # the repair pass. A block is a re-emission only when it matches an
+        # existing heading EXACTLY or by containment, and never when it
+        # overlaps one of this pair's own planned headings.
+        planned_hit = head and (
+            _heading_present(head, planned_n)
+            or any(_substantive_word_overlap(p, head) for p in planned_n)
+        )
+        already_hit = head and any(head == got or head in got or got in head for got in already)
+        if head and already_hit and not planned_hit:
+            dropped.append(head)
+            continue
+        kept.append(block)
+    return "".join(kept).strip(), dropped
+
+
+def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
+    """Keep the first occurrence of every section heading; drop later ones.
+
+    A pleading names each section once. When the pair writer re-emits an
+    earlier section (paraphrased, so the exact-block pass misses it) the
+    filed draft carries it twice - PRAYER, VERIFICATION, the opening
+    MOST RESPECTFULLY SHOWETH block and a second BRIEF FACTS heading were
+    all reported on one s.239 discharge application, 2026-09-09.
+
+    Two headings count as the same section when their normalised text is
+    equal, or one contains the other and both have at least two words, or
+    both begin with prayer / verif. Bold-only lines count as headings only
+    when they have two or more words, so party labels (**Petitioner**),
+    **vs** and **DEPONENT** are never treated as sections.
+
+    Exception: once an AFFIDAVIT heading is reached nothing is dropped. A
+    supporting affidavit legitimately restates the cause title and carries
+    its own VERIFICATION. Structural and mechanical, no content judgement.
+    """
+    blocks = _split_heading_blocks(text)
+    if len(blocks) < 2:
+        return text, []
+
+    def _is_section_heading(raw_first_line: str, head: str) -> bool:
+        if not head:
+            return False
+        if raw_first_line.lstrip().startswith("#"):
+            return True
+        return len(head.split()) >= 2
+
+    def _same(a: str, b: str) -> bool:
+        if a == b:
+            return True
+        if a.startswith("prayer") and b.startswith("prayer"):
+            return True
+        if a.startswith("verif") and b.startswith("verif"):
+            return True
+        if (a in b or b in a) and len(a.split()) >= 2 and len(b.split()) >= 2:
+            return True
+        return False
+
+    seen: list[str] = []
+    kept, dropped = [], []
+    # The supporting affidavit restates the court caption and case number
+    # BEFORE its own heading. Audit 2026-09-11 reproduced both being
+    # dropped as repeats, leaving the affidavit opening at "**vs**". Treat
+    # the eight blocks ahead of the first affidavit heading as part of it,
+    # the same window the exact-block pass uses (_AFFIDAVIT_NEAR).
+    _aff_idx = next((i for i, (h, _b) in enumerate(blocks) if "affidavit" in h), None)
+    for idx, (head, block) in enumerate(blocks):
+        first = block.lstrip().split("\n", 1)[0]
+        is_head = _is_section_heading(first, head)
+        in_affidavit = _aff_idx is not None and idx >= max(0, _aff_idx - 8)
+        if is_head and not in_affidavit and any(_same(head, h) for h in seen):
+            dropped.append(head)
+            continue
+        if is_head:
+            seen.append(head)
+        kept.append(block)
+    return "".join(kept), dropped
+
+
 def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
-    """Planned sections whose heading never made it into the draft.
+    """Planned sections that never made it into the draft.
 
-    A section counts as present when its normalised heading appears anywhere
-    in the draft's own headings, in either direction — the writer is allowed
-    to lengthen a heading ("Prayer" -> "Prayer for Bail") or trim a long one,
-    but not to drop the section or rename it into something unrelated.
+    Three-tier presence check per section, in order of strictness:
 
-    Substring matching in both directions is deliberately permissive: the goal
-    is catching a DROPPED section, not policing wording. A false "missing"
-    triggers a wasted 25s repair call, so the bar is set to avoid that.
+      1. OPENING-BLOCK exemption: sections in `_OPENING_BLOCK_SECTION_IDS`
+         (cause_title, addressee, court_caption, etc.) are treated as
+         present whenever the draft has any heading in its opening ~40
+         lines. Rationale: the writer legitimately replaces the planner's
+         abstract heading with the real court caption for THIS matter, so
+         substring / word-overlap on the abstract heading is unreliable.
+         Their absence downstream causes the repair to blindly re-emit the
+         planner's abstract heading and append it as a trailing fragment
+         (2026-09-06 duplicated-cause-title incident).
+
+      2. SUBSTRING match (original behaviour): normalised planner heading
+         appears in one of the draft's headings, or vice versa.
+
+      3. WORD-OVERLAP match (new): at least 50% of the substantive words
+         in the planner's heading appear in one of the draft's headings.
+         Catches legitimate rewordings like "Grounds" -> "Legal Grounds"
+         and "Preliminary Objections" -> "Preliminary Submissions and
+         Objections" that substring matching misses in both directions.
+
+    Any of the three matching → section present. All three fail → missing.
     """
     if not draft or not sections:
         return []
     draft_headings: list[str] = []
+    opening_has_heading = False
+    _opening_lines_scanned = 0
+    _OPENING_WINDOW_LINES = 40
     for line in draft.splitlines():
         s = line.strip()
         if not s:
+            _opening_lines_scanned += 1
             continue
+        _opening_lines_scanned += 1
         # `## Heading`, and also `**Heading**` alone on a line — some drafts
         # mark sections in bold rather than with hashes, and treating those as
         # "no heading" would flag a complete document as entirely missing.
@@ -2219,6 +3775,8 @@ def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_
             h = _normalise_heading(s)
             if h:
                 draft_headings.append(h)
+                if _opening_lines_scanned <= _OPENING_WINDOW_LINES:
+                    opening_has_heading = True
 
     # No headings recognised at all: the writer is not marking sections in a
     # form we can read, so we cannot tell a dropped section from a differently
@@ -2229,11 +3787,24 @@ def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_
 
     missing: list["_Section"] = []
     for sec in sections:
+        sec_id = (getattr(sec, "id", "") or "").lower().strip()
         want = _normalise_heading(sec.heading)
         if not want:
             continue
+
+        # Tier 1 — opening-block sections are present iff the draft opens
+        # with any heading. The writer's adapted court caption IS the heading.
+        if sec_id in _OPENING_BLOCK_SECTION_IDS and opening_has_heading:
+            continue
+
+        # Tier 2 — original substring match (either direction).
         if any(want in got or got in want for got in draft_headings):
             continue
+
+        # Tier 3 — word-overlap match (>= 50% of substantive words shared).
+        if any(_substantive_word_overlap(want, got) for got in draft_headings):
+            continue
+
         missing.append(sec)
     return missing
 
@@ -2249,6 +3820,7 @@ async def _generate_sectionwise(
     progress_emit,
     gathered_context: dict[str, str] | None,
     review_and_redraft_mode: bool = False,
+    niche_overlay: str = "",
 ) -> str:
     """Walk the section list in pairs of two (last is solo if odd).
 
@@ -2272,10 +3844,18 @@ async def _generate_sectionwise(
     # still see 3,4,5,7,8,9 in a single call. On router failure / empty
     # selection, the pair falls back to the raw user_facts unchanged —
     # this preserves CLAUDE.md invariant #6 whenever the router can't help.
+    #
+    # Skipped entirely in review-and-redraft mode: the section-pair prompt
+    # deliberately drops source_docs_block in that mode because the
+    # reference_block carries the same content (see 2026-09-03 fix in
+    # _generate_section_pair — double-loading blew the 1M-token ceiling).
+    # With source_docs_block skipped, routing over user_facts is dead
+    # work — every pick is discarded.
     chunking_enabled = (
         os.getenv("DRAFTING_PER_SECTION_CHUNKING", "0") == "1"
         and user_facts
         and len(user_facts) > _PER_SECTION_CHUNKING_MIN_CHARS
+        and not review_and_redraft_mode
     )
     all_chunks: list[str] = _chunk_user_facts(user_facts) if chunking_enabled else []
     # A single-chunk (no blank lines) or trivially-few-chunks blob has no
@@ -2286,6 +3866,41 @@ async def _generate_sectionwise(
             "Per-section chunking skipped — too few paragraph chunks to route",
             chunks=len(all_chunks),
         )
+
+    # Per-pair char budget — headroom below Gemini's 1M-token ceiling
+    # after accounting for system prompt (~20K tokens), reference draft
+    # (~50K), prior_text (~30K), section instructions (~5K), and gen
+    # output (~12K). Live 2026-09-02: an arbitration paperbook upload
+    # at 1.88M chars pushed a section-pair call to 1.03M tokens even
+    # after routing (router picked 99.2% of chunks) or fell back to raw
+    # source (Verification section legitimately needed no source docs
+    # but raw fallback still overflowed). This cap protects both paths.
+    # Latin ~4 chars/token -> 2.4M chars = ~600K tokens.
+    # Dense Indic scripts ~2.5 chars/token -> 1.6M chars = ~640K tokens.
+    _PAIR_USER_FACTS_BUDGET_LATIN = 2_400_000
+    _PAIR_USER_FACTS_BUDGET_INDIC = 1_600_000
+    # Same script detection as `_generate_draft`'s whole-request preflight.
+    _INDIC_RANGES = (
+        ("devanagari", "ऀ", "ॿ"),
+        ("bengali",    "ঀ", "৿"),
+        ("gurmukhi",   "਀", "੿"),
+        ("gujarati",   "઀", "૿"),
+        ("oriya",      "଀", "୿"),
+        ("tamil",      "஀", "௿"),
+        ("telugu",     "ఀ", "౿"),
+        ("kannada",    "ಀ", "೿"),
+        ("malayalam",  "ഀ", "ൿ"),
+    )
+    _detected_script = "latin"
+    _pair_budget = _PAIR_USER_FACTS_BUDGET_LATIN
+    if user_facts:
+        _sample = user_facts[:20_000]
+        _sample_len = max(len(_sample), 1)
+        for _name, _lo, _hi in _INDIC_RANGES:
+            if sum(1 for c in _sample if _lo <= c <= _hi) / _sample_len > 0.3:
+                _detected_script = _name
+                _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
+                break
 
     i = 0
     while i < total:
@@ -2321,13 +3936,22 @@ async def _generate_sectionwise(
                 return_exceptions=True,
             )
             per_section_picks = []
+            any_router_failure = False
             for sec, picks in zip(pair, per_section_picks_raw):
                 if isinstance(picks, BaseException):
                     log.warning(
-                        "Chunk router raised for section; using raw source for this section",
+                        "Chunk router raised for section; treating as router "
+                        "failure (raw-source fallback for the pair)",
                         section=sec.heading[:40],
                         error=short_err(picks),
                     )
+                    any_router_failure = True
+                    per_section_picks.append([])
+                elif picks is None:
+                    # `_pick_relevant_chunk_indices` returns None (not [])
+                    # to signal a real failure (timeout, provider error).
+                    # An empty list means "picked nothing legitimately".
+                    any_router_failure = True
                     per_section_picks.append([])
                 else:
                     per_section_picks.append(picks)
@@ -2345,11 +3969,66 @@ async def _generate_sectionwise(
                         100 * (1 - len(pair_user_facts) / max(len(user_facts), 1)), 1,
                     ),
                 )
-            else:
+            elif any_router_failure:
+                # 2026-09-06: router TIMED OUT or ERRORED (not the same as
+                # "router intentionally picked 0"). Per the CLAUDE.md
+                # drafting invariant #6 ("Whenever the router fails,
+                # returns empty, or the blob has <4 chunks, the pair
+                # falls back to the raw source"), fall back to raw
+                # source here rather than sending empty user_facts.
+                # Sending empty on a failure caused the writer to
+                # copy the reference-template's cause title verbatim
+                # (canonical-name substitution) because it had no
+                # source facts to work from.
+                pair_user_facts = user_facts
                 log.info(
-                    "Per-section chunking: no chunks picked — using raw source",
+                    "Per-section chunking: router failed for at least one "
+                    "section in this pair — falling back to raw source",
                     pair_start=position_start,
+                    section_headings=[s.heading[:60] for s in pair],
+                    raw_chars=len(pair_user_facts),
                 )
+            else:
+                # 2026-09-02: router INTENTIONALLY picked 0 chunks -> this
+                # section legitimately doesn't need source-document content
+                # (typical for Verification / signature / cause-title
+                # sections that generate cleanly from the system prompt +
+                # reference draft + prior_text alone). Send EMPTY
+                # user_facts instead of raw-source fallback; the raw
+                # fallback used to overflow the 1M-token ceiling on very
+                # large uploads and caused legitimate 0-pick sections to
+                # fail with a context_length error.
+                pair_user_facts = ""
+                log.info(
+                    "Per-section chunking: no chunks picked — sending empty "
+                    "user_facts (section doesn't need source docs)",
+                    pair_start=position_start,
+                    section_headings=[s.heading[:60] for s in pair],
+                )
+
+        # 2026-09-02: post-router / raw-fallback safety cap. Even after
+        # routing (or with raw fallback when chunking is disabled), the
+        # blob may still exceed our safe per-pair budget on very large
+        # uploads. Truncate with a marker so the section produces output
+        # rather than failing on 1M-token overflow. Trade-off: partial-
+        # verbatim source vs a fully-failed section — the fully-failed
+        # section is unambiguously worse for the user.
+        if len(pair_user_facts) > _pair_budget:
+            _orig_chars = len(pair_user_facts)
+            pair_user_facts = (
+                pair_user_facts[:_pair_budget]
+                + f"\n\n[…source material truncated to fit model context: "
+                + f"showing first {_pair_budget:,} of {_orig_chars:,} chars. "
+                + f"Split the upload into smaller PDFs for full-verbatim access.]"
+            )
+            log.warning(
+                "Per-pair user_facts exceeded budget — truncated with marker",
+                pair_start=position_start,
+                original_chars=_orig_chars,
+                truncated_chars=len(pair_user_facts),
+                budget=_pair_budget,
+                script=_detected_script,
+            )
 
         # One retry per pair (Buglist Phase 2). The first attempt uses
         # the Gemini SDK's default timeout; the retry uses the SAME
@@ -2359,6 +4038,12 @@ async def _generate_sectionwise(
         # 90s. Retry fires on either exception or empty content.
         pair_text = ""
         _pair_err: Exception | None = None
+        # ONE clock for the whole pair, created here in the caller — NOT
+        # inside `_generate_section_pair`, which runs twice per pair and
+        # would reset it on attempt 2 (turning the 90s cap into 180s).
+        # Both attempts and both Flash failovers count down the same
+        # PAIR_TOTAL_BUDGET_S; see `_pair_timeout` for the per-call clamp.
+        pair_remaining = _make_pair_clock()
         for attempt in (1, 2):
             try:
                 pair_text = await _generate_section_pair(
@@ -2373,39 +4058,63 @@ async def _generate_sectionwise(
                     user_intent=user_intent,
                     user_language=user_language,
                     review_and_redraft_mode=review_and_redraft_mode,
+                    niche_overlay=niche_overlay,
+                    pair_remaining=pair_remaining,
                 )
                 _pair_err = None
                 if pair_text.strip():
                     break
-                # Empty content on attempt 1 → retry once.
+                # Empty content on attempt 1 → retry once, but only while
+                # the PAIR still has budget for a real call.
                 if attempt == 1:
+                    _left = pair_remaining()
+                    if _left <= _PAIR_RETRY_MIN_REMAINING_S:
+                        log.warning(
+                            "Section pair returned empty content; skipping retry "
+                            "(pair budget exhausted)",
+                            position_start=position_start,
+                            pair_remaining_s=round(_left, 1),
+                        )
+                        break
                     log.info(
                         "Section pair returned empty content; retrying once",
                         position_start=position_start,
+                        pair_remaining_s=round(_left, 1),
                     )
                     await asyncio.sleep(1)
                     continue
                 break
             except Exception as e:
                 _pair_err = e
+                if isinstance(e, AttachmentTooLarge):
+                    # Raised before any LLM call; the prompt cannot fit and
+                    # a second attempt would compute the same answer.
+                    log.warning(
+                        "Section pair skipped: attachment too large for the "
+                        "input ceiling even after retrieval",
+                        position_start=position_start, error=short_err(e),
+                    )
+                    break
                 if attempt == 1:
-                    # Deadline check: don't retry if we've already
-                    # blown the request budget. The retry itself would
-                    # just fail again after another N seconds.
-                    from core.deadline import remaining as _remaining
-                    rem = _remaining()
-                    if rem is not None and rem <= 15:
+                    # Gate the retry on the PAIR's own budget, not the
+                    # request deadline. The request-level check (<=15s)
+                    # let a pair that had already spent 120s on attempt 1
+                    # spend another 120s on attempt 2 while the request
+                    # still had 140s — starving every section after it.
+                    _left = pair_remaining()
+                    if _left <= _PAIR_RETRY_MIN_REMAINING_S:
                         log.warning(
-                            "Section pair failed; skipping retry (budget exhausted)",
+                            "Section pair failed; skipping retry (pair budget exhausted)",
                             position_start=position_start,
                             error=short_err(e),
-                            remaining_s=round(rem, 1),
+                            pair_remaining_s=round(_left, 1),
                         )
                         break
                     log.warning(
                         "Section pair failed; retrying once",
                         position_start=position_start,
                         error=short_err(e),
+                        pair_remaining_s=round(_left, 1),
                     )
                     await asyncio.sleep(1)
                     continue
@@ -2418,6 +4127,19 @@ async def _generate_sectionwise(
                 pair_text = ""
                 break
 
+        if pair_text.strip():
+            # Drop sections this pair re-emitted that already exist in the
+            # document so far (rule 1 of the pair prompt does not hold on
+            # its own). See _drop_reemitted_sections.
+            _already = [h for h, _ in _split_heading_blocks("\n\n".join(completed)) if h]
+            pair_text, _reemitted = _drop_reemitted_sections(
+                pair_text, [sec.heading for sec in pair], _already,
+            )
+            if _reemitted:
+                log.warning(
+                    "Section pair re-emitted already-drafted sections; dropped",
+                    position_start=position_start, dropped=_reemitted,
+                )
         if pair_text.strip():
             completed.append(pair_text.strip())
         else:
@@ -2490,6 +4212,7 @@ async def _generate_sectionwise(
                     user_intent=user_intent,
                     user_language=user_language,
                     review_and_redraft_mode=review_and_redraft_mode,
+                    niche_overlay=niche_overlay,
                 )
                 if text.strip():
                     repaired.append(text.strip())
@@ -2499,11 +4222,62 @@ async def _generate_sectionwise(
                 log.warning("Section repair failed", error=short_err(e),
                             headings=[s.heading[:40] for s in chunk])
         if repaired:
-            draft = draft + "\n\n" + "\n\n".join(repaired)
+            # SAFETY NET (2026-09-06): before blind-appending, drop any
+            # repaired chunk whose substantive body is already present in
+            # the draft. Belt-and-suspenders against a future false
+            # positive from `_missing_planned_sections` (that function
+            # was tightened in the same commit, but the append is the
+            # last line of defence — a duplicate never lands even if the
+            # detector is later loosened by accident). The check compares
+            # normalised heading-shingles between the repaired chunk and
+            # the existing draft; ~85% word overlap on the chunk's own
+            # words with the existing draft's headings means we already
+            # have this section.
+            deduped_repaired: list[str] = []
+            existing_headings_norm = [
+                _normalise_heading(line.strip())
+                for line in draft.splitlines()
+                if line.strip().startswith("#")
+                or (line.strip().startswith("**") and line.strip().endswith("**"))
+            ]
+            for chunk_text in repaired:
+                chunk_first_heading = ""
+                for line in chunk_text.splitlines():
+                    s = line.strip()
+                    if s.startswith("#") or (s.startswith("**") and s.endswith("**")):
+                        chunk_first_heading = _normalise_heading(s)
+                        break
+                already_present = bool(chunk_first_heading) and any(
+                    _substantive_word_overlap(chunk_first_heading, got, min_ratio=0.85)
+                    or chunk_first_heading in got
+                    or got in chunk_first_heading
+                    for got in existing_headings_norm
+                )
+                if already_present:
+                    log.warning(
+                        "Repaired section already present in draft — skipping "
+                        "append to prevent duplicate section fragment",
+                        chunk_heading_preview=chunk_first_heading[:80],
+                        chunk_chars=len(chunk_text),
+                    )
+                    continue
+                deduped_repaired.append(chunk_text)
+            if deduped_repaired:
+                # Insert each repaired section at its PLANNED position rather than
+                # appending. Appending put a regenerated "Statement of Facts"
+                # after the Prayer and Verification - advocates 2026-09-08
+                # reported "sections up and down". The plan is ordered and
+                # `missing` preserves that order, so the anchor is the next
+                # planned section that DID reach the draft.
+                draft = _insert_repaired_in_plan_order(
+                    draft, sections, missing, deduped_repaired,
+                )
             still_missing = _missing_planned_sections(draft, sections)
             log.info("Plan adherence after repair",
                      recovered=len(missing) - len(still_missing),
-                     still_missing=[s.heading[:40] for s in still_missing])
+                     still_missing=[s.heading[:40] for s in still_missing],
+                     appended_chunks=len(deduped_repaired),
+                     deduped_chunks=len(repaired) - len(deduped_repaired))
 
     # G-24: emit draft_incomplete SSE + prepend a banner when any pair
     # failed. The frontend already listens for draft_incomplete (see
@@ -2602,8 +4376,7 @@ async def _generate_draft_modification(
     )
     system_prompt = localize_prompt(system_prompt, user_language, user_intent)
 
-    llm = get_gemini_pro(
-        temperature=0.0,
+    llm = get_drafting_llm(
         max_output_tokens=24000,
         thinking_budget=4096,
     )
@@ -2618,7 +4391,7 @@ async def _generate_draft_modification(
         with log_time(log, "Draft modification (fast path)"):
             response = await asyncio.to_thread(
                 llm.invoke,
-                [SystemMessage(content=system_prompt),
+                [SystemMessage(content=cacheable_system(system_prompt)),
                  HumanMessage(content="Produce the complete modified draft now.")],
             )
     except Exception as e:
@@ -2664,7 +4437,36 @@ async def _generate_draft(
     `user_facts` is the RAW extracted text of uploaded documents, passed
     verbatim through to whichever generation strategy runs. Returns a
     single assembled string regardless of the strategy.
+
+    Before dispatching, this fires the niche selector once (Gemini Flash
+    Lite) to identify the filing niche (bail, writ, plaint, rejoinder,
+    NI Act notice, etc.) — the resolved overlay is threaded into both
+    the single-pass and section-wise paths so overlay statutory anchors
+    and skeleton conventions travel with every generation call. Selector
+    failure returns no overlay; the base senior-counsel prompt still
+    produces a competent draft.
     """
+    # Niche selection — cheap, one Flash Lite call, no fallback cost.
+    # Run BEFORE the preflight so the selector's telemetry is captured
+    # even for oversized-upload rejections (helps analytics see niche
+    # distribution across attempted requests, not just successful ones).
+    niche_overlay = ""
+    try:
+        from agents.drafting_niche import pick_drafting_niche
+        from config.drafting_niches import get_niche_overlay
+        niche_key = await pick_drafting_niche(query, user_facts)
+        niche_overlay = get_niche_overlay(niche_key)
+        log.info(
+            "Drafting niche resolved",
+            niche_key=niche_key or "none",
+            overlay_chars=len(niche_overlay),
+        )
+    except Exception as e:
+        log.warning(
+            "Niche selection failed; proceeding with base prompt only",
+            error=short_err(e),
+        )
+
     # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens. English
     # text tokenises at ~4 chars/token so the raw-char ceiling is ~4M
     # chars, and 3.5M leaves room for system prompt + reference + context
@@ -2795,6 +4597,49 @@ async def _generate_draft(
             strategy.sections[:MAX_SECTIONS - 1] + strategy.sections[-1:]
         )
 
+    # --- Budget-aware plan (PR 3) -------------------------------------------
+    # Feasibility check between the judge and the pair loop: how many pairs
+    # can the remaining request budget write, after reserving time for the
+    # language gate and self-refine? Every trim is logged with the numbers
+    # so the reserves and the p90 constant can be tuned from the logs.
+    if strategy.should_fanout and strategy.sections:
+        from core.deadline import remaining as _plan_remaining
+        _rem = _plan_remaining()
+        if _rem is not None:
+            _budget_left = _rem - SELF_REFINE_RESERVE_S - LANG_GATE_RESERVE_S
+            _fitted, _feasible, _action = _fit_plan_to_budget(
+                strategy.sections, _budget_left,
+            )
+            if _action == "kept":
+                log.info(
+                    "Plan fits budget",
+                    planned=len(strategy.sections), feasible=_feasible,
+                    budget_left_s=round(_budget_left, 1),
+                    remaining_s=round(_rem, 1),
+                )
+            else:
+                log.warning(
+                    "Plan trimmed for budget",
+                    planned=len(strategy.sections), feasible=_feasible,
+                    budget_left_s=round(_budget_left, 1),
+                    remaining_s=round(_rem, 1),
+                    self_refine_reserve_s=SELF_REFINE_RESERVE_S,
+                    lang_gate_reserve_s=LANG_GATE_RESERVE_S,
+                    pair_p90_s=OBSERVED_PAIR_TIME_P90_S,
+                    action=_action,
+                    planned_headings=[s.heading[:24] for s in strategy.sections],
+                    fitted_headings=[s.heading[:40] for s in _fitted],
+                )
+                if _action == "single_pass":
+                    strategy.should_fanout = False
+                    strategy.sections = []
+                    strategy.reasoning = (
+                        f"{strategy.reasoning} [trimmed to single-pass: "
+                        f"budget_left={_budget_left:.0f}s]"
+                    )
+                else:
+                    strategy.sections = _fitted
+
     if not strategy.should_fanout or not strategy.sections:
         log.info(
             "Drafting: single-pass selected",
@@ -2811,6 +4656,7 @@ async def _generate_draft(
             progress_emit=progress_emit,
             gathered_context=gathered_context,
             review_and_redraft_mode=review_and_redraft_mode,
+            niche_overlay=niche_overlay,
         )
 
     log.info(
@@ -2833,6 +4679,7 @@ async def _generate_draft(
         progress_emit=progress_emit,
         gathered_context=gathered_context,
         review_and_redraft_mode=review_and_redraft_mode,
+        niche_overlay=niche_overlay,
     )
 
     # --- Off-target language gate ------------------------------------------
@@ -2857,7 +4704,10 @@ async def _generate_draft(
         budget = _remaining()
         log.warning(
             "Draft came back off-target language",
-            user_language=user_language, script_ratio=round(ratio, 2),
+            user_language=user_language,
+            # Three decimals: a raw 0.849 logged as "0.85" made a boundary
+            # regeneration (req 8ab2c219, 54s) look like a threshold bug.
+            script_ratio=round(ratio, 3),
             remaining_s=budget,
         )
         if budget is None or budget > _OFF_TARGET_RETRY_MIN_BUDGET_S:
@@ -3249,6 +5099,17 @@ async def drafting_node(state: LegalAgentState) -> dict:
             english_query = ""
             gathered_ctx = await _gather_relevant_context(query)
         else:
+            # Resolve the niche BEFORE the reference lookup so it can pin the
+            # canonical template and skip the LLM tie-break. Memoised in
+            # agents/drafting_niche, so the generation path re-reads it for
+            # free. Failure is non-fatal: an empty key falls through to the
+            # pick cache and then the picker - previous behaviour.
+            _early_niche_key = ""
+            try:
+                from agents.drafting_niche import pick_drafting_niche as _pdn
+                _early_niche_key = await _pdn(query, user_facts) or ""
+            except Exception as _ne:
+                log.debug("Early niche resolution failed", error=str(_ne)[:120])
             progress("drafting", "Searching templates and relevant law...",
                      step="reference")
             (reference_text, reference_source, reference_kind,
@@ -3260,6 +5121,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         user_language=user_language,
                         intent=intent_obj,
                         original_query=original_query,
+                        niche_key=_early_niche_key,
                     ),
                     _gather_relevant_context(query),
                 )
@@ -3297,6 +5159,41 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
         progress("drafting", "Cleaning up draft...", step="cleanup")
         draft, draft_warnings = validate_draft(draft)
+
+        # Old section number bolted to a new act name — "Section 439 BNSS".
+        # 439 is the CrPC bail provision; the BNSS counterpart is 483, so
+        # "439 BNSS" cites a provision that exists in neither code. The
+        # retrieved newacts row for CrPC 439 states its own counterpart, so
+        # the correction comes from the source material, not from us.
+        #
+        # Corrected in place rather than flagged with a banner: a draft is
+        # copied into a filing, where a caution at the top is lost and a
+        # wrong section number is not. Only the digits move — the act the
+        # writer named stays, because which era governs turns on the offence
+        # date and that is the advocate's call.
+        try:
+            from core.statute_citation_check import (
+                correct_cross_pairs, log_era_mismatch,
+            )
+            _newacts_ctx = (gathered_ctx or {}).get("newacts", "")
+            draft, _xpairs = correct_cross_pairs(draft, _newacts_ctx)
+            if _xpairs:
+                draft_warnings = list(draft_warnings or []) + [
+                    f"Corrected {c['cited']} to {c['correct']}"
+                    for c in _xpairs
+                ]
+            # Era mismatch — BNS charges pleaded under the CrPC — is measured
+            # here and repaired by the critic's `statute_era_mismatch`
+            # category, not rewritten in place. "439 CrPC" is a real
+            # provision that a draft may name legitimately (a pre-2024
+            # judgment, a proceeding begun before commencement), and telling
+            # that apart from stale recall needs the surrounding argument.
+            # Logging it before self_refine gives a per-draft number for
+            # whether the prompt rule and the critic actually hold.
+            log_era_mismatch(draft, where="pre_refine")
+        except Exception as e:
+            log.warning("Statute citation checks failed; draft unchanged",
+                        error=short_err(e))
 
         # A citation the pipeline cannot vouch for has to be visible IN the
         # document, not only in response metadata the UI may never render.
@@ -3390,6 +5287,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     draft,
                     user_query=query,
                     intent=intent_obj,
+                    critic_llm=get_drafting_llm(max_output_tokens=8192),
+                    refiner_llm=get_drafting_llm(max_output_tokens=24000),
                     source_languages=source_langs,
                     source_registry=_registry,
                     # A finished draft has no business getting materially
@@ -3402,6 +5301,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     shrink_floor=0.90,
                     cumulative_shrink_floor=0.85,
                 )
+                # Did the critic's `statute_era_mismatch` category actually
+                # repair it? Same check, after the refiner, so the pair of
+                # log lines answers that per draft instead of by impression.
+                try:
+                    from core.statute_citation_check import log_era_mismatch
+                    log_era_mismatch(refined_draft, where="post_refine")
+                except Exception:
+                    pass
                 if refined_draft != draft:
                     log.info(
                         "Self-refine altered draft",
@@ -3439,6 +5346,43 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         )
                     else:
                         draft = refined_draft
+                        # Audit 2026-09-15: the refiner re-emits the whole
+                        # draft, so rerun the mechanical repairs (idempotent)
+                        # or anything it reintroduces ships unrepaired.
+                        draft, _post_refine_warnings = validate_draft(draft)
+                        try:
+                            from core.statute_citation_check import correct_cross_pairs as _post_ccp
+                            draft, _ = _post_ccp(draft, (gathered_ctx or {}).get("newacts", ""))
+                        except Exception as _post_err:
+                            log.warning("Post-refine cross-pair check skipped", error=str(_post_err)[:120])
+                # Unresolved review notes must be visible, not just logged.
+                # self_refine returns after max_iterations with the last
+                # critique still failing; before this the draft shipped
+                # with no signal (req 8ab2c219: final_violations=3, silent).
+                _review_banner = _unresolved_review_banner(refine_history)
+                if _review_banner and _UNRESOLVED_REVIEW_BANNER_MARKER not in draft:
+                    _final_crit = refine_history[-1]
+                    log.warning(
+                        "Draft ships with unresolved review notes",
+                        violations=len(_final_crit.violations),
+                        severities=sorted(
+                            {v.severity for v in _final_crit.violations}
+                        ),
+                        iterations=len(refine_history),
+                    )
+                    try:
+                        from langgraph.config import get_stream_writer as _gsw_rv
+                        _gsw_rv()({
+                            "type": "status",
+                            "message": (
+                                f"Review found {len(_final_crit.violations)} "
+                                "point(s) to check before filing"
+                            ),
+                            "step": "review_unresolved",
+                        })
+                    except (RuntimeError, ImportError):
+                        pass  # batch endpoint — no stream to write to
+                    draft = _review_banner + draft
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))

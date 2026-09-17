@@ -140,6 +140,37 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
                     original_len=pre_len, after_sanitize_output=len(cleaned),
                     removed=pre_len - len(cleaned))
 
+    # Pass 1b: em / en dashes - the "ChatGPT dash". Advocates flagged this on
+    # 2026-09-08 as making the output read machine-written; Indian legal
+    # register sets off a parenthetical with commas, semicolons or brackets.
+    #
+    # This lives HERE, not in the drafting agent, because it has to cover
+    # EVERY response. The first fix went into agents.drafting.validate_draft,
+    # which only runs on the drafting path - so drafts came out clean while
+    # judgment summaries, legislation answers, scenario analyses and document
+    # Q&A still shipped em-dashes. Reported 2026-09-09 on "Prepare detailed
+    # summary for the Manjari Greens phase 3", which routes to a judgment
+    # agent and never touches validate_draft.
+    #
+    # Character classes are [space,tab], never \s: \s matches newlines,
+    # so a dash at end-of-line would swallow the break and glue two lines
+    # together - the exact alignment damage this is meant to prevent.
+    # Three shapes, most specific first: spaced parenthetical -> comma,
+    # unspaced compound or range -> hyphen, leading list marker -> removed.
+    _dash_n = cleaned.count("—") + cleaned.count("–")
+    if _dash_n:
+        cleaned = re.sub(r"(?m)^[ \t]*[—–][ \t]+", "", cleaned)
+        cleaned = re.sub(r"(?<=\d)[ \t]+[—–][ \t]+(?=\d)", "-", cleaned)   # numeric range
+        # Audit 2026-09-11: a lone dash in a table cell ("| — |") is an
+        # empty-cell marker, never a parenthetical; a spaced dash becomes a
+        # comma only between letters.
+        cleaned = re.sub(r"(?<=[A-Za-zऀ-෿])[ \t]+[—–][ \t]+(?=[A-Za-zऀ-෿])", ", ", cleaned)
+        cleaned = re.sub(r"(?<=\|)[ \t]*[—–][ \t]*(?=\|)", " - ", cleaned)
+        cleaned = re.sub(r"(?<=[A-Za-z0-9])[—–](?=[A-Za-z0-9])", "-", cleaned)
+        cleaned = cleaned.replace("—", "-").replace("–", "-")
+        cleaned = re.sub(r",[ \t]*,", ",", cleaned)
+        log.info("Normalised em/en dashes in final response",
+                 count=_dash_n, task=task)
     # Pass 2: markdown polish (code fences, bullets, headings, etc.)
     cleaned = sanitize_markdown(cleaned)
 
@@ -154,6 +185,44 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
         log.info("External URLs stripped from final_response",
                  before=pre_url_len, after=len(cleaned),
                  removed=pre_url_len - len(cleaned))
+
+    # Pass 2b1: a non-drafting answer is never a pleading. Arguments /
+    # analysis that came back with a cause title, application number, party
+    # block, PRAYER or sign-off lose the furniture and keep the body.
+    # Advocate test 2026-09-11. See core.pleading_furniture.
+    from core.pleading_furniture import strip_pleading_furniture as _strip_furniture
+    cleaned, _pf = _strip_furniture(cleaned, task)
+    if _pf["prayer_removed"] or _pf["lines_removed"]:
+        log.warning("Pleading furniture stripped from non-drafting answer", task=task, **_pf)
+
+    # Pass 2b2: no diagrams, no code fences. A flowchart drawn as ASCII art
+    # inside a fence renders in monospace, cannot wrap and misaligns; a
+    # legal opinion or draft never needs one. Drawings are removed, other
+    # fences are unwrapped into body text. Advocate report 2026-09-10.
+    from core.diagrams import strip_diagrams as _strip_diagrams
+    cleaned, _diag = _strip_diagrams(cleaned)
+    if _diag["diagrams_removed"] or _diag["fences_unwrapped"]:
+        log.info("Diagram / code-fence repair applied", task=task, **_diag)
+
+    # Pass 2c: keep the response inside the answer box. A bare whitelisted
+    # PDF URL (70-110 unbreakable chars) becomes a short labelled link; a
+    # 20+ char run of underscores used as a blank is capped; a line of
+    # dashes becomes a markdown rule. Advocate report 2026-09-10: 'a few
+    # part of the answer is going beyond the answer box'. See core.overflow.
+    from core.overflow import keep_inside_answer_box as _fit
+    cleaned, _fit_stats = _fit(cleaned)
+    if _fit_stats["urls"] or _fit_stats["runs"]:
+        log.info("Overflow repair applied", task=task, **_fit_stats)
+
+    # Pass 2d: never reveal the model or provider. Only sentences in which
+    # the assistant describes ITSELF are rewritten; case law and party names
+    # that mention Google or another vendor are untouched. Report 2026-09-10:
+    # 'what is the model running behind you' -> 'powered by Google's Gemini'.
+    from core.identity import hide_provider as _hide_provider
+    cleaned, _hidden = _hide_provider(cleaned)
+    if _hidden:
+        log.warning("Provider self-description rewritten in final response",
+                    task=task, sentences=_hidden)
 
     # Pass 3: hard char cap. sanitize_output handles pad-char runaway, but
     # an LLM can still emit legitimately diverse prose that runs past any

@@ -223,9 +223,21 @@ class TestGenerationScriptGate:
         async def fake_judge(**kwargs):
             return self._strategy()
 
+        # The request clock is read twice on this path: once by the
+        # budget-aware plan check (PR 3) BEFORE any section is written, and
+        # once by the language gate AFTER generation. `remaining_budget`
+        # models the gate-time reading; the plan-time reading is a healthy
+        # budget, otherwise the plan check (correctly) refuses to fan out
+        # and the scripted sectionwise writer is never reached.
+        reads = {"n": 0}
+
+        def fake_remaining():
+            reads["n"] += 1
+            return 285.0 if reads["n"] == 1 else remaining_budget
+
         with patch("agents.drafting._judge_fanout", fake_judge), \
              patch("agents.drafting._generate_sectionwise", fake_sectionwise), \
-             patch("core.deadline.remaining", lambda: remaining_budget), \
+             patch("core.deadline.remaining", fake_remaining), \
              patch.object(drafting_mod.log, "warning", record):
             out = _run(drafting_mod._generate_draft(
                 query="ಜಾಮೀನು ಅರ್ಜಿ ಸಿದ್ಧಪಡಿಸಿ",

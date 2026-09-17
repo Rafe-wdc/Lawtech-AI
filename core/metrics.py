@@ -78,6 +78,19 @@ METRICS: dict = {
         ["agent", "tier"],   # tier: query_rewrite | web_search
     ),
 
+    # --- File GC (Gap #4, 2026-09-02) ---
+
+    "files_gc_removed_total": Counter(
+        "lawtech_files_gc_removed_total",
+        "Files / dirs removed by the in-app GC sweeper",
+        ["kind"],   # kind: uploads | chroma | tmp_pdf
+    ),
+    "files_gc_errors_total": Counter(
+        "lawtech_files_gc_errors_total",
+        "GC sweeper errors (permission denied, race with concurrent write, etc.)",
+        ["kind"],   # kind: uploads | chroma | tmp_pdf
+    ),
+
     # --- Guardrail Layer ---
 
     "guardrail_blocks_total": Counter(

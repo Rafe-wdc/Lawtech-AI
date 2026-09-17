@@ -30,6 +30,7 @@ from typing import Callable, Optional
 
 from core.logger import get_logger, log_time
 from core.settings import (
+    MODELS,
     CHROMA_STORE_ROOT,
     UPLOADS_ROOT,
     MAX_FILES_PER_REQUEST,
@@ -57,7 +58,7 @@ MAX_INLINE_PDF_PAGES = 20
 # OCR latency on long PDFs. We keep a high-DPI option for genuinely poor
 # text-layer cases and default to V1's 96 for the common path.
 # (Bug analysis 2026-06-23: V2 file-processing regression — V1 baseline.)
-VISION_DPI_LOW = 96             # V1 default — fast, acceptable for most cases
+VISION_DPI_LOW = int(os.environ.get("OCR_FIRST_PASS_DPI", "96"))  # V1 default — fast, acceptable for most cases
 VISION_DPI_HIGH = 200            # used when low-DPI OCR returns very little text
 VISION_DPI = VISION_DPI_LOW      # default; _vision_ocr_pdf may escalate
 
@@ -74,7 +75,12 @@ OCR_CACHE_DIR = os.path.join(CHROMA_STORE_ROOT, ".ocr_cache")
 # Bump when the OCR prompt or model changes so pre-existing cache entries
 # (which may contain garbage produced by the old prompt / weaker model) are
 # not served to users. Change to "v3" etc. on any future OCR-quality fix.
-OCR_CACHE_VERSION = "v2"
+# v3 (2026-09-07): Vision OCR moved from gemini-2.5-flash to the pinned
+# vision tier (gemini-3.6-flash). Cache entries are keyed by file hash +
+# this version, so without the bump every previously-uploaded document
+# would keep serving OCR text produced by the OLD model - the upgrade
+# would be invisible on exactly the files most likely to be re-uploaded.
+OCR_CACHE_VERSION = "v3"
 
 # thread_files.ocr_status value meaning "OCR ran on this image but produced
 # nothing usable, so its output was withheld pending the user's confirmation".
@@ -197,6 +203,22 @@ class ProcessedFile:
     # is inserted (save_thread_file does not write this column) so a later
     # "use it anyway" can find the file and re-run it without a re-upload.
     ocr_status: str = ""
+    # Gap #3 (2026-09-02): classified document kind — one of
+    # core.file_classifier.ALL_KINDS or "" when the classifier didn't
+    # run (extraction failure, empty text) OR "other" when the
+    # classifier ran but couldn't confidently categorise. Drives
+    # orchestrator routing hints and per-kind specialised prompts.
+    file_kind: str = ""
+    file_kind_confidence: float = 0.0
+    # Gap #8 (2026-09-02): UUID minted per multipart upload request in
+    # core.gateway. All files uploaded in the same request share the
+    # same batch_id. `agents.memory._restore_file_context` groups files
+    # by batch_id (deterministic) instead of by the fragile
+    # ±10-second `created_at` window, so double-clicks and slow-save
+    # edge cases no longer merge or split batches incorrectly. Empty
+    # for legacy rows (pre-migration); those fall back to the timestamp
+    # path in the restore code.
+    batch_id: str = ""
 
 
 @dataclass
@@ -227,11 +249,24 @@ class FileContext:
             for pf in self.files
             if pf.extracted_text
         ]
+        # Gap #3: per-file classifier verdicts surfaced to state so the
+        # orchestrator + Document agent can consume them without a
+        # ProcessedFile import. `kind` is "" when the classifier didn't
+        # run (extraction failed) or "other" when it couldn't decide.
+        file_kinds = [
+            {
+                "name": pf.original_name,
+                "kind": pf.file_kind or "",
+                "confidence": pf.file_kind_confidence or 0.0,
+            }
+            for pf in self.files
+        ]
         return {
             "chromadb_collections": self.chromadb_collections,
             "summary": self.summary,
             "file_names": self.file_names,
             "extracted_texts": extracted_texts,
+            "file_kinds": file_kinds,
         }
 
 
@@ -857,7 +892,7 @@ def _ocr_batch(llm, batch_b64: list[str], batch_start: int) -> str:
                 "FileProcessor",
                 f"ocr_pdf_pages_{batch_start + 1}_{batch_start + len(batch_b64)}",
                 resp,
-                model="gemini-2.5-flash",
+                model=MODELS["pdf_vision_ocr"],
             )
             text = _extract_ai_text(resp).strip()
             return (
@@ -914,7 +949,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
     2026-07-22 upgraded model + prompt + added retry + quality gate to
     match the PDF path.
     """
-    from core.clients import get_gemini_flash_full
+    from core.clients import get_gemini_vision
     import base64
 
     img_hash = _file_hash(file_path)
@@ -939,7 +974,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
             ".bmp": "image/bmp",
         }.get(ext, "image/jpeg")
 
-        llm = get_gemini_flash_full(temperature=0.0)
+        llm = get_gemini_vision(temperature=0.0)
         content = [{
             "role": "user",
             "content": [
@@ -964,7 +999,7 @@ def _vision_ocr_image(file_path: str, filename: str = "") -> str:
                     "FileProcessor",
                     f"ocr_image_{filename or os.path.basename(file_path)}",
                     resp,
-                    model="gemini-2.5-flash",
+                    model=MODELS["pdf_vision_ocr"],
                 )
                 text = _extract_ai_text(resp).strip()
                 last_exc = None
@@ -1038,17 +1073,17 @@ def _ocr_pdf_at_dpi(
     SSE channel — useful for 100+ page scanned PDFs where OCR alone takes
     1-3 minutes and the user would otherwise see dead silence.
     """
-    from core.clients import get_gemini_flash_full
+    from core.clients import get_gemini_vision
 
     with log_time(log, "PDF page rendering", pages=page_count, dpi=dpi):
         batches = _render_pdf_pages(file_path, page_count, dpi=dpi)
 
     total = len(batches)
-    llm = get_gemini_flash_full(temperature=0.0)
+    llm = get_gemini_vision(temperature=0.0)
     log.info("Starting parallel OCR",
              batches=total, pages=page_count, dpi=dpi,
              batch_size=VISION_BATCH_SIZE, max_concurrent=VISION_MAX_CONCURRENT,
-             model="gemini-2.5-flash")
+             model=MODELS["pdf_vision_ocr"])
 
     if emit and total:
         emit({
@@ -2038,41 +2073,99 @@ def _extract_docx_text(file_path: str) -> str:
 
 
 def _extract_csv_text(file_path: str) -> str:
+    """Extract CSV rows up to XLSX_CSV_MAX_ROWS (Gap #6, was hard-coded 100).
+
+    On truncation, appends a loud marker row that surfaces to the LLM
+    AND emits a WARN log line so the user's operator can see it in
+    telemetry. Never silently drops data past the cap.
+    """
+    from core.settings import XLSX_CSV_MAX_ROWS
+    cap = max(1, XLSX_CSV_MAX_ROWS)
+    rows: list[list[str]] = []
+    truncated_at: int | None = None
+    total_scanned = 0
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         reader = csv.reader(f)
-        rows = []
         for i, row in enumerate(reader):
-            if i >= 100:
-                rows.append(["... (truncated)"])
+            total_scanned = i + 1
+            if i >= cap:
+                truncated_at = i
+                # Peek a few more to estimate how much was dropped, then break
+                overflow = 0
+                for _ in reader:
+                    overflow += 1
+                    if overflow > 5000:
+                        break
+                total_scanned = i + overflow
                 break
             rows.append(row)
     if not rows:
         return ""
+    if truncated_at is not None:
+        # Loud, unambiguous marker that survives into the LLM prompt.
+        rows.append([
+            f"[! TRUNCATED: showing first {cap} rows out of ~{total_scanned}+ "
+            f"detected in this file. Raise XLSX_CSV_MAX_ROWS env var to see "
+            f"more rows, or ask the user to slice / summarise the file first.]"
+        ])
+        log.warning("CSV truncated at row cap",
+                    file=file_path, cap_rows=cap, scanned_rows=total_scanned)
     header = " | ".join(rows[0])
-    sep = " | ".join(["---"] * len(rows[0]))
+    sep = " | ".join(["---"] * len(rows[0])) if rows[0] else ""
     body = "\n".join(" | ".join(r) for r in rows[1:])
-    return f"{header}\n{sep}\n{body}"
+    return f"{header}\n{sep}\n{body}" if sep else header + "\n" + body
 
 
 def _extract_xlsx_text(file_path: str) -> str:
+    """Extract every worksheet, up to XLSX_CSV_MAX_ROWS PER SHEET (Gap #6).
+
+    Per-sheet cap so one giant sheet doesn't starve the others of
+    context budget. On truncation, appends a loud marker row per
+    affected sheet + emits a WARN log line.
+    """
+    from core.settings import XLSX_CSV_MAX_ROWS
     from openpyxl import load_workbook
+    cap = max(1, XLSX_CSV_MAX_ROWS)
     wb = load_workbook(file_path, read_only=True, data_only=True)
-    sheets_text = []
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        rows = []
-        for i, row in enumerate(ws.iter_rows(values_only=True)):
-            if i >= 100:
-                rows.append(["... (truncated)"])
-                break
-            rows.append([str(c) if c is not None else "" for c in row])
-        if not rows:
-            continue
-        header = " | ".join(rows[0])
-        sep = " | ".join(["---"] * len(rows[0]))
-        body = "\n".join(" | ".join(r) for r in rows[1:])
-        sheets_text.append(f"### Sheet: {sheet_name}\n\n{header}\n{sep}\n{body}")
-    wb.close()
+    sheets_text: list[str] = []
+    try:
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows: list[list[str]] = []
+            truncated_at: int | None = None
+            total_scanned = 0
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                total_scanned = i + 1
+                if i >= cap:
+                    truncated_at = i
+                    # Estimate overflow (bounded to keep the walk cheap)
+                    overflow = 0
+                    for _ in ws.iter_rows(min_row=i + 2, values_only=True):
+                        overflow += 1
+                        if overflow > 5000:
+                            break
+                    total_scanned = i + overflow
+                    break
+                rows.append([str(c) if c is not None else "" for c in row])
+            if not rows:
+                continue
+            if truncated_at is not None:
+                rows.append([
+                    f"[! TRUNCATED: sheet '{sheet_name}' has ~{total_scanned}+ "
+                    f"rows; showing first {cap}. Raise XLSX_CSV_MAX_ROWS env "
+                    f"var to see more, or slice the sheet first.]"
+                ])
+                log.warning("XLSX sheet truncated at row cap",
+                            file=file_path, sheet=sheet_name,
+                            cap_rows=cap, scanned_rows=total_scanned)
+            header = " | ".join(rows[0])
+            sep = " | ".join(["---"] * len(rows[0])) if rows[0] else ""
+            body = "\n".join(" | ".join(r) for r in rows[1:])
+            sheet_body = (f"{header}\n{sep}\n{body}" if sep
+                          else f"{header}\n{body}")
+            sheets_text.append(f"### Sheet: {sheet_name}\n\n{sheet_body}")
+    finally:
+        wb.close()
     return "\n\n".join(sheets_text)
 
 
@@ -2089,6 +2182,7 @@ async def process_files(
     thread_id: str,
     writer: Optional[Callable[[dict], None]] = None,
     force_ocr: bool = False,
+    batch_id: str = "",
 ) -> FileContext:
     """Process uploaded files with local storage + Gemini Files API persistence.
 
@@ -2190,6 +2284,7 @@ async def process_files(
             file_id=file_id,
             local_path=local_path,
             gemini_supported=gemini_ok,
+            batch_id=batch_id,   # Gap #8: identify all files uploaded in this request
         )
 
         prepared.append((pf, local_path, ext, mime, gemini_ok))
@@ -2204,6 +2299,49 @@ async def process_files(
     for pf, local_path, ext, mime, gemini_ok in prepared:
         # --- PDF-specific handling ---
         if ext == ".pdf":
+            # --- Gap #7 (2026-09-02): early encrypted-PDF detection ---
+            # PyMuPDF flags password-protected PDFs via `doc.is_encrypted`.
+            # We can't decrypt without the password (and accepting
+            # passwords over the chat channel is a policy question we're
+            # not tackling here). Detect early -> emit a clean, friendly
+            # rejection SSE event and skip the entire compression /
+            # extraction / OCR / Chroma-embed pipeline. Without this
+            # early check the pipeline runs `_extract_pdf_text_per_page`
+            # which raises ValueError deep in the try/except at the
+            # bottom of this branch, surfacing an awkward "PDF processing
+            # failed: PDF is encrypted/password-protected" error string
+            # instead of a UX-friendly next-step.
+            _is_encrypted = False
+            try:
+                import fitz as _fitz_check
+                _probe = _fitz_check.open(local_path)
+                _is_encrypted = bool(_probe.is_encrypted)
+                _probe.close()
+            except Exception as _enc_err:
+                # If we can't even open the file to check, downstream
+                # extraction will fail cleanly with its own error — no
+                # need to duplicate that path.
+                log.debug("PDF encryption pre-check failed",
+                          file=pf.original_name, error=str(_enc_err)[:120])
+            if _is_encrypted:
+                _msg = (
+                    "This PDF is password-protected. Please unlock it "
+                    "(remove the password in your PDF viewer or export as "
+                    "an unlocked copy) and re-upload."
+                )
+                pf.error = _msg
+                emit({
+                    "type": "file_processing",
+                    "stage": "pdf_encrypted_rejected",
+                    "message": f"{pf.original_name}: {_msg}",
+                    "file": pf.original_name,
+                    "rejected": [{"name": pf.original_name, "reason": _msg}],
+                })
+                log.warning("Rejected encrypted PDF — no further processing",
+                            file=pf.original_name)
+                ctx.files.append(pf)
+                continue
+
             # --- Step 3.0: Optional PDF compression (V1 port) ---
             # PikePDF lossless re-streaming reduces file size for downstream
             # fitz extraction and Vision OCR rendering. Ghostscript /ebook
@@ -2788,6 +2926,49 @@ async def process_files(
                 and not pf.chromadb_collection and not pf.error
                 and pf.ocr_status != OCR_STATUS_UNREADABLE):
             pf.error = "No content could be extracted from this file"
+
+        # --- Gap #3: file-nature classifier ---
+        # Runs one Gemini Flash Lite call per file BEFORE the SQLite save so
+        # the file_kind is persisted alongside the rest of the metadata.
+        # Skips silently on:
+        #   * extraction failure (pf.error set) — nothing to classify
+        #   * blur-skipped image (ocr_status UNREADABLE) — content is
+        #     deferred, not available yet
+        #   * no extracted_text — Chroma-only paths (rare; the current
+        #     ingest always retains pf.extracted_text for text-based
+        #     formats via `pf.extracted_text = text` above)
+        # Fails open — any exception in the classifier leaves pf.file_kind
+        # empty, which downstream treats as "unknown, skip specialised
+        # handling".
+        if (
+            not pf.error
+            and pf.ocr_status != OCR_STATUS_UNREADABLE
+            and pf.extracted_text
+            and pf.extracted_text.strip()
+        ):
+            try:
+                from core.file_classifier import classify_file_kind
+                # Run in a thread — the classifier does a blocking LLM call
+                # (Flash Lite ~200ms). Bounded by an outer 15 s wall clock
+                # so a hung classifier can't stall the ingest pipeline.
+                _kind, _conf = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        classify_file_kind, pf.extracted_text, pf.original_name,
+                    ),
+                    timeout=15.0,
+                )
+                pf.file_kind = _kind or ""
+                pf.file_kind_confidence = float(_conf or 0.0)
+                log.info("File-kind classifier ran",
+                         file=pf.original_name,
+                         kind=pf.file_kind,
+                         confidence=round(pf.file_kind_confidence, 2))
+            except asyncio.TimeoutError:
+                log.warning("File-kind classifier timed out",
+                            file=pf.original_name, timeout_s=15.0)
+            except Exception as _fk_err:
+                log.warning("File-kind classifier errored — proceeding without kind",
+                            file=pf.original_name, error=str(_fk_err)[:200])
 
         ctx.files.append(pf)
 

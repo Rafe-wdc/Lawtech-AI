@@ -162,9 +162,17 @@ def strip_fabricated_provenance(
         )
 
     # Tidy punctuation left behind by removals: " ,", " )", doubled spaces.
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    # Interior runs only, and never across a newline. Both patterns below
+    # used to be unanchored: the doubled-space collapse ate the LEADING
+    # indentation of every line (nested bullets 0/3/5 came out 0/1/1 and
+    # rendered as one flat list) and the punctuation tidy used \s, which
+    # can pull a line up into the previous one. Same defect as
+    # core/url_filter.sanitize_prose; both found 2026-09-09 from an
+    # advocate's alignment report. They only need to close the gap left
+    # where a stripped "(DB ID ...)" sat mid-sentence.
+    cleaned = re.sub(r"(?<=\S)[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\(\s*\)|\[\s*\]", "", cleaned)
-    cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+    cleaned = re.sub(r"[ \t]+([,.;:])", r"\1", cleaned)
     cleaned = re.sub(r",\s*\)", ")", cleaned)
 
     return cleaned, warnings

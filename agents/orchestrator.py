@@ -16,8 +16,18 @@ from typing import Literal
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from core.state import LegalAgentState, AgentResult, FileContextData
-from core.clients import get_gemini_flash, get_gemini_flash_full, get_gemini_pro, get_drafting_llm
+# Restored 2026-09-07: this line was dropped in ae2d3cb when the core.clients
+# import was restructured, leaving FileContextData / LegalAgentState /
+# SourceMetadata unbound. orchestrator_plan_node calls
+# FileContextData.from_state(state) on EVERY request, so the graph raised
+# NameError at the plan node and every query returned an SSE 'error' event.
+from core.state import (
+    LegalAgentState, AgentResult, FileContextData, SourceMetadata,
+)
+from core.clients import (
+    get_gemini_flash, get_gemini_flash_full, get_drafting_llm,
+    get_gemini_flash_planning,
+)
 from core.language import devanagari_language, localize_prompt, script_of
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
@@ -95,6 +105,72 @@ def _strip_internal_cite_markers(text: str) -> str:
 # polite/passive phrasings, and conservative defaults (when ambiguous between
 # "draft" and "explain", it picks "explain") — exactly the cases the regex
 # bank could not cover without continuous keyword maintenance.
+
+
+# --- argument requests are analysis, not drafting -----------------------------
+# "Give me arguments in favor of the accused in a bail application under
+# Section 439 CrPC" straddles the extractor's draft trigger ("give me a
+# <doc>") and its own rule that "draft arguments for <party>" is analysis.
+# Some runs return task_intent="draft"; two code paths then promote Drafting
+# to primary and the user receives a full pleading with cause title, PRAYER
+# and placeholders (advocate test, 2026-09-11). The signal that settles it
+# deterministically: the request names arguments/submissions/points/grounds/
+# defences/strategy, and no production verb is attached to a DOCUMENT noun.
+# "Draft written arguments for the accused" and "prepare a bail application"
+# stay drafting requests.
+_ARGUMENT_CUE_RE = re.compile(
+    r"\b(?:arguments?|counter-?arguments?|submissions?|points? (?:to|i should|i can|we can) (?:argue|submit|raise|make|press)|"
+    r"talking points|grounds (?:to|i can|we can) (?:argue|urge|raise)|defen[cs]es?|"
+    r"strategy|line of argument|cross-?examination|how (?:to|should i) argue|what (?:should|can) i argue|"
+    r"case (?:for|against) (?:the |my )?(?:petitioner|respondent|accused|applicant|appellant|plaintiff|defendant|prosecution|defen[cs]e|client)|"
+    r"points? (?:in favou?r of|against)|reasons? (?:why|for|against)|how (?:do|can|should) i (?:oppose|resist|defend|challenge))\b"
+    r"|तर्क|दलील|बहस",
+    re.IGNORECASE,
+)
+_PRODUCTION_VERB_ON_DOC_RE = re.compile(
+    r"\b(?:draft|prepare|write|compose|create|generate|make|draw up|file|give me|i need)\b"
+    r"(?:\s+(?:a|an|the|me|us|my|our|strong|detailed|comprehensive|complete|full|formal|proper|short))*\s+"
+    r"(?:written (?:arguments?|submissions?|statement)|memorandum|memo of arguments|synopsis|"
+    r"application|petition|plaint|notice|affidavit|reply|rejoinder|complaint|appeal|deed|agreement|contract|"
+    r"will|mou|suit|writ|slp|bail application|anticipatory bail)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_argument_request(query: str) -> bool:
+    """True when the user wants arguments, not a document. Pure."""
+    if not query:
+        return False
+    if not _ARGUMENT_CUE_RE.search(query):
+        return False
+    return not _PRODUCTION_VERB_ON_DOC_RE.search(query)
+
+
+def _apply_argument_override(query: str, task: str, tasks_planned: list[str], intent):
+    """Correct BOTH routing signals for an argument request. Pure.
+
+    Returns (task, tasks_planned, intent, changed). The classifier and the
+    intent extractor are separate LLM calls and either can misfire alone:
+    on 2026-09-11 the extractor said draft; on 2026-09-13 the extractor
+    said analyze and the classifier picked Drafting as primary, so the
+    intent-gated override never ran and a full bail pleading shipped.
+    """
+    if not _is_argument_request(query):
+        return task, tasks_planned, intent, False
+    changed = False
+    if intent is not None and getattr(intent, "task_intent", None) == "draft":
+        intent = intent.model_copy(update={"task_intent": "analyze"})
+        changed = True
+    if task == "Drafting":
+        task = "Scenario"
+        changed = True
+    if "Drafting" in tasks_planned:
+        tasks_planned = [a for a in tasks_planned if a != "Drafting"]
+        changed = True
+    if task == "Scenario" and "Scenario" not in tasks_planned:
+        tasks_planned = ["Scenario"] + tasks_planned
+        changed = True
+    return task, tasks_planned, intent, changed
 
 
 def _wants_drafting(intent: UserIntent | None) -> bool:
@@ -250,8 +326,38 @@ doubt, do NOT pick Drafting.
    `##`, or bare numeric strings as drafting-template markers — Drafting
    (rule 3) still requires an actual production verb AND a document-noun
    word in a coherent request.
-2. **Document** — the user attached files AND is asking about their contents
-   (summary, extraction, "what does this say", "who is the plaintiff here").
+2. **Document** — the user attached files AND the ANSWER LIVES INSIDE the
+   file (the query is answerable by reading / summarising / extracting
+   from the uploaded content ALONE, with no external retrieval needed).
+   Triggers:
+   - "what does this say", "summarise this", "give me the gist"
+   - "who is the plaintiff / accused / complainant in this document"
+   - "what sections are mentioned in this FIR"  (sections listed on the file)
+   - "extract the party names / dates / amounts from this"
+   - "translate this document"
+   - "which court is this from"
+   NOT Document even when files are attached — route to the appropriate
+   domain agent instead (per Gap #1 the domain agent will still see the
+   file text as reference context in its system prompt):
+   - "give me relevant case laws" / "cite similar judgments" → **Judgment**
+     (case-law lookup — answer lives in the ES judgment index, not the file)
+   - "explain Section 117 BNS" / "what does Section 138 say" → **Newacts**
+     or **Legislation** (statute text lookup — answer lives in the statute
+     database, not the file)
+   - "draft a bail application" / "write a reply notice" → **Drafting**
+     (production of a new document; file is source material, not answer)
+   - "what remedies do I have" / "arguments for the accused" → **Scenario**
+     (situational analysis — file is fact-context, answer requires
+     external legal reasoning)
+   - "does this violate the basic structure" / "which Article applies"
+     → **Constitution** (Constitutional analysis)
+   - "which BNS sections would apply to these facts" → **Newacts**
+     (section-picking based on file facts — answer requires knowledge of
+     the BNS index, not just the file)
+   Decision rule: ask "if I could ONLY read the file and nothing else, could
+   I answer this?" YES → Document. NO → route to the domain agent that owns
+   the external knowledge needed, and trust that the file will be visible
+   to that agent as reference context.
 3. **Drafting** — explicit production verb (draft / write / prepare / create /
    generate / compose / draw up / redraft / "give me a" / "I need a") PLUS a
    filing-ready document noun (plaint, petition, written statement, bail
@@ -621,7 +727,15 @@ def _extract_user_intent(
     """
     try:
         with log_time(log, "Intent extraction (v2)"):
-            llm = get_gemini_flash(temperature=0.0).with_structured_output(
+            # Full Flash tier, NOT Lite. Measured 2026-09-04: on
+            # "Draft a legal notice ... and cite the relevant case law",
+            # every Lite-tier model (2.5 and 3.5 alike) returned
+            # response_format=prose 0/5, producing an explanation ABOUT the
+            # notice instead of the notice. gemini-3.8-flash returns
+            # `draft` 5/5. This prompt is ~6,500 tokens; the Lite tier does
+            # not hold a spec that long — the same conclusion the language
+            # critic reached at line ~966.
+            llm = get_gemini_flash_planning(temperature=0.0).with_structured_output(
                 QueryAnalysisV2, include_raw=True,
             )
             prompt = ChatPromptTemplate.from_template(USER_INTENT_EXTRACTION_PROMPT)
@@ -979,7 +1093,7 @@ async def _enforce_response_language(
             text,
             state.get("original_query", "") or state.get("query", ""),
             audit_intent,
-            critic_llm=get_gemini_flash_full(
+            critic_llm=get_gemini_flash_planning(
                 temperature=0.0, max_output_tokens=4096, thinking_budget=0,
             ),
             source_registry=source_registry,
@@ -1289,6 +1403,14 @@ _CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment
 # stripped from a classifier-picked plan. Content agents (Legal_Concepts,
 # Scenario, Maxim, Constitution, Non_legal, Document) must be preserved
 # because they represent distinct user asks bundled with a drafting request.
+_CITATIONS_ONLY_PREFIX = (
+    "CITATIONS ONLY. The user is having a document drafted by another agent. "
+    "Do NOT draft, redraft or restate any document. Return only the relevant "
+    "authorities for the legal issues below: for each, the case name, citation, "
+    "court and year, one sentence on the ratio, and the PDF link where available. "
+    "Issues / matter: "
+)
+
 _CITATION_APPENDIX_AGENTS = frozenset({
     "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts", "Legislation",
 })
@@ -1473,6 +1595,10 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # ("draft FIR + charge sheet + cite Supreme Court judgments") to one
     # agent. Rule 7 of CLASSIFY_AND_PLAN_PROMPT already routes pure SCI
     # lookups correctly; the ~2s latency saving was not worth the collapse.
+    # Audit 2026-09-15: the greeting short-circuit skipped the assignment at
+    # the DynamicPlanner branch, so 'hi' / 'hello' raised UnboundLocalError
+    # at the `if dynamic_plan is not None` tail (present since 6ece09a).
+    dynamic_plan = None
     # --- Short-circuit: greeting resolved ---
     if is_greeting:
         log.info("Greeting detected, short-circuiting classification",
@@ -1523,10 +1649,44 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             normalized_query = None  # will be set by parallel normalization
 
         # --- Change 2: Parallelize normalization + classify-plan ---
-        # Build classify query with file hint
+        # Build classify query with file hint.
+        #
+        # Historical assertion "This query is about the uploaded document(s)"
+        # over-collapsed routing to Document-only whenever files were
+        # attached — even when the query was a pure domain question
+        # (2026-09-02: "give me case law on chain snatching" with an FIR
+        # attached routed to Document, which then refused because the FIR
+        # obviously didn't contain SC/HC case law). Neutralise the hint:
+        # tell the classifier the FILES EXIST but let the query's actual
+        # intent drive routing. Gap #1 ships the file-content-into-every-
+        # agent wiring, so a domain agent that runs alongside Document
+        # still sees the attached file in its system prompt.
         classify_query = query
         if fc and fc.has_content:
-            file_hint = f" [User has uploaded files: {', '.join(fc.file_names)}. This query is about the uploaded document(s).]"
+            # Gap #3: include per-file classifier verdicts in the hint so
+            # the classifier LLM has typed signal (kind=fir, kind=judgment,
+            # etc.) alongside the raw filenames. Files without a known
+            # kind render as bare "<name>".
+            _fk_list = getattr(fc, "file_kinds", None) or []
+            _fk_by_name = {e.get("name", ""): (e.get("kind") or "") for e in _fk_list}
+            _labeled = [
+                f"{n} ({_fk_by_name[n]})" if _fk_by_name.get(n) and _fk_by_name[n] not in ("", "other")
+                else n
+                for n in fc.file_names
+            ]
+            file_hint = (
+                f" [Files attached: {', '.join(_labeled)}. Apply "
+                "rule #2's decision rule: if the answer lives INSIDE the "
+                "file, route to Document. If the answer requires external "
+                "retrieval (case law, statute text, drafting, scenario "
+                "analysis), route to the domain agent — the file is "
+                "visible to it as reference context. When a file's "
+                "classified kind is shown in parentheses (e.g. 'evidence.pdf "
+                "(fir)'), use it to bias routing: fir/court_order/pleading "
+                "-> typically Newacts or Judgment for external context; "
+                "contract -> Legislation or Scenario; notice -> Legislation "
+                "or Scenario; statute -> Newacts or Legislation.]"
+            )
             classify_query = query + file_hint
             log.info("File context hint added for classification", file_names=fc.file_names)
 
@@ -1555,6 +1715,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # agents + intent + normalized_query + cite_appendix + self-critique).
         # Off by default until validated. Fallback: default_dynamic_plan()
         # on any failure, then the rest of the node proceeds normally.
+        dynamic_plan = None
         if _dynamic_orchestrator_enabled():
             log.info("Plan phase: using DynamicPlanner (Move 3 Phase A)")
             try:
@@ -1571,16 +1732,15 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                 dynamic_plan = default_dynamic_plan()
             # Adapt the DynamicPlan into the same variables the legacy
             # dual-call path produces below. Downstream code (rest of this
-            # function + `state` writes) reads task/agents_planned/
+            # function + return dict) reads task/agents_planned/
             # extracted_intent/response_instructions and doesn't care where
-            # they came from.
+            # they came from. `dynamic_plan` is exported via the return dict
+            # (LangGraph merges declared state keys) rather than mutated
+            # in-place (Bug 2 fix, 2026-09-09).
             results = [
                 (dynamic_plan.normalized_query, dynamic_plan.intent),
                 (dynamic_plan.task, list(dynamic_plan.agents)),
             ]
-            # Stash the DynamicPlan so the rest of the node can read
-            # cite_appendix_recommended and other planner-decided flags.
-            state["_dynamic_plan"] = dynamic_plan
         else:
             intent_coro = asyncio.wait_for(
                 asyncio.to_thread(
@@ -1655,10 +1815,20 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # a chatty answer instead of a modified draft. Force Drafting back
         # into the plan when the specific "short-directive-on-prior-draft"
         # pattern holds AND the classifier didn't already include Drafting.
+        # An acknowledgement with no new ask is answered in one line by the
+        # Non_legal agent, in context of the previous turn. It must never
+        # inherit the prior Drafting task or be pushed to Document because
+        # a file is attached. Set by the memory node; see core.followup.
+        if state.get("conversational_followup"):
+            log.info("Conversational follow-up - routing to Non_legal",
+                     classifier_task=task, query=_original_query[:40])
+            task = "Non_legal"
+            tasks_planned = ["Non_legal"]
         _prev_task_state = state.get("previous_task", "") or ""
         _prev_kind_state = state.get("previous_artifact_kind", "") or ""
         if (
-            _prev_task_state == "Drafting"
+            not state.get("conversational_followup")
+            and _prev_task_state == "Drafting"
             and _prev_kind_state == "draft"
             and _original_query
             and len(_original_query) < 200
@@ -1682,7 +1852,7 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                                                     if t != "Drafting"]
 
         # Handle non-legal with file context
-        if task == "Non_legal" and fc and fc.has_content:
+        if task == "Non_legal" and fc and fc.has_content and not state.get("conversational_followup"):
             log.info("Non-legal overridden to Document due to file context")
             task = "Document"
             tasks_planned = ["Document"]
@@ -1693,8 +1863,12 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         log.info("Document task with file context — using Document agent directly",
                  file_names=fc.file_names)
 
-    # File context: ensure Document agent is in plan if files attached
-    if fc and fc.has_content and "Document" not in tasks_planned:
+    # File context: ensure Document agent is in plan if files attached.
+    # Not for an acknowledgement ("ok", "thanks") on a thread whose files
+    # were restored from history: audit 2026-09-11 traced "ok" after a draft
+    # with a PDF to a Document call, a rewrite and a full synthesis.
+    if (fc and fc.has_content and "Document" not in tasks_planned
+            and task != "Non_legal" and not state.get("conversational_followup")):
         tasks_planned.append("Document")
         log.info("Document agent added for file context (multi-intent support)",
                  file_names=fc.file_names)
@@ -1715,6 +1889,16 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # keyword-scan safety net. When the extractor is confident, the
     # plan reflects exactly what the user asked for; when confidence
     # is low, nothing is added (we trust the planner LLM).
+    # An argument request is analysis whatever the extractor said. Override
+    # BEFORE any consumer (multi-intent, reconciliation, draft-from-file)
+    # reads task_intent. See _is_argument_request.
+    _prev = (task, list(tasks_planned))
+    task, tasks_planned, extracted_intent, _arg_changed = _apply_argument_override(
+        _original_query, task, tasks_planned, extracted_intent,
+    )
+    if _arg_changed:
+        log.warning("Argument request: routing corrected away from Drafting",
+                    query=_original_query[:80], before=_prev, after=(task, tasks_planned))
     if task not in ("Non_legal", "Document"):
         extra = _detect_multi_intent(extracted_intent, task)
         for agent in extra:
@@ -1849,6 +2033,11 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     tasks_planned = _validate_and_enrich_plan(
         tasks_planned, extracted_intent, log,
     )
+    # Audit 2026-09-15: the Newacts veto can remove the primary agent; a task
+    # whose agent never runs falls to the anchor-less generic synthesis.
+    if task == "Legislation" and "Legislation" not in tasks_planned and "Newacts" in tasks_planned:
+        log.info("Plan veto removed the Legislation primary; task moved to Newacts")
+        task = "Newacts"
 
     # Review-and-Redraft with upload: strip citation agents.
     #
@@ -1897,6 +2086,15 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             )
         except asyncio.TimeoutError:
             log.warning("Per-agent query rewriting timed out")
+        # Drafting-primary: citation agents get a search brief, never the
+        # drafting instruction. They inherit the shared rule 'if the user asks
+        # for a draft, return ONLY the draft' and, handed the raw prompt (which
+        # happens whenever the rewrite fails), they write a second pleading
+        # that the appendix then carried verbatim (advocate report, 2026-09-11).
+        if task == "Drafting":
+            for _ca in [a for a in tasks_planned if a in _CITATION_APPENDIX_AGENTS]:
+                _base = agent_queries.get(_ca) or query
+                agent_queries[_ca] = _CITATIONS_ONLY_PREFIX + _base[:1500]
 
     # NOTE: Previously this block concatenated 30K chars of PDF text into
     # agent_queries["Drafting"] so the drafting agent would receive the
@@ -1927,6 +2125,11 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         "agent_queries": agent_queries,
         "response_instructions": response_instructions,
     }
+    # Bug 2 fix (2026-09-09): return the DynamicPlan via the state dict
+    # rather than mutating state in-place. LangGraph declares this key
+    # in LegalAgentState so the reducer preserves it through fan-out.
+    if dynamic_plan is not None:
+        result["_dynamic_plan"] = dynamic_plan
     # Phase 1: surface the structured intent on state when it was successfully
     # extracted. Downstream consumers can opt in to reading it ahead of Phase 2
     # by checking state.get("user_intent"). Stays None otherwise.
@@ -1979,13 +2182,36 @@ _STOP_WORDS = frozenset((
 ))
 
 
+# Audit 2026-09-15: markers pasted into the merge/synthesis input must
+# never survive into the answer if the model echoes them.
+_CLIP_MARKER_RE = re.compile(r"[ \t]*\[\.\.\. truncated for (?:merge|synthesis)\][ \t]*\r?\n?")
+
+
+def _audit_intent(intent, user_language: str):
+    """The critic and refiner must audit under the language the answer was
+    actually written in (the resolved user_language), not the extractor's
+    guess; when they disagree the refiner rewrites into the wrong language."""
+    if intent is None or not user_language:
+        return intent
+    if getattr(intent, "language", None) == user_language:
+        return intent
+    try:
+        return intent.model_copy(update={"language": user_language})
+    except Exception:
+        return intent
+
+
 def _content_token_set(text: str) -> set[str]:
     """Token bag for overlap comparison. Lowercase, drop stop words, keep
     legal-meaningful tokens (act names, section numbers, doctrine names).
     """
     if not text:
         return set()
-    tokens = re.findall(r"[A-Za-z]{3,}|\d{3,}", text.lower())
+    # Unicode-aware (Devanagari and other Indic runs count as words) and
+    # URL-free, so a Hindi supporter is judged on its prose, not on the
+    # English anchors and links every agent shares.
+    text = re.sub(r"https?://\S+", " ", text)
+    tokens = re.findall(r"[\u0900-\u0DFF]{3,}|[^\W\d_]{3,}|\d{2,}", text.lower())
     return {t for t in tokens if t not in _STOP_WORDS}
 
 
@@ -2311,8 +2537,10 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
 
         citations_text = ""
         for name, result in citation_results.items():
-            if result.content:
-                citations_text += f"\n\n### {name.upper()} CITATIONS:\n{result.content}"
+            _appendix_body = _citation_appendix_text(name, result)
+            if _appendix_body:
+                citations_text += f"\n\n### {name.upper()} CITATIONS:\n{_appendix_body}"
+            if result.content or _appendix_body:
                 total_tokens += result.tokens_consumed
                 all_serialized_sources.extend(_serialize_sources(result))
 
@@ -2471,17 +2699,58 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         # and the mandated structure, while supporting content lands
         # under its own labelled heading.
         if primary_agent_name in ("SCI_Judgment", "Judgment"):
+            # Append only what the primary — and the turn before it — does
+            # not already carry. Verbatim concatenation made 53-68% of a
+            # measured answer duplicate material (dev box, 2026-09-16):
+            # a statute block repeating the previous turn, and a second
+            # judgment agent's full essay with its own "Landmark Case Law"
+            # list. Filtering is deterministic; the primary is untouched, so
+            # its mandated headings and PDF links survive exactly as before.
+            _prev_answer = state.get("previous_artifact_content") or ""
+            _known_cites, _known_provs, _known_names = _known_keys(
+                primary, _prev_answer)
             appendix_parts = []
+            _appendix_log: list[str] = []
             for name, result in kept_supporting.items():
                 heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
-                appendix_parts.append(
-                    f"\n\n---\n\n{heading}\n\n{result.content.strip()}"
+                body, dropped = _filter_supporting_blocks(
+                    result.content.strip(), set(_known_cites), set(_known_provs),
+                    set(_known_names), primary_tokens,
+                )
+                _outcome = "kept"
+                if not body or len(body) > _SUPPORTING_APPEND_MAX_CHARS:
+                    # Prose is either wholly redundant or too long to be
+                    # gap-filling. Either way the prose goes — but a case the
+                    # primary never cited still reaches the user through this
+                    # agent's structured sources, with court, year and PDF
+                    # link intact.
+                    citations = _new_source_citations(
+                        result, _known_cites, _known_names).strip()
+                    if citations:
+                        body, _outcome = citations, (
+                            "citations_only" if not body else "reduced_to_citations")
+                    elif not body:
+                        _appendix_log.append(
+                            f"{name}(all {len(dropped)} blocks redundant, no new sources)")
+                        continue
+                    else:
+                        body, _outcome = body[:_SUPPORTING_APPEND_MAX_CHARS].rstrip(), "truncated"
+                # Everything this supporter contributed is known to the next.
+                _known_cites |= _citation_keys(body)
+                _known_provs |= _provision_keys(body)
+                _known_names |= _case_name_keys(body)
+                appendix_parts.append(f"\n\n---\n\n{heading}\n\n{body}")
+                _appendix_log.append(
+                    f"{name}({_outcome}, {len(result.content)}->{len(body)} chars, "
+                    f"{len(dropped)} blocks dropped)"
                 )
             final_response = primary + "".join(appendix_parts)
             log.info("Primary-task-aware append-only (case-lookup primary)",
                      task=primary_task_state, primary_agent=primary_agent_name,
                      primary_len=len(primary),
                      supporting_agents=list(kept_supporting.keys()),
+                     appended=_appendix_log,
+                     had_previous_turn=bool(_prev_answer),
                      final_len=len(final_response), total_tokens=total_tokens)
             return {
                 "final_response": final_response,
@@ -2516,7 +2785,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         try:
             # Build merge input — flag primary as anchor so the LLM
             # recognises which agent owns layout/shape for THIS task.
-            _MAX_AGENT_CONTENT = 12000
+            _MAX_AGENT_CONTENT = 30000  # audit 2026-09-15: 12K cut SCI answers (17-21K) mid-citation
             _primary_clip = primary if len(primary) <= _MAX_AGENT_CONTENT else \
                 primary[:_MAX_AGENT_CONTENT] + "\n\n[... truncated for merge]"
             merge_input = (
@@ -2551,7 +2820,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "retrieved_sources": source_registry.serialize_for_prompt(),
             }, timeout=180)
 
-            merged = response.content
+            merged = _CLIP_MARKER_RE.sub("", response.content)
             from core.token_tracker import record as _record_tokens
             merge_tokens = _record_tokens("Orchestrator", "merge_synthesis", response)
             total_tokens += merge_tokens
@@ -2575,7 +2844,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 refined, _crit_history = await _self_refine(
                     merged,
                     query,
-                    state.get("user_intent"),
+                    _audit_intent(state.get("user_intent"), user_language),
                     source_registry=source_registry,
                 )
                 if refined and refined != merged:
@@ -2622,7 +2891,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     total_tokens = 0
     all_serialized_sources = []
 
-    _MAX_AGENT_CONTENT = 8000  # per-agent cap to prevent token explosion
+    _MAX_AGENT_CONTENT = 30000  # per-agent cap; 8K cut SCI answers (17-21K) mid-citation (audit 2026-09-15)
     for name, result in valid_results.items():
         content = result.content
         if len(content) > _MAX_AGENT_CONTENT:
@@ -2697,6 +2966,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             log.warning("Synthesis output too large, truncating",
                         original_len=len(synthesized), cap=_MAX_SYNTHESIS_LEN)
             synthesized = synthesized[:_MAX_SYNTHESIS_LEN] + "\n\n*[Response truncated for length]*"
+            synthesized = _CLIP_MARKER_RE.sub("", synthesized)
 
         total_tokens += synth_tokens
         log.info("Synthesis completed",
@@ -2716,7 +2986,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 refined_synth, _crit_hist = await _self_refine_pkg(
                     synthesized,
                     query,
-                    state.get("user_intent"),
+                    _audit_intent(state.get("user_intent"), user_language),
                     source_registry=source_registry,
                 )
                 if refined_synth and refined_synth != synthesized:
@@ -2740,6 +3010,259 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         "source_metadata": all_serialized_sources,
         "tokens_consumed": total_tokens,
     }
+
+
+# --- citation appendix rendering ------------------------------------------
+# A citation agent handed a drafting-shaped query sometimes writes a whole
+# second pleading (the shared discipline block says 'if the user asks for a
+# draft, return ONLY the draft'). The Draft-aware append-only synth used to
+# glue that verbatim under '### SCI_JUDGMENT CITATIONS:' - the 'double
+# draft' an advocate reported on an SLP, 2026-09-11. The appendix is now
+# built from citation-shaped content only, falling back to the agent's
+# structured sources.
+# Pleading markers by KIND. A second pleading carries several distinct kinds
+# (caption + synopsis + questions of law + prayer ...); a citation summary
+# organised under "Grounds for Quashing" or mentioning "Prayer" once carries
+# at most one. GROUNDS is deliberately absent: it is a common heading in
+# citation summaries. Measured 2026-09-11 on 9 real SCI_Judgment outputs:
+# 0 marker hits on all 9; the old 6,000-char length rule alone misclassified
+# 4 of 9 (full answers of 17-21K chars), so the length rule is now only a
+# 30K backstop that logs loudly.
+_DRAFT_SHAPE_KINDS = {
+    "caption": re.compile(r"(?im)^[ \t#*]*IN THE (?:HON'BLE )?(?:SUPREME COURT|HIGH COURT|COURT OF)\b"),
+    "parties": re.compile(r"(?im)^[ \t#*]*(?:BETWEEN:|VERSUS\b|\.{4,}[ \t]*(?:PETITIONER|RESPONDENT|APPLICANT)S?\b)"),
+    "synopsis": re.compile(r"(?im)^[ \t#*]*(?:SYNOPSIS|LIST OF DATES)\b"),
+    "questions": re.compile(r"(?im)^[ \t#*]*QUESTIONS? OF LAW\b"),
+    "facts": re.compile(r"(?im)^[ \t#*]*STATEMENT OF FACTS\b"),
+    "showeth": re.compile(r"(?im)^[ \t#*]*MOST RESPECTFULLY\b"),
+    "prayer": re.compile(r"(?im)^[ \t#*]*PRAYER\b"),
+    "verification": re.compile(r"(?im)^[ \t#*]*(?:VERIFICATION|AFFIDAVIT)\b"),
+}
+_DRAFT_SHAPE_MIN_KINDS = 3
+_CITATION_APPENDIX_HARD_CAP = 30_000
+
+
+def _draft_shape_kinds(text: str) -> list[str]:
+    return [k for k, rx in _DRAFT_SHAPE_KINDS.items() if rx.search(text)]
+
+
+def _is_draft_shaped(text: str) -> bool:
+    """True when a citation agent's content reads as a pleading, not a list:
+    three or more distinct pleading-marker kinds. The length backstop fires
+    only past 30K chars, far above any plausible citation list, and logs."""
+    if not text:
+        return False
+    kinds = _draft_shape_kinds(text)
+    if len(kinds) >= _DRAFT_SHAPE_MIN_KINDS:
+        return True
+    if len(text) > _CITATION_APPENDIX_HARD_CAP:
+        log.warning("Citation appendix: content over the 30K backstop treated as draft-shaped",
+                    chars=len(text), kinds=kinds)
+        return True
+    return False
+
+
+def _sources_as_citation_list(result) -> str:
+    """Render an agent's structured sources as a citation list."""
+    lines = []
+    seen = set()
+    for src in (getattr(result, "sources", None) or []):
+        title = (getattr(src, "title", None) or "").strip()
+        if not title or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        bits = [title]
+        court = getattr(src, "court_name", None)
+        year = getattr(src, "year", None)
+        if court:
+            bits.append(str(court))
+        if year:
+            bits.append(str(year))
+        line = ", ".join(bits)
+        link = getattr(src, "doc_link", None)
+        if link:
+            line += f" ([Judgment PDF]({link}))"
+        lines.append(f"- {line}")
+    return "\n".join(lines)
+
+
+def _citation_appendix_text(name: str, result) -> str:
+    """The text to place under '### <AGENT> CITATIONS:' - never a draft."""
+    content = (getattr(result, "content", None) or "").strip()
+    if content and not _is_draft_shaped(content):
+        return content
+    rendered = _sources_as_citation_list(result)
+    if content:
+        log.warning(
+            "Citation appendix: agent content was draft-shaped; using structured sources instead",
+            agent=name, content_chars=len(content), sources=len(getattr(result, "sources", None) or []),
+        )
+    return rendered
+
+
+# ---------------------------------------------------------------------------
+# Supporting-block filtering for the case-lookup append path.
+#
+# When the primary agent is a case lookup (Judgment / SCI_Judgment) synthesis
+# appends supporting agents verbatim rather than merging, to protect the
+# mandated headings and the clickable PDF-link block (see the branch in
+# orchestrator_synthesize_node). Measured 2026-09-16 on the dev box: that made
+# 53-68% of four probe answers appended material — a statute agent repeating
+# the provision the user was shown in the PREVIOUS turn, and a second judgment
+# agent's entire essay carrying its own duplicate "Landmark Case Law" list.
+#
+# These helpers keep only what the primary (and the previous turn) does not
+# already have, block by block, and reduce a judgment supporter to the cases
+# it actually adds. Everything here is deterministic string work — no extra
+# LLM call on a path whose whole purpose is to avoid one.
+# ---------------------------------------------------------------------------
+
+# "(2022) 7 SCC 124", "2022 INSC 326", "AIR 1973 SC 1461", "(2019) 1 SCR 991",
+# "2022 SCC OnLine SC 1061", "2026:JHHC:16661".
+_CITATION_RE = re.compile(
+    r"\(?\d{4}\)?\s*(?:\d+\s*)?(?:SCC\s+OnLine\s+\w+|SCC|SCR|INSC|AIR\s+\w+|"
+    r"ALL\s+ER|Bom\s*CR|Cri\s*LJ)\s*\d+|\d{4}:[A-Z]{2,6}:\d+",
+    re.I,
+)
+
+# "Section 420 of the Indian Penal Code, 1860", "Section 318(4) BNS",
+# "s. 138 NI Act", "Article 226". Captured as a normalised (label, number) pair
+# so "Section 420 IPC" and "Section 420 of the Indian Penal Code" match.
+_PROVISION_RE = re.compile(
+    r"\b(section|sections|sec\.?|s\.|article|art\.?|order|rule)\s*"
+    r"(\d+[A-Za-z]?(?:\(\d+\))?(?:\([a-z]\))?)",
+    re.I,
+)
+
+# A supporting agent's content that is mostly one of these is a full essay
+# rather than the handful of extra citations the primary is missing.
+_SUPPORTING_BLOCK_SPLIT_RE = re.compile(r"\n(?=#{1,3}\s+\S)")
+
+
+def _citation_keys(text: str) -> set[str]:
+    """Normalised reporter citations found in `text`."""
+    if not text:
+        return set()
+    return {re.sub(r"[\s().]+", "", m.group(0)).lower()
+            for m in _CITATION_RE.finditer(text)}
+
+
+def _provision_keys(text: str) -> set[str]:
+    """Normalised statutory anchors ("section420", "article226") in `text`."""
+    if not text:
+        return set()
+    out = set()
+    for m in _PROVISION_RE.finditer(text):
+        label = m.group(1).lower().rstrip(".")
+        label = {"sections": "section", "sec": "section", "s": "section",
+                 "art": "article"}.get(label, label)
+        out.add(f"{label}{m.group(2).lower().replace(' ', '')}")
+    return out
+
+
+def _case_name_keys(text: str) -> set[str]:
+    """Party-name keys for cases cited as "X v. Y" / "X vs Y"."""
+    if not text:
+        return set()
+    out = set()
+    for m in re.finditer(r"([A-Z][\w.&'-]*(?:\s+[A-Z][\w.&'-]*){0,4})\s+"
+                         r"v(?:s?\.?|ersus)\s+([A-Z][\w.&'-]*(?:\s+[A-Z][\w.&'-]*){0,4})",
+                         text):
+        a = re.sub(r"\W+", "", m.group(1)).lower()[:24]
+        b = re.sub(r"\W+", "", m.group(2)).lower()[:24]
+        if len(a) > 2 and len(b) > 2:
+            out.add(f"{a}|{b}")
+    return out
+
+
+def _known_keys(*texts: str) -> tuple[set[str], set[str], set[str]]:
+    """(citations, provisions, case names) already covered by `texts`."""
+    cites: set[str] = set()
+    provs: set[str] = set()
+    names: set[str] = set()
+    for t in texts:
+        if not t:
+            continue
+        cites |= _citation_keys(t)
+        provs |= _provision_keys(t)
+        names |= _case_name_keys(t)
+    return cites, provs, names
+
+
+def _filter_supporting_blocks(
+    content: str,
+    known_cites: set[str],
+    known_provs: set[str],
+    known_names: set[str],
+    primary_tokens: set[str],
+) -> tuple[str, list[str]]:
+    """Keep only the blocks of `content` that add something new.
+
+    A block (a heading and its body, or the lead paragraph) is dropped when
+    every citation, provision and case name it mentions is already known AND
+    its prose adds fewer than `_BLOCK_MIN_UNIQUE_TOKENS` unique tokens over
+    the primary. A block that names a case or provision the primary lacks is
+    kept whole, so its reasoning and links survive.
+
+    Returns (kept_text, dropped_headings).
+    """
+    blocks = [b for b in _SUPPORTING_BLOCK_SPLIT_RE.split(content) if b.strip()]
+    kept: list[str] = []
+    dropped: list[str] = []
+    for block in blocks:
+        # A label-only block ("## Statutory Provisions Referenced" with its
+        # body in the next block) is dropped without comment: the append
+        # branch prepends its own heading, so keeping this one would print
+        # the same label twice.
+        _body_lines = [l for l in block.strip().splitlines()[1:] if l.strip()]
+        if block.strip().startswith("#") and not _body_lines:
+            continue
+        b_cites = _citation_keys(block)
+        b_provs = _provision_keys(block)
+        b_names = _case_name_keys(block)
+        new_anchors = ((b_cites - known_cites) | (b_provs - known_provs)
+                       | (b_names - known_names))
+        unique_tokens = _content_token_set(block) - primary_tokens
+        heading = block.strip().splitlines()[0].strip()[:70]
+        if not new_anchors and len(unique_tokens) < _BLOCK_MIN_UNIQUE_TOKENS:
+            dropped.append(heading)
+            continue
+        kept.append(block.rstrip())
+        # A kept block's own anchors become known, so a later block that only
+        # repeats them is dropped too (self-dedup within one supporter).
+        known_cites |= b_cites
+        known_provs |= b_provs
+        known_names |= b_names
+    return "\n\n".join(kept).strip(), dropped
+
+
+def _new_source_citations(result, known_cites: set[str], known_names: set[str]) -> str:
+    """This agent's structured sources, minus the ones already cited.
+
+    Used when a supporter's prose is redundant or over-long: the prose goes,
+    but a judgment the primary never mentioned still reaches the user with
+    its court, year and PDF link intact.
+    """
+    lines = []
+    for line in _sources_as_citation_list(result).splitlines():
+        if not line.strip():
+            continue
+        if (_citation_keys(line) & known_cites) or (_case_name_keys(line) & known_names):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+# A block with no new case / provision anchor must clear this many unique
+# tokens to survive. Sized so a short transitional paragraph is dropped while
+# a genuine piece of analysis the primary lacks is kept.
+_BLOCK_MIN_UNIQUE_TOKENS = 40
+
+# Hard ceiling on what any single supporting agent may append to a case-lookup
+# answer. Past this the supporter is not "the citations the primary missed",
+# it is a second essay — reduce it to its citation list. The four probe cases
+# appended 8.1k-12.0k chars each; a real gap-filling block is a few hundred.
+_SUPPORTING_APPEND_MAX_CHARS = 2_500
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:

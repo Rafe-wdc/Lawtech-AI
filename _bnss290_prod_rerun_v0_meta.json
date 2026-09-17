@@ -1,0 +1,139 @@
+{
+  "run_label": "rerun_2",
+  "elapsed_s": 116.23,
+  "ttfb_ms": 2542,
+  "http_ok": true,
+  "raw_events_written": 331,
+  "thread_id": "4e2fc279-e60f-445c-a813-0db9224e83de",
+  "answer_len": 16629,
+  "answer_words": 2592,
+  "answer_case_citations_count_regex": 4,
+  "answer_case_citations_sample": [
+    "State of M.P. v. Bablu",
+    "The State of Telangana v. Mohd. Abdul Qasim",
+    "Indian and Eastern Newspaper Society New Delhi v. Commissioner of Income Tax",
+    "Ors. v. V. Manickavasagam"
+  ],
+  "structure_signals": {
+    "found_errors_section": false,
+    "found_redraft_section": false,
+    "found_case_laws_section": false,
+    "found_prayer": true,
+    "found_shows_bnss_290": false,
+    "found_shows_bnss_293": false,
+    "found_mv_act_185": true,
+    "found_alister_anthony": false
+  },
+  "offtopic_signals": {
+    "order_vii_rule_11_count": 0,
+    "indian_evangelical_count": 0,
+    "sri_bala_count": 0,
+    "dindigul_count": 0,
+    "specific_performance_count": 0,
+    "limitation_count": 0,
+    "sci_citations_header_present": true,
+    "judgment_citations_header_present": true
+  },
+  "agents_planned": [
+    "Drafting",
+    "Document",
+    "SCI_Judgment"
+  ],
+  "event_type_counts": {
+    "thread_id": 1,
+    "file_processing": 4,
+    "progress": 32,
+    "status": 8,
+    "context": 1,
+    "agents_planned": 1,
+    "token": 280,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "progress_step_count": 32,
+  "unique_progress_steps": [
+    "classify",
+    "cleanup",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "load",
+    "plan",
+    "prepare",
+    "react",
+    "reference",
+    "results",
+    "search",
+    "section:1",
+    "section:2",
+    "section:3",
+    "section:4",
+    "section:5",
+    "section:6",
+    "self_refine",
+    "synthesize",
+    "validate"
+  ],
+  "file_processing_summary": [
+    {
+      "message": "Processing uploaded files...",
+      "files": null,
+      "stage": null,
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...",
+      "files": null,
+      "stage": "docx_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": "all_files_done",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": null,
+      "rejected": null
+    }
+  ],
+  "errors": [],
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ],
+  "comparison_to_first_run": {
+    "first_run_agents_planned": [
+      "Drafting",
+      "Document",
+      "SCI_Judgment"
+    ],
+    "first_run_answer_len": 18132,
+    "first_run_structure_signals": {
+      "found_errors_section": false,
+      "found_redraft_section": false,
+      "found_case_laws_section": false,
+      "found_prayer": true,
+      "found_shows_bnss_290": true,
+      "found_shows_bnss_293": false,
+      "found_mv_act_185": false,
+      "found_alister_anthony": false
+    },
+    "first_run_case_citations_count": 8
+  }
+}

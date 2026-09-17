@@ -1,0 +1,892 @@
+﻿{
+    "globalThreadId":  "c829648c-0773-444f-af47-9f9ad9bc2b7c",
+    "result":  "The scenario involves a hacker gaining unauthorized access to a fintech company\u0027s servers and stealing sensitive personal and financial data, including Aadhaar records, PAN data, bank account details, credit card information, and source code, which is then sold on the dark web. This constitutes a serious cybercrime with multiple legal implications under the Bharatiya Nyaya Sanhita, 2023 (BNS), the Information Technology Act, 2000 (IT Act), and the Bharatiya Sakshya Adhiniyam, 2023 (BSA).\n\n### Applicable Offences under Bharatiya Nyaya Sanhita, 2023\n\nBased on the facts provided, the following offences under the Bharatiya Nyaya Sanhita, 2023, may be applicable:\n\n1.  **Theft (Section 303 BNS):** The act of dishonestly taking movable property out of the possession of any person without their consent constitutes theft. Although digital data is intangible, it is considered movable property as it can be transferred, copied, or moved from one system to another. The hacker\u0027s actions of stealing Aadhaar records, PAN data, bank details, credit card information, and source code fall squarely under this provision.\n    -   **Old Provision:** Section 378 of The Indian Penal Code, 1860\n    -   **New Provision:** Section 303 of The Bharatiya Nyaya Sanhita, 2023\n\n2.  **Cheating (Section 319 BNS):** If the hacker employed deception to gain unauthorized access to the servers or in the process of selling the stolen data on the dark web, causing wrongful loss to the fintech company and individuals, the offense of cheating would be applicable.\n    -   **Old Provision:** Section 415 of The Indian Penal Code, 1860\n    -   **New Provision:** Section 319 of The Bharatiya Nyaya Sanhita, 2023\n\n3.  **Cheating by Personation (Section 354 BNS):** If the stolen identity documents and financial data are used to impersonate individuals for financial gain, this section would be attracted.\n    -   **Old Provision:** Section 419 of The Indian Penal Code, 1860\n    -   **New Provision:** Section 354 of The Bharatiya Nyaya Sanhita, 2023: \"Whoever cheats by personation, shall be punished with imprisonment of either description for a term which may extend to three years, or with fine, or with both.\"\n\n4.  **Cheating and Dishonestly Inducing Delivery of Property (Section 355 BNS):** If the hacker or subsequent purchasers of the data use it to cheat individuals and dishonestly induce them to deliver property (e.g., money from bank accounts), this section would apply.\n    -   **Old Provision:** Section 420 of The Indian Penal Code, 1860\n    -   **New Provision:** Section 355 of The Bharatiya Nyaya Sanhita, 2023: \"Whoever cheats and thereby dishonestly induces the person deceived to deliver any property to any person, or to make, alter or destroy the whole or any part of a valuable security, or anything which is signed or sealed, and which is capable of being converted into a valuable security, shall be punished with imprisonment of either description for a term which may extend to seven years, and shall also be liable to fine.\"\n\n5.  **Forgery of record of Court or of public register, etc. (Section 337 BNS):** If the hacker forged Aadhaar cards or other identity documents issued by the Government, this section would apply. The stolen Aadhaar records could be used for such forgery.\n    -   **Old Provision:** Section 466 of The Indian Penal Code, 1860\n-   **New Provision:** Section 337 of The Bharatiya Nyaya Sanhita, 2023: \"Whoever forges a document or an electronic\nrecord, purporting to be a record or proceeding of or in a Court or an identity document issued by Government including\nvoter identity card or Aadhaar Card, or a register of birth, marriage or burial, or a register kept by a public servant\nas such, or a certificate or document purporting to be made by a public servant in his official capacity, or an\nauthority to institute or defend a suit, or to take any proceedings therein, or to confess judgment, or a power of\nattorney, shall be punished with imprisonment of either description for a term which may extend to seven years, and\nshall also be liable to fine.\"\n        *Explanation:* For the purposes of this section, âregisterâ includes any list, data or record of any entries maintained in the electronic form as defined in clause (r) of sub-section (1) of section 2 of the Information Technology Act, 2000.\n\n6.  **Criminal Trespass (Section 367 BNS):** The unauthorized access to the company\u0027s servers can be considered a form of criminal trespass into an electronic system.\n    -   **Old Provision:** Section 441 of The Indian Penal Code, 1860\n    -   **New Provision:** Section 367 of The Bharatiya Nyaya Sanhita, 2023: \"Whoever enters into or upon property in the possession of another with intent to commit an offence or to intimidate, insult or annoy any person in possession of such property, or having lawfully entered into or upon such property, unlawfully remains there with intent thereby to intimidate, insult or annoy any such person, or with intent to commit an offence, is said to commit âcriminal trespassâ.\"\n\n7.  **Organized Crime (Section 111 BNS):** Section 111 of the BNS broadly defines organized crime to include \"cyber-crimes\" when such conduct is part of a continuing unlawful activity by a syndicate, aiming for financial gain. The sale of data on the dark web often implies involvement in a larger criminal network, potentially invoking this section.\n\n### Provisions of the Information Technology Act, 2000\n\nThe IT Act, 2000, provides the primary legal framework in India to combat cybercrimes.\n\n1.  **Section 43 â Penalty for damage to computer, computer system, etc.:** This section imposes civil liability for unauthorized access, downloading, extracting, or copying data from a computer resource. The hacker would be liable to pay damages by way of compensation.\n2.  **Section 65 â Tampering with computer source documents:** Since source code was stolen, this section would be directly applicable. It penalizes anyone who intentionally conceals, destroys, or alters any computer source code used for a computer, computer program, computer system, or computer network.\n3.  **Section 66 â Computer related offences:** This is a broad section that covers various acts of computer misuse, including:\n    -   **Section 66(1):** Hacking with dishonest or fraudulent intent.\n    -   **Section 66(B):** Receiving stolen computer resource or communication device.\n    -   **Section 66(C):** Identity theft, which is clearly applicable given the theft of Aadhaar, PAN, bank account, and credit card details.\n    -   **Section 66(D):** Cheating by personation by using computer resource.\n    -   **Section 66(E):** Violation of privacy, as the stolen data includes personal information.\n    -   **Section 66(F):** Cyber terrorism, if the act was intended to cause death or injury, or to threaten the unity, integrity, security, or sovereignty of India, or to strike terror in the people.\n4.  **Section 72 â Penalty for breach of confidentiality and privacy:** This section applies to persons who, having secured access to any electronic record, book, register, correspondence, information, document, or other material without the consent of the person concerned, disclose such information.\n5.  **Section 72A â Punishment for disclosure of information in breach of lawful contract:** This section penalizes a person who, with the intent to cause wrongful loss or gain, discloses personal information about another person in breach of a lawful contract, without the consent of the person concerned.\n\n### Investigation Procedure\n\nThe investigation of cyber offenses is governed by the Bharatiya Nagarik Suraksha Sanhita, 2023 (BNSS), which replaced the Code of Criminal Procedure, 1973.\n\n1.  **Filing of Complaint/FIR:** The process begins with the registration of a First Information Report (FIR) by the fintech company with the police, either by visiting a police station or online through the National Cyber Crime Reporting Portal. The FIR is registered under Section 173(1) and 173(2) of the BNSS, which mandates the recording of information about a cognizable offense. All available evidence, such as screenshots, URLs, or any digital receipts, should be attached.\n    -   **Old Provision:** Section 154 of The Code of Criminal Procedure, 1973\n    -   **New Provision:** Section 173 of The Bharatiya Nagarik Suraksha Sanhita, 2023\n2.  **Investigation by Police:** The police or investigating agency has the authority to investigate the matter and arrest the accused under Sections 78 and 80 of the IT Act. An officer of the rank of Inspector is empowered to investigate matters under the IT Act. The investigation involves detailed forensic examination of electronic evidence, analysis of banking transactions, and tracing of money trails.\n    -   **Old Provision:** Section 157 of The Code of Criminal Procedure, 1973\n-   **New Provision:** Section 176 of The Bharatiya Nagarik Suraksha Sanhita, 2023: \"(1)If, from information received or\notherwise, an officer in charge of a police station has reason to suspect the commission of an offence which he is\nempowered under section 173 to investigate, he shall forthwith send a report of the same to a Magistrate empowered to\ntake cognizance of such offence upon a police report and shall proceed in person, or shall depute one of his subordinate\nofficers not being below such rank as the State Government may, by general or special order, prescribe in this behalf,\nto proceed to the spot, to investigate the facts and circumstances of the case, and, if necessary, to take measures for\nthe discovery and arrest of the offender.\"\n3.  **Filing the Charge Sheet:** Once the investigation is complete, a charge sheet is filed under Section 173 of the BNSS, submitting a report to the magistrate.\n\n### Digital Evidence Collection\n\nDigital evidence is fragile, easily alterable, and requires special tools and precautions for collection.\n\n-   **Identification:** Identify all potential sources of digital evidence, including servers, computers, mobile devices, cloud storage, and network logs.\n-   **Seizure:** Seize devices in a forensically sound manner to prevent alteration. This often involves isolating devices from networks and powering them down carefully.\n-   **Imaging/Cloning:** Create forensic images (bit-stream copies) of storage media to preserve the original evidence. All analysis should be performed on these copies.\n-   **Documentation:** Meticulously document the entire collection process, including date, time, location, personnel involved, and the state of the devices.\n-   **Chain of Custody:** Maintain a strict chain of custody to track the evidence from collection to analysis and presentation in court.\n\n### Preservation of Electronic Evidence\n\nProper preservation is crucial to ensure the accuracy, reliability, integrity, and future access to information, preventing data loss or corruption.\n\n-   **Hashing:** Generate cryptographic hash values (digital fingerprints) of the original evidence and its forensic image to verify integrity.\n-   **Secure Storage:** Store electronic evidence in a secure environment with controlled access to prevent unauthorized tampering.\n-   **Logging:** Maintain detailed logs of all access, handling, and analysis of the evidence.\n-   **Expert Handling:** Only trained cyber forensic experts should handle and analyze electronic evidence to ensure its integrity and admissibility.\n\n### Role of Cyber Forensic Laboratory\n\nA Cyber Forensic Laboratory is a specialized facility equipped with digital forensic tools and trained experts to analyze, preserve, and recover digital evidence.\n\n-   **Analysis:** They analyze digital evidence from various sources like computers, mobile phones, networks, and cloud systems to uncover facts related to cybercrimes.\n-   **Recovery:** They specialize in recovering deleted, hidden, or encrypted data.\n-   **Reporting:** They prepare detailed forensic reports outlining their findings, which are crucial for legal proceedings.\n-   **Expert Testimony:** Cyber forensic experts provide expert witness testimony in court to explain technical aspects of digital evidence.\n-   **Specializations:** Labs may specialize in areas like malware investigation, network forensics, mobile forensics, and cryptocurrency analysis. They follow international standards in evidence collection, chain of custody, and forensic procedures.\n\n### Admissibility of Electronic Evidence under Bharatiya Sakshya Adhiniyam, 2023 (BSA)\n\nThe Bharatiya Sakshya Adhiniyam, 2023, replaced the Indian Evidence Act, 1872, and introduced significant provisions for the admissibility of electronic evidence.\n\n1.  **Section 61 BSA:** States that an electronic or digital record cannot be denied admissibility simply because it is electronic, and such a record has the same legal effect and enforceability as any other document, subject to Section 63 BSA.\n    -   **Old Provision:** Section 3 of The Indian Evidence Act, 1872\n    -   **New Provision:** Section 2 of The Bharatiya Sakshya Adhiniyam, 2023\n2.  **Section 63 BSA (replacing Section 65B of the Indian Evidence Act):** This is the key provision governing the\nadmissibility of electronic records. It states that any information contained in an electronic record, which is printed\non paper, stored, recorded, or copied in optical or magnetic media or semiconductor memory, and produced by a computer\nor any communication device, shall be deemed to be a document. For an electronic record to be admissible without\nproducing the original device, it must be accompanied by a certificate.\n    -   **Old Provision:** Section 65B of The Indian Evidence Act, 1872\n-   **New Provision:** Section 63 of The Bharatiya Sakshya Adhiniyam, 2023: \"(1)Notwithstanding anything contained in\nthis Adhiniyam, any information contained in an electronic record, which is printed on a paper, stored, recorded or\ncopied in optical or magnetic media or semiconductor memory, produced by a computer or any communication device, in such\nform as may be prescribed, shall be deemed to be also a document, if the conditions mentioned in this section are\nsatisfied in relation to the information and computer or the communication device in question.\"\n    -   The certificate must be signed by both the person in charge of the device and an expert.\n    -   It must disclose the record\u0027s hash value, which is the digital fingerprint of the file.\n    -   The conditions for admissibility include that the computer system was operating properly, the information was regularly fed into it, and the information was derived in the ordinary course of activities.\n3.  **Opinion of Examiner of Electronic Evidence (Section 39(2) BSA):** This section allows for the opinion of an examiner of electronic evidence to be considered relevant.\n    -   **Old Provision:** Section 45A of The Indian Evidence Act, 1872\n    -   **New Provision:** Section 39(2) of The Bharatiya Sakshya Adhiniyam, 2023: \"When in a proceeding, the court has to form an opinion on any matter relating to any information transmitted or stored in any computer resource or any other electronic or digital form, the opinion of the Examiner of Electronic Evidence referred to in section 79A of the Information Technology Act, 2000, is a relevant fact.\"\n\n### Relevant Supreme Court Judgments\n\nWhile the Bharatiya Nyaya Sanhita and Bharatiya Sakshya Adhiniyam are new, the Supreme Court has delivered several landmark judgments on cybercrime, digital evidence, and the interpretation of the Information Technology Act. These judgments will continue to be relevant in understanding the legal principles.\n\n-   ***Anvar P.V. v. P.K. Basheer, (2014) 10 SCC 473***: This is a crucial judgment that laid down the detailed procedure and conditions for the admissibility of electronic evidence under Section 65B of the Indian Evidence Act (now Section 63 of BSA). The Court held that electronic records are admissible as primary evidence if the conditions stipulated in Section 65B(2) are satisfied. If not, then a certificate under Section 65B(4) is mandatory.\n-   ***Shafhi Mohammad v. The State of Himachal Pradesh, (2018) 5 SCC 311***: This case emphasized the need for\nadvancement of information technology and scientific temper in methods of investigation. It also discussed the\ndefinition of \"electronic record\" and \"data\" under the Information Technology Act, 2000. The Court clarified that the\nrequirement of a certificate under Section 65B of the Indian Evidence Act (now Section 63 of BSA) is mandatory for the\nadmissibility of electronic evidence. However, it also held that the said certificate can be produced at any stage of\nthe trial and that the party who is not in possession of the device from which the electronic document is produced\ncannot be expected to produce the certificate.\n\n---\n\n### Draft FIR\n\n**FIRST INFORMATION REPORT (FIR)**\n\n**[Under Section 173 of The Bharatiya Nagarik Suraksha Sanhita, 2023]**\n\n**1. Police Station:** Cyber Crime Police Station, [Jurisdictional City, State]\n**2. FIR No.:** [To be assigned by Police Station]\n**3. Date \u0026 Time of Report:** [Date of Filing], [Time of Filing]\n**4. Act(s) \u0026 Section(s):**\n    -   Bharatiya Nyaya Sanhita, 2023: Sections 303, 319, 354, 355, 337, 367, 111\n    -   Information Technology Act, 2000: Sections 43, 65, 66, 66C, 66D, 66E, 66F, 72, 72A\n**5. Complainant Details:**\n    -   **Name:** [Name of Authorized Representative], [Designation]\n    -   **Company Name:** The fintech company\n    -   **Address:** [Company Address]\n    -   **Contact No.:** [Contact Number]\n    -   **Email:** [Email Address]\n**6. Details of Incident:**\n    -   **Date \u0026 Time of Incident (approx.):** An unknown period, breach detected on [Date of Detection].\n    -   **Place of Incident:** The company\u0027s IT infrastructure and servers.\n    -   **Nature of Incident:** Unauthorized access to company servers, data theft, and subsequent sale of stolen data on the dark web.\n    -   **Stolen Data:** Aadhaar records, PAN data, bank account details, credit card information, and proprietary source code.\n    -   **Modus Operandi (if known):** Gained unauthorized access to the company\u0027s servers. The exact method is currently under investigation.\n**7. Description of Accused (if known):** Unknown Hacker(s).\n**8. Steps Taken by Complainant:** The company has initiated an internal investigation, isolated the affected systems, and is in the process of notifying relevant authorities including CERT-In.\n**9. Request:** To register an FIR and initiate a thorough investigation into the cybercrime, identify and apprehend the perpetrator(s), recover the stolen data, and prevent further misuse.\n\n**[Signature of Complainant]**\n**[Name of Complainant]**\n**[Designation]**\n**[Date]**\n\n---\n\n### Draft Seizure Memo\n\n**SEIZURE MEMO**\n\n**[Under Section 185 of The Bharatiya Nagarik Suraksha Sanhita, 2023]**\n\n**Case FIR No.:** [FIR No. as assigned]\n**Police Station:** Cyber Crime Police Station, [Jurisdictional City, State]\n**Date \u0026 Time of Seizure:** [Date of Seizure], [Time of Seizure]\n**Place of Seizure:** [Location of Seizure, e.g., Residence of Accused]\n\n**Details of Articles Seized:**\n\nThe following articles/electronic evidence were seized in the presence of the undersigned and witnesses, in connection with the above-mentioned FIR:\n\n1.  **Item 1:** Laptop/Desktop Computer (Make, Model, Serial No. to be recorded)\n    -   **Description:** Suspected to be used for hacking activities.\n    -   **Condition:** Powered off, sealed in evidence bag.\n    -   **Hash Value (if generated on-site):** [Hash value to be generated and recorded]\n2.  **Item 2:** Mobile Phone (Make, Model, IMEI No. to be recorded)\n    -   **Description:** Suspected to contain communication related to the crime.\n    -   **Condition:** Powered off, placed in Faraday bag, sealed.\n3.  **Item 3:** Pen Drive(s)/External Hard Drive(s) (Make, Capacity to be recorded)\n    -   **Description:** Suspected to contain stolen data or hacking tools.\n    -   **Condition:** Sealed in evidence bag.\n    -   **Hash Value (if generated on-site):** [Hash value to be generated and recorded]\n4.  **Item 4:** Network Router/Switch (Make, Model, Serial No. to be recorded)\n    -   **Description:** Suspected to contain network logs relevant to the intrusion.\n    -   **Condition:** Powered off, cables disconnected, sealed.\n\n**Procedure of Seizure:**\nAll seized articles were carefully packed, sealed with the official seal of the Cyber Crime Police Station, and labeled with case details, date, and time of seizure. Hash values were generated for digital media where feasible at the scene. A detailed inventory was prepared.\n\n**Witnesses:**\n1.  **Name:** [Witness 1 Name]\n    **Address:** [Witness 1 Address]\n    **Signature:**\n2.  **Name:** [Witness 2 Name]\n    **Address:** [Witness 2 Address]\n    **Signature:**\n\n**Seizing Officer:**\n**[Name of Investigating Officer]**\n**[Rank]**\n**Cyber Crime Police Station, [Jurisdictional City, State]**\n**[Signature]**\n\n---\n\n### Draft Arrest Memo\n\n**ARREST MEMO**\n\n**[Under Section 43 of The Bharatiya Nagarik Suraksha Sanhita, 2023]**\n\n**Case FIR No.:** [FIR No. as assigned]\n**Police Station:** Cyber Crime Police Station, [Jurisdictional City, State]\n**Date \u0026 Time of Arrest:** [Date of Arrest], [Time of Arrest]\n**Place of Arrest:** [Location of Arrest]\n\n**Details of Arrested Person:**\n\n1.  **Name:** [Full Name of Accused]\n2.  **Father\u0027s Name:** [Father\u0027s Name]\n3.  **Address:** [Residential Address]\n4.  **Age:** [Age]\n5.  **Gender:** [Gender]\n6.  **Identification Marks:** [Any distinct identification marks]\n7.  **Offences for which arrested:**\n    -   Bharatiya Nyaya Sanhita, 2023: Sections 303, 319, 354, 355, 337, 367, 111\n    -   Information Technology Act, 2000: Sections 43, 65, 66, 66C, 66D, 66E, 66F, 72, 72A\n8.  **Grounds of Arrest:** Based on technical evidence including IP address tracing and digital forensic analysis, the accused has been identified as the perpetrator involved in the unauthorized access and theft of sensitive data from the servers of the fintech company, and the subsequent sale of this data on the dark web.\n9.  **Time of informing relative/friend:** [Time]\n10. **Name of person informed:** [Name of relative/friend informed]\n11. **Relationship with arrested person:** [Relationship]\n12. **Medical Examination:** The arrested person was informed of their right to a medical examination. [Status of examination to be recorded here].\n13. **Personal Articles Seized (if any):** As per attached personal search memo.\n\n**Rights of Arrested Person:**\nThe arrested person has been informed of the grounds of arrest and their right to consult a legal practitioner of their choice. They have also been informed of their right to have a relative or friend informed of their arrest.\n\n**Witnesses to Arrest:**\n1.  **Name:** [Witness 1 Name]\n    **Address:** [Witness 1 Address]\n    **Signature:**\n2.  **Name:** [Witness 2 Name]\n    **Address:** [Witness 2 Address]\n    **Signature:**\n\n**Arresting Officer:**\n**[Name of Arresting Officer]**\n**[Rank]**\n**Cyber Crime Police Station, [Jurisdictional City, State]**\n**[Signature]**\n\n---\n\n### Draft Charge Sheet\n\n**CHARGE SHEET**\n\n**[Under Section 193 of The Bharatiya Nagarik Suraksha Sanhita, 2023]**\n\n**1. Police Station:** Cyber Crime Police Station, [Jurisdictional City, State]\n**2. FIR No.:** [FIR No. as assigned]\n**3. Date of FIR:** [Date of FIR]\n**4. Date of Charge Sheet:** [Date of Filing Charge Sheet]\n**5. Name of Accused:** [Full Name of Accused], S/o [Father\u0027s Name], R/o [Address]\n**6. Date \u0026 Time of Arrest:** [Date of Arrest], [Time of Arrest]\n**7. Offences Charged:**\n    -   Bharatiya Nyaya Sanhita, 2023: Sections 303 (Theft), 319 (Cheating), 354 (Cheating by Personation), 355 (Cheating and Dishonestly Inducing Delivery of Property), 337 (Forgery of record of Court or of public register, etc.), 367 (Criminal Trespass), 111 (Organized Crime).\n    -   Information Technology Act, 2000: Sections 43 (Penalty for damage to computer, etc.), 65 (Tampering with computer source documents), 66 (Computer related offences), 66C (Identity Theft), 66D (Cheating by personation by using computer resource), 66E (Violation of privacy), 66F (Cyber Terrorism), 72 (Penalty for breach of confidentiality and privacy), 72A (Punishment for disclosure of information in breach of lawful contract).\n**8. Brief Facts of the Case:**\n    On [Date of FIR], a complaint was received from [Name of Authorized Representative], [Designation] of the fintech company, alleging unauthorized access to their company servers and the theft of sensitive personal and financial data, including Aadhaar records, PAN data, bank account details, credit card information, and proprietary source code. The stolen data was subsequently sold on the dark web.\n    Investigation revealed that the accused, [Full Name of Accused], gained unauthorized access to the company\u0027s servers during an unknown period prior to the discovery of the breach by exploiting a vulnerability in the company\u0027s network (details in forensic report Annexure-A). The accused then extracted the aforementioned sensitive data and uploaded it to various dark web marketplaces for sale, thereby causing significant financial loss and privacy breaches to the company and its customers.\n**9. Evidence Collected:**\n    -   **Documentary Evidence:**\n        -   FIR No. [FIR No. as assigned]\n        -   Complaint filed by the fintech company\n        -   Forensic report from [Name of Designated Cyber Forensic Laboratory], detailing the intrusion, data exfiltration, and analysis of seized devices.\n        -   Bank statements/transaction records showing illicit financial transactions related to the sale of data.\n        -   Screenshots/logs from dark web marketplaces confirming the sale of stolen data.\n        -   Certificates under Section 63 of the Bharatiya Sakshya Adhiniyam, 2023, for all electronic records.\n    -   **Material Evidence:**\n        -   Seized server units, hard drives, laptops, mobile phones, and other digital devices belonging to the accused and the victim company, as detailed in the Seizure Memo dated [Date of Seizure].\n    -   **Witness Statements:**\n        -   Statement of [Name of Authorized Representative] (Company Representative)\n        -   Statements of technical experts/IT personnel from the fintech company\n        -   Statements of independent witnesses to seizure and arrest.\n        -   Statement of Cyber Forensic Expert from [Name of Designated Cyber Forensic Laboratory].\n**10. Conclusion of Investigation:**\n    The investigation has established a prima facie case against the accused, [Full Name of Accused], for committing the aforementioned offences. The technical evidence, forensic analysis, and witness statements corroborate the involvement of the accused in the cybercrime.\n**11. Prayer:**\n    It is prayed that the Hon\u0027ble Court may take cognizance of the offences and proceed against the accused, [Full Name of Accused], in accordance with law.\n\n**Investigating Officer:**\n**[Name of Investigating Officer]**\n**[Rank]**\n**Cyber Crime Police Station, [Jurisdictional City, State]**\n**[Signature]**\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+    "token_usage":  {
+                        "input_tokens":  101214,
+                        "output_tokens":  21401,
+                        "total_tokens":  122615,
+                        "cache_read_tokens":  11994,
+                        "cache_creation_tokens":  0,
+                        "reasoning_tokens":  3636,
+                        "cost_usd":  0.207396,
+                        "by_agent":  {
+                                         "Orchestrator":  {
+                                                              "input":  7097,
+                                                              "output":  576,
+                                                              "total":  7673,
+                                                              "cache_read":  6074,
+                                                              "calls":  3,
+                                                              "cost_usd":  0.000927
+                                                          },
+                                         "Newacts":  {
+                                                         "input":  428,
+                                                         "output":  61,
+                                                         "total":  489,
+                                                         "cache_read":  0,
+                                                         "calls":  2,
+                                                         "cost_usd":  0.000059
+                                                     },
+                                         "Judgment":  {
+                                                          "input":  5335,
+                                                          "output":  384,
+                                                          "total":  5719,
+                                                          "cache_read":  0,
+                                                          "calls":  2,
+                                                          "cost_usd":  0.000687
+                                                      },
+                                         "SCI_Judgment":  {
+                                                              "input":  19109,
+                                                              "output":  7456,
+                                                              "total":  26565,
+                                                              "cache_read":  5920,
+                                                              "calls":  2,
+                                                              "cost_usd":  0.024373
+                                                          },
+                                         "SelfRefine":  {
+                                                            "input":  69245,
+                                                            "output":  12924,
+                                                            "total":  82169,
+                                                            "cache_read":  0,
+                                                            "calls":  3,
+                                                            "cost_usd":  0.181349
+                                                        }
+                                     },
+                        "calls":  [
+                                      {
+                                          "agent":  "Orchestrator",
+                                          "step":  "classify_and_plan",
+                                          "input":  1488,
+                                          "output":  116,
+                                          "total":  1604,
+                                          "cache_read":  761,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000195
+                                      },
+                                      {
+                                          "agent":  "Orchestrator",
+                                          "step":  "extract_user_intent",
+                                          "input":  5609,
+                                          "output":  428,
+                                          "total":  6037,
+                                          "cache_read":  5313,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000732
+                                      },
+                                      {
+                                          "agent":  "Newacts",
+                                          "step":  "extract_metadata",
+                                          "input":  428,
+                                          "output":  41,
+                                          "total":  469,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000059
+                                      },
+                                      {
+                                          "agent":  "Judgment",
+                                          "step":  "extract_metadata",
+                                          "input":  1112,
+                                          "output":  258,
+                                          "total":  1370,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000214
+                                      },
+                                      {
+                                          "agent":  "Judgment",
+                                          "step":  "relevance_judge",
+                                          "input":  4223,
+                                          "output":  126,
+                                          "total":  4349,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.000473
+                                      },
+                                      {
+                                          "agent":  "Newacts",
+                                          "step":  "generate",
+                                          "input":  0,
+                                          "output":  20,
+                                          "total":  20,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.0
+                                      },
+                                      {
+                                          "agent":  "SCI_Judgment",
+                                          "step":  "react_msg_1",
+                                          "input":  7887,
+                                          "output":  137,
+                                          "total":  8024,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.002709
+                                      },
+                                      {
+                                          "agent":  "SCI_Judgment",
+                                          "step":  "react_msg_6",
+                                          "input":  11222,
+                                          "output":  7319,
+                                          "total":  18541,
+                                          "cache_read":  5920,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.021664
+                                      },
+                                      {
+                                          "agent":  "Orchestrator",
+                                          "step":  "merge_synthesis",
+                                          "input":  0,
+                                          "output":  32,
+                                          "total":  32,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.0
+                                      },
+                                      {
+                                          "agent":  "SelfRefine",
+                                          "step":  "critique",
+                                          "input":  26480,
+                                          "output":  1548,
+                                          "total":  28028,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.011814
+                                      },
+                                      {
+                                          "agent":  "SelfRefine",
+                                          "step":  "refine",
+                                          "input":  16770,
+                                          "output":  10130,
+                                          "total":  26900,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  3636,
+                                          "cost_usd":  0.158622
+                                      },
+                                      {
+                                          "agent":  "SelfRefine",
+                                          "step":  "critique",
+                                          "input":  25995,
+                                          "output":  1246,
+                                          "total":  27241,
+                                          "cache_read":  0,
+                                          "cache_creation":  0,
+                                          "reasoning":  0,
+                                          "cost_usd":  0.010913
+                                      }
+                                  ]
+                    },
+    "source":  [
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 466",
+                       "content":  [
+                                       "Section Number: Section 466 of The Indian Penal Code 1860\nSection Name: Forgery of record of court or of public register, etc\nNew Provision: Section 337 of Bharatiya Nyaya Sanhita, 2023:\nWhoever forges a document or an electronic record, purporting to be a record or proceeding of or in a Court or an"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/Indian Penal Code 1860.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  25.45606,
+                       "section_number":  "466",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 337",
+                       "content":  [
+                                       "Section Number: Section 337 of The Bharatiya Nyaya Sanhita, 2023\nSection Name: Forgery of record of Court or of public register, etc\nSection Provisions: Whoever forges a document or an electronic record, purporting to be a record or proceeding of or in a Court or an \nidentity document issued by Gove"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nyaya Sanhita,2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  24.006424,
+                       "section_number":  "337",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 45A",
+                       "content":  [
+                                       "section number: Section 45A of Indian Evidence Act, 1872\nsection name: Opinion of Examiner of Electronic Evidence\nnew provisions: Section 39(2)of Bharatiya Sakshya Adhiniyam, 2023:\nWhen in a proceeding, the court has to form an opinion on any matter relating to any information\ntransmitted or stored "
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/Indian Evidence Act 1872.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  22.179691,
+                       "section_number":  "45A",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 3",
+                       "content":  [
+                                       "section number: Section 3 of Indian Evidence Act, 1872\nsection name: Interpretation clause\nnew provisions: Section 2 of Bharatiya Sakshya Adhiniyam, 2023:\n(1)In this Adhiniyam, unless the context otherwise requires,\n(a)ÂCourtÂ includes all Judges and Magistrates, and all persons, except arbitrators,"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/Indian Evidence Act 1872.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  15.809071,
+                       "section_number":  "3",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 176",
+                       "content":  [
+                                       "Section Number: Section 176 of The Bharatiya Nagarik Suraksha Sanhita, 2023\nSection Name: Procedure for investigation\nSection Provisions: (1)If, from information received or otherwise, an officer in charge of a police station has reason to suspect the \ncommission of an offence which he is empowered "
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Nagarik Suraksha Sanhita, 2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  15.7960615,
+                       "section_number":  "176",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 292",
+                       "content":  [
+                                       "section number: Section 292 of The Code of Criminal Procedure 1973\nsection name: Evidence of officers of the Mint\nNew Provision: Section 328 of The Bharatiya Nagarik Suraksha Sanhita, 2023:\n(1)Any document purporting to be a report under the hand of a gazetted officer of any Mint or of any Note Prin"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/Code of Criminal Procedure 1974.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  15.514845,
+                       "section_number":  "292",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 63",
+                       "content":  [
+                                       "Section Number: Section 63 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: Admissibility of electronic records\nSection Provision: (1)Notwithstanding anything contained in this Adhiniyam, any information\ncontained in an electronic record which is printed on paper, stored, recorded or copied in"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  14.896099,
+                       "section_number":  "63",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 2",
+                       "content":  [
+                                       "Section Number: Section 2 of The Bharatiya Sakshya Adhiniyam, 2023\nSection Name: Definations\nSection Provision: (1)In this Adhiniyam, unless the context otherwise requires,\n(a)\"Court\" includes all Judges and Magistrates, and all persons, except\narbitrators, legally authorised to take evidence;\n(b)\"c"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/The Bharatiya Sakshya Adhiniyam, 2023.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  14.702154,
+                       "section_number":  "2",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 29A",
+                       "content":  [
+                                       "Section Number: Section 29A of The Indian Penal Code 1860\nSection Name: \"Electronic record\nNew Provision: Section 2(39) of Bharatiya Nyaya Sanhita, 2023:\nwords and expressions used but not defined in this Sanhita but defined in the Information Technology Act, 2000 and the \nBharatiya Nagarik Suraksha"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/Indian Penal Code 1860.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  14.654982,
+                       "section_number":  "29A",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "newacts",
+                       "title":  "The Bharatiya Nyaya Sanhita, 2023 - Section 157",
+                       "content":  [
+                                       "section number: Section 157 of The Code of Criminal Procedure 1973\nsection name: Procedure for investigation\nNew Provision: Section 176 of The Bharatiya Nagarik Suraksha Sanhita, 2023:\n(1)If, from information received or otherwise, an officer in charge of a police station has reason to suspect the \n"
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  "/content/Bharitya New Acts/Code of Criminal Procedure 1974.csv",
+                       "agent_name":  "Newacts",
+                       "relevance_score":  14.513714,
+                       "section_number":  "157",
+                       "act_name":  "The Bharatiya Nyaya Sanhita, 2023"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "lexorbis.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH6zwdCqlPPkr56Sp0r1bf05IcR00y2KImQ0DgPkAP5VZC6ijgFUIVc61vg5GzWysvOibYnOrnoOgYTSQVmywp6q4N84g5Zmku-CARil8gZkCP-fVNi2-c6dipuV5k0w-IYwId-JsvAcrcPBDy6bkDJcA2zBaUuY6X1CRNQ6_ngIkA=",
+                       "web_title":  "lexorbis.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "yourlawarticle.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEtb_ViOmM7jqzIYVqf2z6VWQHiMY13WjZjPy8EYnJjhkFEO6ucMY68urvH-KOlpH2mcZyZmiZ8XNqq_rvyR7rsBdDQH99WzuryND9UsnK2IUQdSnjDwCXGGzHP5hN-qXx3tpd_C0hh6BIGnp2rSIZvnW4rAeV8g7Nu8TSR1YbLoA1HLA9XmYmGCik9nYlDT3yvNUv9AYdjlXQ_FIaX4ZP7DmJZ6A==",
+                       "web_title":  "yourlawarticle.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "lexscriptamagazine.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE6QLdIbWgUvoOaMERpGoMK3wS9EfI2FO2wNHyLqr1UMhdJGk8MyUqgqjOThC2756Wamz6gSvZYIqTzzU5iVGoNtQxUrkJPA-T2ArYJY0rzkeFeoYYHlT1ZzjtvoGByO0mwAkLoF4epFAibGc3Q3hG983seD_wz6YAtuvZfzWGxVGnUAW-fyWnJO_PKH8xmB_FHjEWqQD5NOkIRCMkSiMNYtzwJBQqI_m-k--pR",
+                       "web_title":  "lexscriptamagazine.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "finlawassociates.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH-JO5oC3c9nvO6ENxKJZdlk_6Q10xEI5f3Kef8VWjF5cUU0hGsrU0NdYIQ6toLoZwtocumIe9R4Sf8wJkFv1ydp1y_sH2suruBZeXXZKCvNYr-wwkVW5zeIrrw2z5v7oC7vjBeyT2v5kstURBOyr3Kwbgi_j61eQOkWpKlg2fL2eiBqCBxzDuarM-Ncz1nHM0HBNE8ep-zNr3k7SGeJynx_9T_MQ==",
+                       "web_title":  "finlawassociates.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "clearlaw.online",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEuglQTLBurT2JTAcL91bu06YNJE-EMfofAn29zsvpx1Kq-8KDwIxQcjfWVHVCUXEKLDuJj-UsAwicU0zlOe2nhMe3QQbu28ym7td1bdpzJy70MDVsOeqcXhxITYrsNj4ad7wQq87wuNQMUg8SRxLRTbr9hbF84KDPCEAR-KcRYXcQ3dyTOIFmBQC1lrg8ivbv1ztlFtw==",
+                       "web_title":  "clearlaw.online"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "ihrpchumanrights.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHA-JJgh9cTQJzEmBOUQRpodFnxDuQrlBpL4vuZbxwCXQm62twDeKYYau5-Jo4AGbWP5R1BnHsdXPU2482TGIti7L2h9BcyqxkXWI_AxIppigFdtOVKHfay4qojNoNmm0vL5riKd3uejvTW81n3xaD4NjlV_EWwe4A=",
+                       "web_title":  "ihrpchumanrights.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "researchgate.net",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGzDyMk_VfQ1oTCxrn_EMsVIHOwlJmQcpEiNaQRYPrrNEp_73BzbriKwnXoLciaK-ahyaoWtrLxwDPLVTCUPbABuIy2tllrZY3M_LKdEcrQXRfY2lJjCo-ZpU1ptv5vf9mQOFTei05qgkE6yAPZRtij1WZP7Fq5-TFrualaUc2TL-UgsVMJ1ikCJbdQaL5lIUBeWuSG2Dsa24CXxGT18DW2wP2kRtmaiLG9UOFaUgtq_WV5yn9dfoqe2nGt",
+                       "web_title":  "researchgate.net"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "legalsetu.co.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEN8X_hBLcAWps5PqlAwzi_oHotpvJPIaj0Rci6V4e0_lWALa_x7g-uadSwzX6EQB7qAgkO1oyn2n4bZ_Dnuv19eBArWympTDFqiJSBsxIN5VF94qzWJzcbSySCdhMTu0MGew==",
+                       "web_title":  "legalsetu.co.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "researchgate.net",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGYfkAiZPf3SDBStQX-1zg25fS7CAZxW2jrhyJd76lKfaSoTroD3pjXkj_j_GK-_h6OkZ5aJWjQg-sokiLqm-Fxt3EzBzy9niBB9J2W60-CRiU0aFkkev-mJmfGLjCG1_caPj52rkjmsfhCPQqrRGU_bSEuDLUybhvn_YmiHy2a9slVglGV9loM9d2vO64k1Y0Q9i_z5FwH5lGn6N0WSnKLAgc=",
+                       "web_title":  "researchgate.net"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "prashantmali.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGqJxJ4RsamyrW6GRN08G_0DZGh2pCpJFASk_sIlIuZyj1rGEgfh2__zs0QIiWtOR5RhUtjUk-lNNHPTfzTQGg2xMAM_LpYCrKbOwM407B2c2UsaN9IJTTMpUDVMiOV0wt66HtZ8uUL1pZebO6MFFdbXLdxR2KWoeZXioYDBllNa7UC-gDXCc64uIUa1nQ6ibNBnJbmpjsT5NT2McWDtHBXAA==",
+                       "web_title":  "prashantmali.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "primelegal.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHdkoLCgRAPPYFlDm3DXt50lfm5Bqov5euECQoc6Xa_7dQB2UtH11DSFp08pjyUU1C9MAEdKM3pGIgewE3o4W-7KQfWb2i2XFrpX9nBJDxivPl5kzLE35OX60TBLaU3Z-Tc8nwB-V7mcdQ56741eOwruQOCAJoJ6X7njMtyz31rat6X6NtUz1GpIw==",
+                       "web_title":  "primelegal.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "penacclaims.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGiun6OyGckKfIQoMKVHk4uHDl6FXFSUpdMusHADXwEh4GaJYzQ4JD88RETZzEstJ9pkotWpPkekfq_safGosGj1SKnHmPO-Lxe_UD8jSGfTZvDRkWGT87lmGO8nt5ilNAnI_8hX3zpcw_2-vo4SF8qz6VYsppy-qzjKfuT94U=",
+                       "web_title":  "penacclaims.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "verdictum.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFqQYnVrMqQ-Isq9aVy2q0I7T3s46bYP8Te-0JfQeoTIEBD1liCgyc5OuIa4sBqB2NJT-_Hu_R3IKWllHxvSyTni62PWmODRqlwDGEnMUKknteGgMG20n3vJ_-FWrztCdjAGqxW5vdhSXRBMlILGYXHb4uh9kNGPZ4pwgn45mEHoaowaboe1LNFy0GRHmgx4zW7b_Obp-azE6RjVQ24MDoGePCJkLaYTTQY",
+                       "web_title":  "verdictum.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "nja.gov.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFfg2CALOTFwfzyYrrsWIPmR10nWXqC2roMYH40aD5ww1SEGY_aaBE_L3-P_6UQ59h3Q5gStH_x5OJVXHooCqKxq2izD3nMrHlLNS1iZHOPb3RTyBduceP2HMzYHvINlQTRvC1AHu0eJMC7ZfZRXP9N5O2zWekB4yTD9tN2yYB1DM8iSOFA2Dac2NoMASjSfaNciyOrVFd0qw_VzAJHlaYVEQOLEHQ5NZS11c2e3RJ3lkDx--ftHstCKR_GJAupH52pcea1QhJd",
+                       "web_title":  "nja.gov.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "ipleaders.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHojgT02O4TqD1Wz_oGpUniCLYZCBKBWt29DZkdHaQ5VcTjeC2OeW03fBjSpvDqWwcONxrpIhMm0AzdToxkXUQrljB1wNExCdHU6c_f8ECoSng3Q_i8hyJRGeqV6amPd2vbWZMj-KL86XtMK9Zd5KHD",
+                       "web_title":  "ipleaders.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "cmhlp.org",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE3PEV0f3aTFLEooCpNUXzgMp63HsK4DJVc4tdTPvdr4EsPQ02G8bZK4ugA480Uj9RMgLdVnRiZgR8qRbXCKGB1J8h0qtcvdwYNYzmlt_GtbKC9_XbUzpjVm65q4-poMLRI9vABwFra9YKELJuBFYr27dQiE3PYJonCj9jiC7_iUAqqf7Scflf0cbTGOEFhYS-tz82GBboXkoBh3hUzyY81VOplQGU9mlaTGW-0cS1s668QHXFkgvV_Gh_iqqCmbKZ15psbCM9oRFdyc5uxW6w=",
+                       "web_title":  "cmhlp.org"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "hawkeyeforensic.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEuD5R757UU6I1SwOlcBefgOpWy3OvefjbrSTJH3byFXrII3JUSh53kYjznK9mcUoHnnJ_Z5CeJ1bh3nBB4-GEcUuQ4BiHUa2caBm48EnSkEMwZf6K8CDKl6AlbOBciTHKL4Wilq5Dq3K9a_j2eHn2Y5F8=",
+                       "web_title":  "hawkeyeforensic.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "nahar.om",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHvFTbrWJfhh-vk7Hnt8RWRkXeTwIlpapjqPNXiYhdZEQOuUf1ChHXe6lvcLvT5ti2B1J6RRCTWORZffah9piD0AkQ3Y3cqQYlhr5vQtn1yYwqwx4YOwLR7CEaelWx1Gd-Eav_pEIushy5kGNVYpLZT527tDelfZ5OkaLBjskhymEbUi7U=",
+                       "web_title":  "nahar.om"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "sifsindia.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF955LEGCo9x12bPlARfxYbElDeo6NAEhKlpZxrNWQAKsjkIMXXN_3jDCwMiD9JMLy5gRX9ZnzoEc4tmv-IP6Q6a10rpTjwk5byDPxgSf907JP0v54qk1aOhQEQah_RjkNMMKx3gkRE0BbKIbQfrQ==",
+                       "web_title":  "sifsindia.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "ipleaders.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGWY950n3TQEgaWuUd_fpkkzm6Yy2kh7RxU8njOHlQjJETL9AbrIP6zlK9Bh_TI5CDEzQF2GD4xwOcpY0p2P-U7qSH0bLJZhm4fYAzzKw61lqYwcrmd04ZO14igWHOPK_8I11LPh3KK-3ppoLkIBtV0MqcdZ1arfYlY15M=",
+                       "web_title":  "ipleaders.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "veterinaria.org",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHCsze3eD4XTmw3u8poZ1HLTFixErA6Q5gtKS1hNlPBiawgKO1wntDLz0XyQlGPn2ZEYrTHDDB47KnzPAT43p5jkavpK7ClF08EvRbtfNnkCKmRTXcryv03V9auuGufHNtZbtJmhErGItpf_lexXidlqnZO1A==",
+                       "web_title":  "veterinaria.org"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "ijlra.com",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGNFrCE7sUEk_NFqyWn_cv93LWNBI1syXqEA3MR1xmBkrF-9YAL5hr-1Mum0imjVBdj2btjJqEXs-P5jDiLPBudvt8E8VrNWbBLrgu4yTg0-8yF4rMZ5BxISg4cozakULTzf9X7-DtLzPJ_rcZqrNuOSFOQXAXxZV9qTs8f2lhSARLGuJ__cx3yCTjnb8NK-vFRbIhunI5BpeUQWjqSAGkCYN1zet0J-fAIRw==",
+                       "web_title":  "ijlra.com"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "s3waas.gov.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHda9okJtj_zo76JzBX7GUiH8lOxUJguIjPPECKu2ud5W0gYqUGgRH6Z7l43kiqZfNv0npSr4y-_49fvw2VnB-2mfoIxPqJrIhgS4EzFFjZLWNGsfknIVOlvNcxkkCb9WTpiEhns-XcIMug3JxcdQ92bgZnw8jJh1nPf56Q6vnEb7RpqrrvJuxV0O5SJzaQAXdp2zJhnNnRoNo=",
+                       "web_title":  "s3waas.gov.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "s3waas.gov.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFSaqxalvutd2GGEBuo-o_k9GfZKu5Z0-oBf3QCq6iQwYyLe8lcPoR08_h9nW564D02lsinFidOQJbwMJHjdYGyDVPx9o-ogKNBWoKoX4cpEwAwf63jJ03tR4lFRpsRFizhnr5BODruCZxzPbZLa-Er1LXhvdUW7HUkuIMWgkMQNOBeM03D8bjVUGuOSB8Nc5xNqbiyfrJaWxvQ",
+                       "web_title":  "s3waas.gov.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "supremetoday.ai",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEjKN1T1FplB5Od1X9owCgkzg9G70QWdyqhR30TVIXzcv8Jgi9bPFL2VNyVwUtxT5oUnLFw1TyTbtFdzgtt6Ls5z06uCe-CoVb_krZdSIT2HTO2zrLunBGo-2x3Gqx71P2xlh7Obi7BApX5ohQwhuQ-BbqH0gG4yCtrViH-fNmA-RMxg1qSZbEPMxsEQXSuFSryx9i8tVg2y6Re6oIQ-Q==",
+                       "web_title":  "supremetoday.ai"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "legaleye.co.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGbXweZRXjehqwwt8_LhFZtKPj0fcIaNrbMV09rHhyg9SneWqkeMrdT7D87XN2RF1YVF9kv3WdXwyYZxpvDx-GxyRHjLdWKr-kUT-bu4Uo-NuxLbXcLdTYmGfPiFrq2KVCpisXAmqHPDPcj8gQbRTwCjSUReMZb1zLY4sOjyNGqaWxkwvUSWXFzhtJyBf2oS7kyWrDapu4=",
+                       "web_title":  "legaleye.co.in"
+                   },
+                   {
+                       "source_type":  "judgment",
+                       "title":  "lawweb.in",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  null,
+                       "file_name":  null,
+                       "agent_name":  "Judgment",
+                       "relevance_score":  null,
+                       "web_url":  "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGAASd06V3-DTvokI2RH6UKWAOewwiKOHSf2HUADOGh7ubnGNQOE_5enlbNwU_q8V6lI8jtXObkPtgAE8JD1nHYk5nSAND6sM0n4ClU-sLELUQe7DEsBa_E81yyfGMc1QmZHm6gou118Q6Y09ezjO5NKgVe4o5ocCeSs1uEI2E0ucA=",
+                       "web_title":  "lawweb.in"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "PRASHANT PRAKASH RATNAPARKI VS THE STATE OF MAHARASHTRA",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2025/7612/7612_2025_3_1502_65871_Judgement_17-Nov-2025.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "Crl.A. No.-004896-004896 - 2025",
+                       "judgment_date":  "17-11-2025",
+                       "bench":  "HON\u0027BLE MR. JUSTICE VIKRAM NATH HON\u0027BLE MR. JUSTICE SANDEEP MEHTA",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE SANDEEP MEHTA",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2025/7612/7612_2025_3_1502_65871_Judgement_17-Nov-2025.pdf"
+                                         }
+                                     ],
+                       "parties":  "PRASHANT PRAKASH RATNAPARKI VS THE STATE OF MAHARASHTRA",
+                       "db_id":  "45486"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "PARVINDER SINGH VS ENFORCEMENT OF DIRECTORATE",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2025/44465/44465_2025_5_1501_71414_Judgement_19-May-2026.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "Crl.A. No.-002678-002678 - 2026",
+                       "judgment_date":  "19-05-2026",
+                       "bench":  "HON\u0027BLE MR. JUSTICE M.M. SUNDRESH HON\u0027BLE MR. JUSTICE SATISH CHANDRA SHARMA",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE M.M. SUNDRESH",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2025/44465/44465_2025_5_1501_71414_Judgement_19-May-2026.pdf"
+                                         }
+                                     ],
+                       "parties":  "PARVINDER SINGH VS ENFORCEMENT OF DIRECTORATE",
+                       "db_id":  "46160"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "BHAGAT SINGH VS THE STATE OF UTTAR PRADESH",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2026/10813/10813_2026_5_1504_71440_Judgement_22-May-2026.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "Crl.A. No.-002777-002777 - 2026",
+                       "judgment_date":  "22-05-2026",
+                       "bench":  "HON\u0027BLE MR. JUSTICE SANJAY KAROL HON\u0027BLE MR. JUSTICE NONGMEIKAPAM KOTISWAR SINGH",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE NONGMEIKAPAM KOTISWAR SINGH",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2026/10813/10813_2026_5_1504_71440_Judgement_22-May-2026.pdf"
+                                         }
+                                     ],
+                       "parties":  "BHAGAT SINGH VS THE STATE OF UTTAR PRADESH",
+                       "db_id":  "46078"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "TATA TELESERVICES  LTD. VS BHARAT SANCHAR NIGAM LTD. .",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/jonew/judis/31386.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "C.A. No.-005850-005850 - 2005",
+                       "judgment_date":  "30-04-2008",
+                       "bench":  "N/A",
+                       "judgment_by":  "N/A",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/jonew/judis/31386.pdf"
+                                         }
+                                     ],
+                       "parties":  "TATA TELESERVICES  LTD. VS BHARAT SANCHAR NIGAM LTD. .",
+                       "db_id":  "24468"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "COMPETITION COMMISSION OF INDIA VS SCHOTT GLASS INDIA PVT. LTD. .",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2014/19707/19707_2014_5_1501_61745_Judgement_13-May-2025.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "C.A. No.-005843-005843 - 2014",
+                       "judgment_date":  "13-05-2025",
+                       "bench":  "HON\u0027BLE MR. JUSTICE VIKRAM NATH HON\u0027BLE MR. JUSTICE SANDEEP MEHTA",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE VIKRAM NATH",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2014/19707/19707_2014_5_1501_61745_Judgement_13-May-2025.pdf"
+                                         }
+                                     ],
+                       "parties":  "COMPETITION COMMISSION OF INDIA VS SCHOTT GLASS INDIA PVT. LTD. .",
+                       "db_id":  "44944"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "SHAFHI MOHAMMAD VS THE STATE OF HIMACHAL PRADESH",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2017/6212/6212_2017_Judgement_30-Jan-2018.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "SLP(Crl) No.-002302-002302 - 2017",
+                       "judgment_date":  "30-01-2018",
+                       "bench":  "HON\u0027BLE THE CHIEF JUSTICE HON\u0027BLE MR. JUSTICE PAMIDIGHANTAM SRI NARASIMHA HON\u0027BLE MR. JUSTICE DIPANKAR DATTA",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE ADARSH KUMAR GOEL",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2017/6212/6212_2017_Judgement_30-Jan-2018.pdf"
+                                         }
+                                     ],
+                       "parties":  "SHAFHI MOHAMMAD VS THE STATE OF HIMACHAL PRADESH",
+                       "db_id":  "36758"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "WEST BENGAL STATE ELECTRICITY DISTRIBUTION COMPANY LIMITED VS ADHUNIK POWER AND NATURAL RESOURCES LIMITED",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2025/74823/74823_2025_1_1501_69141_Judgement_27-Feb-2026.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "C.A. No.-002584-002585 - 2026",
+                       "judgment_date":  "27-02-2026",
+                       "bench":  "HON\u0027BLE THE CHIEF JUSTICE HON\u0027BLE MR. JUSTICE JOYMALYA BAGCHI",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE JOYMALYA BAGCHI",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2025/74823/74823_2025_1_1501_69141_Judgement_27-Feb-2026.pdf"
+                                         }
+                                     ],
+                       "parties":  "WEST BENGAL STATE ELECTRICITY DISTRIBUTION COMPANY LIMITED VS ADHUNIK POWER AND NATURAL RESOURCES LIMITED",
+                       "db_id":  "45852"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "POORANMAL VS THE STATE OF RAJASTHAN",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2025/74821/74821_2025_2_1503_69143_Judgement_10-Mar-2026.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "Crl.A. No.-001266-001266 - 2026",
+                       "judgment_date":  "10-03-2026",
+                       "bench":  "HON\u0027BLE MR. JUSTICE VIKRAM NATH HON\u0027BLE MR. JUSTICE SANDEEP MEHTA",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE SANDEEP MEHTA",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2025/74821/74821_2025_2_1503_69143_Judgement_10-Mar-2026.pdf"
+                                         }
+                                     ],
+                       "parties":  "POORANMAL VS THE STATE OF RAJASTHAN",
+                       "db_id":  "45935"
+                   },
+                   {
+                       "source_type":  "sci_judgment",
+                       "title":  "NIKHAT PARVEEN @ KHUSBOO KHATOON VS RAFIQUE @ SHILLU",
+                       "content":  [
+
+                                   ],
+                       "doc_link":  "https://api.sci.gov.in/supremecourt/2023/48122/48122_2023_11_1501_70462_Judgement_21-Apr-2026.pdf",
+                       "file_name":  null,
+                       "agent_name":  "SCI_Judgment",
+                       "relevance_score":  null,
+                       "case_no":  "Crl.A. No.-002068-002068 - 2026",
+                       "judgment_date":  "21-04-2026",
+                       "bench":  "HON\u0027BLE MR. JUSTICE SANJAY KAROL HON\u0027BLE MR. JUSTICE VIPUL M. PANCHOLI",
+                       "judgment_by":  "HON\u0027BLE MR. JUSTICE SANJAY KAROL",
+                       "pdf_links":  [
+                                         {
+                                             "label":  "Judgment PDF",
+                                             "url":  "https://api.sci.gov.in/supremecourt/2023/48122/48122_2023_11_1501_70462_Judgement_21-Apr-2026.pdf"
+                                         }
+                                     ],
+                       "parties":  "NIKHAT PARVEEN @ KHUSBOO KHATOON VS RAFIQUE @ SHILLU",
+                       "db_id":  "46033"
+                   }
+               ],
+    "agents_used":  [
+                        "Newacts",
+                        "Judgment",
+                        "SCI_Judgment"
+                    ],
+    "effective_query":  "A hacker gains unauthorized access to a fintech company\u0027s servers.\n\nHe steals:\n\nAadhaar records PAN data Bank account details Credit card information Source code\n\nThe data is sold on the dark web.\n\nPrepare:\n\nIdentify every applicable offence under Bharatiya Nyaya Sanhita 2023. Discuss provisions of the Information Technology Act. Explain investigation procedure. Digital evidence collection. Preservation of electronic evidence. Role of cyber forensic laboratory. Admissibility of electronic evidence under Bharatiya Sakshya Adhiniyam. Draft FIR. Draft seizure memo. Draft arrest memo. Draft charge sheet. Relevant Supreme Court judgments.",
+    "query_rewritten":  true,
+    "conversation_turn":  1,
+    "followup_suggestions":  [
+                                 "What BNS sections apply?",
+                                 "What IT Act sections apply?",
+                                 "How is evidence collected?"
+                             ]
+}

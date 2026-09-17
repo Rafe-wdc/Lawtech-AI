@@ -1,0 +1,22 @@
+=== VERBATIM ===
+  name preserved: True
+  name preserved: False
+  name preserved: False
+  date 01/04/2026 preserved: False
+  date 9/4/2026 preserved: False
+  date 17/4/2026 preserved: False
+  amount 101000 preserved: False
+  amount 1,01,000 preserved: True
+  amount 41000 preserved: False
+  amount 60000 preserved: False
+  amount 60,000 preserved: True
+
+=== QUALITY ===
+  compliance deadline mentioned: False
+  legal-heir framing: True
+  ORDER XXXVII / summary suit: False
+  Section 138 (WRONG): False
+  cause title (WRONG): False
+  canonical substitution (WRONG): False
+
+draft_len: 3193, reference_kind: es

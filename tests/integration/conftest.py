@@ -33,7 +33,7 @@ def api_key(request):
     return (
         request.config.getoption("--api-key")
         or os.getenv("API_KEY", "")
-    )
+    ).strip()
 
 
 @pytest.fixture(scope="session")
@@ -41,7 +41,7 @@ def admin_key(request):
     return (
         request.config.getoption("--admin-key")
         or os.getenv("ADMIN_KEY", "")
-    )
+    ).strip()
 
 
 @pytest.fixture(scope="session")

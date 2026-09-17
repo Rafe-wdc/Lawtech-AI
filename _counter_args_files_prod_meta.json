@@ -1,0 +1,122 @@
+{
+  "base": "https://api.lawttorney.com/pyapi",
+  "prompt": "Make notes of counter arguments on behalf of Opponent, Cover all the points including Violation of 33(2)(b) by non payment of one month's wages or lesser wages including deductions, in any case a lesser payment than what has been mandated, So also not considered the past record of service and victimizing the workmen for the union activities. Also provide relevant case laws.",
+  "files": [
+    "Written Notes of Argument Speciality (1).pdf",
+    "SPECIALITY-Workman_Arguments_Section_33_2b-2.docx"
+  ],
+  "elapsed_s": 70.32,
+  "ttfb_ms": 3919,
+  "thread_id": "8ecde631-da84-4e3e-8a05-016e372a2fac",
+  "effective_query": null,
+  "query_rewritten": false,
+  "agents_planned": [
+    "Scenario",
+    "Judgment",
+    "SCI_Judgment",
+    "Document"
+  ],
+  "answer_len": 9863,
+  "answer_words": 1435,
+  "event_type_counts": {
+    "thread_id": 1,
+    "file_processing": 8,
+    "progress": 28,
+    "status": 9,
+    "context": 1,
+    "agents_planned": 1,
+    "token": 429,
+    "token_reset": 1,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "unique_progress_steps": [
+    "analyze",
+    "classify",
+    "fallback",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "load",
+    "metadata",
+    "plan",
+    "prepare",
+    "react",
+    "relevance_check",
+    "results",
+    "search",
+    "synthesize",
+    "validate",
+    "web_search"
+  ],
+  "file_processing_summary": [
+    {
+      "message": "Processing uploaded files...",
+      "files": null,
+      "stage": null,
+      "rejected": null
+    },
+    {
+      "message": "Compressing Written_Notes_of_Argument_Speciality_1.pdf...",
+      "files": null,
+      "stage": "pdf_compress_start",
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from Written_Notes_of_Argument_Speciality_1.pdf...",
+      "files": null,
+      "stage": "pdf_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "Written_Notes_of_Argument_Speciality_1.pdf: 15 pages",
+      "files": null,
+      "stage": "pdf_extract_done",
+      "rejected": null
+    },
+    {
+      "message": "Embedding Written_Notes_of_Argument_Speciality_1.pdf into vector store...",
+      "files": null,
+      "stage": "chroma_store_start",
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from SPECIALITY-Workman_Arguments_Section_33_2b-2.docx...",
+      "files": null,
+      "stage": "docx_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 pdf, 1 docx",
+      "files": [
+        "Written_Notes_of_Argument_Speciality_1.pdf",
+        "SPECIALITY-Workman_Arguments_Section_33_2b-2.docx"
+      ],
+      "stage": "all_files_done",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 pdf, 1 docx",
+      "files": [
+        "Written_Notes_of_Argument_Speciality_1.pdf",
+        "SPECIALITY-Workman_Arguments_Section_33_2b-2.docx"
+      ],
+      "stage": null,
+      "rejected": null
+    }
+  ],
+  "errors": [],
+  "raw_events_written": 482,
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ]
+}

@@ -30,6 +30,7 @@ The user has sent a message that is not a legal query. Respond warmly and approp
 - If they ask **who you are or what you do**: introduce yourself as Lawttorney, an AI legal assistant for Indian law, and list your key capabilities in a clear, concise way.
 - If it is **casual conversation or off-topic**: acknowledge it politely and gently guide them toward asking a legal question.
 
+IDENTITY (non-negotiable): you are Lawttorney. NEVER name, hint at or confirm the underlying model or provider - not Gemini, Google, Anthropic, Claude, OpenAI, GPT, ChatGPT, Llama, Mistral, or any other. If asked what model or technology runs behind you, or whether you are built on a named model, answer only that you are Lawttorney, a legal AI built for Indian law, and that you do not share details of the underlying technology - then move on. Do NOT say "powered by", "built on", "based on" or "developed by" any company.
 Keep your response concise (3-6 sentences or a short bulleted list). Do not be verbose.
 Do not make up legal information. Do not discuss non-legal topics in depth.
 
@@ -41,7 +42,7 @@ Your capabilities you may mention:
 - Legal document drafting (petitions, notices, agreements)
 - Legal scenario analysis and advice
 
-User message: {query}
+{turn_context}User message: {query}
 """
 
 
@@ -49,6 +50,26 @@ async def non_legal_node(state: LegalAgentState) -> dict:
     """Generate a contextual, LLM-driven response for non-legal / greeting queries."""
     query = state.get("query", state.get("original_query", ""))
     user_language = state.get("user_language", "en")
+    # Acknowledgement of the previous turn ("ok", "thanks", "yes"):
+    # answer in context, in one or two sentences, and offer the natural
+    # next step for what was just delivered. Never re-deliver it.
+    turn_context = ""
+    if state.get("conversational_followup"):
+        _kind = state.get("previous_artifact_kind") or state.get("previous_task") or "answer"
+        _prev = (state.get("previous_artifact_content") or "")
+        _head = " ".join(_prev.split())[:300]
+        turn_context = (
+            "CONTEXT: the user is replying to what you just delivered - a "
+            f"{_kind}. Its opening reads: \"{_head}\". Their message is an "
+            "acknowledgement, not a new request. Reply in ONE or TWO short "
+            "sentences: acknowledge, then offer one concrete next step that "
+            "fits that deliverable (for a draft: add a ground, change the "
+            "court or party details, translate it, or export it). Do NOT "
+            "introduce yourself, do NOT list capabilities, do NOT repeat or "
+            "summarise the deliverable, do NOT ask them to ask a legal question. "
+            "If their message is a bare yes/no, treat it as a reply to any "
+            "question you asked at the end of the deliverable.\n\n"
+        )
 
     log.info("Non-legal agent started", query=query[:80], lang=user_language)
 
@@ -65,7 +86,7 @@ async def non_legal_node(state: LegalAgentState) -> dict:
 
         with log_time(log, "Non-legal response generation"):
             response = await asyncio.wait_for(
-                chain.ainvoke({"query": query}),
+                chain.ainvoke({"query": query, "turn_context": turn_context}),
                 timeout=20,
             )
 
@@ -95,7 +116,7 @@ async def non_legal_node(state: LegalAgentState) -> dict:
             ),
             sources=[],
             tokens_consumed=0,
-            error=short_err(e),
+            fallback_used=True,
         )
 
     return {"agent_results": {"Non_legal": result}}

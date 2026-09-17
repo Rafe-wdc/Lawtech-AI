@@ -1,0 +1,231 @@
+{
+  "run_label": "local_afterfix",
+  "elapsed_s": 197.11,
+  "ttfb_ms": 943,
+  "http_ok": true,
+  "raw_events_written": 47,
+  "thread_id": "1e385540-52c4-4e9a-8da6-42807b5e8e1c",
+  "answer_len": 8523,
+  "answer_words": 1260,
+  "answer_case_citations_count_regex": 3,
+  "answer_case_citations_sample": [
+    "Gajanan Moreshwar Parelkar v. Moreshwar Madan Mantri",
+    "Bharathi Knitting Company v. DHL Worldwide Express Courier",
+    "Vidya Drolia and Ors. v. Durga Trading Corporation"
+  ],
+  "structure_signals": {
+    "found_errors_section": false,
+    "found_redraft_section": false,
+    "found_case_laws_section": false,
+    "found_prayer": false,
+    "found_shows_bnss_290": false,
+    "found_shows_bnss_293": false,
+    "found_mv_act_185": false,
+    "found_alister_anthony": false
+  },
+  "offtopic_signals": {
+    "order_vii_rule_11_count": 0,
+    "indian_evangelical_count": 0,
+    "sri_bala_count": 0,
+    "dindigul_count": 0,
+    "specific_performance_count": 1,
+    "limitation_count": 2,
+    "income_tax_count": 0,
+    "cinema_count": 0,
+    "sci_citations_header_present": false,
+    "agreement_name_placeholder_present": true,
+    "money_recovery_plaint_shape_present": false
+  },
+  "agents_planned": [
+    "Drafting",
+    "Document"
+  ],
+  "event_type_counts": {
+    "thread_id": 1,
+    "file_processing": 4,
+    "progress": 29,
+    "status": 7,
+    "context": 1,
+    "agents_planned": 1,
+    "response": 1,
+    "sources": 1,
+    "followup_suggestions": 1,
+    "done": 1
+  },
+  "progress_step_count": 29,
+  "unique_progress_steps": [
+    "classify",
+    "cleanup",
+    "finalize",
+    "generate",
+    "history",
+    "language",
+    "load",
+    "plan",
+    "reference",
+    "search",
+    "section:1",
+    "section:10",
+    "section:2",
+    "section:3",
+    "section:4",
+    "section:5",
+    "section:6",
+    "section:7",
+    "section:8",
+    "section:9",
+    "self_refine",
+    "synthesize",
+    "validate"
+  ],
+  "file_processing_summary": [
+    {
+      "message": "Processing uploaded files...",
+      "files": null,
+      "stage": null,
+      "rejected": null
+    },
+    {
+      "message": "Extracting text from APPLICATION_UNDER_SECTION_290_OF_BNSS.docx...",
+      "files": null,
+      "stage": "docx_extract_start",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": "all_files_done",
+      "rejected": null
+    },
+    {
+      "message": "Processed 1 docx",
+      "files": [
+        "APPLICATION_UNDER_SECTION_290_OF_BNSS.docx"
+      ],
+      "stage": null,
+      "rejected": null
+    }
+  ],
+  "errors": [],
+  "done_event_keys": [
+    "type",
+    "agents_used",
+    "token_usage",
+    "thread_id",
+    "conversation_turn",
+    "query_rewritten",
+    "effective_query"
+  ],
+  "compared_to_baseline": {
+    "found_shows_bnss_290": "unchanged",
+    "found_shows_bnss_293": "unchanged",
+    "found_mv_act_185": "unchanged",
+    "found_alister_anthony": "unchanged",
+    "found_prayer": "unchanged",
+    "sci_citations_header_present": "improved",
+    "order_vii_rule_11_count": "unchanged",
+    "indian_evangelical_count": "unchanged",
+    "specific_performance_count": "regressed",
+    "income_tax_count": "unchanged",
+    "cinema_count": "unchanged",
+    "agreement_name_placeholder_present": "changed",
+    "money_recovery_plaint_shape_present": "changed"
+  },
+  "baseline_agents_planned": [
+    "Drafting",
+    "Document",
+    "SCI_Judgment"
+  ],
+  "baseline_answer_len": 11431
+}
+
+=== ANSWER (first 4000 chars) ===
+**[AGREEMENT NAME]**
+
+**THIS AGREEMENT** is made and entered into on this [Date] (“Effective Date”)
+
+**BETWEEN:**
+
+**[Full Legal Name]**, a [company/partnership/individual] incorporated under the laws of India, with its registered office at [Address] (hereinafter referred to as **“[Defined Term, e.g., ‘Service Provider’]”**), which expression shall, unless it be repugnant to the context or meaning thereof, be deemed to mean and include its successors and permitted assigns) of the **FIRST PART**;
+
+**AND**
+
+**[Full Legal Name]**, a [company/partnership/individual] incorporated under the laws of India, with its registered office at [Address] (hereinafter referred to as **“[Defined Term, e.g., ‘Client’]”**), which expression shall, unless it be repugnant to the context or meaning thereof, be deemed to mean and include its successors and permitted assigns) of the **SECOND PART**.
+
+(The Service Provider and the Client shall hereinafter be individually referred to as a **“Party”** and collectively as the **“Parties”**)
+
+**WHEREAS:**
+
+A. The Service Provider is engaged in the business of [Brief description of business];
+B. The Client is desirous of availing certain services from the Service Provider;
+C. The Service Provider has agreed to provide the services to the Client and the Client has agreed to avail the services from the Service Provider, on the terms and conditions set forth in this Agreement.
+
+**NOW, THEREFORE, IN CONSIDERATION OF THE MUTUAL COVENANTS AND AGREEMENTS SET FORTH HEREIN, THE PARTIES HERETO AGREE AS FOLLOWS:**
+
+**1. SCOPE OF WORK**
+The Service Provider shall perform the services and provide the deliverables as more particularly described in the Statement of Work (SOW) attached hereto as **Annexure A** (the “Services”). The SOW shall detail the specific deliverables, timelines, acceptance criteria, and performance metrics.
+
+**2. TERM**
+This Agreement shall commence on the Effective Date and shall remain in full force and effect for a period of [Number] years, unless terminated earlier in accordance with the provisions of this Agreement (“Term”).
+
+**3. CONSIDERATION AND PAYMENT TERMS**
+In consideration for the Services, the Client shall pay the Service Provider a total fee of INR [Amount], exclusive of applicable taxes. The payment schedule, invoicing process, and provisions for Tax Deducted at Source (TDS) shall be as mutually agreed and specified in the SOW.
+
+**4. REPRESENTATIONS AND WARRANTIES**
+Each Party represents and warrants to the other that:
+(a) it is duly organized and validly existing under the laws of India;
+(b) it has the full power and authority to enter into this Agreement and perform its obligations hereunder;
+(c) this Agreement constitutes a legal, valid, and binding obligation, enforceable against it in accordance with its terms.
+
+**5. INTELLECTUAL PROPERTY RIGHTS**
+(a) **Pre-existing IP:** Each Party shall retain all rights, title, and interest in and to its own pre-existing intellectual property.
+(b) **Developed IP:** Any intellectual property developed, conceived, or created by the Service Provider during the performance of the Services under this Agreement (“Developed IP”) shall be owned by [Specify ownership, e.g., the Client / the Service Provider / jointly]. The terms of use and licensing for any Developed IP shall be detailed in the SOW.
+
+**6. INDEMNIFICATION**
+(a) Each Party (the “Indemnifying Party”) shall indemnify, defend, and hold harmless the other Party, its affiliates, officers, and employees (the “Indemnified Party”) from and against any and all claims, losses, damages, liabilities, and expenses arising out of:
+(i) a breach of any representation or warranty made by the Indemnifying Party in this Agreement;
+(ii) gross negligence or willful misconduct of the Indemnifying Party;
+(iii) infringement of any third-party intellectual property rights.
+(b) **Conduct of Claims:** The Indemnified Party shall provide prompt written notice of any claim, and the Indemnifying Party shall have the
+
+=== ANSWER TAIL (last 2000 chars) ===
+nior management.
+(b) **Mediation:** If the dispute is not resolved through negotiation within [Number] days, the Parties agree to submit the dispute to mediation before a mutually agreed-upon mediator.
+(c) **Litigation:** If mediation fails, the dispute shall be subject to the exclusive jurisdiction of the courts.
+
+***Drafting Note:*** *A multi-tiered dispute resolution clause is cost-effective. It is crucial to clearly define each step. The Supreme Court in **Vidya Drolia and Ors. v. Durga Trading Corporation (2021) 2 SCC 1** has extensively discussed the arbitrability of disputes, reinforcing the need for clear and unambiguous dispute resolution clauses.*
+
+**11. GOVERNING LAW AND JURISDICTION**
+This Agreement shall be governed by and construed in accordance with the laws of India. The courts at [City, State] shall have exclusive jurisdiction to adjudicate any disputes arising out of or in connection with this Agreement.
+
+**12. MISCELLANEOUS**
+(a) **Entire Agreement:** This Agreement, including its Annexures, constitutes the entire agreement between the Parties.
+(b) **Notices:** All notices shall be in writing and sent to the addresses specified in the preamble.
+(c) **Severability:** If any provision of this Agreement is held to be invalid or unenforceable, the remaining provisions shall remain in full force and effect.
+
+**IN WITNESS WHEREOF**, the Parties have executed this Agreement as of the Effective Date.
+
+**For [Full Legal Name of Service Provider]**
+
+---
+Name:
+Title:
+
+**For [Full Legal Name of Client]**
+
+---
+Name:
+Title:
+
+---
+**ANNEXURE A**
+
+**STATEMENT OF WORK (SOW)**
+
+*(This section should contain a detailed description of services, deliverables, timelines, payment schedule, acceptance criteria, and specific performance metrics.)*
+
+
+---
+**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.

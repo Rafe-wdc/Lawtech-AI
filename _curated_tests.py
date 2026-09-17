@@ -37,7 +37,36 @@ TEST_DOCX = REPO / "test_docx"
 
 # --- Shared client + SSE helpers ----------------------------------------
 
+PROD_URL = "https://api.lawttorney.com"
+
+
+class _ProdClient:
+    """Minimal subset of TestClient that talks to a live HTTPS server."""
+
+    def __init__(self, base_url: str):
+        import httpx
+        self._base = base_url.rstrip("/")
+        self._http = httpx.Client(timeout=httpx.Timeout(420.0, connect=30.0))
+
+    def get(self, path: str, **kw):
+        return self._http.get(self._base + path, **kw)
+
+    def post(self, path: str, **kw):
+        return self._http.post(self._base + path, **kw)
+
+    def close(self):
+        self._http.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
 def _client():
+    if os.environ.get("CURATED_TESTS_TARGET") == "prod":
+        return _ProdClient(PROD_URL)
     from fastapi.testclient import TestClient
     from core.gateway import app
     return TestClient(app)
@@ -93,6 +122,7 @@ def _post_with_file(client, file_path: Path, mime: str, query: str,
     final = _extract_final(r.text) if r.status_code == 200 else ""
 
     events_by_type: dict[str, int] = {}
+    fp_stages: list[str] = []
     for line in r.text.splitlines():
         if line.startswith("data: "):
             try:
@@ -101,12 +131,15 @@ def _post_with_file(client, file_path: Path, mime: str, query: str,
                 continue
             t = ev.get("type", "?")
             events_by_type[t] = events_by_type.get(t, 0) + 1
+            if t == "file_processing":
+                fp_stages.append(ev.get("stage", "?"))
 
     return {
         "status": r.status_code,
         "elapsed": elapsed,
         "final_answer": final,
         "events_by_type": events_by_type,
+        "file_processing_stages": fp_stages,
         "raw": r.text,
         "thread_id": thread_id,
     }
@@ -128,6 +161,7 @@ def test_1_small_pdf() -> int:
         )
     print(f"status={res['status']}  elapsed={res['elapsed']:.1f}s  "
           f"events={res['events_by_type']}")
+    print(f"file_processing stages: {res.get('file_processing_stages', [])}")
     print(f"response length: {len(res['final_answer'])}")
     print(f"--- first 400 chars ---\n{res['final_answer'][:400]}")
     ok = res["status"] == 200 and len(res["final_answer"]) > 100
@@ -152,6 +186,7 @@ def test_2_medium_pdf_drafting() -> int:
         )
     print(f"status={res['status']}  elapsed={res['elapsed']:.1f}s  "
           f"events={res['events_by_type']}")
+    print(f"file_processing stages: {res.get('file_processing_stages', [])}")
     print(f"response length: {len(res['final_answer'])}")
     print(f"--- first 600 chars ---\n{res['final_answer'][:600]}")
     ok = res["status"] == 200 and len(res["final_answer"]) > 500
@@ -176,6 +211,7 @@ def test_3_large_pdf_summary() -> int:
         )
     print(f"status={res['status']}  elapsed={res['elapsed']:.1f}s  "
           f"events={res['events_by_type']}")
+    print(f"file_processing stages: {res.get('file_processing_stages', [])}")
     print(f"response length: {len(res['final_answer'])}")
     print(f"--- first 800 chars ---\n{res['final_answer'][:800]}")
     ok = res["status"] == 200 and len(res["final_answer"]) > 500
@@ -201,6 +237,7 @@ def test_4_docx_fact_extraction() -> int:
         )
     print(f"status={res['status']}  elapsed={res['elapsed']:.1f}s  "
           f"events={res['events_by_type']}")
+    print(f"file_processing stages: {res.get('file_processing_stages', [])}")
     print(f"response length: {len(res['final_answer'])}")
     print(f"--- first 600 chars ---\n{res['final_answer'][:600]}")
     ok = res["status"] == 200 and len(res["final_answer"]) > 300
@@ -224,6 +261,7 @@ def test_5_image_vision_ocr() -> int:
         )
     print(f"status={res['status']}  elapsed={res['elapsed']:.1f}s  "
           f"events={res['events_by_type']}")
+    print(f"file_processing stages: {res.get('file_processing_stages', [])}")
     print(f"response length: {len(res['final_answer'])}")
     print(f"--- first 600 chars ---\n{res['final_answer'][:600]}")
     ok = res["status"] == 200 and len(res["final_answer"]) > 100

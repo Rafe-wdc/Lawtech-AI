@@ -1,0 +1,117 @@
+{
+  "base": "http://127.0.0.1:5000/pyapi",
+  "prompt_1": "How to deal with a Criminal Case?",
+  "prompt_2": "When should I hire a lawyer?",
+  "thread_id": "f794cb1f-60a8-438f-8cb4-80225b5e238e",
+  "same_thread": true,
+  "turn_1": {
+    "turn": 1,
+    "prompt": "How to deal with a Criminal Case?",
+    "http_ok": true,
+    "http_status": 200,
+    "elapsed_s": 23.98,
+    "ttfb_ms": 48,
+    "thread_id": "f794cb1f-60a8-438f-8cb4-80225b5e238e",
+    "answer_len": 8180,
+    "answer_words": 1272,
+    "agents_planned": [
+      "Legal_Concepts"
+    ],
+    "progress_step_count": 12,
+    "unique_progress_steps": [
+      "classify",
+      "finalize",
+      "generate",
+      "history",
+      "language",
+      "research",
+      "rewrite",
+      "synthesize",
+      "validate"
+    ],
+    "event_type_counts": {
+      "thread_id": 1,
+      "progress": 12,
+      "status": 6,
+      "context": 1,
+      "agents_planned": 1,
+      "token": 398,
+      "response": 1,
+      "sources": 1,
+      "followup_suggestions": 1,
+      "done": 1
+    },
+    "raw_events_written": 423,
+    "errors": [],
+    "followup_suggestions": [
+      "What are my rights if arrested?",
+      "How can I get legal representation?",
+      "What happens after an FIR is filed?"
+    ],
+    "quality_score": null,
+    "done_event_keys": [
+      "type",
+      "agents_used",
+      "token_usage",
+      "thread_id",
+      "conversation_turn",
+      "query_rewritten",
+      "effective_query"
+    ]
+  },
+  "turn_2": {
+    "turn": 2,
+    "prompt": "When should I hire a lawyer?",
+    "http_ok": true,
+    "http_status": 200,
+    "elapsed_s": 15.21,
+    "ttfb_ms": 11,
+    "thread_id": "f794cb1f-60a8-438f-8cb4-80225b5e238e",
+    "answer_len": 5470,
+    "answer_words": 858,
+    "agents_planned": [
+      "Legal_Concepts"
+    ],
+    "progress_step_count": 13,
+    "unique_progress_steps": [
+      "classify",
+      "finalize",
+      "generate",
+      "history",
+      "language",
+      "research",
+      "rewrite",
+      "synthesize",
+      "validate"
+    ],
+    "event_type_counts": {
+      "thread_id": 1,
+      "progress": 13,
+      "status": 6,
+      "context": 1,
+      "agents_planned": 1,
+      "token": 262,
+      "response": 1,
+      "sources": 1,
+      "followup_suggestions": 1,
+      "done": 1
+    },
+    "raw_events_written": 288,
+    "errors": [],
+    "followup_suggestions": [
+      "What if FIR is already filed?",
+      "Can I get a lawyer post-arrest?",
+      "What are lawyer costs in India?"
+    ],
+    "quality_score": null,
+    "done_event_keys": [
+      "type",
+      "agents_used",
+      "token_usage",
+      "thread_id",
+      "conversation_turn",
+      "query_rewritten",
+      "effective_query"
+    ]
+  }
+}

@@ -1,0 +1,652 @@
+{
+  "endpoint": "prod",
+  "url": "https://api.lawttorney.com/pyapi/search",
+  "thread_id": "81f11088-aae2-4783-aa36-6bb57b89869a",
+  "run_started_at": "2026-08-17T19:03:00.161996+00:00",
+  "turns": [
+    {
+      "id": 1,
+      "label": "prompt-1-mega",
+      "started_at": "2026-08-17T19:03:00.162040+00:00",
+      "elapsed_s": 92.89,
+      "status": 200,
+      "request": {
+        "url": "https://api.lawttorney.com/pyapi/search",
+        "method": "POST",
+        "headers": {
+          "X-API-Key": "***",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "Promptquery": "prompt 1: Research Prompt: Section 125 of CrPC\n \nScenario:\n \nDraft a civil suit for partition along with a prayer for temporary injunction. Facts: Rupa is an adopted daughter of the deceased owner. She has no siblings. Her father died 5 years ago, leaving behind two flats in Pune. The only legal heirs are Rupa and her mother. Her name is not yet on the property documents. Her mother is attempting to dispossess her and has expressed intent to transfer the properties to her cousin. The suit should include legal provisions for partition of the properties, declaration of her share, and a temporary injunction restraining the mother or any third party from selling, transferring, or creating third-party rights in the properties until disposal of the suit.\n \nDraft a civil suit for damages arising from medical negligence, incorporating detailed legal reasoning and relevant case laws. Scenario: My client, Mrs. Anjali Deshmukh, aged 42, and a resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the procedure, the attending surgeon, Dr. Rakesh Nair, negligently caused damage to her bile duct. Following the surgery, she experienced severe abdominal pain and had to be admitted to another hospital for corrective surgery. As a result, she incurred additional medical expenses amounting to ₹3.5 lakhs and endured significant physical pain and mental agony. Despite repeated follow-ups, both the hospital and the doctor have refused to acknowledge their negligence or offer any compensation. Mrs. Deshmukh now seeks damages of ₹25 lakhs, covering medical expenses, mental harassment, pain and suffering, and anticipated costs of future treatment.\n \nCitations:\n \n1. Rupa is a adopted child. She doesnt have any siblings. her father passed away 5 years ago. She and her mothers are only legal heirs. Her father had 2 flats in pune. Her mother told her to leave the house and her mother says that she'll transfer the property to her cousins name. now rupa is scared that she won't get any share in the properties (her name is still not on the legal papers of the properties). Give me 5 plus Case law or Citations According to the Scenario.\n \n2. Provide case laws on the admissibility of electronic evidence under Section 65B of the Indian Evidence Act.\n \n3. Provide citations or case laws related to anticipatory bail\n \nArgument Generation:\n \nMy client, Mrs. Anjali Deshmukh, aged 42, resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the surgery, due to the negligence of the attending surgeon, Dr. Rakesh Nair, her bile duct was damaged. Post-surgery, she suffered from severe abdominal pain and had to be admitted again for corrective surgery at another hospital. She incurred additional medical expenses of ₹3.5 lakhs and suffered immense mental agony and physical pain. Despite repeated follow-ups, the hospital and the doctor refused to acknowledge their mistake or compensate her. She now seeks compensation of ₹25 lakhs for medical expenses, mental harassment, pain and suffering, and future treatment costs. give me arguments on behalf of plaintiff and defendant.\n \nमाझ्या क्लायंट, श्रीमती अंजली देशमुख, वय ४२, पुण्यातील रहिवासी, यांची १२ मार्च २०२४ रोजी XYZ मल्टीस्पेशालिटी हॉस्पिटलमध्ये पित्ताशयाची शस्त्रक्रिया झाली. शस्त्रक्रियेदरम्यान, उपस्थित सर्जन डॉ. राकेश नायर यांच्या निष्काळजीपणामुळे, त्यांच्या पित्तनलिकेचे नुकसान झाले. शस्त्रक्रियेनंतर, त्यांना तीव्र पोटदुखीचा त्रास झाला आणि त्यांना दुसऱ्या रुग्णालयात सुधारात्मक शस्त्रक्रियेसाठी पुन्हा दाखल करावे लागले. त्यांना ३.५ लाख रुपयांचा अतिरिक्त वैद्यकीय खर्च आला आणि प्रचंड मानसिक त्रास आणि शारीरिक वेदना सहन कराव्या लागल्या. वारंवार पाठपुरावा करूनही, रुग्णालय आणि डॉक्टरांनी त्यांची चूक मान्य करण्यास किंवा तिला भरपाई देण्यास नकार दिला. आता त्या वैद्यकीय खर्च, मानसिक छळ, वेदना आणि त्रास आणि भविष्यातील उपचार खर्चासाठी २५ लाख रुपयांची भरपाई मागत आहेत. मला युक्तिवाद द्या.\n \nMy client is facing a criminal case under Section 420 IPC for alleged cheating. However, there was no fraudulent intention from the beginning, and it was purely a civil dispute arising from a failed business agreement. Give me arguments to defend the client and emphasize that this is a case of civil liability, not criminal cheating.\n \nConsumer Laws:\n \nScenario 1: Defective Product Liability Prompt: Priya purchases a brand-new refrigerator from a well-known electronics store. After a week, it stops working, and the manufacturer refuses to repair or replace it, claiming that the issue was caused by improper installation. What legal options does Priya have under the Consumer Protection Act, 2019, to address this defect?\n \nPdf : Review this draft and suggest changes, if any.",
+          "globalThreadId": "81f11088-aae2-4783-aa36-6bb57b89869a"
+        }
+      },
+      "response": {
+        "globalThreadId": "81f11088-aae2-4783-aa36-6bb57b89869a",
+        "result": "## Cause Title\n\nIN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, PUNE\n\nCIVIL SUIT NO. ______ OF 2024\n\nRupa D/o. Late [Deceased Father's Name],\nAge: [Age of Rupa],\nOccupation: [Occupation of Rupa],\nResiding at: [Address of Rupa], Pune.\n\n.....Plaintiff\n\n**vs**\n\n[Name of Mother] W/o. Late [Deceased Father's Name],\nAge: [Age of Mother],\nOccupation: [Occupation of Mother],\nResiding at: [Address of Mother], Pune.\n\n.....Defendant\n\n## Suit for Partition and Temporary Injunction\n\nSUIT FOR PARTITION, DECLARATION OF SHARE, PERMANENT AND TEMPORARY INJUNCTION\n\nThe Plaintiff above-named submits as under:\n\n## Facts of the Case\n\n1. That the Plaintiff is the adopted daughter of Late [Deceased Father's Name] and the Defendant, [Name of Mother]. The Plaintiff has no siblings. The parties are Hindus and are governed by Hindu Law.\n\n2. That the Plaintiff's adoptive father, Late [Deceased Father's Name], passed away intestate approximately 5 years ago, leaving behind the Plaintiff and the Defendant as his only Class I legal heirs.\n\n3. That during his lifetime, the deceased father of the Plaintiff was the absolute owner of two residential flats situated in Pune, the full particulars of which are described in the Schedule of Property annexed hereto and hereinafter referred to as the \"Suit Properties\".\n\n4. That upon the demise of the Plaintiff's father, the Plaintiff and the Defendant, being the sole legal heirs, succeeded to the Suit Properties jointly and have been in joint possession thereof. The Plaintiff and Defendant are each entitled to an equal, undivided one-half (1/2) share in the Suit Properties.\n\n5. That recently, the Defendant's behaviour towards the Plaintiff has become hostile. The Defendant has been attempting to dispossess the Plaintiff from the family home and has explicitly threatened to transfer the Suit Properties to her cousin, thereby depriving the Plaintiff of her rightful and legitimate share.\n\n6. That the Plaintiff's name has not yet been mutated in the official property records, and the Defendant is taking undue advantage of this fact to illegally and wrongfully exclude the Plaintiff from her inheritance.\n\n7. That the cause of action arose recently when the Defendant threatened to dispossess the Plaintiff and alienate the Suit Properties. The Plaintiff demanded her share, but the Defendant has refused to partition the properties, necessitating the filing of the present suit.\n\n## Legal Provisions\n\n8. That the parties to the suit are Hindus, and the succession to the estate of the deceased is governed by the provisions of the Hindu Succession Act, 1956.\n\n9. That the Plaintiff, being the adopted daughter, has all the rights and privileges of a natural-born daughter in the adoptive family. As per Section 12 of the Hindu Adoptions and Maintenance Act, 1956, an adopted child is deemed to be the child of his or her adoptive father or mother for all purposes with effect from the date of the adoption.\n\n10. That as per Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule. The Plaintiff (daughter) and the Defendant (widow) are the only Class I heirs of the deceased.\n\n11. That consequently, the Plaintiff and the Defendant are each entitled to an equal one-half (1/2) share in the Suit Properties left by the deceased.\n\n12. That in light of the Defendant's attempts to create third-party rights and alienate the Suit Properties, it is imperative to grant a temporary injunction restraining the Defendant, her agents, or anyone acting on her behalf from selling, transferring, mortgaging, or creating any third-party interest in the Suit Properties pending the final disposal of this suit, as provided under Order XXXIX Rules 1 and 2 of the Code of Civil Procedure, 1908.\n\n## Plaintiff's Entitlement and Share\n\n13. That the Plaintiff submits that as the legally adopted daughter of the Late [Deceased Father's Name], she is conferred with all the rights and status of a natural-born daughter within the adoptive family. This status is unequivocally established under Section 12 of the Hindu Adoptions and Maintenance Act, 1956, which severs all ties with the birth family and creates corresponding rights in the adoptive family.\n\n14. That the Plaintiff's adoptive father, Late [Deceased Father's Name], passed away intestate. Therefore, the succession to his self-acquired properties is governed by the rules of intestate succession laid down in the Hindu Succession Act, 1956.\n\n15. That in accordance with Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves firstly upon the heirs specified in Class I of the Schedule to the said Act. The Plaintiff, being the daughter, and the Defendant, being the widow of the deceased, are the only two surviving Class I legal heirs.\n\n16. That by virtue of the aforesaid provisions of law, the Plaintiff and the Defendant are each entitled to an equal, undivided one-half (1/2) share in the Suit Properties. The Plaintiff is, therefore, a co-owner of the Suit Properties along with the Defendant and is in joint possession of the same.\n\n## Grounds for Temporary Injunction\n\n17. That the Plaintiff has a strong prima facie case in her favour, as her entitlement to a one-half (1/2) share in the Suit Properties is clearly established by the provisions of the Hindu Succession Act, 1956. The Defendant has no legal right to deny the Plaintiff her legitimate share.\n\n18. That the balance of convenience lies overwhelmingly in favour of the Plaintiff. Granting an injunction would only require the Defendant to maintain the status quo of the properties until the rights of the parties are adjudicated, causing no prejudice to the Defendant. Conversely, refusing the injunction would expose the Plaintiff to the risk of losing her rightful inheritance through the Defendant's wrongful acts.\n\n19. That the Plaintiff will suffer irreparable loss and injury if a temporary injunction is not granted. The Defendant\nhas explicitly threatened to alienate the Suit Properties by transferring them to her cousin. If the Defendant is not\nrestrained by an order of this Hon'ble Court and succeeds in creating third-party interests, it will lead to a\nmultiplicity of legal proceedings and render any decree passed in this suit futile. The loss of the Plaintiff's share in\nthe family's residential properties cannot be adequately compensated in monetary terms.\n\n20. That it is therefore just, equitable, and necessary in the interest of justice that the Defendant, her agents, servants, or any person claiming through her be restrained by an order of temporary injunction from selling, transferring, alienating, mortgaging, gifting, or creating any third-party rights or interest of any nature whatsoever in the Suit Properties described in the Schedule hereto, pending the final hearing and disposal of this suit.\n\n## Jurisdiction and Valuation\n\n21. That the Suit Properties are situated in Pune, which is within the territorial and pecuniary jurisdiction of this Hon'ble Court. Therefore, this Hon'ble Court has the jurisdiction to entertain, try, and dispose of the present suit.\n\n22. That for the purpose of jurisdiction and court fees, the suit is valued as follows:\na. For the relief of partition and separate possession, the Plaintiff being in joint possession of the Suit Properties, the suit is valued at Rs. 1,000/- and a fixed court fee is paid thereon as per Schedule II, Article 17(vi) of the Maharashtra Court Fees Act, 1959.\nb. For the relief of permanent injunction, the suit is valued at Rs. 1,000/- and a fixed court fee is paid thereon as per Section 6(iv)(j) of the Maharashtra Court Fees Act, 1959.\nc. The total value of the suit for the purpose of court fees and jurisdiction is Rs. 2,000/-.\n\n23. That the appropriate court fee has been paid on the plaint.\n\n## Prayer\n\nIt is, therefore, most humbly and respectfully prayed that this Hon'ble Court may be pleased to:\n\na. Pass a preliminary decree declaring that the Plaintiff is entitled to an equal, undivided one-half (1/2) share in the Suit Properties described in the Schedule annexed hereto.\n\nb. Direct that the Suit Properties be partitioned by metes and bounds, and that the Plaintiff be put in separate, vacant, and peaceful possession of her one-half (1/2) share.\n\nc. Appoint a Court Commissioner to effect the partition of the Suit Properties and submit a report to this Hon'ble Court, and thereafter pass a final decree in terms of the said report.\n\nd. Pass a decree of permanent injunction restraining the Defendant, her agents, servants, or any person claiming through or under her, from selling, transferring, alienating, mortgaging, gifting, or creating any third-party rights or interest of any nature whatsoever in the Suit Properties.\n\ne. Award the costs of this suit to the Plaintiff from the Defendant.\n\nf. Grant any other and further relief as this Hon'ble Court may deem fit and proper in the facts and circumstances of the case.\n\n## Verification\n\nI, Rupa, the Plaintiff above-named, do hereby verify that the contents of paragraphs 1 to 23 of the foregoing plaint are true and correct to the best of my knowledge, information, and belief, and that nothing material has been concealed therefrom.\n\nVerified at Pune on this ______ day of __________, 2024.\n\n(Signature of Plaintiff)\nRupa\nPlaintiff\n\n---\n\n## REFERENCES & CITATIONS\n\n\n### LEGAL_CONCEPTS CITATIONS:\nMedical negligence in India occurs when a healthcare professional fails to provide the expected standard of care, leading to harm or injury to a patient. This concept has gained significant attention due to an increasing number of cases where patients seek legal recourse for alleged mistakes by medical practitioners or staff.\n\n### Essential Components of Medical Negligence\n\nTo establish medical negligence, the following conditions must typically be met:\n-   **Duty of Care:** The medical professional must have owed a duty of care to the patient. This duty arises when a patient seeks medical treatment, expecting the healthcare provider to act competently and responsibly.\n-   **Breach of Duty:** The medical professional must have failed to meet the expected standard of care, skill, or knowledge in the given situation. This breach is often measured against what a reasonably prudent medical provider in the same field would have done under similar circumstances.\n-   **Injury Caused by Breach:** The harm or injury suffered by the patient must be directly linked to the medical professional's breach of duty. This injury can be physical, emotional, or financial.\n-   **Damage:** The patient must demonstrate actual loss, such as physical harm, emotional distress, or financial loss.\n\n### Legal Framework for Medical Negligence in India\n\nMedical negligence cases in India can be pursued under various legal provisions:\n\n-   **Consumer Protection Act, 2019:** Patients can approach consumer courts for negligence claims, treating it as a\n\"deficiency in service.\" The Supreme Court, in *Indian Medical Association v. V.P. Shantha*, held that medical services\nfall within the ambit of \"service\" under the Consumer Protection Act, 1986 (now the 2019 Act), allowing patients who pay\nfor treatment to seek relief in consumer forums. The Act explicitly includes any act of negligence or omission causing\nloss or injury to a consumer as a \"deficiency in service.\"\n-   **Indian Penal Code, 1860 (IPC):** Sections 304A, 337, and 338 of the IPC deal with causing death or harm due to careless or negligent actions.\n    -   **Section 304A:** Penalizes those who cause death by negligence, applicable when doctors fail to exercise reasonable care.\n    -   **Section 337:** Deals with causing hurt by an act endangering human life or personal safety.\n    -   **Section 338:** Deals with causing grievous hurt by an act endangering human life or personal safety.\n    It is important to note that for criminal liability under the IPC, the negligence must be \"gross\" or \"reckless,\" not merely a mistake of judgment or an accident.\n-   **Civil Law (Torts):** Medical negligence cases can also be brought under tort law, where a doctor can be held responsible for breaching their duty, leading to harm to a patient. Patients can file a civil suit seeking compensation for their loss or injury.\n-   **Indian Evidence Act, 1872:** This Act regulates the burden of proof, meaning the patient usually has to prove the doctor's negligence.\n\n### Key Case Laws and Principles\n\n-   ***Jacob Mathew v. State of Punjab, (2005) 6 SCC 1***: This landmark Supreme Court judgment laid down guidelines for\nhandling criminal complaints against doctors for medical negligence. The Court emphasized that to hold a doctor\ncriminally liable, there must be \"gross negligence\" reflecting a reckless disregard for the patient's safety. It also\nstated that a simple lack of care, an error of judgment, or an accident, even if fatal, will not constitute culpable\nmedical negligence. The judgment aims to protect doctors from frivolous or unjust prosecution.\n-   ***Indian Medical Association v. V.P. Shantha, (1995) 6 SCC 651***: This case established that medical services provided for consideration fall under the definition of \"service\" in the Consumer Protection Act, 1986, making medical professionals accountable to consumer forums.\n-   **Bolam Test:** This test, accepted by the Supreme Court, states that a doctor is not negligent if they acted in accordance with a practice accepted as proper by a responsible body of medical men skilled in that particular art.\n\n### Professional Regulations\n\nThe **Indian Medical Council (Professional Conduct, Etiquette and Ethics) Regulations, 2002**, passed under the Indian Medical Council Act, 1956, lay down several duties and responsibilities for registered medical practitioners. These regulations cover aspects such as maintaining medical records, patient confidentiality, and ethical conduct.\n\n### Burden of Proof\n\nGenerally, the burden of proof in medical negligence cases lies with the complainant (patient) to establish that there was a duty of care, a breach of that duty, and that the breach directly resulted in damage. The law requires a higher standard of evidence to support allegations against medical professionals.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "token_usage": {
+          "input_tokens": 88857,
+          "output_tokens": 12147,
+          "total_tokens": 107601,
+          "cache_read_tokens": 30329,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 6180,
+          "cost_usd": 0.231113,
+          "by_agent": {
+            "Orchestrator": {
+              "input": 11076,
+              "output": 2184,
+              "total": 13260,
+              "cache_read": 5803,
+              "calls": 3,
+              "cost_usd": 0.001981
+            },
+            "Drafting": {
+              "input": 71408,
+              "output": 8867,
+              "total": 80275,
+              "cache_read": 24526,
+              "calls": 7,
+              "cost_usd": 0.224479
+            },
+            "Legal_Concepts": {
+              "input": 6373,
+              "output": 1096,
+              "total": 14066,
+              "cache_read": 0,
+              "calls": 1,
+              "cost_usd": 0.004652
+            }
+          },
+          "calls": [
+            {
+              "agent": "Orchestrator",
+              "step": "classify_and_plan",
+              "input": 2430,
+              "output": 79,
+              "total": 2509,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000275
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "extract_user_intent",
+              "input": 6803,
+              "output": 1437,
+              "total": 8240,
+              "cache_read": 5803,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.001255
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "rewrite_per_agent_queries",
+              "input": 1843,
+              "output": 668,
+              "total": 2511,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000452
+            },
+            {
+              "agent": "Drafting",
+              "step": "pick_reference",
+              "input": 4740,
+              "output": 71,
+              "total": 4811,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000502
+            },
+            {
+              "agent": "Drafting",
+              "step": "fanout_judge",
+              "input": 3596,
+              "output": 519,
+              "total": 4115,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000567
+            },
+            {
+              "agent": "Legal_Concepts",
+              "step": "web_grounded",
+              "input": 6373,
+              "output": 1096,
+              "total": 14066,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.004652
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 11704,
+              "output": 1751,
+              "total": 13455,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 1573,
+              "cost_usd": 0.04787
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 11894,
+              "output": 2078,
+              "total": 13972,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 1388,
+              "cost_usd": 0.049528
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 12588,
+              "output": 1959,
+              "total": 14547,
+              "cache_read": 8175,
+              "cache_creation": 0,
+              "reasoning": 1319,
+              "cost_usd": 0.048515
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 13220,
+              "output": 2011,
+              "total": 15231,
+              "cache_read": 8175,
+              "cache_creation": 0,
+              "reasoning": 1507,
+              "cost_usd": 0.051705
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate_section_pair",
+              "input": 13666,
+              "output": 478,
+              "total": 14144,
+              "cache_read": 8176,
+              "cache_creation": 0,
+              "reasoning": 393,
+              "cost_usd": 0.025792
+            }
+          ]
+        },
+        "source": [
+          {
+            "source_type": "drafting",
+            "title": "SUIT FOR PARTITION AND SEPARATE POSSESSION",
+            "content": [
+              "Draft Heading: Specimen/Draft/Format of SUIT FOR PARTITION AND SEPARATE POSSESSION.\nDraft Content: IN THE COURT OF THE PRINCIPAL CIVIL JUDGE, (City Name), (District Name), (State Name)\n                                                                                SUIT NO. _________ OF 2023\n\n(Plaint"
+            ],
+            "doc_link": null,
+            "file_name": "/content/formats_and_all_drafts/SUIT FOR PARTITION AND SEPARATE POSSESSION.csv",
+            "agent_name": "Drafting",
+            "relevance_score": null,
+            "template_type": "SUIT FOR PARTITION AND SEPARATE POSSESSION"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "saslawchambers.com",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFu7ssGVA9IjG2zR4NWj2Yk4A8JisVJXdmbACqdUU3s8LQN0npewW1hq0HY6PkxYagFRfQ_5yM2AvY2qzAwr-gwqCiFUC0vxCaBuItYfKcsCV7nscUvmfWghBxiHCkciFmbYVR_Gzh57cHsoRhJFccawUvC4AsN6F9Lsc39jG-P",
+            "web_title": "saslawchambers.com"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "legalkart.com",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEWpWD4bPfw9V1-obazxnlXkBFffgV9d0zJjf_Mvd0wGvR4IROMtDRfjNhp36rqZA5XhtO3EG-NiaM3iPZ0rxlR7kxgpbfHEj2g-_ASHwH7BZFtq67yozAfHzH3r6dIm7-n136mx533olV1cRNoFYIuBr_TxazvfXXZ1OdAG-ArOC_DAkssJjXq-DRn0CFRP6P3f1wBzT3INFNIZIn-f38_-D78dbG-IAibFw==",
+            "web_title": "legalkart.com"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "asiindia.org",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFKblY6tRKNCBUcbnA9QFiqPNWo3ir53TlIH4347dJ_zosm3wSU1pSR1IydTVUcsnGl9GRZuQwYS6A3uf_ClMhkHZMQn90TR0xLU5pLWHwVZCvNxlz76k4ZK7NISnZV3miiA3Xbo8xUUUQdnSgIgfJJotp66XWSxXzlwgMEP2dmUUh0KhVu3DKgAL4=",
+            "web_title": "asiindia.org"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "nyaaya.org",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGRBV9L8xytAgQ_MxF4sMTImGE1UvZ38YgvhRA7a4z2tU7159HkXik9YCzfzYQU0n0SSo21A0r-WqHNw2mI3k0xrOmeyMwepBj4XdD9rIAeU691ZQ75LHdoJVQIHApQL4fOnXzVhdjT4uiuMb5Dgzjs8CfxKiSDRzbs1oAhpqNsgj-8DJ2naBkZpg9BdTQ1eud6qCEmG_eOznlohIaiUDE=",
+            "web_title": "nyaaya.org"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "lawjournals.org",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF4E71UJcG0t-plK-BdPitsbUP_D7qckeycIgPIv4gL37crOKmmdJ4X1BMsRsXzK35tu8J4yXvoPBNrr26ebgYdoK-VFfxnAMCNtRmbWPrzytUgV-A4DuFCfQn6qi2GlStHAdHUvVEKjG_q9bBLHLplsvRKoi7rbVrbCV4-jlXm9J1l3A==",
+            "web_title": "lawjournals.org"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "thelaw.institute",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF3x9T8q_7SFqFeGvj88fIZn9DXgoVszlUC6p5-P49DJQFWpEl8qLV8viQJADSbp16_plps8d86xNSf7YEn4EDlg28RDjPYpqoDeipLafH2xFOPjqR67laf-skC0HiCt4rSGMYrMp8FmVgbPtkBq3XfD5qcNR80FH4jK7LP5E7355ztEoSh2U7F_Nzy-PJRrZllKwLYnfsKNTOWCtU=",
+            "web_title": "thelaw.institute"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ijme.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFsBtF3eW_xkJ8LoCu8JEUf8_8iCqM4gLTx1JkwgvOeTuX3c0kMrrzb4i3MobSF2d9yHL04PGqVr5e6IKq6ND0WR1Mk17J3oM5NKXxPuW4JaOBr_JW5JDKYIuTpBH0GBAG8-tX7lHCwK5BzCepr1Q3P6ksROQ-jGeXWH_0ry5Lhn6PwsE4VgjE2ndg5OCoYRKW0b7x6lKyHoFy92ifuNCdnMzJPmEW0eC_MU5W4OzE2tKqtkxkU3HEboBUoKughA0U0hPhbjvamlw==",
+            "web_title": "ijme.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ipleaders.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHBfem2dQut5PVIB79xVp3lmhqVDcdZ9BfBiqOHiMqaArcuhIOxLTQW3TXPVbFd5gbuveHG1Dhk0zA39Bd1Hntx3IxJwh_P7OIngqL4BjK9PMRzEDrT3kfeVHkAxTL43p7fqoX21MbD5s3e1jzsmw==",
+            "web_title": "ipleaders.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "nih.gov",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQELgMJtzIREP-v4rKfKcoVESvFa_y3U6fmkR_fafmSl3fYxhSOLHwM-aDZHg4t1CsE-T5SGcuuyywKfKC_RObG0AYJMvnA5-tGcPTtUPADEAxi_YuFrE7qLkhTX-js2aCDeeV14HbybJIPROiw=",
+            "web_title": "nih.gov"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "nmji.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFo7qMndzWsi-4PQPgzCasWiyP6EDtnGRi__ZfjJ9rVsEkk9dImtZ5RPT2KIfvFsbeACf_TVwBNf9e8byhsFJxmM9XY2OSbPRy6SiXON7AJT3N_2RT1GJGDCuZX2LveizaVBZRNF3ZrbZCmQa_-k2uyPrDcpW2pMNblGhdbobDalOVF9mzv43lqDmomwEmtFqZ---hz70sk-nDgilwFREOh8dVsfNcvi4a6OYzlQSpB",
+            "web_title": "nmji.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "medindia.net",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFaaSkUnDaPPnHgbAdzjY59IGbwDW7Ast2LSV-UiADvgeMQfdI_lp836-0MoNa4oL88ym02VMpS976rBUddn4R5x2C_kCtE24EgHC-pJ23iaA6btw56eZEH3umF9eUjvLqnJZNfDg2uy8SyU83BKmFEqJhZ92Pj2qcRBrOU3K3oXHjbpuig1AVLOPogJ_oV06NdzJ6PlcwA085fMojGDsg7bVtN9eC9IxBIa7OaCzxoi2QZG_ywjQjrXokG64h9Zd-waw==",
+            "web_title": "medindia.net"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ijllr.com",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGMG8ni0hwwFNu_HnYgfTRdwWirUWLreNBfrRTGjl1T1G9UqUDfQNiUroiZilEim0RSCU0SBHs-LqGJyxF5-eexU8qFwcOfPDKwKduRLsVDYp0zRwqKpWrpswtgnyW3HW9SLn8mbitZn9q0oKxPH0I5vyKciFF-d1pTID9Bs_qvYVck",
+            "web_title": "ijllr.com"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "alec.co.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHGbg1BmQlmWbzurwPYupaUgcD9N5HtYxEt2i1uknCUSo9oDk09dpB2ulm2C9udGQ0CQ4o5Qo_2uAkQjfuhWXebzUrl4whG6SBvciYJzHWPOePqICTukcWHqicQ_pQOFAf6XJ7S6teKG4Cx2YoA958rVn-X8GjGiNoHNqp9DKp-187Mh5m0Ow2XFmjBzzk=",
+            "web_title": "alec.co.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ovid.com",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqJCk-pCskqQn4_GIx1eOkMPrtpN_z2ShD7c_4SEg6VwDU2IeEwYLAJrzVK5gp_mjsGfko60GZ6CvQPjf3JD4jRiEC1WHgV_Oc7lFsRoz8OgBsMyq-1qNdIaHWuP1-CxWnXZzg-9SyfIxtBxB2hpRPFaGZDYsyZBLSWciEpZ_yOUVqo-8-zWu5k5M5nO5ISBjsJUWA1zYDhGRXLKPwsGki9vHqLYCn3xZSOta4Nqk=",
+            "web_title": "ovid.com"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ijme.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE64Y2b_OzitVqvWgNUZFHlKXRByxCqoChZ2ae5Xs1ND7EOPaJ8-cq1xUbiEnyDKNH6ee7znZK1Zspta8YkvRAHbbYiv-2OwrfEDBzrMAPbH7fYGi2AUEMO9uA-iNDhBKskiAgOEECKy4FcAyNz7s0RRIKlQCCkmw_YCLnCgN37ic0TFFVJ4sW5jaiFBfDstYqeS-QH1Nr35sQwJ6WyQNxjkPDRi_WaSnb1SvbpIag1NaloXMzI",
+            "web_title": "ijme.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "nih.gov",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFITx8oi3OJ8qN3nWQ2VTJVwhz6g-UyApeIcQv4QPf5OaA_T93Wp7ef861svDt1kkRLvHcIUC7xeCoT047WHTt5atgv3vPC1noBmwIj52kTuVsXdv_QIIxdZUhJEvKON5yVSJx0YtjcLJjvCOw=",
+            "web_title": "nih.gov"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ruralneuropractice.com",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHC_LpqX6ezdHE3ddfWB5O9AU632EFCXxYGJknAxsHVxq8r4Ixnqy51c-VI75RX0phj7PLkdUCNligweAiIXtqlKXMhlhF6jcjvoi8JiN7Dxw0JZaeP3VLiPS7reVYdOWCesJmO4JQrFnJyOO3QxANEIx4aeWnz60mYZIhookk2BrTGTTumVBPjANCB13Vca_PjNIBUg9QUGteH1WdK8Lq3VrBsaFkAGAQfCf1uxZhkt-H_o_DUaHyy9xZ9RVXkmtA3s7jO1JYho5sETb8SeN1h7DBojsg3A5zF0WE82kuSwfN4Fw436eo0hI5RM25Z5Q==",
+            "web_title": "ruralneuropractice.com"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "nih.gov",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG7--3irnLynUwtqZ2EbV0HM2JA-Q4JSgZLSTZhx15GVBFl87sogb4mts72DsDZErnIgpCFMOkYNOJO49jIPgut90KMPQfLnRVN9xM1G42zt0l-sk_uhNSxDLoglzqYAI3vjsC6QonDdtH7IrA=",
+            "web_title": "nih.gov"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "indiacode.nic.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGZOrq0xSWHOErGr-YbUx2I6OiR3mwrGt_5qczejeoJauzEyxlSUrwG-Km8B6iZhR9b2HXgfcydTSCpNNeuACW7wL6Q7ZiVJ4oyHdU6-KX6wCrYwobrRM3Yrurr8t9z1LK6rwOolPGlGqXYrjBulofyPc1YZ5GrFhRHWgvMa8JJcnnnCmZKRqr2Ob8T4mzlqJ8_b1mAaLOdqQ5O4cP5-QS4XgSqyfw1l2NVtJ0nsB43_r3RSGDEeKk6XRQV29Hr8nWQ9gwbLUN8sQ-8nvDuqZ3bCnM6JVp2DPNyuNq52u6IwGAXj1vD8dFcfn8-maOVuFFHXezFlxWHBkO8tyM_ZxfDqg==",
+            "web_title": "indiacode.nic.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "medbots.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHct49Ywyu_eemdJUB7prcOOYKoNm6pkHzvq57zAVDY_7sJegvwy6oKyxFHXyZd3KJr9odLFm6Os38zPOac2L-A1xyZ0IrYC9aNZpYijpY4s-9Nk3tiQalTul4maw6D8fxW0H9anD5S6xc6DxnnuVczYoOJh72Zs2IxXLHfZIIMbQ2AWg==",
+            "web_title": "medbots.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "cgmedicalcouncil.org",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHK30k_qLhs71XIrrHCB8Yu0qeakt37zzn7-19auIM50Cnzu2oGMfRfdOQAfgo_80YZg-JAbUJ806GNWDd1Y8CrHCwUJu2G859M4oVExN3vWpXTNUEZSl5ycE1FmVbCVqbOlLugBjqerWY=",
+            "web_title": "cgmedicalcouncil.org"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "indiankanoon.org",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE9Q7e7h2H6ReHGBw5z2yeYM6W_QAdCG3Gtar01Ge3gPZ9Tg9b7sWZVEf1qV72V8ksY4dHOtGvo89W4ohED2u6A4xzggOez7fPz-WWkdnObU7iv9kat07lLRBJpiiFNKVy2CA==",
+            "web_title": "indiankanoon.org"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ijme.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHhC4Uce2ZUaLvYjMjZUsYpdrzrWNxMc8a4L2gOj1OdNC8s5E09cVVYkZRn1LPwJtKENPuyahQ8hooFx6PiNtb_mJyLnVseRZdXO-D63TVPD3IMBwcSoGhqCHt_Zcf76PzUALxA3Yyomk-Z2dCtZSMgHT8v9VNKHV_Gc6D8Nv1Z8WLrp3OiLhsQi6NztaeD3kLyvVZwgvBEfCRzY6A3Dft4giRek26LQQctx_d-60ZjCQ==",
+            "web_title": "ijme.in"
+          },
+          {
+            "source_type": "legal_concepts",
+            "title": "ssrana.in",
+            "content": [],
+            "doc_link": null,
+            "file_name": null,
+            "agent_name": "Legal_Concepts",
+            "relevance_score": null,
+            "web_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGAzbmzuVFvAQfE97OcvF1uJg6XPeWu6rImRO-HdfUVCyGxZZkOhVV7PttTdFE25W5C3RC80l3uxe2CRijYhrFqtyu8HknWosRaaGIdbC57bPnPjDoB9eY3YUgDKQr4cVDB7nZojmIuSEGYMgdN2Gc=",
+            "web_title": "ssrana.in"
+          }
+        ],
+        "agents_used": [
+          "Drafting",
+          "Legal_Concepts"
+        ],
+        "effective_query": "prompt 1: Research Prompt: Section 125 of Code of Criminal Procedure 1973\n \nScenario:\n \nDraft a civil suit for partition along with a prayer for temporary injunction. Facts: Rupa is an adopted daughter of the deceased owner. She has no siblings. Her father died 5 years ago, leaving behind two flats in Pune. The only legal heirs are Rupa and her mother. Her name is not yet on the property documents. Her mother is attempting to dispossess her and has expressed intent to transfer the properties to her cousin. The suit should include legal provisions for partition of the properties, declaration of her share, and a temporary injunction restraining the mother or any third party from selling, transferring, or creating third-party rights in the properties until disposal of the suit.\n \nDraft a civil suit for damages arising from medical negligence, incorporating detailed legal reasoning and relevant case laws. Scenario: My client, Mrs. Anjali Deshmukh, aged 42, and a resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the procedure, the attending surgeon, Dr. Rakesh Nair, negligently caused damage to her bile duct. Following the surgery, she experienced severe abdominal pain and had to be admitted to another hospital for corrective surgery. As a result, she incurred additional medical expenses amounting to ₹3.5 lakhs and endured significant physical pain and mental agony. Despite repeated follow-ups, both the hospital and the doctor have refused to acknowledge their negligence or offer any compensation. Mrs. Deshmukh now seeks damages of ₹25 lakhs, covering medical expenses, mental harassment, pain and suffering, and anticipated costs of future treatment.\n \nCitations:\n \n1. Rupa is a adopted child. She doesnt have any siblings. her father passed away 5 years ago. She and her mothers are only legal heirs. Her father had 2 flats in pune. Her mother told her to leave the house and her mother says that she'll transfer the property to her cousins name. now rupa is scared that she won't get any share in the properties (her name is still not on the legal papers of the properties). Give me 5 plus Case law or Citations According to the Scenario.\n \n2. Provide case laws on the admissibility of electronic evidence under Section 65B of the Indian Evidence Act.\n \n3. Provide citations or case laws related to anticipatory bail\n \nArgument Generation:\n \nMy client, Mrs. Anjali Deshmukh, aged 42, resident of Pune, underwent gallbladder surgery at XYZ Multispecialty Hospital on 12th March 2024. During the surgery, due to the negligence of the attending surgeon, Dr. Rakesh Nair, her bile duct was damaged. Post-surgery, she suffered from severe abdominal pain and had to be admitted again for corrective surgery at another hospital. She incurred additional medical expenses of ₹3.5 lakhs and suffered immense mental agony and physical pain. Despite repeated follow-ups, the hospital and the doctor refused to acknowledge their mistake or compensate her. She now seeks compensation of ₹25 lakhs for medical expenses, mental harassment, pain and suffering, and future treatment costs. give me arguments on behalf of plaintiff and defendant.\n \nमाझ्या क्लायंट, श्रीमती अंजली देशमुख, वय ४२, पुण्यातील रहिवासी, यांची १२ मार्च २०२४ रोजी XYZ मल्टीस्पेशालिटी हॉस्पिटलमध्ये पित्ताशयाची शस्त्रक्रिया झाली. शस्त्रक्रियेदरम्यान, उपस्थित सर्जन डॉ. राकेश नायर यांच्या निष्काळजीपणामुळे, त्यांच्या पित्तनलिकेचे नुकसान झाले. शस्त्रक्रियेनंतर, त्यांना तीव्र पोटदुखीचा त्रास झाला आणि त्यांना दुसऱ्या रुग्णालयात सुधारात्मक शस्त्रक्रियेसाठी पुन्हा दाखल करावे लागले. त्यांना ३.५ लाख रुपयांचा अतिरिक्त वैद्यकीय खर्च आला आणि प्रचंड मानसिक त्रास आणि शारीरिक वेदना सहन कराव्या लागल्या. वारंवार पाठपुरावा करूनही, रुग्णालय आणि डॉक्टरांनी त्यांची चूक मान्य करण्यास किंवा तिला भरपाई देण्यास नकार दिला. आता त्या वैद्यकीय खर्च, मानसिक छळ, वेदना आणि त्रास आणि भविष्यातील उपचार खर्चासाठी २५ लाख रुपयांची भरपाई मागत आहेत. मला युक्तिवाद द्या.\n \nMy client is facing a criminal case under Section 420 Indian Penal Code 1860 for alleged cheating. However, there was no fraudulent intention from the beginning, and it was purely a civil dispute arising from a failed business agreement. Give me arguments to defend the client and emphasize that this is a case of civil liability, not criminal cheating.\n \nConsumer Laws:\n \nScenario 1: Defective Product Liability Prompt: Priya purchases a brand-new refrigerator from a well-known electronics store. After a week, it stops working, and the manufacturer refuses to repair or replace it, claiming that the issue was caused by improper installation. What legal options does Priya have under the Consumer Protection Act, 2019, to address this defect?\n \nPdf : Review this draft and suggest changes, if any.",
+        "query_rewritten": true,
+        "conversation_turn": 1,
+        "followup_suggestions": [
+          "What if the mother already transferred the property?",
+          "What are Rupa's rights as adopted daughter?",
+          "What evidence is needed for injunction?"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "label": "prompt-2-convert-to-marathi",
+      "started_at": "2026-08-17T19:04:33.056641+00:00",
+      "elapsed_s": 92.26,
+      "status": 200,
+      "request": {
+        "url": "https://api.lawttorney.com/pyapi/search",
+        "method": "POST",
+        "headers": {
+          "X-API-Key": "***",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "Promptquery": "Convert above text into marathi",
+          "globalThreadId": "81f11088-aae2-4783-aa36-6bb57b89869a"
+        }
+      },
+      "response": {
+        "globalThreadId": "81f11088-aae2-4783-aa36-6bb57b89869a",
+        "result": "## दावा शीर्षक\n\nपुणे येथील वरिष्ठ स्तर दिवाणी न्यायाधीश यांच्या न्यायालयात\n\nदिवाणी दावा क्रमांक ______ सन 2024 चा\n\nरुपा, कै. [मृत वडिलांचे नाव] यांची कन्या,\nवय: [रुपाचे वय],\nव्यवसाय: [रुपाचा व्यवसाय],\nरा. [रुपाचा पत्ता], पुणे.\n\n.....वादी\n\n**विरुद्ध**\n\n[आईचे नाव], कै. [मृत वडिलांचे नाव] यांची पत्नी,\nवय: [आईचे वय],\nव्यवसाय: [आईचा व्यवसाय],\nरा. [आईचा पत्ता], पुणे.\n\n.....प्रतिवादी\n\n## वाटप आणि तात्पुरत्या मनाई हुकुमासाठीचा दावा\n\nवाटप, हिश्शाची घोषणा, कायमस्वरूपी आणि तात्पुरत्या मनाई हुकुमासाठीचा दावा\n\nवरील नमूद वादी खालीलप्रमाणे सादर करतो/करते:\n\n## प्रकरणाची तथ्ये\n\n1. वादी ही कै. [मृत वडिलांचे नाव] आणि प्रतिवादी, [आईचे नाव] यांची दत्तक कन्या आहे. वादीला कोणतीही भावंडं नाहीत. पक्षकार हिंदू असून त्यांना हिंदू कायदा लागू आहे.\n2. वादीचे दत्तक वडील, कै. [मृत वडिलांचे नाव], सुमारे 5 वर्षांपूर्वी विना-मृत्युपत्र मरण पावले, त्यांच्यामागे वादी आणि प्रतिवादी हेच त्यांचे एकमेव वर्ग I कायदेशीर वारस आहेत.\n3. हयात असताना, वादीचे दिवंगत वडील पुणे येथे असलेल्या दोन निवासी सदनिकांचे पूर्ण मालक होते, ज्यांचे संपूर्ण तपशील यासोबत जोडलेल्या मालमत्तेच्या परिशिष्टात वर्णन केले आहेत आणि यापुढे त्यांना \"दावा मालमत्ता\" असे संबोधले जाईल.\n4. वादीच्या वडिलांच्या निधनानंतर, वादी आणि प्रतिवादी, एकमेव कायदेशीर वारस असल्याने, दावा मालमत्तेचे संयुक्तपणे वारस झाले आहेत आणि त्यांच्या संयुक्त ताब्यात आहेत. वादी आणि प्रतिवादी प्रत्येकी दावा मालमत्तेत समान, अविभाजित अर्धा (1/2) हिश्शाचे हक्कदार आहेत.\n5. अलीकडे, प्रतिवादीचे वादीप्रतीचे वर्तन शत्रुत्वपूर्ण झाले आहे. प्रतिवादी वादीला कौटुंबिक घरातून बेदखल करण्याचा प्रयत्न करत आहे आणि दावा मालमत्ता तिच्या चुलत भावाला हस्तांतरित करण्याची स्पष्ट धमकी दिली आहे, ज्यामुळे वादीला तिच्या कायदेशीर आणि वैध हिश्शापासून वंचित ठेवले जात आहे.\n6. वादीचे नाव अद्याप अधिकृत मालमत्ता नोंदींमध्ये समाविष्ट झालेले नाही आणि प्रतिवादी या वस्तुस्थितीचा गैरफायदा घेऊन वादीला तिच्या वारसा हक्कातून बेकायदेशीरपणे आणि चुकीच्या पद्धतीने वगळत आहे.\n7. दावा कारण नुकतेच उद्भवले जेव्हा प्रतिवादीने वादीला बेदखल करण्याची आणि दावा मालमत्ता हस्तांतरित करण्याची धमकी दिली. वादीने तिच्या हिश्शाची मागणी केली, परंतु प्रतिवादीने मालमत्तेचे वाटप करण्यास नकार दिला, ज्यामुळे हा दावा दाखल करणे आवश्यक झाले आहे.\n\n## कायदेशीर तरतुदी\n\n8. दाव्यातील पक्षकार हिंदू आहेत आणि मृताच्या मालमत्तेचे वारसा हक्क Hindu Succession Act, 1956 च्या तरतुदींद्वारे नियंत्रित होतात.\n9. वादी, दत्तक कन्या असल्याने, दत्तक कुटुंबातील नैसर्गिकरित्या जन्मलेल्या कन्येचे सर्व हक्क आणि विशेषाधिकार तिला प्राप्त आहेत. Section 12 of the Hindu Adoptions and Maintenance Act, 1956 नुसार, दत्तक घेतलेले मूल दत्तक घेतल्याच्या तारखेपासून सर्व हेतूंसाठी त्याच्या दत्तक वडील किंवा आईचे मूल मानले जाते.\n10. Section 8 of the Hindu Succession Act, 1956 नुसार, विना-मृत्युपत्र मरण पावलेल्या हिंदू पुरुषाची मालमत्ता अनुसूचीतील वर्ग I मध्ये नमूद केलेल्या वारसांना मिळते. वादी (कन्या) आणि प्रतिवादी (विधवा) हेच मृताचे एकमेव वर्ग I वारस आहेत.\n11. परिणामी, वादी आणि प्रतिवादी प्रत्येकी मृताने मागे ठेवलेल्या दावा मालमत्तेत समान अर्धा (1/2) हिश्शाचे हक्कदार आहेत.\n12. प्रतिवादीच्या तृतीय-पक्ष हक्क निर्माण करण्याच्या आणि दावा मालमत्ता हस्तांतरित करण्याच्या प्रयत्नांच्या पार्श्वभूमीवर, या दाव्याच्या अंतिम निकालापर्यंत प्रतिवादी, तिचे एजंट किंवा तिच्या वतीने कार्य करणाऱ्या कोणालाही दावा मालमत्ता विकण्यापासून, हस्तांतरित करण्यापासून, गहाण ठेवण्यापासून किंवा कोणताही तृतीय-पक्ष हितसंबंध निर्माण करण्यापासून रोखण्यासाठी तात्पुरता मनाई हुकूम देणे आवश्यक आहे, जसे की Order XXXIX Rules 1 and 2 of the Code of Civil Procedure, 1908 अंतर्गत प्रदान केले आहे.\n\n## वादीचा हक्क आणि हिस्सा\n\n13. वादी सादर करतो/करते की, कै. [मृत वडिलांचे नाव] यांची कायदेशीररित्या दत्तक कन्या असल्याने, तिला दत्तक कुटुंबातील नैसर्गिकरित्या जन्मलेल्या कन्येचे सर्व हक्क आणि दर्जा प्राप्त आहे. हा दर्जा Section 12 of the Hindu Adoptions and Maintenance Act, 1956 अंतर्गत निःसंदिग्धपणे स्थापित केला आहे, जो जन्म कुटुंबाशी असलेले सर्व संबंध तोडतो आणि दत्तक कुटुंबात संबंधित हक्क निर्माण करतो.\n14. वादीचे दत्तक वडील, कै. [मृत वडिलांचे नाव], विना-मृत्युपत्र मरण पावले. त्यामुळे, त्यांच्या स्व-अधिग्रहित मालमत्तेचे वारसा हक्क Hindu Succession Act, 1956 मध्ये नमूद केलेल्या विना-मृत्युपत्र वारसा नियमांनुसार नियंत्रित होतात.\n15. Section 8 of the Hindu Succession Act, 1956 नुसार, विना-मृत्युपत्र मरण पावलेल्या हिंदू पुरुषाची मालमत्ता प्रथमतः उक्त कायद्याच्या अनुसूचीतील वर्ग I मध्ये नमूद केलेल्या वारसांना मिळते. वादी, कन्या असल्याने, आणि प्रतिवादी, मृताची विधवा असल्याने, हेच एकमेव दोन हयात असलेले वर्ग I कायदेशीर वारस आहेत.\n16. कायद्याच्या उपरोक्त तरतुदींनुसार, वादी आणि प्रतिवादी प्रत्येकी दावा मालमत्तेत समान, अविभाजित अर्धा (1/2) हिश्शाचे हक्कदार आहेत. त्यामुळे, वादी प्रतिवादीसोबत दावा मालमत्तेची सह-मालक आहे आणि तिच्या संयुक्त ताब्यात आहे.\n\n## तात्पुरत्या मनाई हुकुमासाठीची कारणे\n\n17. वादीच्या बाजूने एक मजबूत प्रथमदर्शनी प्रकरण आहे, कारण दावा मालमत्तेतील तिच्या अर्ध्या (1/2) हिश्शाचा हक्क Hindu Succession Act, 1956 च्या तरतुदींद्वारे स्पष्टपणे स्थापित झाला आहे. प्रतिवादीला वादीला तिचा कायदेशीर हिस्सा नाकारण्याचा कोणताही कायदेशीर अधिकार नाही.\n18. सोयीचे संतुलन मोठ्या प्रमाणात वादीच्या बाजूने आहे. मनाई हुकूम दिल्यास प्रतिवादीला केवळ पक्षकारांचे हक्क निश्चित होईपर्यंत मालमत्तेची सद्यस्थिती राखणे आवश्यक राहील, ज्यामुळे प्रतिवादीचे कोणतेही नुकसान होणार नाही. याउलट, मनाई हुकूम नाकारल्यास वादीला प्रतिवादीच्या चुकीच्या कृत्यांमुळे तिचा कायदेशीर वारसा गमावण्याचा धोका पत्करावा लागेल.\n19. तात्पुरता मनाई हुकूम न दिल्यास वादीला भरून न येणारे नुकसान आणि इजा होईल. प्रतिवादीने दावा मालमत्ता तिच्या चुलत भावाला हस्तांतरित करून त्या हस्तांतरित करण्याची स्पष्ट धमकी दिली आहे. जर प्रतिवादीला या माननीय न्यायालयाच्या आदेशाने रोखले नाही आणि तिने तृतीय-पक्ष हितसंबंध निर्माण करण्यात यश मिळवले, तर यामुळे अनेक कायदेशीर कार्यवाही होतील आणि या दाव्यात पारित केलेला कोणताही हुकूम निरर्थक ठरेल. कुटुंबाच्या निवासी मालमत्तेतील वादीच्या हिश्शाचे नुकसान आर्थिकदृष्ट्या पुरेसे भरून काढता येणार नाही.\n20. त्यामुळे, या दाव्याच्या अंतिम सुनावणी आणि निकालापर्यंत, प्रतिवादी, तिचे एजंट, नोकर किंवा तिच्यामार्फत दावा करणारे कोणतेही व्यक्ती यांना यासोबत जोडलेल्या अनुसूचीमध्ये वर्णन केलेल्या दावा मालमत्तेची विक्री करण्यापासून, हस्तांतरित करण्यापासून, गहाण ठेवण्यापासून, भेट देण्यापासून किंवा कोणत्याही स्वरूपाचे तृतीय-पक्ष हक्क किंवा हितसंबंध निर्माण करण्यापासून तात्पुरत्या मनाई हुकुमाद्वारे रोखणे न्याय, समता आणि न्यायाच्या हितासाठी आवश्यक आहे.\n\n## अधिकारक्षेत्र आणि मूल्यांकन\n\n21. दावा मालमत्ता पुणे येथे स्थित आहे, जी या माननीय न्यायालयाच्या प्रादेशिक आणि आर्थिक अधिकारक्षेत्रात येते. त्यामुळे, या माननीय न्यायालयाला हा दावा स्वीकारण्याचा, त्याची सुनावणी करण्याचा आणि त्याचा निकाल लावण्याचा अधिकार आहे.\n22. अधिकारक्षेत्र आणि न्यायालयीन शुल्काच्या उद्देशाने, दाव्याचे मूल्यांकन खालीलप्रमाणे केले आहे:\nअ. वाटप आणि स्वतंत्र ताबा मिळवण्यासाठी, वादी दावा मालमत्तेच्या संयुक्त ताब्यात असल्याने, दाव्याचे मूल्यांकन Rs. 1,000/- इतके केले आहे आणि त्यावर Schedule II, Article 17(vi) of the Maharashtra Court Fees Act, 1959 नुसार निश्चित न्यायालयीन शुल्क भरले आहे.\nब. कायमस्वरूपी मनाई हुकुमाच्या निवारणासाठी, दाव्याचे मूल्यांकन Rs. 1,000/- इतके केले आहे आणि त्यावर Section 6(iv)(j) of the Maharashtra Court Fees Act, 1959 नुसार निश्चित न्यायालयीन शुल्क भरले आहे.\nक. न्यायालयीन शुल्क आणि अधिकारक्षेत्राच्या उद्देशाने दाव्याचे एकूण मूल्य Rs. 2,000/- आहे.\n23. दाव्यावर योग्य न्यायालयीन शुल्क भरले आहे.\n\n## प्रार्थना\n\nत्यामुळे, या माननीय न्यायालयाला नम्रपणे आणि आदरपूर्वक विनंती आहे की त्यांनी कृपया:\n\nअ. यासोबत जोडलेल्या अनुसूचीमध्ये वर्णन केलेल्या दावा मालमत्तेत वादीला समान, अविभाजित अर्धा (1/2) हिश्शाचा हक्क आहे असे घोषित करणारा प्रारंभिक हुकूम पारित करावा.\nब. दावा मालमत्तेचे सीमांकन करून वाटप करण्याचे आणि वादीला तिच्या अर्ध्या (1/2) हिश्शाचा स्वतंत्र, मोकळा आणि शांततापूर्ण ताबा देण्याचे निर्देश द्यावेत.\nक. दावा मालमत्तेचे वाटप करण्यासाठी एक न्यायालयीन आयुक्त नियुक्त करावा आणि या माननीय न्यायालयाला अहवाल सादर करावा, आणि त्यानंतर उक्त अहवालाच्या अटींनुसार अंतिम हुकूम पारित करावा.\nड. प्रतिवादी, तिचे एजंट, नोकर किंवा तिच्यामार्फत किंवा तिच्याखाली दावा करणारे कोणतेही व्यक्ती यांना दावा मालमत्तेची विक्री करण्यापासून, हस्तांतरित करण्यापासून, गहाण ठेवण्यापासून, भेट देण्यापासून किंवा कोणत्याही स्वरूपाचे तृतीय-पक्ष हक्क किंवा हितसंबंध निर्माण करण्यापासून रोखणारा कायमस्वरूपी मनाई हुकूम पारित करावा.\nइ. या दाव्याचा खर्च प्रतिवादीकडून वादीला मिळवून द्यावा.\nफ. या प्रकरणाच्या तथ्ये आणि परिस्थितीत या माननीय न्यायालयाला योग्य आणि उचित वाटेल असा कोणताही इतर आणि पुढील दिलासा मंजूर करावा.\n\n## पडताळणी\n\nमी, रुपा, वरील नमूद वादी, याद्वारे पडताळणी करतो/करते की, वरील दाव्याच्या परिच्छेद 1 ते 23 मधील मजकूर माझ्या माहितीनुसार, माहितीनुसार आणि विश्वासानुसार सत्य आणि योग्य आहे आणि त्यातून कोणतीही महत्त्वाची बाब लपविलेली नाही.\n\nपुणे येथे या ______ दिवशी __________, 2024 रोजी पडताळणी केली.\n\n(वादीची स्वाक्षरी)\nरुपा\nवादी\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "token_usage": {
+          "input_tokens": 64400,
+          "output_tokens": 11736,
+          "total_tokens": 81465,
+          "cache_read_tokens": 5394,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 2247,
+          "cost_usd": 0.115655,
+          "by_agent": {
+            "Orchestrator": {
+              "input": 10352,
+              "output": 344,
+              "total": 10696,
+              "cache_read": 5394,
+              "calls": 2,
+              "cost_usd": 0.001173
+            },
+            "Drafting": {
+              "input": 33764,
+              "output": 7306,
+              "total": 46399,
+              "cache_read": 0,
+              "calls": 5,
+              "cost_usd": 0.098183
+            },
+            "SelfRefine": {
+              "input": 20284,
+              "output": 4086,
+              "total": 24370,
+              "cache_read": 0,
+              "calls": 1,
+              "cost_usd": 0.0163
+            }
+          },
+          "calls": [
+            {
+              "agent": "Orchestrator",
+              "step": "classify_and_plan",
+              "input": 4561,
+              "output": 77,
+              "total": 4638,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000487
+            },
+            {
+              "agent": "Orchestrator",
+              "step": "extract_user_intent",
+              "input": 5791,
+              "output": 267,
+              "total": 6058,
+              "cache_read": 5394,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000686
+            },
+            {
+              "agent": "Drafting",
+              "step": "translate_query",
+              "input": 3308,
+              "output": 7,
+              "total": 3315,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000334
+            },
+            {
+              "agent": "Drafting",
+              "step": "pick_reference",
+              "input": 3252,
+              "output": 51,
+              "total": 3303,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.000346
+            },
+            {
+              "agent": "Drafting",
+              "step": "web_grounded",
+              "input": 7830,
+              "output": 2482,
+              "total": 15641,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.008554
+            },
+            {
+              "agent": "Drafting",
+              "step": "fanout_judge",
+              "input": 4144,
+              "output": 64,
+              "total": 4208,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 2,
+              "cost_usd": 0.000441
+            },
+            {
+              "agent": "Drafting",
+              "step": "generate",
+              "input": 15230,
+              "output": 4702,
+              "total": 19932,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 2245,
+              "cost_usd": 0.088508
+            },
+            {
+              "agent": "SelfRefine",
+              "step": "critique",
+              "input": 20284,
+              "output": 4086,
+              "total": 24370,
+              "cache_read": 0,
+              "cache_creation": 0,
+              "reasoning": 0,
+              "cost_usd": 0.0163
+            }
+          ]
+        },
+        "source": [
+          {
+            "source_type": "drafting",
+            "title": "Reference draft (web-synthesised: <web:picker-rejected>)",
+            "content": [
+              "## दावा शीर्षक\n\nपुणे येथील वरिष्ठ स्तर दिवाणी न्यायाधीश यांच्या न्यायालयात\n\nदिवाणी दावा क्रमांक ______ सन 2024 चा\n\nरुपा, कै. [Deceased Father's Name] यांची कन्या,\nवय: [Age of Rupa],\nव्यवसाय: [Occupation of Rupa],\nरा. [Address of Rupa], पुणे.\n\n.....वादी\n\n**विरुद्ध**\n\n[Name of Mother], कै. [Deceased F"
+            ],
+            "doc_link": null,
+            "file_name": "<web:picker-rejected>",
+            "agent_name": "Drafting",
+            "relevance_score": null,
+            "template_type": "web-synthesized"
+          }
+        ],
+        "agents_used": [
+          "Drafting"
+        ],
+        "effective_query": "Convert above text into marathi\n\n---\n\nPRIOR DRAFT (the text the user wants to modify per the directive above):\n\n## Cause Title\n\nIN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, PUNE\n\nCIVIL SUIT NO. ______ OF 2024\n\nRupa D/o. Late [Deceased Father's Name],\nAge: [Age of Rupa],\nOccupation: [Occupation of Rupa],\nResiding at: [Address of Rupa], Pune.\n\n.....Plaintiff\n\n**vs**\n\n[Name of Mother] W/o. Late [Deceased Father's Name],\nAge: [Age of Mother],\nOccupation: [Occupation of Mother],\nResiding at: [Address of Mother], Pune.\n\n.....Defendant\n\n## Suit for Partition and Temporary Injunction\n\nSUIT FOR PARTITION, DECLARATION OF SHARE, PERMANENT AND TEMPORARY INJUNCTION\n\nThe Plaintiff above-named submits as under:\n\n## Facts of the Case\n\n1. That the Plaintiff is the adopted daughter of Late [Deceased Father's Name] and the Defendant, [Name of Mother]. The Plaintiff has no siblings. The parties are Hindus and are governed by Hindu Law.\n\n2. That the Plaintiff's adoptive father, Late [Deceased Father's Name], passed away intestate approximately 5 years ago, leaving behind the Plaintiff and the Defendant as his only Class I legal heirs.\n\n3. That during his lifetime, the deceased father of the Plaintiff was the absolute owner of two residential flats situated in Pune, the full particulars of which are described in the Schedule of Property annexed hereto and hereinafter referred to as the \"Suit Properties\".\n\n4. That upon the demise of the Plaintiff's father, the Plaintiff and the Defendant, being the sole legal heirs, succeeded to the Suit Properties jointly and have been in joint possession thereof. The Plaintiff and Defendant are each entitled to an equal, undivided one-half (1/2) share in the Suit Properties.\n\n5. That recently, the Defendant's behaviour towards the Plaintiff has become hostile. The Defendant has been attempting to dispossess the Plaintiff from the family home and has explicitly threatened to transfer the Suit Properties to her cousin, thereby depriving the Plaintiff of her rightful and legitimate share.\n\n6. That the Plaintiff's name has not yet been mutated in the official property records, and the Defendant is taking undue advantage of this fact to illegally and wrongfully exclude the Plaintiff from her inheritance.\n\n7. That the cause of action arose recently when the Defendant threatened to dispossess the Plaintiff and alienate the Suit Properties. The Plaintiff demanded her share, but the Defendant has refused to partition the properties, necessitating the filing of the present suit.\n\n## Legal Provisions\n\n8. That the parties to the suit are Hindus, and the succession to the estate of the deceased is governed by the provisions of the Hindu Succession Act, 1956.\n\n9. That the Plaintiff, being the adopted daughter, has all the rights and privileges of a natural-born daughter in the adoptive family. As per Section 12 of the Hindu Adoptions and Maintenance Act, 1956, an adopted child is deemed to be the child of his or her adoptive father or mother for all purposes with effect from the date of the adoption.\n\n10. That as per Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves upon the heirs specified in Class I of the Schedule. The Plaintiff (daughter) and the Defendant (widow) are the only Class I heirs of the deceased.\n\n11. That consequently, the Plaintiff and the Defendant are each entitled to an equal one-half (1/2) share in the Suit Properties left by the deceased.\n\n12. That in light of the Defendant's attempts to create third-party rights and alienate the Suit Properties, it is imperative to grant a temporary injunction restraining the Defendant, her agents, or anyone acting on her behalf from selling, transferring, mortgaging, or creating any third-party interest in the Suit Properties pending the final disposal of this suit, as provided under Order XXXIX Rules 1 and 2 of the Code of Civil Procedure, 1908.\n\n## Plaintiff's Entitlement and Share\n\n13. That the Plaintiff submits that as the legally adopted daughter of the Late [Deceased Father's Name], she is conferred with all the rights and status of a natural-born daughter within the adoptive family. This status is unequivocally established under Section 12 of the Hindu Adoptions and Maintenance Act, 1956, which severs all ties with the birth family and creates corresponding rights in the adoptive family.\n\n14. That the Plaintiff's adoptive father, Late [Deceased Father's Name], passed away intestate. Therefore, the succession to his self-acquired properties is governed by the rules of intestate succession laid down in the Hindu Succession Act, 1956.\n\n15. That in accordance with Section 8 of the Hindu Succession Act, 1956, the property of a Hindu male dying intestate devolves firstly upon the heirs specified in Class I of the Schedule to the said Act. The Plaintiff, being the daughter, and the Defendant, being the widow of the deceased, are the only two surviving Class I legal heirs.\n\n16. That by virtue of the aforesaid provisions of law, the Plaintiff and the Defendant are each entitled to an equal, undivided one-half (1/2) share in the Suit Properties. The Plaintiff is, therefore, a co-owner of the Suit Properties along with the Defendant and is in joint possession of the same.\n\n## Grounds for Temporary Injunction\n\n17. That the Plaintiff has a strong prima facie case in her favour, as her entitlement to a one-half (1/2) share in the Suit Properties is clearly established by the provisions of the Hindu Succession Act, 1956. The Defendant has no legal right to deny the Plaintiff her legitimate share.\n\n18. That the balance of convenience lies overwhelmingly in favour of the Plaintiff. Granting an injunction would only require the Defendant to maintain the status quo of the properties until the rights of the parties are adjudicated, causing no prejudice to the Defendant. Conversely, refusing the injunction would expose the Plaintiff to the risk of losing her rightful inheritance through the Defendant's wrongful acts.\n\n19. That the Plaintiff will suffer irreparable loss and injury if a temporary injunction is not granted. The Defendant\nhas explicitly threatened to alienate the Suit Properties by transferring them to her cousin. If the Defendant is not\nrestrained by an order of this Hon'ble Court and succeeds in creating third-party interests, it will lead to a\nmultiplicity of legal proceedings and render any decree passed in this suit futile. The loss of the Plaintiff's share in\nthe family's residential properties cannot be adequately compensated in monetary terms.\n\n20. That it is therefore just, equitable, and necessary in the interest of justice that the Defendant, her agents, servants, or any person claiming through her be restrained by an order of temporary injunction from selling, transferring, alienating, mortgaging, gifting, or creating any third-party rights or interest of any nature whatsoever in the Suit Properties described in the Schedule hereto, pending the final hearing and disposal of this suit.\n\n## Jurisdiction and Valuation\n\n21. That the Suit Properties are situated in Pune, which is within the territorial and pecuniary jurisdiction of this Hon'ble Court. Therefore, this Hon'ble Court has the jurisdiction to entertain, try, and dispose of the present suit.\n\n22. That for the purpose of jurisdiction and court fees, the suit is valued as follows:\na. For the relief of partition and separate possession, the Plaintiff being in joint possession of the Suit Properties, the suit is valued at Rs. 1,000/- and a fixed court fee is paid thereon as per Schedule II, Article 17(vi) of the Maharashtra Court Fees Act, 1959.\nb. For the relief of permanent injunction, the suit is valued at Rs. 1,000/- and a fixed court fee is paid thereon as per Section 6(iv)(j) of the Maharashtra Court Fees Act, 1959.\nc. The total value of the suit for the purpose of court fees and jurisdiction is Rs. 2,000/-.\n\n23. That the appropriate court fee has been paid on the plaint.\n\n## Prayer\n\nIt is, therefore, most humbly and respectfully prayed that this Hon'ble Court may be pleased to:\n\na. Pass a preliminary decree declaring that the Plaintiff is entitled to an equal, undivided one-half (1/2) share in the Suit Properties described in the Schedule annexed hereto.\n\nb. Direct that the Suit Properties be partitioned by metes and bounds, and that the Plaintiff be put in separate, vacant, and peaceful possession of her one-half (1/2) share.\n\nc. Appoint a Court Commissioner to effect the partition of the Suit Properties and submit a report to this Hon'ble Court, and thereafter pass a final decree in terms of the said report.\n\nd. Pass a decree of permanent injunction restraining the Defendant, her agents, servants, or any person claiming through or under her, from selling, transferring, alienating, mortgaging, gifting, or creating any third-party rights or interest of any nature whatsoever in the Suit Properties.\n\ne. Award the costs of this suit to the Plaintiff from the Defendant.\n\nf. Grant any other and further relief as this Hon'ble Court may deem fit and proper in the facts and circumstances of the case.\n\n## Verification\n\nI, Rupa, the Plaintiff above-named, do hereby verify that the contents of paragraphs 1 to 23 of the foregoing plaint are true and correct to the best of my knowledge, information, and belief, and that nothing material has been concealed therefrom.\n\nVerified at Pune on this ______ day of __________, 2024.\n\n(Signature of Plaintiff)\nRupa\nPlaintiff\n\n---\n\n## REFERENCES & CITATIONS\n\n\n### LEGAL_CONCEPTS CITATIONS:\nMedical negligence in India occurs when a healthcare professional fails to provide the expected standard of care, leading to harm or injury to a patient. This concept has gained significant attention due to an increasing number of cases where patients seek legal recourse for alleged mistakes by medical practitioners or staff.\n\n### Essential Components of Medical Negligence\n\nTo establish medical negligence, the following conditions must typically be met:\n-   **Duty of Care:** The medical professional must have owed a duty of care to the patient. This duty arises when a patient seeks medical treatment, expecting the healthcare provider to act competently and responsibly.\n-   **Breach of Duty:** The medical professional must have failed to meet the expected standard of care, skill, or knowledge in the given situation. This breach is often measured against what a reasonably prudent medical provider in the same field would have done under similar circumstances.\n-   **Injury Caused by Breach:** The harm or injury suffered by the patient must be directly linked to the medical professional's breach of duty. This injury can be physical, emotional, or financial.\n-   **Damage:** The patient must demonstrate actual loss, such as physical harm, emotional distress, or financial loss.\n\n### Legal Framework for Medical Negligence in India\n\nMedical negligence cases in India can be pursued under various legal provisions:\n\n-   **Consumer Protection Act, 2019:** Patients can approach consumer courts for negligence claims, treating it as a\n\"deficiency in service.\" The Supreme Court, in *Indian Medical Association v. V.P. Shantha*, held that medical services\nfall within the ambit of \"service\" under the Consumer Protection Act, 1986 (now the 2019 Act), allowing patients who pay\nfor treatment to seek relief in consumer forums. The Act explicitly includes any act of negligence or omission causing\nloss or injury to a consumer as a \"deficiency in service.\"\n-   **Indian Penal Code, 1860 (IPC):** Sections 304A, 337, and 338 of the IPC deal with causing death or harm due to careless or negligent actions.\n    -   **Section 304A:** Penalizes those who cause death by negligence, applicable when doctors fail to exercise reasonable care.\n    -   **Section 337:** Deals with causing hurt by an act endangering human life or personal safety.\n    -   **Section 338:** Deals with causing grievous hurt by an act endangering human life or personal safety.\n    It is important to note that for criminal liability under the IPC, the negligence must be \"gross\" or \"reckless,\" not merely a mistake of judgment or an accident.\n-   **Civil Law (Torts):** Medical negligence cases can also be brought under tort law, where a doctor can be held responsible for breaching their duty, leading to harm to a patient. Patients can file a civil suit seeking compensation for their loss or injury.\n-   **Indian Evidence Act, 1872:** This Act regulates the burden of proof, meaning the patient usually has to prove the doctor's negligence.\n\n### Key Case Laws and Principles\n\n-   ***Jacob Mathew v. State of Punjab, (2005) 6 SCC 1***: This landmark Supreme Court judgment laid down guidelines for\nhandling criminal complaints against doctors for medical negligence. The Court emphasized that to hold a doctor\ncriminally liable, there must be \"gross negligence\" reflecting a reckless disregard for the patient's safety. It also\nstated that a simple lack of care, an error of judgment, or an accident, even if fatal, will not constitute culpable\nmedical negligence. The judgment aims to protect doctors from frivolous or unjust prosecution.\n-   ***Indian Medical Association v. V.P. Shantha, (1995) 6 SCC 651***: This case established that medical services provided for consideration fall under the definition of \"service\" in the Consumer Protection Act, 1986, making medical professionals accountable to consumer forums.\n-   **Bolam Test:** This test, accepted by the Supreme Court, states that a doctor is not negligent if they acted in accordance with a practice accepted as proper by a responsible body of medical men skilled in that particular art.\n\n### Professional Regulations\n\nThe **Indian Medical Council (Professional Conduct, Etiquette and Ethics) Regulations, 2002**, passed under the Indian Medical Council Act, 1956, lay down several duties and responsibilities for registered medical practitioners. These regulations cover aspects such as maintaining medical records, patient confidentiality, and ethical conduct.\n\n### Burden of Proof\n\nGenerally, the burden of proof in medical negligence cases lies with the complainant (patient) to establish that there was a duty of care, a breach of that duty, and that the breach directly resulted in damage. The law requires a higher standard of evidence to support allegations against medical professionals.\n\n\n---\n**Disclaimer:** This response is generated by an AI assistant and is for informational purposes only. It does not constitute legal advice. Please consult a qualified legal professional for advice specific to your situation.",
+        "query_rewritten": true,
+        "conversation_turn": 2,
+        "followup_suggestions": [
+          "दावा दाखल करण्यासाठी काय कागदपत्रे लागतील?",
+          "या दाव्यात प्रतिवादी कोण असू शकतो?",
+          "दिवाणी दावा म्हणजे काय?"
+        ]
+      }
+    }
+  ]
+}

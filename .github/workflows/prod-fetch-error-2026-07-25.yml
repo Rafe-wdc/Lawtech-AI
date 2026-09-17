@@ -1,0 +1,145 @@
+name: Prod Fetch error window 2026-07-25 20:35 IST (read-only diagnostic)
+
+# One-off workflow_dispatch — SSH's into api.lawttorney.com and pulls
+# journalctl for the incident window reported by the client:
+#   2026-07-25  20:35 IST  =  2026-07-25 15:05 UTC
+#
+# The client screenshot shows a completed legal notice draft followed by
+# the follow-up "Prepare the above notice more properly." → SSE
+#   {"type": "error", "data": ...}
+# rendered on the mobile client as "The assistant ran into an error."
+#
+# Two backend origins for that event:
+#   - core/chat_runner.py:388 → TimeoutError branch ("Request timed out...")
+#   - core/chat_runner.py:395 → Exception branch (redacted str(e))
+#
+# Grep windows (all bracket the incident by ±30 min):
+#   Absolute: 2026-07-25 14:30:00  →  2026-07-25 15:35:00 UTC
+#
+# Read-only: no files created / modified / deleted on prod.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    name: Fetch 2026-07-25 15:05 UTC incident window
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.lawttorney.com/pyapi/health
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Pull incident-window logs
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+              'bash -s' << 'ENDSSH'
+          set -u
+
+          UNIT=lawttorney-v2.service
+          SINCE="2026-07-25 14:30:00"
+          UNTIL="2026-07-25 15:35:00"
+
+          echo "=========================================================="
+          echo " 0. Box identity + service uptime"
+          echo "=========================================================="
+          hostname
+          curl -fsS https://api.lawttorney.com/pyapi/health 2>/dev/null \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(f"  version: {d.get(\"version\")}  uptime_s: {d.get(\"uptime_seconds\")}")' \
+            || echo "(health probe failed)"
+          sudo systemctl status "$UNIT" --no-pager 2>/dev/null | head -5 || true
+          echo "  Window: $SINCE  →  $UNTIL  UTC"
+          echo
+
+          echo "=========================================================="
+          echo " 1. Stream-level errors in the window"
+          echo "     (core/chat_runner.py timeout + exception branches)"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -iE "Stream timed out|Stream error|Agent graph execution (timed out|failed)|Request timed out" \
+            || echo "  (no stream-error lines in window)"
+          echo
+
+          echo "=========================================================="
+          echo " 2. All ERROR-level lines in the window"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -E "\\[ERROR\\]|level=error|ERROR:" \
+            | tail -80 \
+            || echo "  (no ERROR lines)"
+          echo
+
+          echo "=========================================================="
+          echo " 3. Drafting-agent activity in the window"
+          echo "     (agent started / self_refine / cleanup / section fan-out)"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -iE "drafting|section-wise|single-pass|self_refine|reference draft|_acquire_reference" \
+            | tail -120 \
+            || echo "  (no drafting activity)"
+          echo
+
+          echo "=========================================================="
+          echo " 4. 300s / gunicorn worker timeout hits in the window"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -iE "WORKER TIMEOUT|worker timed out|SIGKILL|Booting worker" \
+            || echo "  (no worker-timeout events)"
+          echo
+
+          echo "=========================================================="
+          echo " 5. Memory-node rewrite behaviour in the window"
+          echo "     (Query rewritten / Rewrite result / Skipping rewrite)"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -iE "Query rewritten|Rewrite result discarded|Rewrite introduced unsupported|Skipping rewrite|Rewrite failed" \
+            | tail -60 \
+            || echo "  (no rewrite log lines)"
+          echo
+
+          echo "=========================================================="
+          echo " 6. Google GenAI / SDK errors in the window"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -iE "google.genai|google_genai|ClientError|Gemini.*error|API_KEY_INVALID|INVALID_ARGUMENT|RECITATION|SAFETY|503|429|max_retries" \
+            | tail -60 \
+            || echo "  (no Google GenAI error lines)"
+          echo
+
+          echo "=========================================================="
+          echo " 7. Full request context around any error hits (±5 lines)"
+          echo "     — helps trace the incoming query / thread_id."
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -B5 -A5 -E "Stream timed out|Stream error|Agent graph execution (timed out|failed)" \
+            | tail -160 \
+            || echo "  (no matches to contextualize)"
+          echo
+
+          echo "=========================================================="
+          echo " 8. Requests that reached /pyapi/chat or /pyapi/search/stream"
+          echo "     in the window (endpoint + status code + latency)"
+          echo "=========================================================="
+          sudo journalctl -u "$UNIT" --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null \
+            | grep -iE "POST /pyapi/(chat|search/stream)|Stream completed|endpoint=" \
+            | tail -100 \
+            || echo "  (no request lines)"
+          echo
+
+          echo "=========================================================="
+          echo " DIAGNOSTIC COMPLETE — window: 2026-07-25 14:30 → 15:35 UTC"
+          echo "=========================================================="
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

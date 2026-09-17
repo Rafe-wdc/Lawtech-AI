@@ -84,6 +84,17 @@ async def scenario_node(state: LegalAgentState) -> dict:
                 user_language,
                 state.get("user_intent"),
             )
+            # Gap #1: inject uploaded-document text so Scenario sees the
+            # user's uploaded matter (a court order, an FIR, a notice)
+            # alongside the scenario prose in the user's text query. Empty
+            # when no files — normal Scenario flow unchanged.
+            from core.state import FileContextData as _FileContextData
+            from core.file_context import format_file_context_prefix as _fmt_files
+            _file_prefix = _fmt_files(_FileContextData.from_state(state))
+            if _file_prefix:
+                system_prompt = system_prompt + "\n\n" + _file_prefix
+                log.info("Scenario: uploaded file context injected",
+                         prefix_len=len(_file_prefix))
             template = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
                 MessagesPlaceholder("chat_history", optional=True),

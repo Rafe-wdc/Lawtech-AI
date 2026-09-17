@@ -2699,17 +2699,58 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         # and the mandated structure, while supporting content lands
         # under its own labelled heading.
         if primary_agent_name in ("SCI_Judgment", "Judgment"):
+            # Append only what the primary — and the turn before it — does
+            # not already carry. Verbatim concatenation made 53-68% of a
+            # measured answer duplicate material (dev box, 2026-09-16):
+            # a statute block repeating the previous turn, and a second
+            # judgment agent's full essay with its own "Landmark Case Law"
+            # list. Filtering is deterministic; the primary is untouched, so
+            # its mandated headings and PDF links survive exactly as before.
+            _prev_answer = state.get("previous_artifact_content") or ""
+            _known_cites, _known_provs, _known_names = _known_keys(
+                primary, _prev_answer)
             appendix_parts = []
+            _appendix_log: list[str] = []
             for name, result in kept_supporting.items():
                 heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
-                appendix_parts.append(
-                    f"\n\n---\n\n{heading}\n\n{result.content.strip()}"
+                body, dropped = _filter_supporting_blocks(
+                    result.content.strip(), set(_known_cites), set(_known_provs),
+                    set(_known_names), primary_tokens,
+                )
+                _outcome = "kept"
+                if not body or len(body) > _SUPPORTING_APPEND_MAX_CHARS:
+                    # Prose is either wholly redundant or too long to be
+                    # gap-filling. Either way the prose goes — but a case the
+                    # primary never cited still reaches the user through this
+                    # agent's structured sources, with court, year and PDF
+                    # link intact.
+                    citations = _new_source_citations(
+                        result, _known_cites, _known_names).strip()
+                    if citations:
+                        body, _outcome = citations, (
+                            "citations_only" if not body else "reduced_to_citations")
+                    elif not body:
+                        _appendix_log.append(
+                            f"{name}(all {len(dropped)} blocks redundant, no new sources)")
+                        continue
+                    else:
+                        body, _outcome = body[:_SUPPORTING_APPEND_MAX_CHARS].rstrip(), "truncated"
+                # Everything this supporter contributed is known to the next.
+                _known_cites |= _citation_keys(body)
+                _known_provs |= _provision_keys(body)
+                _known_names |= _case_name_keys(body)
+                appendix_parts.append(f"\n\n---\n\n{heading}\n\n{body}")
+                _appendix_log.append(
+                    f"{name}({_outcome}, {len(result.content)}->{len(body)} chars, "
+                    f"{len(dropped)} blocks dropped)"
                 )
             final_response = primary + "".join(appendix_parts)
             log.info("Primary-task-aware append-only (case-lookup primary)",
                      task=primary_task_state, primary_agent=primary_agent_name,
                      primary_len=len(primary),
                      supporting_agents=list(kept_supporting.keys()),
+                     appended=_appendix_log,
+                     had_previous_turn=bool(_prev_answer),
                      final_len=len(final_response), total_tokens=total_tokens)
             return {
                 "final_response": final_response,
@@ -3057,6 +3098,171 @@ def _citation_appendix_text(name: str, result) -> str:
             agent=name, content_chars=len(content), sources=len(getattr(result, "sources", None) or []),
         )
     return rendered
+
+
+# ---------------------------------------------------------------------------
+# Supporting-block filtering for the case-lookup append path.
+#
+# When the primary agent is a case lookup (Judgment / SCI_Judgment) synthesis
+# appends supporting agents verbatim rather than merging, to protect the
+# mandated headings and the clickable PDF-link block (see the branch in
+# orchestrator_synthesize_node). Measured 2026-09-16 on the dev box: that made
+# 53-68% of four probe answers appended material — a statute agent repeating
+# the provision the user was shown in the PREVIOUS turn, and a second judgment
+# agent's entire essay carrying its own duplicate "Landmark Case Law" list.
+#
+# These helpers keep only what the primary (and the previous turn) does not
+# already have, block by block, and reduce a judgment supporter to the cases
+# it actually adds. Everything here is deterministic string work — no extra
+# LLM call on a path whose whole purpose is to avoid one.
+# ---------------------------------------------------------------------------
+
+# "(2022) 7 SCC 124", "2022 INSC 326", "AIR 1973 SC 1461", "(2019) 1 SCR 991",
+# "2022 SCC OnLine SC 1061", "2026:JHHC:16661".
+_CITATION_RE = re.compile(
+    r"\(?\d{4}\)?\s*(?:\d+\s*)?(?:SCC\s+OnLine\s+\w+|SCC|SCR|INSC|AIR\s+\w+|"
+    r"ALL\s+ER|Bom\s*CR|Cri\s*LJ)\s*\d+|\d{4}:[A-Z]{2,6}:\d+",
+    re.I,
+)
+
+# "Section 420 of the Indian Penal Code, 1860", "Section 318(4) BNS",
+# "s. 138 NI Act", "Article 226". Captured as a normalised (label, number) pair
+# so "Section 420 IPC" and "Section 420 of the Indian Penal Code" match.
+_PROVISION_RE = re.compile(
+    r"\b(section|sections|sec\.?|s\.|article|art\.?|order|rule)\s*"
+    r"(\d+[A-Za-z]?(?:\(\d+\))?(?:\([a-z]\))?)",
+    re.I,
+)
+
+# A supporting agent's content that is mostly one of these is a full essay
+# rather than the handful of extra citations the primary is missing.
+_SUPPORTING_BLOCK_SPLIT_RE = re.compile(r"\n(?=#{1,3}\s+\S)")
+
+
+def _citation_keys(text: str) -> set[str]:
+    """Normalised reporter citations found in `text`."""
+    if not text:
+        return set()
+    return {re.sub(r"[\s().]+", "", m.group(0)).lower()
+            for m in _CITATION_RE.finditer(text)}
+
+
+def _provision_keys(text: str) -> set[str]:
+    """Normalised statutory anchors ("section420", "article226") in `text`."""
+    if not text:
+        return set()
+    out = set()
+    for m in _PROVISION_RE.finditer(text):
+        label = m.group(1).lower().rstrip(".")
+        label = {"sections": "section", "sec": "section", "s": "section",
+                 "art": "article"}.get(label, label)
+        out.add(f"{label}{m.group(2).lower().replace(' ', '')}")
+    return out
+
+
+def _case_name_keys(text: str) -> set[str]:
+    """Party-name keys for cases cited as "X v. Y" / "X vs Y"."""
+    if not text:
+        return set()
+    out = set()
+    for m in re.finditer(r"([A-Z][\w.&'-]*(?:\s+[A-Z][\w.&'-]*){0,4})\s+"
+                         r"v(?:s?\.?|ersus)\s+([A-Z][\w.&'-]*(?:\s+[A-Z][\w.&'-]*){0,4})",
+                         text):
+        a = re.sub(r"\W+", "", m.group(1)).lower()[:24]
+        b = re.sub(r"\W+", "", m.group(2)).lower()[:24]
+        if len(a) > 2 and len(b) > 2:
+            out.add(f"{a}|{b}")
+    return out
+
+
+def _known_keys(*texts: str) -> tuple[set[str], set[str], set[str]]:
+    """(citations, provisions, case names) already covered by `texts`."""
+    cites: set[str] = set()
+    provs: set[str] = set()
+    names: set[str] = set()
+    for t in texts:
+        if not t:
+            continue
+        cites |= _citation_keys(t)
+        provs |= _provision_keys(t)
+        names |= _case_name_keys(t)
+    return cites, provs, names
+
+
+def _filter_supporting_blocks(
+    content: str,
+    known_cites: set[str],
+    known_provs: set[str],
+    known_names: set[str],
+    primary_tokens: set[str],
+) -> tuple[str, list[str]]:
+    """Keep only the blocks of `content` that add something new.
+
+    A block (a heading and its body, or the lead paragraph) is dropped when
+    every citation, provision and case name it mentions is already known AND
+    its prose adds fewer than `_BLOCK_MIN_UNIQUE_TOKENS` unique tokens over
+    the primary. A block that names a case or provision the primary lacks is
+    kept whole, so its reasoning and links survive.
+
+    Returns (kept_text, dropped_headings).
+    """
+    blocks = [b for b in _SUPPORTING_BLOCK_SPLIT_RE.split(content) if b.strip()]
+    kept: list[str] = []
+    dropped: list[str] = []
+    for block in blocks:
+        # A label-only block ("## Statutory Provisions Referenced" with its
+        # body in the next block) is dropped without comment: the append
+        # branch prepends its own heading, so keeping this one would print
+        # the same label twice.
+        _body_lines = [l for l in block.strip().splitlines()[1:] if l.strip()]
+        if block.strip().startswith("#") and not _body_lines:
+            continue
+        b_cites = _citation_keys(block)
+        b_provs = _provision_keys(block)
+        b_names = _case_name_keys(block)
+        new_anchors = ((b_cites - known_cites) | (b_provs - known_provs)
+                       | (b_names - known_names))
+        unique_tokens = _content_token_set(block) - primary_tokens
+        heading = block.strip().splitlines()[0].strip()[:70]
+        if not new_anchors and len(unique_tokens) < _BLOCK_MIN_UNIQUE_TOKENS:
+            dropped.append(heading)
+            continue
+        kept.append(block.rstrip())
+        # A kept block's own anchors become known, so a later block that only
+        # repeats them is dropped too (self-dedup within one supporter).
+        known_cites |= b_cites
+        known_provs |= b_provs
+        known_names |= b_names
+    return "\n\n".join(kept).strip(), dropped
+
+
+def _new_source_citations(result, known_cites: set[str], known_names: set[str]) -> str:
+    """This agent's structured sources, minus the ones already cited.
+
+    Used when a supporter's prose is redundant or over-long: the prose goes,
+    but a judgment the primary never mentioned still reaches the user with
+    its court, year and PDF link intact.
+    """
+    lines = []
+    for line in _sources_as_citation_list(result).splitlines():
+        if not line.strip():
+            continue
+        if (_citation_keys(line) & known_cites) or (_case_name_keys(line) & known_names):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+# A block with no new case / provision anchor must clear this many unique
+# tokens to survive. Sized so a short transitional paragraph is dropped while
+# a genuine piece of analysis the primary lacks is kept.
+_BLOCK_MIN_UNIQUE_TOKENS = 40
+
+# Hard ceiling on what any single supporting agent may append to a case-lookup
+# answer. Past this the supporter is not "the citations the primary missed",
+# it is a second essay — reduce it to its citation list. The four probe cases
+# appended 8.1k-12.0k chars each; a real gap-filling block is a few hundred.
+_SUPPORTING_APPEND_MAX_CHARS = 2_500
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:

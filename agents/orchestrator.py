@@ -2448,6 +2448,10 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             cleaned = _strip_internal_cite_markers(result.content)
             log.info("Drafting solo — passing through unmodified (BUG-03 fix)",
                      draft_len=len(result.content), cleaned_len=len(cleaned))
+            # The draft body stays untouched; the lookup only appends links
+            # for the judgments it cites (see core/judgments_cited.py).
+            from core.judgments_cited import append_judgments_cited
+            cleaned = await append_judgments_cited(cleaned)
             return {
                 "final_response": cleaned,
                 "source_metadata": _serialize_sources(result),
@@ -2548,6 +2552,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         # [CITE: ...] placeholder markers (BUG-09), append a References section.
         try:
             enriched = _strip_internal_cite_markers(drafting_result.content)
+            # Look up only the judgments the DRAFT cites, before the
+            # references appendix is attached (that appendix carries its own
+            # links and would otherwise be scanned too).
+            from core.judgments_cited import append_judgments_cited
+            enriched = await append_judgments_cited(enriched)
             if citations_text.strip():
                 enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
 

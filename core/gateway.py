@@ -1099,6 +1099,17 @@ async def search_stream(data: SearchRequest, request: Request):
 # Chat with Files (inline file attachments)
 # ============================================================
 
+def _pdf_page_count(path: str) -> int:
+    """Page count for the per-plan limit. An unreadable PDF counts as 0 and is
+    left to process_files, which reports the extraction error."""
+    import fitz
+    try:
+        with fitz.open(path) as doc:
+            return doc.page_count
+    except Exception:
+        return 0
+
+
 def safe_upload_name(original: str) -> str:
     """Sanitize an uploaded filename without dropping non-ASCII-named files.
 
@@ -1133,6 +1144,9 @@ async def chat_with_files(
     # thread whose OCR output was withheld as unreadable is retried and
     # accepted as-is. See OCR_STATUS_UNREADABLE in core/file_processor.py.
     force_ocr: Optional[bool] = Form(None),
+    # Subscription plan name, e.g. "First Justice Plan" or "Basic". When set,
+    # every uploaded PDF must fit that plan's page limit (PLAN_UPLOAD_LIMITS).
+    plan: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -1140,9 +1154,28 @@ async def chat_with_files(
     Accepts multipart/form-data with query text and optional files.
     Processes files (PDF, images, DOCX, TXT, CSV, XLSX), then runs
     the full agent graph with file context injected into state.
+
+    The optional ``plan`` field applies that plan's per-PDF page limit from
+    PLAN_UPLOAD_LIMITS. The document count per plan is enforced by the
+    frontend.
     """
     from .file_processor import process_files, validate_upload
     from .settings import MAX_FILES_PER_REQUEST as MAX_FILES
+    from .settings import PLAN_UPLOAD_LIMITS
+
+    plan = (plan or "").strip()
+    plan_limits = None
+    if plan:
+        _plans_by_key = {name.casefold(): name for name in PLAN_UPLOAD_LIMITS}
+        _plan_name = _plans_by_key.get(plan.casefold())
+        if _plan_name is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown plan '{plan}'. Allowed: "
+                       f"{', '.join(PLAN_UPLOAD_LIMITS)}",
+            )
+        plan = _plan_name
+        plan_limits = PLAN_UPLOAD_LIMITS[plan]
 
     agent_graph = request.app.state.agent_graph
     thread_id = globalThreadId or str(uuid.uuid4())
@@ -1289,6 +1322,21 @@ async def chat_with_files(
                     pass
                 temp_paths.remove(tmp_path)
                 continue
+
+            if plan_limits is not None and _ext == ".pdf":
+                _pages = await asyncio.to_thread(_pdf_page_count, tmp_path)
+                if _pages > plan_limits["max_pages_per_doc"]:
+                    for _p in temp_paths:
+                        try:
+                            os.unlink(_p)
+                        except OSError:
+                            pass
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"{original_name} has {_pages} pages. Your plan "
+                               f"({plan}) allows up to "
+                               f"{plan_limits['max_pages_per_doc']} pages per document",
+                    )
 
             file_tuples.append((tmp_path, filename, total_bytes))
 

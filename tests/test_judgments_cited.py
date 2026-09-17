@@ -229,3 +229,22 @@ def test_joined_initial_in_the_index_still_matches():
 
 def test_query_forms_cover_both_spellings():
     assert set(jc._query_forms("CBI")) == {"cbi", "bureau central investigation"}
+
+
+def test_the_drafts_own_cause_title_is_not_a_citation():
+    # Seen live 2026-09-17 on the medical-negligence plaint.
+    draft = ("IN THE COURT OF THE CIVIL JUDGE SENIOR DIVISION, PUNE\n\n"
+             "Mrs. Anjali Deshmukh .....Plaintiff v. XYZ Multispecialty Hospital & Anr. "
+             ".....Defendants\n\nThe Plaintiff relies on Jacob Mathew v. State of Punjab, "
+             "(2005) 6 SCC 1.\n")
+    assert _names(draft) == ["Jacob Mathew v. State of Punjab"]
+
+
+def test_parties_from_the_users_own_request_are_skipped():
+    query = ("Draft a civil suit. My client Mrs. Anjali Deshmukh sued XYZ Multispecialty "
+             "Hospital for negligence.")
+    draft = ("ANJALI DESHMUKH v. XYZ MULTISPECIALTY HOSPITAL\n\n"
+             "Relying on Jacob Mathew v. State of Punjab, (2005) 6 SCC 1.")
+    names = [f"{c.petitioner} v. {c.respondent}"
+             for c in extract_cited_cases(draft, own_parties_text=query)]
+    assert names == ["Jacob Mathew v. State of Punjab"]

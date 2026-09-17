@@ -2451,7 +2451,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             # The draft body stays untouched; the lookup only appends links
             # for the judgments it cites (see core/judgments_cited.py).
             from core.judgments_cited import append_judgments_cited
-            cleaned = await append_judgments_cited(cleaned)
+            cleaned = await append_judgments_cited(
+                cleaned, user_query=state.get("original_query") or query)
             return {
                 "final_response": cleaned,
                 "source_metadata": _serialize_sources(result),
@@ -2556,7 +2557,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             # references appendix is attached (that appendix carries its own
             # links and would otherwise be scanned too).
             from core.judgments_cited import append_judgments_cited
-            enriched = await append_judgments_cited(enriched)
+            enriched = await append_judgments_cited(
+                enriched, user_query=state.get("original_query") or query)
             if citations_text.strip():
                 enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
 

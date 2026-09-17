@@ -54,9 +54,12 @@ _WORD = r"(?:M/s\.?|\(?[A-Z][\w'&.-]*\)?)"
 _CONNECTOR = r"(?:of|and|the|for|&|de|du|la)"
 # No comma between words: a comma after a party name starts the citation
 # ("..., AIR 1969 SC 128"), not more of the name.
-_PARTY = rf"{_WORD}(?:\s+(?:{_CONNECTOR}\s+)*{_WORD}){{0,9}}"
+# Whitespace inside a case name: a hard-wrapped line break is fine, a blank
+# line (a new paragraph or a heading) is not.
+_SP = r"(?:[ \t]*\n[ \t]*|[ \t]+)"
+_PARTY = rf"{_WORD}(?:{_SP}(?:{_CONNECTOR}{_SP})*{_WORD}){{0,9}}"
 _CASE_RE = re.compile(
-    rf"(?P<a>{_PARTY})\s+(?:v\.|vs\.?|versus)\s+(?P<b>{_PARTY})"
+    rf"(?P<a>{_PARTY}){_SP}(?:v\.|vs\.?|versus){_SP}(?P<b>{_PARTY})"
 )
 # A reporter citation directly after the name, kept for display and year.
 _CITATION_TAIL_RE = re.compile(
@@ -201,15 +204,34 @@ def _trim_party(party: str, leading: bool) -> str:
     return " ".join(words).strip(" ,;:")
 
 
-def extract_cited_cases(text: str) -> list[CitedCase]:
-    """Every distinct "X v. Y" case cited in `text`, in order of first mention."""
+# A draft's own cause title ("Mrs. Anjali Deshmukh .....Plaintiff v. XYZ
+# Hospital & Anr. .....Defendants") has the same "X v. Y" shape as a citation.
+# Role labels and dot leaders only ever appear in a cause title.
+_ROLE_OR_LEADER_RE = re.compile(
+    r"\.{2,}|\b(?:plaintiffs?|defendants?|petitioners?|respondents?|applicants?|"
+    r"appellants?|complainants?|accused|opposite\s+part(?:y|ies)|deponent)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_cited_cases(text: str, own_parties_text: str = "") -> list[CitedCase]:
+    """Every distinct "X v. Y" case cited in `text`, in order of first mention.
+
+    `own_parties_text` is the user's request: a "case" whose two parties both
+    come from it is the draft's own matter, not an authority.
+    """
     out: list[CitedCase] = []
     seen: list[tuple[set[str], set[str]]] = []
+    own = _tokens(own_parties_text)
     for m in _CASE_RE.finditer(text or ""):
+        if _ROLE_OR_LEADER_RE.search(m.group(0)):
+            continue
         a = _trim_party(m.group("a"), leading=True)
         b = _trim_party(m.group("b"), leading=False)
         ta, tb = _tokens(a), _tokens(b)
         if not ta or not tb:
+            continue
+        if own and ta <= own and tb <= own:
             continue
         tail = _CITATION_TAIL_RE.match(text[m.end():m.end() + 80])
         citation = re.sub(r"\s+", " ", tail.group("cit")).strip() if tail else ""
@@ -368,15 +390,16 @@ def render_block(results: list[tuple[CitedCase, FoundJudgment | None]]) -> str:
     return f"{HEADING}\n\n" + "\n".join(lines)
 
 
-async def append_judgments_cited(draft: str, lookup=None) -> str:
+async def append_judgments_cited(draft: str, lookup=None, user_query: str = "") -> str:
     """Return `draft` with a Judgments Cited block, or `draft` unchanged.
 
+    `user_query` lets the draft's own parties be told apart from authorities.
     `lookup` is injectable for tests; production uses the ES indices.
     """
     lookup = lookup or _lookup_one
     if not draft or HEADING in draft:
         return draft
-    cases = extract_cited_cases(draft)
+    cases = extract_cited_cases(draft, own_parties_text=user_query)
     if not cases:
         return draft
 

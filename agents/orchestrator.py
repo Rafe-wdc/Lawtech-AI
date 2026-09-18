@@ -2723,9 +2723,19 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             appendix_parts = []
             _appendix_log: list[str] = []
             for name, result in kept_supporting.items():
+                # A web-grounded supporter has no case record or PDF behind
+                # it. Next to a primary that already found the case in our
+                # index it can only restate it or add unverified claims, and
+                # its source list survives URL scrubbing as bare domain names
+                # ("casemine.com", "scribd.com") — lawyer-reported on prod,
+                # 2026-09-18, for a named Supreme Court case.
+                if getattr(result, "fallback_used", False):
+                    _appendix_log.append(f"{name}(web fallback, dropped)")
+                    continue
                 heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
                 body, dropped = _filter_supporting_blocks(
-                    result.content.strip(), set(_known_cites), set(_known_provs),
+                    _strip_link_only_lines(result.content.strip()),
+                    set(_known_cites), set(_known_provs),
                     set(_known_names), primary_tokens,
                 )
                 _outcome = "kept"
@@ -2745,7 +2755,13 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                             f"{name}(all {len(dropped)} blocks redundant, no new sources)")
                         continue
                     else:
-                        body, _outcome = body[:_SUPPORTING_APPEND_MAX_CHARS].rstrip(), "truncated"
+                        # Cutting at the ceiling left the answer ending
+                        # mid-word ("The Court deprecat"). An over-long
+                        # supporter with nothing citable is a second essay;
+                        # drop it rather than print a fragment of it.
+                        _appendix_log.append(
+                            f"{name}(too long, no new sources, {len(body)} chars dropped)")
+                        continue
                 # Everything this supporter contributed is known to the next.
                 _known_cites |= _citation_keys(body)
                 _known_provs |= _provision_keys(body)
@@ -3165,6 +3181,30 @@ _PROVISION_RE = re.compile(
 # A supporting agent's content that is mostly one of these is a full essay
 # rather than the handful of extra citations the primary is missing.
 _SUPPORTING_BLOCK_SPLIT_RE = re.compile(r"\n(?=#{1,3}\s+\S)")
+
+# A line whose only visible text is a domain name, bare or as a link label:
+# "- casemine.com", "* [scribd.com](https://…)". The URL scrubber keeps link
+# labels, so these reach the user as a list of bare domains.
+_DOMAIN_ONLY_LINE_RE = re.compile(
+    r"^\s*(?:[-*•+]|\d+[.)])?\s*[*_]*\[?\s*(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?\s*\]?"
+    r"(?:\(\s*https?://[^)]*\))?[*_]*\s*$",
+    re.I,
+)
+_SOURCE_LABEL_LINE_RE = re.compile(
+    r"^\s*[#*_\s]*(?:web\s+)?(?:sources?|references?)\s*:?[*_\s]*$", re.I)
+
+
+def _strip_link_only_lines(text: str) -> str:
+    """Drop domain-only lines, then any "Sources:" label left with nothing under it."""
+    lines = [l for l in text.splitlines() if not _DOMAIN_ONLY_LINE_RE.match(l)]
+    out: list[str] = []
+    for i, line in enumerate(lines):
+        if _SOURCE_LABEL_LINE_RE.match(line):
+            rest = next((l for l in lines[i + 1:] if l.strip()), "")
+            if not rest or rest.lstrip().startswith(("#", "---")):
+                continue
+        out.append(line)
+    return "\n".join(out).strip()
 
 
 def _citation_keys(text: str) -> set[str]:

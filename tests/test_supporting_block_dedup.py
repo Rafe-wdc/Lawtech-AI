@@ -365,3 +365,139 @@ def test_citation_list_keeps_judgments_and_statutes_but_not_labels():
     assert "Sarabjit Kaur" in rendered
     assert "Section 318" in rendered          # statutes have no court or link
     assert "Ramdeo Prasad Singh" in rendered  # a link alone is enough
+
+
+# ---------------------------------------------------------------------------
+# Web-grounded supporters next to a case-lookup primary.
+#
+# Lawyer-reported on prod (2026-09-18): "Summary of Dinesh Gupta v. State of
+# U.P., Criminal Appeal 214 of 2024" was planned as SCI_Judgment + Judgment.
+# SCI_Judgment found the case in our index; Judgment did not (it searches mostly
+# High Court judgments), fell back to Google-grounded web search and wrote a
+# second summary of the same case. The append branch then printed, under
+# "## Supporting Case Authority", either
+#   - a list of bare domains (casemine.com, scribd.com, ...) — link labels left
+#     behind after the URL scrubber removed the grounding URLs, or
+#   - a second essay kept because its IPC->BNS mapping counted as "new
+#     provisions", cut at the 2,500-char ceiling mid-word ("The Court deprecat").
+# ---------------------------------------------------------------------------
+
+_DINESH_PRIMARY = (
+    "Dinesh Gupta v. State of Uttar Pradesh & Anr. (Criminal Appeal No. 214 of 2024, "
+    "2024 INSC 32) arose from an order of the Allahabad High Court dismissing "
+    "petitions under Section 482 of the Code of Criminal Procedure, 1973.\n\n"
+    "### Court Observations\n"
+    "Unscrupulous litigants should not be allowed to go scot-free.\n\n"
+    "**PDF Links:**\n"
+    "- [Supreme Court Judgment dated 11-01-2024](https://api.sci.gov.in/supremecourt/"
+    "2022/7498/7498_2022_8_1501_49396_Judgement_11-Jan-2024.pdf)\n"
+)
+
+
+def _dinesh_state(judgment_result):
+    from core.state import AgentResult
+    return {
+        "original_query": "Summary of Dinesh Gupta v. State of UP, Criminal Appeal 214 of 2024",
+        "query": "Summary of Dinesh Gupta v. State of UP, Criminal Appeal 214 of 2024",
+        "task": "SCI_Judgment",
+        "tasks_planned": ["SCI_Judgment", "Judgment"],
+        "previous_artifact_content": "",
+        "agent_results": {
+            "SCI_Judgment": AgentResult(agent_name="SCI_Judgment", content=_DINESH_PRIMARY),
+            "Judgment": judgment_result,
+        },
+    }
+
+
+def _web_sources():
+    from core.state import SourceMetadata
+    return [SourceMetadata(source_type="judgment", title=d,
+                           web_url=f"https://vertexaisearch.cloud.google.com/grounding-api-redirect/{i}",
+                           web_title=d, agent_name="Judgment")
+            for i, d in enumerate(["casemine.com", "scribd.com", "verdictum.in"])]
+
+
+def test_web_fallback_supporter_is_dropped_from_case_lookup_answer():
+    import asyncio
+    from core.state import AgentResult
+    from agents.orchestrator import orchestrator_synthesize_node
+
+    web_essay = (
+        "## Statutory Provisions Involved\n"
+        "- Section 420 of the Indian Penal Code, 1860 - corresponding to Section 318(4) BNS.\n"
+        "- Section 482 of the Code of Criminal Procedure, 1973 - corresponding to Section 528 BNSS.\n\n"
+        "## Key Legal Issues\n"
+        "1. Whether a purely commercial dispute can be converted into a criminal prosecution.\n\n"
+        "Sources:\n"
+        "* [allahabadhighcourt.in](https://vertexaisearch.cloud.google.com/grounding-api-redirect/a)\n"
+        "* [casemine.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/b)\n"
+    )
+    state = _dinesh_state(AgentResult(agent_name="Judgment", content=web_essay,
+                                      sources=_web_sources(), fallback_used=True))
+    answer = asyncio.run(orchestrator_synthesize_node(state))["final_response"]
+
+    assert answer == _DINESH_PRIMARY.rstrip()
+    assert "Supporting Case Authority" not in answer
+    assert "casemine" not in answer
+
+
+def test_domain_only_lines_are_stripped_from_an_indexed_supporter():
+    import asyncio
+    from core.state import AgentResult, SourceMetadata
+    from agents.orchestrator import orchestrator_synthesize_node
+
+    content = (
+        "### Randheer Singh v. State of U.P., (2021) 14 SCC 626\n"
+        "Criminal proceedings cannot be used to settle a civil dispute.\n\n"
+        "**Sources:**\n"
+        "- casemine.com\n"
+        "- [scribd.com](https://www.scribd.com/doc/1)\n"
+        "- [Judgment PDF](https://api.sci.gov.in/jonew/judis/randheer.pdf)\n"
+    )
+    state = _dinesh_state(AgentResult(
+        agent_name="Judgment", content=content,
+        sources=[SourceMetadata(source_type="judgment", title="Randheer Singh v. State of U.P.",
+                                doc_link="https://api.sci.gov.in/jonew/judis/randheer.pdf",
+                                agent_name="Judgment")]))
+    answer = asyncio.run(orchestrator_synthesize_node(state))["final_response"]
+
+    assert "Randheer Singh" in answer
+    assert "randheer.pdf" in answer          # a real judgment link is kept
+    assert "casemine.com" not in answer
+    assert "scribd.com" not in answer
+
+
+def test_over_long_supporter_with_nothing_citable_is_dropped_not_cut():
+    import asyncio
+    from core.state import AgentResult
+    from agents.orchestrator import orchestrator_synthesize_node
+
+    essay = (
+        "## Findings and Ratio Decidendi\n"
+        "Section 338 of the Bharatiya Nyaya Sanhita, 2023 corresponds to Section 467 IPC. "
+        + "The Court deprecated forum shopping and concealment of material facts. " * 80
+    )
+    assert len(essay) > _SUPPORTING_APPEND_MAX_CHARS
+    state = _dinesh_state(AgentResult(agent_name="Judgment", content=essay))
+    answer = asyncio.run(orchestrator_synthesize_node(state))["final_response"]
+
+    assert answer == _DINESH_PRIMARY.rstrip()
+
+
+def test_strip_link_only_lines_keeps_prose_and_real_links():
+    from agents.orchestrator import _strip_link_only_lines
+    text = (
+        "The Court quashed the FIR.\n"
+        "References:\n"
+        "1. the-laws.com\n"
+        "• lawsuitcasefinder.com\n"
+        "- [Judgment PDF](https://api.sci.gov.in/x.pdf)\n"
+        "See www.example.com for the order.\n"
+    )
+    out = _strip_link_only_lines(text)
+    assert "the-laws.com" not in out and "lawsuitcasefinder.com" not in out
+    assert "The Court quashed the FIR." in out
+    assert "[Judgment PDF](https://api.sci.gov.in/x.pdf)" in out
+    assert "See www.example.com for the order." in out   # prose mentioning a domain stays
+    assert "References:" in out                           # label still has a link under it
+    assert _strip_link_only_lines("Sources:\n- casemine.com\n") == ""

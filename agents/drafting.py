@@ -3417,11 +3417,11 @@ def _fit_plan_to_budget(
     return secs, feasible, "collapsed"
 
 
-_UNRESOLVED_REVIEW_BANNER_MARKER = "**Review notes outstanding**"
+_UNRESOLVED_REVIEW_BANNER_MARKER = "**Please check before filing**"
 
 
 def _unresolved_review_banner(history) -> str:
-    """Banner for a draft self_refine could not bring to a pass.
+    """Closing note for a draft self_refine left with a CRITICAL problem.
 
     `history` is the list of Critique objects self_refine returns; the last
     one is the final verdict. When it still lists violations the draft was
@@ -3429,6 +3429,14 @@ def _unresolved_review_banner(history) -> str:
     but a log line (`self_refine_completed | unverified_budget_exhausted |
     final_violations=3`, req 8ab2c219). Returns "" when there is nothing
     to say. Pure function so it is unit-testable.
+
+    Only critical violations reach the user (lawyer feedback, 2026-09-18):
+    the note used to open every draft with major/minor formatting points
+    such as "IN THE MATTER OF is unbolded" — one of them wrong — under the
+    critic's internal field names, and lawyers read it as unnecessary
+    content. Major and minor points are still logged by the caller. The
+    note is appended at the END of the draft in plain language, so the
+    document itself starts clean.
     """
     if not history:
         return ""
@@ -3441,26 +3449,29 @@ def _unresolved_review_banner(history) -> str:
     # client-facing draft (live check, 2026-09-15).
     violations = [v for v in violations
                   if (getattr(v, "field", "") or "") != "verifier_unavailable"]
-    if getattr(final, "passes", True) or not violations:
+    if getattr(final, "passes", True):
         return ""
-    # Most severe first; at most four lines so the banner stays a note.
-    _rank = {"critical": 0, "major": 1, "minor": 2}
-    violations.sort(key=lambda v: _rank.get(getattr(v, "severity", "minor"), 3))
+    critical = [v for v in violations
+                if (getattr(v, "severity", "") or "").strip().lower() == "critical"]
+    if not critical:
+        return ""
+    # At most four lines so the note stays a note. Plain issue text only —
+    # the critic's field names ("missing_cause_title_elements") and severity
+    # labels mean nothing to the reader.
     lines = []
-    for v in violations[:4]:
-        field = (getattr(v, "field", "") or "").strip()
+    for v in critical[:4]:
         issue = (getattr(v, "issue", "") or "").strip().rstrip(".")
-        sev = (getattr(v, "severity", "") or "").strip()
-        head = f"{field}: " if field else ""
-        lines.append(f"> - {head}{issue}" + (f" ({sev})" if sev else ""))
-    more = len(violations) - len(lines)
+        if issue:
+            lines.append(f"> - {issue}.")
+    if not lines:
+        return ""
+    more = len(critical) - len(lines)
     if more > 0:
-        lines.append(f"> - and {more} more")
+        lines.append(f"> - and {more} more.")
     return (
-        f"> ⚠ {_UNRESOLVED_REVIEW_BANNER_MARKER} — our review flagged "
-        f"{len(violations)} point(s) in this draft that could not be "
-        f"resolved automatically. Please check them before filing:\n"
-        + "\n".join(lines) + "\n\n"
+        f"\n\n---\n\n> ⚠ {_UNRESOLVED_REVIEW_BANNER_MARKER} — our review found "
+        f"{len(critical)} point(s) in this draft that it could not fix "
+        f"automatically:\n" + "\n".join(lines) + "\n"
     )
 
 
@@ -5360,29 +5371,40 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 # critique still failing; before this the draft shipped
                 # with no signal (req 8ab2c219: final_violations=3, silent).
                 _review_banner = _unresolved_review_banner(refine_history)
-                if _review_banner and _UNRESOLVED_REVIEW_BANNER_MARKER not in draft:
-                    _final_crit = refine_history[-1]
+                _final_crit = refine_history[-1] if refine_history else None
+                if (_final_crit is not None and not _final_crit.passes
+                        and _final_crit.violations):
+                    # Every unresolved point is logged, whether or not it is
+                    # severe enough to be shown to the user.
                     log.warning(
                         "Draft ships with unresolved review notes",
                         violations=len(_final_crit.violations),
+                        shown_to_user=bool(_review_banner),
                         severities=sorted(
                             {v.severity for v in _final_crit.violations}
                         ),
+                        fields=[v.field for v in _final_crit.violations][:8],
                         iterations=len(refine_history),
+                    )
+                if _review_banner and _UNRESOLVED_REVIEW_BANNER_MARKER not in draft:
+                    _shown = sum(
+                        1 for v in _final_crit.violations
+                        if (v.severity or "").lower() == "critical"
+                        and v.field != "verifier_unavailable"
                     )
                     try:
                         from langgraph.config import get_stream_writer as _gsw_rv
                         _gsw_rv()({
                             "type": "status",
                             "message": (
-                                f"Review found {len(_final_crit.violations)} "
+                                f"Review found {_shown} "
                                 "point(s) to check before filing"
                             ),
                             "step": "review_unresolved",
                         })
                     except (RuntimeError, ImportError):
                         pass  # batch endpoint — no stream to write to
-                    draft = _review_banner + draft
+                    draft = draft.rstrip() + _review_banner
             except Exception as refine_err:
                 log.warning("Self-refine skipped due to error",
                             error=str(refine_err))

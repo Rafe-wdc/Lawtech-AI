@@ -172,7 +172,9 @@ def test_no_banner_when_history_empty_or_final_passes():
     assert _unresolved_review_banner([_crit(False), _crit(True)]) == ""
 
 
-def test_banner_lists_unresolved_violations_most_severe_first():
+def test_banner_lists_only_critical_points_in_plain_language():
+    """Only critical points reach the user, without the critic's field names
+    or severity labels (lawyer feedback 2026-09-18)."""
     history = [
         _crit(False, _viol("prayer", "Relief does not match grounds")),
         _crit(False,
@@ -181,13 +183,33 @@ def test_banner_lists_unresolved_violations_most_severe_first():
               _viol("prayer", "Relief does not match grounds")),
     ]
     banner = _unresolved_review_banner(history)
-    assert banner.startswith("> ⚠ ")
     assert _UNRESOLVED_REVIEW_BANNER_MARKER in banner
-    assert "3 point(s)" in banner
+    assert "1 point(s)" in banner
     lines = [l for l in banner.splitlines() if l.startswith("> - ")]
-    assert lines[0].startswith("> - facts:")           # critical first
-    assert lines[-1].startswith("> - verification:")   # minor last
-    assert banner.endswith("\n\n")
+    assert lines == ["> - FIR number differs from source."]
+    assert "facts:" not in banner and "(critical)" not in banner
+    assert "Relief does not match" not in banner      # major — logged, not shown
+    assert "Missing deponent" not in banner           # minor — logged, not shown
+
+
+def test_banner_is_a_closing_note_not_a_header():
+    banner = _unresolved_review_banner(
+        [_crit(False, _viol("facts", "FIR number differs from source", "critical"))])
+    assert banner.startswith("\n\n---\n\n> ⚠ ")
+    draft = "IN THE COURT OF SESSIONS JUDGE\n\nBody of the draft."
+    shipped = draft.rstrip() + banner
+    assert shipped.startswith("IN THE COURT OF SESSIONS JUDGE")
+    assert shipped.endswith("FIR number differs from source.\n")
+
+
+def test_formatting_only_points_produce_no_note():
+    """The reported draft: two formatting points, one of them wrong."""
+    history = [_crit(False,
+        _viol("missing_cause_title_elements",
+              "The cause title is missing the mandatory bolded 'IN THE MATTER OF:' header", "major"),
+        _viol("wrong_numbering_scheme_for_procedural_section",
+              "Paragraph 24 continues the global body counter above the Prayer", "minor"))]
+    assert _unresolved_review_banner(history) == ""
 
 
 def test_banner_ignores_the_critic_unavailable_sentinel():
@@ -201,8 +223,8 @@ def test_banner_ignores_the_critic_unavailable_sentinel():
     assert _unresolved_review_banner([_crit(False, sentinel)]) == ""
     # mixed: the real note survives, the sentinel does not
     banner = _unresolved_review_banner(
-        [_crit(False, sentinel, _viol("prayer", "Relief does not match grounds"))])
-    assert "prayer:" in banner and "verifier_unavailable" not in banner
+        [_crit(False, sentinel, _viol("facts", "FIR number differs from source", "critical"))])
+    assert "FIR number differs" in banner and "verifier_unavailable" not in banner
     assert "1 point(s)" in banner
 
 
@@ -219,8 +241,8 @@ def test_banner_never_contains_the_critic_unavailable_text():
 
 
 def test_banner_caps_at_four_lines_and_counts_the_rest():
-    vs = [_viol(f"f{i}", f"issue {i}") for i in range(6)]
+    vs = [_viol(f"f{i}", f"issue {i}", "critical") for i in range(6)]
     banner = _unresolved_review_banner([_crit(False, *vs)])
     listed = [l for l in banner.splitlines() if l.startswith("> - ")]
     assert len(listed) == 5
-    assert listed[-1] == "> - and 2 more"
+    assert listed[-1] == "> - and 2 more."

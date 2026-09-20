@@ -83,3 +83,18 @@ def test_validate_draft_can_skip_renumbering_for_review_and_redraft():
 def test_idempotent():
     once, _ = _renumber_backward_paragraphs(WRITTEN_STATEMENT)
     assert _renumber_backward_paragraphs(once) == (once, 0)
+
+
+def test_nested_lines_are_indented_for_the_new_number_width():
+    # "9." is renumbered to "12."; its left-margin continuation line must be
+    # indented for the two-digit number, or markdown renders it outside
+    # the paragraph.
+    text = "\n".join(
+        [f"{n}. Objection {n}." for n in range(1, 12)]
+        + ["9. With respect to paragraph 1:", "", "Continuation of the reply.", "", "10. Next."]
+    )
+    out, _ = validate_draft(text)
+    lines = out.splitlines()
+    i = lines.index("12. With respect to paragraph 1:")
+    cont = next(l for l in lines[i + 1:] if l.strip())
+    assert cont == "    Continuation of the reply."

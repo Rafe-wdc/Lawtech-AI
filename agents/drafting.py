@@ -925,11 +925,8 @@ def validate_draft(
             f"Layout: {_pipes} two-column line(s), {_dup_heads} caption-restating heading(s), "
             f"{_ground_splits} ground heading(s) separated from their paragraph."
         )
-    cleaned, _nested = _nest_subpoints_under_numbered_items(cleaned)
-    if _nested:
-        warnings.append(
-            f"Nested {_nested} left-margin line(s) under their numbered clause."
-        )
+    # Renumber before nesting: the nesting indent follows the width of the
+    # paragraph number, so "7." -> "10." must happen first.
     if renumber_paragraphs:
         cleaned, _renumbered = _renumber_backward_paragraphs(cleaned)
         if _renumbered:
@@ -937,6 +934,11 @@ def validate_draft(
                 f"Renumbered {_renumbered} paragraph(s) that repeated earlier "
                 "paragraph numbers."
             )
+    cleaned, _nested = _nest_subpoints_under_numbered_items(cleaned)
+    if _nested:
+        warnings.append(
+            f"Nested {_nested} left-margin line(s) under their numbered clause."
+        )
 
     # A line that opens with a bare number and a period is a markdown
     # ordered-list item. When the writer hard-wraps prose, a year or an

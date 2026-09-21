@@ -208,6 +208,17 @@ def _fix_unclosed_code_blocks(text: str) -> str:
     return text
 
 
+_LONG_RUN_RE = re.compile(r"\S{501,}")
+_LONG_RUN_CHUNK = 120
+
+
+def _split_run(m: re.Match) -> str:
+    run = m.group(0)
+    if "://" in run:
+        return run
+    return "\n".join(run[i:i + _LONG_RUN_CHUNK] for i in range(0, len(run), _LONG_RUN_CHUNK))
+
+
 def _fix_long_lines(text: str) -> str:
     """Break extremely long lines (>500 chars) that have no spaces.
 
@@ -233,18 +244,15 @@ def _fix_long_lines(text: str) -> str:
             cleaned.append(line)
             continue
 
-        # Break lines >500 chars at word boundaries
+        # Only an unbroken run (no spaces) overflows: the renderer wraps
+        # prose on its own. Re-wrapping prose here used to hard-break every
+        # >500-char paragraph at 120 chars, and a break that left "1971." at
+        # the start of a line rendered as an empty numbered paragraph and
+        # shifted every later paragraph number by one (advocate screenshot,
+        # writ petition, 2026-09-21). Runs are split in place; the line's
+        # indentation and every space are kept, and URLs are left whole.
         if len(line) > 500:
-            words = line.split(" ")
-            current = ""
-            for word in words:
-                if len(current) + len(word) + 1 > 120:
-                    cleaned.append(current)
-                    current = word
-                else:
-                    current = current + " " + word if current else word
-            if current:
-                cleaned.append(current)
+            cleaned.append(_LONG_RUN_RE.sub(_split_run, line))
         else:
             cleaned.append(line)
 

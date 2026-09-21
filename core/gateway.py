@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 import io
 import json
 import os
+import threading
 import random
 
 # asyncio.timeout() is Python 3.11+; fall back to async_timeout on 3.10
@@ -1110,6 +1111,125 @@ def _pdf_page_count(path: str) -> int:
         return 0
 
 
+# LibreOffice binary for DOCX -> PDF page counting. Installed on the servers
+# by the deploy workflows (libreoffice-writer + Word-metric fonts).
+_SOFFICE_CANDIDATES = (
+    "soffice", "libreoffice",
+    r"C:\Program Files\LibreOffice\program\soffice.exe",
+)
+_DOCX_CONVERT_TIMEOUT_S = 60
+# A LibreOffice profile serves one conversion at a time. Starting on a fresh
+# profile costs ~5 s, a warm one ~2 s, so each worker process keeps a small
+# pool of warm profiles; a conversion waits for a free one.
+_SOFFICE_PROFILE_POOL_SIZE = 2
+_soffice_profiles = None
+_soffice_profiles_lock = threading.Lock()
+
+
+def _soffice_profile_pool():
+    global _soffice_profiles
+    with _soffice_profiles_lock:
+        if _soffice_profiles is None:
+            import queue
+            import tempfile
+            from pathlib import Path
+            root = Path(tempfile.gettempdir(), "lawtech_lo_profiles")
+            _soffice_profiles = queue.Queue()
+            for i in range(_SOFFICE_PROFILE_POOL_SIZE):
+                _soffice_profiles.put(root / f"{os.getpid()}_{i}")
+        return _soffice_profiles
+
+
+def _find_soffice() -> str | None:
+    import shutil
+    configured = os.getenv("LIBREOFFICE_PATH")
+    for cand in ((configured,) if configured else ()) + _SOFFICE_CANDIDATES:
+        found = shutil.which(cand) or (cand if os.path.isfile(cand) else None)
+        if found:
+            return found
+    return None
+
+
+def _docx_saved_page_count(path: str) -> int | None:
+    """The page count Word stores in docProps/app.xml when it saves a file.
+    Exact for files Word saved; missing in files written by other programs. Files made
+    by python-docx carry its template's stale "1 page, 0 words" values, so a
+    count saved next to <Words>0</Words> is ignored."""
+    import re
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            app = z.read("docProps/app.xml").decode("utf-8", "replace")
+    except (KeyError, OSError, zipfile.BadZipFile):
+        return None
+    if re.search(r"<Words>0</Words>", app):
+        return None
+    m = re.search(r"<Pages>(\d+)</Pages>", app)
+    return int(m.group(1)) if m and int(m.group(1)) > 0 else None
+
+
+def _docx_page_count(path: str) -> int | None:
+    """Pages of a .docx for the per-plan limit.
+
+    A .docx stores no pages; they exist only once a word processor lays the
+    text out. When Word saved the file it recorded its own page count, which
+    is used as-is (exact, and no conversion). Otherwise the file is converted
+    to PDF with LibreOffice (headless) and the PDF pages are counted: measured
+    against Word on 11 documents, 10 matched exactly and one long petition
+    with tables came out 27 against 25. Conversions borrow a warm profile from
+    a per-process pool so concurrent uploads do not collide.
+
+    Returns None when neither is available (the caller lets the file through
+    and logs it), so a missing or broken converter never blocks Word uploads.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    saved = _docx_saved_page_count(path)
+    if saved is not None:
+        return saved
+
+    soffice = _find_soffice()
+    if soffice:
+        pool = _soffice_profile_pool()
+        profile_dir = pool.get()
+        with tempfile.TemporaryDirectory(prefix="docx_pages_") as out_dir:
+            profile = profile_dir.as_uri()
+            try:
+                subprocess.run(
+                    [soffice, "--headless", "--norestore",
+                     f"-env:UserInstallation={profile}",
+                     "--convert-to", "pdf", "--outdir", out_dir, path],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=_DOCX_CONVERT_TIMEOUT_S, check=False,
+                )
+                pdf = Path(out_dir, Path(path).stem + ".pdf")
+                if pdf.is_file():
+                    pages = _pdf_page_count(str(pdf))
+                    if pages > 0:
+                        return pages
+                log.warning("DOCX page count: conversion produced no PDF",
+                            file=os.path.basename(path))
+            except (subprocess.TimeoutExpired, OSError) as e:
+                log.warning("DOCX page count: conversion failed",
+                            file=os.path.basename(path), error=str(e)[:120])
+            finally:
+                pool.put(profile_dir)
+    else:
+        log.warning("DOCX page count: LibreOffice not installed")
+    return None
+
+
+def _document_page_count(path: str, ext: str) -> int | None:
+    """Pages for the per-plan limit, or None when the type has no pages."""
+    if ext == ".pdf":
+        return _pdf_page_count(path)
+    if ext == ".docx":
+        return _docx_page_count(path)
+    return None
+
+
 def safe_upload_name(original: str) -> str:
     """Sanitize an uploaded filename without dropping non-ASCII-named files.
 
@@ -1156,7 +1276,7 @@ async def chat_with_files(
     the full agent graph with file context injected into state.
 
     The optional ``plan`` field applies that plan's limits from
-    PLAN_UPLOAD_LIMITS: pages per PDF, and documents per chat thread
+    PLAN_UPLOAD_LIMITS: pages per PDF or Word (.docx) document, and documents per chat thread
     (already uploaded + attached now).
     """
     from .file_processor import process_files, validate_upload
@@ -1343,9 +1463,12 @@ async def chat_with_files(
                 temp_paths.remove(tmp_path)
                 continue
 
-            if plan_limits is not None and _ext == ".pdf":
-                _pages = await asyncio.to_thread(_pdf_page_count, tmp_path)
-                if _pages > plan_limits["max_pages_per_doc"]:
+            if plan_limits is not None and _ext in (".pdf", ".docx"):
+                _pages = await asyncio.to_thread(_document_page_count, tmp_path, _ext)
+                if _pages is None:
+                    log.warning("Page limit not applied: page count unknown",
+                                file=original_name, plan=plan)
+                elif _pages > plan_limits["max_pages_per_doc"]:
                     for _p in temp_paths:
                         try:
                             os.unlink(_p)

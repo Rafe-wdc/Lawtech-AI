@@ -622,6 +622,46 @@ def _nest_subpoints_under_numbered_items(text: str) -> tuple[str, int]:
     return chr(10).join(lines), changed
 
 
+def _renumber_backward_paragraphs(text: str) -> tuple[str, int]:
+    """Continue the paragraph count where a later section went backwards.
+
+    Advocate screenshot 2026-09-21 (written statement): Preliminary
+    Objections ran 1-11, then Para-wise Reply opened at 9, so paragraphs
+    9, 10 and 11 appeared twice. The sections are written in separate
+    calls, each told to continue numbering from DOCUMENT SO FAR, and the
+    writer still miscounts; the prompt rule alone does not hold.
+
+    Only a backward jump to a number other than 1 is repaired: that run is
+    shifted to continue from the last paragraph (9 -> 12, 10 -> 13, ...).
+    A restart at 1 is left alone, because an annexed affidavit, a prayer
+    list or an index legitimately starts again at 1. Forward gaps are left
+    alone. A 3-digit number counts only when it continues the sequence,
+    so a year or amount stranded at line start is never renumbered.
+    Only numbered items at column 0 are touched. Structural and mechanical.
+    """
+    lines = text.split(chr(10))
+    last, offset, changed = 0, 0, 0
+    for i, line in enumerate(lines):
+        m = _NUMBERED_ITEM_RE.match(line)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if n == 1:
+            last, offset = 1, 0
+            continue
+        new = n + offset
+        if n >= 100 and new != last + 1:
+            continue
+        if new <= last:
+            offset = last + 1 - n
+            new = last + 1
+        if new != n:
+            lines[i] = f"{new}." + line[len(m.group(1)) + 1:]
+            changed += 1
+        last = new
+    return chr(10).join(lines), changed
+
+
 # A line opening with a bare number of three or more digits and a period.
 # Two-digit numbers are genuine paragraph numbers; three-plus are years
 # and amounts that hard-wrapping stranded at line start.
@@ -802,6 +842,7 @@ def _drop_duplicate_valuation_block(text: str) -> tuple[str, int]:
 def validate_draft(
     full_draft: str,
     stance=None,  # kept for signature compatibility; unused
+    renumber_paragraphs: bool = True,
 ) -> tuple[str, list[str]]:
     """Cheap mechanical repairs on the generated draft.
 
@@ -812,6 +853,9 @@ def validate_draft(
       - HTML tag strip (<br>, <hr> first, then any remaining tags)
       - leftover `[CITE: ...]` placeholder strip
       - empty numbered paragraphs (`N.` with no body)
+      - paragraph numbers that go backwards between sections (off when
+        ``renumber_paragraphs`` is False, i.e. review-and-redraft, where the
+        writer mirrors the user's own numbering)
 
     Substantive critique (orphan citation tails, forbidden statute pairs,
     paragraph numbering, prayer-relief mismatch, missing sections) is the
@@ -886,6 +930,13 @@ def validate_draft(
         warnings.append(
             f"Nested {_nested} left-margin line(s) under their numbered clause."
         )
+    if renumber_paragraphs:
+        cleaned, _renumbered = _renumber_backward_paragraphs(cleaned)
+        if _renumbered:
+            warnings.append(
+                f"Renumbered {_renumbered} paragraph(s) that repeated earlier "
+                "paragraph numbers."
+            )
 
     # A line that opens with a bare number and a period is a markdown
     # ordered-list item. When the writer hard-wraps prose, a year or an
@@ -5169,7 +5220,9 @@ async def drafting_node(state: LegalAgentState) -> dict:
 
         # --- 6. Mechanical cleanup (mojibake, HTML strip, [CITE:] strip) ---
         progress("drafting", "Cleaning up draft...", step="cleanup")
-        draft, draft_warnings = validate_draft(draft)
+        draft, draft_warnings = validate_draft(
+            draft, renumber_paragraphs=not use_upload_as_ref,
+        )
 
         # Old section number bolted to a new act name — "Section 439 BNSS".
         # 439 is the CrPC bail provision; the BNSS counterpart is 483, so

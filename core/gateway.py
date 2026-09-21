@@ -1155,9 +1155,9 @@ async def chat_with_files(
     Processes files (PDF, images, DOCX, TXT, CSV, XLSX), then runs
     the full agent graph with file context injected into state.
 
-    The optional ``plan`` field applies that plan's per-PDF page limit from
-    PLAN_UPLOAD_LIMITS. The document count per plan is enforced by the
-    frontend.
+    The optional ``plan`` field applies that plan's limits from
+    PLAN_UPLOAD_LIMITS: pages per PDF, and documents per chat thread
+    (already uploaded + attached now).
     """
     from .file_processor import process_files, validate_upload
     from .settings import MAX_FILES_PER_REQUEST as MAX_FILES
@@ -1200,6 +1200,26 @@ async def chat_with_files(
                 status_code=400,
                 detail=f"Maximum {MAX_FILES} files allowed",
             )
+
+        # Documents per chat thread for the plan: those already uploaded to
+        # this thread plus the ones attached now. Checked before any body is
+        # read. A new thread (no globalThreadId) has none yet.
+        if plan_limits is not None:
+            _new_docs = sum(1 for f in files if f.filename)
+            _existing_docs = 0
+            if _new_docs and globalThreadId:
+                _existing_docs, _ = await chat_store.get_thread_storage(thread_id)
+            _max_docs = plan_limits["max_docs_per_session"]
+            if _existing_docs + _new_docs > _max_docs:
+                if _existing_docs >= _max_docs:
+                    _detail = (f"Your plan ({plan}) allows up to {_max_docs} documents "
+                               f"per chat, and this chat already has {_existing_docs}. "
+                               "Start a new chat to upload more documents.")
+                else:
+                    _detail = (f"Your plan ({plan}) allows up to {_max_docs} documents "
+                               f"per chat. This chat has {_existing_docs}, so you can "
+                               f"attach up to {_max_docs - _existing_docs} more.")
+                raise HTTPException(status_code=403, detail=_detail)
 
         # Per-file size cap (in bytes) used by the pre-read + chunked-read
         # checks below. Duplicated from validate_upload so we reject BEFORE

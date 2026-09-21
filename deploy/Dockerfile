@@ -3,8 +3,15 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install system deps
+# libreoffice-writer + Word-metric fonts: DOCX -> PDF for the per-plan page
+# limit (core/gateway.py _docx_page_count). Carlito/Caladea/Liberation match
+# Calibri/Cambria/Times/Arial widths so page counts track Word.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libreoffice-writer-nogui \
+    fonts-crosextra-carlito \
+    fonts-crosextra-caladea \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps first (layer cache)

@@ -665,7 +665,8 @@ def _renumber_backward_paragraphs(text: str) -> tuple[str, int]:
 # A line opening with a bare number of three or more digits and a period.
 # Two-digit numbers are genuine paragraph numbers; three-plus are years
 # and amounts that hard-wrapping stranded at line start.
-_LINE_INITIAL_BIG_NUMBER_RE = re.compile(r"^([ \t]*)(\d{3,})\.(?=\s)")
+# End of line counts too: "1971." alone on a line is a list item as well.
+_LINE_INITIAL_BIG_NUMBER_RE = re.compile(r"^([ \t]*)(\d{3,})\.(?=\s|$)")
 _ANY_NUMBERED_LINE_RE = re.compile(r"^[ \t]*(\d{1,3})\.\s")
 
 

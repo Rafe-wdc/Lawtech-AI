@@ -1,7 +1,7 @@
 """Per-plan PDF page limit on POST /pyapi/chat, driven by the `plan` form field.
 
 Each PDF may have at most PLAN_UPLOAD_LIMITS[plan]["max_pages_per_doc"] pages.
-The document count per plan is enforced by the frontend, not here.
+The per-chat document limit is covered in test_plan_session_doc_limit.py.
 File processing is stubbed, so these tests stop right after the upload checks.
 """
 
@@ -69,8 +69,9 @@ def test_plan_name_match_ignores_case_and_spaces(client):
     assert _post(client, [31], "  first justice plan ").status_code == 403
 
 
-def test_document_count_is_not_limited_by_backend(client):
-    assert _post(client, [1, 1, 1], "First Justice Plan").status_code == 200
+def test_document_count_over_session_limit_is_rejected(client):
+    # 3 docs in a new chat on First Justice Plan (max 2 per chat).
+    assert _post(client, [1, 1, 1], "First Justice Plan").status_code == 403
 
 
 def test_unknown_plan_is_rejected(client):

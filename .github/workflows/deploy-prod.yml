@@ -136,6 +136,19 @@ jobs:
             -exec sed -i 's/\r$//' {} +
           sudo sed -i 's/\r$//' $APP_DIR/gunicorn.conf.py 2>/dev/null || true
 
+          echo "=== LibreOffice for the DOCX page limit (one-time) ==="
+          if ! command -v soffice >/dev/null; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+            # -nogui exists from Ubuntu 22.04; older hosts get the full writer package.
+            # Never fail the deploy over it: without LibreOffice the DOCX page limit
+            # falls back to the page count Word saved in the file.
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
+              libreoffice-writer-nogui fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation \
+            || sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
+              libreoffice-writer fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation \
+            || echo "WARNING: LibreOffice install failed; DOCX page limit uses saved page counts"
+          fi
+
           echo "=== Install any new Python dependencies ==="
           sudo $APP_DIR/venv/bin/pip install --quiet -r $APP_DIR/requirements.txt
 

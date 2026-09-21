@@ -59,7 +59,8 @@ apt-get install -yqq \
     "postgresql-$PG_VERSION" "postgresql-contrib-$PG_VERSION" \
     redis-server \
     libpq-dev libssl-dev \
-    fail2ban ufw
+    fail2ban ufw \
+    libreoffice-writer-nogui fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation
 
 info "APT packages installed."
 

@@ -167,6 +167,20 @@ jobs:
             cp frontend.html /var/www/html/v2test.html
             sed -i 's|value="http://localhost:5000"|value="https://tool.lawttorney.com"|g' /var/www/html/v2test.html
 
+            # LibreOffice for the DOCX page limit (one-time; skipped once present)
+            if ! command -v soffice >/dev/null; then
+              echo "=== Installing LibreOffice for DOCX page counting ==="
+              DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+              # -nogui exists from Ubuntu 22.04; older hosts get the full writer package.
+              # Never fail the deploy over it: without LibreOffice the DOCX page limit
+              # falls back to the page count Word saved in the file.
+              DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
+                libreoffice-writer-nogui fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation \
+              || DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
+                libreoffice-writer fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation \
+              || echo "WARNING: LibreOffice install failed; DOCX page limit uses saved page counts"
+            fi
+
             # Install any new Python dependencies
             source venv/bin/activate
             pip install -q -r requirements.txt

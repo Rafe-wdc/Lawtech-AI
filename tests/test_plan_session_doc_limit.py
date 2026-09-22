@@ -29,13 +29,14 @@ def _pdf() -> bytes:
 
 @pytest.fixture
 def thread_files(monkeypatch):
-    """Files already stored per thread id, as get_thread_storage reports them."""
+    """Files already stored per thread id (1 page each for these tests)."""
     counts: dict[str, int] = {}
 
-    async def _storage(thread_id):
-        return counts.get(thread_id, 0), 0
+    async def _usage(thread_id):
+        n = counts.get(thread_id, 0)
+        return n, n
 
-    monkeypatch.setattr(gateway.chat_store, "get_thread_storage", _storage)
+    monkeypatch.setattr(gateway.chat_store, "get_thread_upload_usage", _usage)
     return counts
 
 

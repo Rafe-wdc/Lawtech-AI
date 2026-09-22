@@ -1222,12 +1222,13 @@ def _docx_page_count(path: str) -> int | None:
 
 
 def _document_page_count(path: str, ext: str) -> int | None:
-    """Pages for the per-plan limit, or None when the type has no pages."""
+    """Pages for the per-plan page budget. PDF and Word count their pages
+    (None when a Word count is unavailable); any other file counts as 1."""
     if ext == ".pdf":
         return _pdf_page_count(path)
     if ext == ".docx":
         return _docx_page_count(path)
-    return None
+    return 1
 
 
 def safe_upload_name(original: str) -> str:
@@ -1275,9 +1276,9 @@ async def chat_with_files(
     Processes files (PDF, images, DOCX, TXT, CSV, XLSX), then runs
     the full agent graph with file context injected into state.
 
-    The optional ``plan`` field applies that plan's limits from
-    PLAN_UPLOAD_LIMITS: pages per PDF or Word (.docx) document, and documents per chat thread
-    (already uploaded + attached now).
+    The optional ``plan`` field applies that plan's limits per chat thread
+    from PLAN_UPLOAD_LIMITS: documents and pages (already uploaded + attached
+    now). PDF and Word files count their pages, other files 1 page each.
     """
     from .file_processor import process_files, validate_upload
     from .settings import MAX_FILES_PER_REQUEST as MAX_FILES
@@ -1311,6 +1312,8 @@ async def chat_with_files(
 
     # Validate and save files to temp dir
     file_tuples: list[tuple[str, str, int]] = []
+    page_counts: dict[str, int] = {}                 # temp path -> pages (plan budget)
+    upload_pages: list[tuple[str, int]] = []         # (original name, pages) this request
     temp_paths: list[str] = []
     rejected_files: list[dict] = []   # surfaced to the client as a file_processing event
 
@@ -1321,14 +1324,18 @@ async def chat_with_files(
                 detail=f"Maximum {MAX_FILES} files allowed",
             )
 
-        # Documents per chat thread for the plan: those already uploaded to
-        # this thread plus the ones attached now. Checked before any body is
-        # read. A new thread (no globalThreadId) has none yet.
+        # Documents and pages per chat thread for the plan: those already
+        # uploaded to this thread plus the ones attached now. The document
+        # count, and a page budget that is already used up, are checked
+        # before any body is read; the pages of the new files are added
+        # after they are read (below). A new thread (no globalThreadId) has
+        # used nothing yet.
+        _existing_pages = 0
         if plan_limits is not None:
             _new_docs = sum(1 for f in files if f.filename)
             _existing_docs = 0
             if _new_docs and globalThreadId:
-                _existing_docs, _ = await chat_store.get_thread_storage(thread_id)
+                _existing_docs, _existing_pages = await chat_store.get_thread_upload_usage(thread_id)
             _max_docs = plan_limits["max_docs_per_session"]
             if _existing_docs + _new_docs > _max_docs:
                 if _existing_docs >= _max_docs:
@@ -1340,6 +1347,14 @@ async def chat_with_files(
                                f"per chat. This chat has {_existing_docs}, so you can "
                                f"attach up to {_max_docs - _existing_docs} more.")
                 raise HTTPException(status_code=403, detail=_detail)
+            _max_pages = plan_limits["max_pages_per_session"]
+            if _new_docs and _existing_pages >= _max_pages:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Your plan ({plan}) allows up to {_max_pages} pages per "
+                           f"chat, and this chat has already used {_existing_pages}. "
+                           "Start a new chat to upload more documents.",
+                )
 
         # Per-file size cap (in bytes) used by the pre-read + chunked-read
         # checks below. Duplicated from validate_upload so we reject BEFORE
@@ -1463,25 +1478,37 @@ async def chat_with_files(
                 temp_paths.remove(tmp_path)
                 continue
 
-            if plan_limits is not None and _ext in (".pdf", ".docx"):
+            if plan_limits is not None:
                 _pages = await asyncio.to_thread(_document_page_count, tmp_path, _ext)
                 if _pages is None:
-                    log.warning("Page limit not applied: page count unknown",
-                                file=original_name, plan=plan)
-                elif _pages > plan_limits["max_pages_per_doc"]:
-                    for _p in temp_paths:
-                        try:
-                            os.unlink(_p)
-                        except OSError:
-                            pass
-                    raise HTTPException(
-                        status_code=403,
-                        detail=f"{original_name} has {_pages} pages. Your plan "
-                               f"({plan}) allows up to "
-                               f"{plan_limits['max_pages_per_doc']} pages per document",
-                    )
+                    if _ext == ".docx":
+                        log.warning("Page count unknown for Word file; counted as 1 page",
+                                    file=original_name, plan=plan)
+                    _pages = 1
+                page_counts[tmp_path] = _pages
+                upload_pages.append((original_name, _pages))
 
             file_tuples.append((tmp_path, filename, total_bytes))
+
+        # Page budget: pages already used in this chat plus the new files.
+        if plan_limits is not None and upload_pages:
+            _new_pages = sum(p for _, p in upload_pages)
+            _max_pages = plan_limits["max_pages_per_session"]
+            if _existing_pages + _new_pages > _max_pages:
+                for _p in temp_paths:
+                    try:
+                        os.unlink(_p)
+                    except OSError:
+                        pass
+                _left = _max_pages - _existing_pages
+                _what = (f"{upload_pages[0][0]} has {_new_pages} pages"
+                         if len(upload_pages) == 1
+                         else f"These documents have {_new_pages} pages in total")
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"{_what}. Your plan ({plan}) allows up to {_max_pages} "
+                           f"pages per chat, and this chat has {_left} pages left.",
+                )
 
     async def event_generator():
         # Process files before invoking the pipeline (they need to be staged
@@ -1531,6 +1558,7 @@ async def chat_with_files(
                             file_tuples, thread_id, writer=_fp_writer,
                             force_ocr=bool(force_ocr),
                             batch_id=_batch_id,
+                            page_counts=page_counts,
                         )
                     finally:
                         _fp_events.put_nowait(_FP_SENTINEL)

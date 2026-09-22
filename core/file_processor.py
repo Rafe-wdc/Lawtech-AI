@@ -2183,6 +2183,7 @@ async def process_files(
     writer: Optional[Callable[[dict], None]] = None,
     force_ocr: bool = False,
     batch_id: str = "",
+    page_counts: Optional[dict[str, int]] = None,
 ) -> FileContext:
     """Process uploaded files with local storage + Gemini Files API persistence.
 
@@ -2285,6 +2286,11 @@ async def process_files(
             local_path=local_path,
             gemini_supported=gemini_ok,
             batch_id=batch_id,   # Gap #8: identify all files uploaded in this request
+            # Pages the gateway measured for the per-plan page budget, keyed
+            # by temp path. PDF extraction below overwrites it with the same
+            # number; Word files, images and text keep it so the thread's
+            # page usage can be summed on later turns.
+            page_count=(page_counts or {}).get(file_path, 0),
         )
 
         prepared.append((pf, local_path, ext, mime, gemini_ok))

@@ -770,6 +770,24 @@ class _SqliteChatHistoryStore:
         """Async wrapper — returns (file_count, total_bytes) for a thread."""
         return await asyncio.to_thread(self._get_thread_storage_bytes_sync, thread_id)
 
+    def _get_thread_upload_usage_sync(self, thread_id: str) -> tuple[int, int]:
+        """(documents, pages) uploaded to a thread, for the per-plan limits.
+        A file stored without a page count (image, text, sheet) counts as 1."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute("""
+                SELECT COUNT(*) AS cnt,
+                       COALESCE(SUM(CASE WHEN page_count > 0 THEN page_count ELSE 1 END), 0) AS pages
+                FROM thread_files WHERE thread_id = ?
+            """, (thread_id,)).fetchone()
+            return row["cnt"], row["pages"]
+        finally:
+            conn.close()
+
+    async def get_thread_upload_usage(self, thread_id: str) -> tuple[int, int]:
+        return await asyncio.to_thread(self._get_thread_upload_usage_sync, thread_id)
+
     def _update_ocr_status_sync(
         self, thread_id: str, file_id: str, status: str, error: str = "",
     ) -> None:
@@ -2197,6 +2215,21 @@ class _PostgresChatHistoryStore:
 
     async def get_thread_storage(self, thread_id: str) -> tuple:
         return await asyncio.to_thread(self._get_thread_storage_bytes_sync, thread_id)
+
+    def _get_thread_upload_usage_sync(self, thread_id: str) -> tuple:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("""
+                SELECT COUNT(*) AS cnt,
+                       COALESCE(SUM(CASE WHEN page_count > 0 THEN page_count ELSE 1 END), 0) AS pages
+                FROM thread_files WHERE thread_id = %s
+            """, (thread_id,)).fetchone()
+        return row["cnt"], int(row["pages"])
+
+    async def get_thread_upload_usage(self, thread_id: str) -> tuple:
+        return await asyncio.to_thread(self._get_thread_upload_usage_sync, thread_id)
 
     def _update_ocr_status_sync(
         self, thread_id: str, file_id: str, status: str, error: str = "",

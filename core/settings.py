@@ -230,13 +230,16 @@ MAX_FILE_SIZE_MB = 1024             # per-file size limit (1 GB)
 MAX_THREAD_STORAGE_MB = 1024        # 1 GB total per thread
 GEMINI_URI_EXPIRY_BUFFER_HOURS = 2  # re-upload if Gemini URI expires within this window
 
-# Per-plan upload limits, keyed by the plan name sent in the `plan` form field
-# of POST /pyapi/chat (matched case-insensitively). max_docs_per_session caps
-# the documents in one chat thread: files already uploaded to the thread plus
-# the ones in this request. Requests without a plan have neither limit.
+# Per-plan upload limits per chat thread, keyed by the plan name sent in the
+# `plan` form field of POST /pyapi/chat (matched case-insensitively). Both
+# count files already uploaded to the thread plus the ones in this request:
+#   max_docs_per_session   documents per chat
+#   max_pages_per_session  pages per chat; one document may use all of it.
+#                          PDF and Word count their pages, other files 1 each.
+# Requests without a plan have neither limit.
 PLAN_UPLOAD_LIMITS = {
-    "First Justice Plan": {"max_pages_per_doc": 30, "max_docs_per_session": 2},  # 499
-    "Basic": {"max_pages_per_doc": 30, "max_docs_per_session": 5},               # 999
+    "First Justice Plan": {"max_docs_per_session": 2, "max_pages_per_session": 60},   # 499
+    "Basic": {"max_docs_per_session": 5, "max_pages_per_session": 150},               # 999
 }
 
 # --- In-app file GC (Gap #4, 2026-09-02) ---

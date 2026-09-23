@@ -1908,6 +1908,12 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
             log.info("Multi-intent enrichment via UserIntent",
                      extra=extra, all_agents=tasks_planned)
 
+    task, tasks_planned, _hc_changed = _prefer_high_court_agent_for_hc_citation(
+        _original_query, task, tasks_planned)
+    if _hc_changed:
+        log.info("High Court reporter citation: Supreme Court agent dropped from plan",
+                 query=_original_query[:80], task=task, agents=tasks_planned)
+
     # Drafting reconciliation (post multi-intent): when Drafting appears in
     # the plan but wasn't the primary task, the typed UserIntent from the
     # extractor is the authoritative signal on whether the user actually
@@ -2722,6 +2728,11 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 primary, _prev_answer)
             appendix_parts = []
             _appendix_log: list[str] = []
+            # A primary that came from web search means our index does not
+            # hold the case the user named. See the loop below.
+            _primary_is_web = bool(getattr(primary_result, "fallback_used", False))
+            _query_case = (_query_case_tokens(state.get("original_query") or query)
+                           if _primary_is_web else None)
             for name, result in kept_supporting.items():
                 # A web-grounded supporter has no case record or PDF behind
                 # it. Next to a primary that already found the case in our
@@ -2731,6 +2742,17 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 # 2026-09-18, for a named Supreme Court case.
                 if getattr(result, "fallback_used", False):
                     _appendix_log.append(f"{name}(web fallback, dropped)")
+                    continue
+                # The reverse case: the primary itself came from web search,
+                # so the index does not hold the case the user named. An
+                # indexed supporter helps only if it discusses THAT case; one
+                # that surfaced other cases sharing a party name ("Vinay
+                # Kumar v. Savita" for "Vinay Kumar v. Om Prakash", prod
+                # 2026-09-22) is noise.
+                if (_primary_is_web and _query_case is not None
+                        and not _mentions_case(result.content, _query_case)):
+                    _appendix_log.append(
+                        f"{name}(primary is web fallback; does not discuss the queried case, dropped)")
                     continue
                 heading = _SUPPORTING_HEADINGS.get(name, f"## {name} Notes")
                 body, dropped = _filter_supporting_blocks(
@@ -2745,14 +2767,19 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                     # primary never cited still reaches the user through this
                     # agent's structured sources, with court, year and PDF
                     # link intact.
-                    citations = _new_source_citations(
+                    # Not next to a web-search primary, though: a list of
+                    # "related" index hits under an answer built from the
+                    # web is the noise reported on prod (2026-09-22).
+                    citations = "" if _primary_is_web else _new_source_citations(
                         result, _known_cites, _known_names).strip()
                     if citations:
                         body, _outcome = citations, (
                             "citations_only" if not body else "reduced_to_citations")
                     elif not body:
                         _appendix_log.append(
-                            f"{name}(all {len(dropped)} blocks redundant, no new sources)")
+                            f"{name}(all {len(dropped)} blocks redundant, "
+                            + ("citation list withheld: primary is web fallback)"
+                               if _primary_is_web else "no new sources)"))
                         continue
                     else:
                         # Cutting at the ceiling left the answer ending
@@ -3106,11 +3133,14 @@ def _has_citable_identity(src) -> bool:
     return bool(re.search(r"\s(?:v\.?|vs\.?|versus)\s", title, re.I))
 
 
-def _sources_as_citation_list(result) -> str:
-    """Render an agent's structured sources as a citation list."""
+def _sources_as_citation_list(result, sources=None) -> str:
+    """Render an agent's structured sources (or the given subset) as a
+    citation list."""
     lines = []
     seen = set()
-    for src in (getattr(result, "sources", None) or []):
+    if sources is None:
+        sources = getattr(result, "sources", None) or []
+    for src in sources:
         title = (getattr(src, "title", None) or "").strip()
         if not title or title.lower() in seen or not _has_citable_identity(src):
             continue
@@ -3257,6 +3287,96 @@ def _known_keys(*texts: str) -> tuple[set[str], set[str], set[str]]:
     return cites, provs, names
 
 
+# "X vs Y", "X vs. Y", "X versus Y", "X v. Y" (the bare "v." must sit between
+# two party-looking words, so "Chapter V. of" is not read as a case).
+_QUERY_VS_RE = re.compile(r"(?i:\b(?:vs\.?|versus)\b)|(?<=[A-Za-z.])\s+v\.(?=\s+[A-Z])")
+# Words around a party name that never identify it.
+_PARTY_NOISE = frozenset({
+    "and", "anr", "another", "ors", "others", "other", "the", "of", "mr", "mrs",
+    "ms", "smt", "shri", "sri", "dr", "etc", "judgment", "judgement", "case",
+    "provide", "give", "me", "in", "re", "for", "with", "about", "summary",
+})
+# The right-hand party ends where a citation, year or punctuation begins.
+_PARTY_END_RE = re.compile(
+    r"[,(\[;:]|\b(?:19|20)\d{2}\b|\b(?:AIR|SCC|SCR|INSC|All\s?LJ|ALJ|LJ|LR|LT|Cri\s?LJ)\b",
+    re.IGNORECASE)
+
+
+def _query_case_tokens(query: str) -> tuple[set[str], set[str]] | None:
+    """(left-party tokens, right-party tokens) of the case a query names,
+    or None when the query names no case."""
+    if not query:
+        return None
+    m = _QUERY_VS_RE.search(query)
+    if not m:
+        return None
+    left_words = re.findall(r"[A-Za-z][\w'&.-]*", query[:m.start()])[-5:]
+    right_text = _PARTY_END_RE.split(query[m.end():], maxsplit=1)[0]
+    right_words = re.findall(r"[A-Za-z][\w'&.-]*", right_text)[:5]
+
+    def _clean(words):
+        out = set()
+        for w in words:
+            w = re.sub(r"\W+", "", w).lower()
+            if len(w) > 2 and w not in _PARTY_NOISE:
+                out.add(w)
+        return out
+
+    left, right = _clean(left_words), _clean(right_words)
+    return (left, right) if left and right else None
+
+
+def _mentions_case(text: str, case: tuple[set[str], set[str]]) -> bool:
+    """True when `text` cites a case whose parties match the queried one
+    (either way round, so an appeal with the parties reversed counts)."""
+    if not text:
+        return False
+    left, right = case
+    for key in _case_name_keys(_vs_to_v(text)):
+        a, b = key.split("|", 1)
+        if any(t in a for t in left) and any(t in b for t in right):
+            return True
+        if any(t in b for t in left) and any(t in a for t in right):
+            return True
+    return False
+
+
+# Reporters that publish High Court decisions (not SCC / SCR / INSC / AIR SC).
+_HC_REPORTER_RE = re.compile(
+    r"\b(?:All\s?LJ|ALJ|AWC|ACC|ACrR|Bom\s?(?:LR|CR)|BLR|Mad\s?LJ|MLJ|Guj\s?(?:LR|LH)|GLR|"
+    r"Kant\s?LJ|KLJ|Ker\s?LT|KLT|Cal\s?LT|CLT|CWN|DLT|DRJ|PLR|RLW|MPLJ|MPHT|Ori\s?LR|OLR|"
+    r"PLJR|ALD|ILR|AIR\s+\d{4}\s+(?:All|Bom|Cal|Mad|Del|Ker|Kant|Kar|Guj|Pat|Raj|MP|P&H|"
+    r"AP|HP|Gau|J&K|Chh|Jhar|Utr|Sikkim|Tri|Megh|Mani|Ori))\b",
+    re.IGNORECASE)
+_SC_REPORTER_RE = re.compile(
+    r"\b(?:SCC|SCR|INSC|SCALE|SCJ|Supp\s+SCC|AIR\s+\d{4}\s+SC|JT\s+\(?\d{4})\b|supreme\s+court",
+    re.IGNORECASE)
+
+
+def _prefer_high_court_agent_for_hc_citation(
+    query: str, task: str, tasks_planned: list[str],
+) -> tuple[str, list[str], bool]:
+    """A named case cited from a High Court reporter is a High Court lookup.
+
+    "Provide a judgment of Vinay Kumar vs Omprakash All LJ 1980" was planned
+    as Judgment + SCI_Judgment. The Supreme Court agent cannot hold an
+    Allahabad Law Journal case; it searched the party names and the year and
+    appended 140 unrelated judgments (prod, 2026-09-22). When the query names
+    a case with a High Court reporter citation, a year, and no Supreme Court
+    marker, SCI_Judgment leaves the plan and Judgment is the primary. Only
+    narrows a plan the LLM planner made; never empties it.
+    """
+    if task not in ("Judgment", "SCI_Judgment"):
+        return task, tasks_planned, False
+    if "SCI_Judgment" not in tasks_planned or "Judgment" not in tasks_planned:
+        return task, tasks_planned, False
+    q = query or ""
+    if not (_QUERY_VS_RE.search(q) and re.search(r"\b(?:19|20)\d{2}\b", q)
+            and _HC_REPORTER_RE.search(q) and not _SC_REPORTER_RE.search(q)):
+        return task, tasks_planned, False
+    return "Judgment", [a for a in tasks_planned if a != "SCI_Judgment"], True
+
+
 def _filter_supporting_blocks(
     content: str,
     known_cites: set[str],
@@ -3304,22 +3424,76 @@ def _filter_supporting_blocks(
     return "\n\n".join(kept).strip(), dropped
 
 
+def _vs_to_v(text: str) -> str:
+    """"X VS Y" / "X vs. Y" -> "X v. Y", the form `_case_name_keys` reads."""
+    return re.sub(r"\b(?:vs|versus)\b\.?", "v.", text or "", flags=re.IGNORECASE)
+
+
+def _words(text: str) -> str:
+    """Lower-case, punctuation collapsed to single spaces, padded, so a party
+    name can be looked up whole: " state of u p " never matches "u p" alone."""
+    return " " + re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip() + " "
+
+
+def _title_parties(title: str) -> list[str]:
+    """["state of u p", "vinay kumar jain"] from "STATE OF U.P. VS VINAY KUMAR JAIN"."""
+    parts = _QUERY_VS_RE.split(title, maxsplit=1)
+    return [p.strip() for p in (_words(x) for x in parts) if p.strip()]
+
+
+def _discussed_sources(result) -> list:
+    """The agent's sources that its own text mentions: by PDF link, by
+    "X v. Y" party-name key, or by both party names appearing whole."""
+    content = getattr(result, "content", None) or ""
+    if not content.strip():
+        return []
+    content_names = _case_name_keys(_vs_to_v(content))
+    content_words = _words(content)
+    out = []
+    for src in (getattr(result, "sources", None) or []):
+        link = getattr(src, "doc_link", None)
+        if link and link in content:
+            out.append(src)
+            continue
+        title = (getattr(src, "title", None) or "").strip()
+        if not title:
+            continue
+        if _case_name_keys(_vs_to_v(title)) & content_names:
+            out.append(src)
+            continue
+        parties = _title_parties(title)
+        if (len(parties) == 2 and min(len(p) for p in parties) >= 3
+                and max(len(p) for p in parties) >= 6
+                and all(f" {p} " in content_words for p in parties)):
+            out.append(src)
+    return out
+
+
 def _new_source_citations(result, known_cites: set[str], known_names: set[str]) -> str:
-    """This agent's structured sources, minus the ones already cited.
+    """This agent's citable sources, minus the ones already cited, at most
+    `_SUPPORTING_CITATIONS_MAX` of them.
 
     Used when a supporter's prose is redundant or over-long: the prose goes,
     but a judgment the primary never mentioned still reaches the user with
-    its court, year and PDF link intact. Label-only sources are already
-    excluded by `_sources_as_citation_list`, so an agent with nothing citable
-    returns "" and the caller drops its heading.
+    its court, year and PDF link intact. For a ReAct agent only the cases its
+    own text discussed qualify; raw search hits never do. Label-only sources
+    are already excluded by `_sources_as_citation_list`, so an agent with
+    nothing citable returns "" and the caller drops its heading.
     """
+    sources = getattr(result, "sources", None) or []
+    if getattr(result, "agent_name", "") in _RAW_HIT_SOURCE_AGENTS:
+        sources = _discussed_sources(result)
+    if not sources:
+        return ""
     lines = []
-    for line in _sources_as_citation_list(result).splitlines():
+    for line in _sources_as_citation_list(result, sources).splitlines():
         if not line.strip():
             continue
-        if (_citation_keys(line) & known_cites) or (_case_name_keys(line) & known_names):
+        if (_citation_keys(line) & known_cites) or (_case_name_keys(_vs_to_v(line)) & known_names):
             continue
         lines.append(line)
+        if len(lines) >= _SUPPORTING_CITATIONS_MAX:
+            break
     return "\n".join(lines)
 
 
@@ -3333,6 +3507,16 @@ _BLOCK_MIN_UNIQUE_TOKENS = 40
 # it is a second essay — reduce it to its citation list. The four probe cases
 # appended 8.1k-12.0k chars each; a real gap-filling block is a few hundred.
 _SUPPORTING_APPEND_MAX_CHARS = 2_500
+
+# A supporter reduced to its citation list shows at most this many cases.
+_SUPPORTING_CITATIONS_MAX = 5
+
+# ReAct agents record every hit of every tool call as a source, so their
+# source list is a search history, not a reading list. Only the cases their
+# own text discussed may be listed. A Supreme Court supporter that searched
+# two party names and the year 1980 appended 140 unrelated judgments under
+# "Related Supreme Court Authority" (prod, 2026-09-22).
+_RAW_HIT_SOURCE_AGENTS = frozenset({"SCI_Judgment", "GST_Judgment"})
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:

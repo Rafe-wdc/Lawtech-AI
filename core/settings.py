@@ -236,7 +236,9 @@ GEMINI_URI_EXPIRY_BUFFER_HOURS = 2  # re-upload if Gemini URI expires within thi
 #   max_docs_per_session   documents per chat
 #   max_pages_per_session  pages per chat; one document may use all of it.
 #                          PDF and Word count their pages, other files 1 each.
-# Requests without a plan have neither limit.
+# A plan name that contains a configured name ("First Justice Plan Yearly")
+# gets that plan's limits. Any other plan, and a request without a plan, is
+# accepted with no plan limits (the global MAX_FILES_* caps still apply).
 PLAN_UPLOAD_LIMITS = {
     "First Justice Plan": {"max_docs_per_session": 2, "max_pages_per_session": 60},   # 499
     "Basic": {"max_docs_per_session": 5, "max_pages_per_session": 150},               # 999

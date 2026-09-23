@@ -1,4 +1,4 @@
-"""Named-case lookups: no search-hit dumps, no grounding artifacts, honest note.
+"""Named-case lookups: no search-hit dumps, no grounding artifacts.
 
 Lawyer report, prod 2026-09-22: "Provide a judgment of Vinay Kumar and other
 versus Omprakash All LJ 1980". The case is not in the index. The High Court
@@ -12,11 +12,6 @@ import os
 
 os.environ.setdefault("EMBEDDING_SERVICE_URL", "http://127.0.0.1:9")
 
-from core.agent_fallback import (
-    CASE_NOT_IN_DB_NOTE,
-    looks_like_named_case_query,
-    note_case_not_in_db,
-)
 from core.grounding_artifacts import strip_grounding_artifacts
 from core.state import AgentResult, SourceMetadata
 from agents.orchestrator import (
@@ -82,43 +77,6 @@ def test_output_guardrail_strips_artifacts_from_the_final_answer():
     out = asyncio.run(guardrail_output_node({"final_response": REPORTED, "task": "Judgment"}))
     assert "PerQueryResult" not in out["final_response"]
     assert "1980 All LJ 524" in out["final_response"]
-
-
-# --- the "not in our database" note --------------------------------------------
-
-def test_named_case_queries_are_recognised():
-    assert looks_like_named_case_query(QUERY)
-    assert looks_like_named_case_query("Dinesh Gupta vs State of UP")
-    assert looks_like_named_case_query("Kesavananda Bharati v. State of Kerala")
-    assert not looks_like_named_case_query("cases on anticipatory bail under Schedule V of the Act")
-    assert not looks_like_named_case_query("Chapter V. of the Contract Act")
-
-
-def test_web_fallback_answer_to_a_named_case_gets_the_note():
-    r = AgentResult(agent_name="Judgment", content="The decision in Vinai Kumar v. Om Prakash...",
-                    fallback_used=True)
-    note_case_not_in_db(r, QUERY)
-    assert r.content.startswith(CASE_NOT_IN_DB_NOTE)
-    assert "not the judgment text" in r.content
-    note_case_not_in_db(r, QUERY)                      # idempotent
-    assert r.content.count("**Note:**") == 1
-
-
-def test_note_is_not_added_to_topic_answers_or_apologies():
-    topic = AgentResult(agent_name="Judgment", content="Bail is the rule...", fallback_used=True)
-    note_case_not_in_db(topic, "High Court cases on anticipatory bail in dowry matters")
-    assert not topic.content.startswith(">")
-    apology = AgentResult(agent_name="Judgment", fallback_used=True,
-                          content="I was unable to retrieve information on this topic at the moment.")
-    note_case_not_in_db(apology, QUERY)
-    assert not apology.content.startswith(">")
-
-
-def test_metadata_party_names_count_as_a_named_case():
-    class Meta:
-        petitioner_names = ["Vinai Kumar"]
-        respondent_names = []
-    assert looks_like_named_case_query("judgment please", Meta())
 
 
 # --- supporter citation lists --------------------------------------------------
@@ -187,8 +145,7 @@ def test_a_reactive_agent_with_no_prose_lists_nothing():
 # --- the reported conversation, end to end through synthesis --------------------
 
 WEB_PRIMARY = (
-    CASE_NOT_IN_DB_NOTE
-    + "The decision in *Vinai Kumar and others v. Om Prakash and another*, reported at "
+    "The decision in *Vinai Kumar and others v. Om Prakash and another*, reported at "
     "1980 All LJ 524, is an authority on the scope of a \"competent court\" under "
     "Section 146 of the Code of Criminal Procedure, 1973.\n\n"
     "### Key Legal Issues\n"

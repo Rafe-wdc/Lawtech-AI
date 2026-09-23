@@ -12,7 +12,6 @@ Pattern borrowed from scenario_node() in agents/scenario.py.
 from __future__ import annotations
 
 import asyncio
-import re
 
 from core.state import AgentResult, SourceMetadata
 from core.clients import get_gemini_flash, get_genai_client
@@ -466,49 +465,3 @@ async def get_web_context(query: str, agent_name: str) -> str:
         log.warning("Web context enrichment failed, continuing without it",
                     agent=agent_name, error=str(e)[:100])
         return ""
-
-
-# --- Named-case lookups the corpus could not serve ---------------------------
-
-# "X vs Y", "X vs. Y", "X versus Y", "X v. Y" (the bare "v." must sit between
-# two party-looking words, so "Chapter V. of" is not read as a case).
-_NAMED_CASE_RE = re.compile(r"(?i:\b(?:vs\.?|versus)\b)|(?<=[A-Za-z.])\s+v\.(?=\s+[A-Z])")
-
-_APOLOGY_PREFIX = "I was unable to retrieve information"
-
-CASE_NOT_IN_DB_NOTE = (
-    "> **Note:** This judgment is not in our database, so its full text and "
-    "PDF are not available here. The summary below is compiled from web "
-    "sources and is not the judgment text; please verify it against the "
-    "reported judgment before relying on it.\n\n"
-)
-
-
-def looks_like_named_case_query(query: str, metadata=None) -> bool:
-    """True when the user asked for one specific case ("X v. Y", "X vs Y")."""
-    if metadata is not None and (getattr(metadata, "petitioner_names", None)
-                                 or getattr(metadata, "respondent_names", None)):
-        return True
-    return bool(query) and bool(_NAMED_CASE_RE.search(query))
-
-
-def note_case_not_in_db(result: AgentResult, query: str, metadata=None) -> AgentResult:
-    """Prefix a web-fallback answer to a named-case lookup with a note that
-    the judgment is not in the database.
-
-    A lawyer asked for "Vinai Kumar v. Om Prakash, 1980 All LJ 524"; the
-    corpus does not hold it, the web fallback wrote a confident summary from
-    pages that merely cite the case, and nothing told the reader it was not
-    the judgment (prod, 2026-09-22). English on purpose, like the drafting
-    banners: the note must read the same on every path.
-    """
-    if result is None or not (result.content or "").strip():
-        return result
-    if result.error or result.content.lstrip().startswith(_APOLOGY_PREFIX):
-        return result
-    if CASE_NOT_IN_DB_NOTE.strip() in result.content:
-        return result
-    if not looks_like_named_case_query(query, metadata):
-        return result
-    result.content = CASE_NOT_IN_DB_NOTE + result.content.lstrip()
-    return result

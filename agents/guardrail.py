@@ -186,6 +186,16 @@ async def guardrail_output_node(state: LegalAgentState) -> dict:
                  before=pre_url_len, after=len(cleaned),
                  removed=pre_url_len - len(cleaned))
 
+    # Pass 2b0: Gemini grounding objects pasted in as citations
+    # ("[PerQueryResult(index=..., snippet=...)]", "[cite: 3]"). Stripped at
+    # the web-fallback source too; this catches a merged answer that copied
+    # them from a supporter. Lawyer report 2026-09-22.
+    from core.grounding_artifacts import strip_grounding_artifacts as _strip_artifacts
+    cleaned, _artifacts = _strip_artifacts(cleaned)
+    if _artifacts:
+        log.warning("Grounding artifacts stripped from final_response",
+                    count=_artifacts, task=task)
+
     # Pass 2b1: a non-drafting answer is never a pleading. Arguments /
     # analysis that came back with a cause title, application number, party
     # block, PRAYER or sign-off lose the furniture and keep the body.

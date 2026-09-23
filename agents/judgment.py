@@ -522,12 +522,13 @@ async def judgment_node(state: LegalAgentState) -> dict:
                      f"'{metadata.court_name}' isn't in our judgment index "
                      "— searching the web...",
                      step="fallback")
-            from core.agent_fallback import web_search_fallback
+            from core.agent_fallback import web_search_fallback, note_case_not_in_db
             fallback_result = await web_search_fallback(
                 query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
                 original_query=original_query,
                 user_language=_user_language, intent=_intent)
             fallback_result.fallback_used = True
+            note_case_not_in_db(fallback_result, original_query or query, metadata)
             return {"agent_results": {"Judgment": fallback_result}}
 
         # If preliminary search found hits, use them directly
@@ -587,7 +588,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
         if not hits:
             # Phase 1: Query rewrite + retry
             progress("judgment", "No results — rewriting query...", step="fallback")
-            from core.agent_fallback import rewrite_query_for_domain, web_search_fallback
+            from core.agent_fallback import rewrite_query_for_domain, web_search_fallback, note_case_not_in_db
             rewritten = await asyncio.to_thread(rewrite_query_for_domain, query, "Judgment")
             if rewritten != query:
                 log.info("Retrying with rewritten query", rewritten=rewritten[:100])
@@ -622,6 +623,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
                     original_query=original_query,
                     user_language=_user_language, intent=_intent)
                 fallback_result.retry_attempted = True
+                note_case_not_in_db(fallback_result, original_query or query, metadata)
                 return {"agent_results": {"Judgment": fallback_result}}
 
         log.info("ES results found",
@@ -675,12 +677,13 @@ async def judgment_node(state: LegalAgentState) -> dict:
                      "Retrieved cases don't match the query "
                      "— searching the web...",
                      step="fallback", substep=True)
-            from core.agent_fallback import web_search_fallback
+            from core.agent_fallback import web_search_fallback, note_case_not_in_db
             fallback_result = await web_search_fallback(
                 query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
                 original_query=original_query,
                 user_language=_user_language, intent=_intent)
             fallback_result.retry_attempted = True
+            note_case_not_in_db(fallback_result, original_query or query, metadata)
             return {"agent_results": {"Judgment": fallback_result}}
 
         progress("judgment", "Generating response with citations...", step="generate")
@@ -724,11 +727,12 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 writer({"type": "token_reset"})
             except RuntimeError:
                 pass
-            from core.agent_fallback import web_search_fallback
+            from core.agent_fallback import web_search_fallback, note_case_not_in_db
             fallback_result = await web_search_fallback(
                 query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
                 user_language=_user_language, intent=_intent)
             fallback_result.tokens_consumed += tokens
+            note_case_not_in_db(fallback_result, original_query or query, metadata)
             return {"agent_results": {"Judgment": fallback_result}}
 
         log.info("Agent completed",

@@ -276,7 +276,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                      "No corpus results — falling back to web search...",
                      step="fallback", substep=True)
             try:
-                from core.agent_fallback import web_search_fallback
+                from core.agent_fallback import web_search_fallback, note_case_not_in_db
                 # RAW prompt — web_search_fallback localizes the assembled
                 # prompt itself, so localizing here too just duplicates the
                 # (long) directive block.
@@ -291,6 +291,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                     log.info("SCI web fallback produced answer",
                              answer_len=len(fb.content),
                              fb_sources=len(fb.sources or []))
+                    note_case_not_in_db(fb, query)
                     result = AgentResult(
                         agent_name="SCI_Judgment",
                         content=fb.content,

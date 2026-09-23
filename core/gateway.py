@@ -1102,6 +1102,24 @@ async def search_stream(data: SearchRequest, request: Request):
 # Chat with Files (inline file attachments)
 # ============================================================
 
+def _match_plan(plan: str) -> str | None:
+    """The configured plan a submitted plan name refers to, or None.
+
+    Exact match first (case-insensitive), then a configured name contained
+    in the submitted one, longest first: "First Justice Plan Yearly" and
+    "Basic - Annual" get the monthly plan's per-chat limits.
+    """
+    from .settings import PLAN_UPLOAD_LIMITS
+    key = " ".join(plan.casefold().split())
+    for name in PLAN_UPLOAD_LIMITS:
+        if name.casefold() == key:
+            return name
+    for name in sorted(PLAN_UPLOAD_LIMITS, key=len, reverse=True):
+        if name.casefold() in key:
+            return name
+    return None
+
+
 def _pdf_page_count(path: str) -> int:
     """Page count for the per-plan limit. An unreadable PDF counts as 0 and is
     left to process_files, which reports the extraction error."""
@@ -1289,16 +1307,16 @@ async def chat_with_files(
     plan = (plan or "").strip()
     plan_limits = None
     if plan:
-        _plans_by_key = {name.casefold(): name for name in PLAN_UPLOAD_LIMITS}
-        _plan_name = _plans_by_key.get(plan.casefold())
+        _plan_name = _match_plan(plan)
         if _plan_name is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown plan '{plan}'. Allowed: "
-                       f"{', '.join(PLAN_UPLOAD_LIMITS)}",
-            )
-        plan = _plan_name
-        plan_limits = PLAN_UPLOAD_LIMITS[plan]
+            # Every plan is accepted. Only the configured ones carry upload
+            # limits; an unconfigured plan (yearly tiers, trials, ...) used to
+            # get a 400 here and could not upload at all (report 2026-09-23).
+            log.info("Plan has no upload limits configured; accepted without plan limits",
+                     plan=plan[:60])
+        else:
+            plan = _plan_name
+            plan_limits = PLAN_UPLOAD_LIMITS[plan]
 
     agent_graph = request.app.state.agent_graph
     thread_id = globalThreadId or str(uuid.uuid4())

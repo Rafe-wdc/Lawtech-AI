@@ -959,7 +959,9 @@ async def search(data: SearchRequest, request: Request):
     # replaying them for the TTL would pin the wrong branch for future
     # users. See the RESPONSE_CACHE_ENABLED comment in core/settings.py.
     from core.url_filter import sanitize_source_records as _sanitize_srcs
-    _clean_sources = _sanitize_srcs(final_state.get("source_metadata", []))
+    from core.web_sources import resolve_web_source_records as _resolve_web
+    _clean_sources = _sanitize_srcs(
+        await _resolve_web(final_state.get("source_metadata", [])))
 
     # Repair the emitted token_usage in one place so both the cache write
     # and the response body share the same honest total. Fallback is the

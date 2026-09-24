@@ -166,10 +166,18 @@ def test_document_count_over_session_limit_is_rejected(client):
     assert _post(client, [1, 1, 1], "First Justice Plan").status_code == 403
 
 
-def test_unknown_plan_is_rejected(client):
-    r = _post(client, [1], "Gold")
-    assert r.status_code == 400
-    assert "Unknown plan 'Gold'" in r.json()["message"]
+def test_unconfigured_plan_is_accepted_without_plan_limits(client):
+    # Yearly tiers, trials and future plans must never be locked out of uploads.
+    for plan in ("Yearly Plan", "Premium", "Gold"):
+        assert _post(client, [200], plan).status_code == 200
+
+
+def test_plan_name_containing_a_configured_plan_gets_its_limits(client):
+    assert _post(client, [61], "First Justice Plan Yearly").status_code == 403
+    assert _post(client, [60], "First Justice Plan (Yearly)").status_code == 200
+    assert _post(client, [151], "Basic - Annual").status_code == 403
+    assert _post(client, [150], "basic yearly").status_code == 200
+    assert _post(client, [1, 1, 1], "First Justice Plan Yearly").status_code == 403   # 2 docs per chat
 
 
 @pytest.mark.parametrize("plan", [None, ""])

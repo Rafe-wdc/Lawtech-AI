@@ -776,10 +776,13 @@ async def run_chat_pipeline(
     if final_response:
         yield _sse({"type": "response", "content": final_response})
 
-    # Sanitise sources to drop external web URLs (Scenario grounding,
-    # tier-3 web_search_fallback). HC S3 and SCI api.sci.gov.in links kept.
+    # Web-grounded sources (Scenario grounding, tier-3 web_search_fallback)
+    # are resolved from Google's redirect links to the real page and kept
+    # for the sources panel; records with no URL are dropped. HC S3 and SCI
+    # api.sci.gov.in links kept as before. The answer text stays URL-free.
     from core.url_filter import sanitize_source_records as _sanitize_srcs
-    all_source_metadata = _sanitize_srcs(all_source_metadata)
+    from core.web_sources import resolve_web_source_records as _resolve_web
+    all_source_metadata = _sanitize_srcs(await _resolve_web(all_source_metadata))
 
     if all_source_metadata:
         yield _sse({"type": "sources", "data": all_source_metadata})

@@ -79,13 +79,14 @@ class TestIsWhitelistedUrl:
 # ---------------------------------------------------------------------------
 
 class TestSanitizeSourceRecords:
-    """Post-2026-08-22 policy: keep ONLY records with a whitelisted PDF URL."""
+    """Keep records the reader can open: a whitelisted PDF, or (since
+    2026-09-23) a web page the answer was grounded on. No-URL records go."""
 
     def test_none_and_empty(self):
         assert sanitize_source_records(None) == []
         assert sanitize_source_records([]) == []
 
-    def test_scenario_web_record_dropped(self):
+    def test_scenario_web_record_kept_for_the_sources_panel(self):
         records = [{
             "source_type": "scenario",
             "title": "Some blog post",
@@ -93,16 +94,30 @@ class TestSanitizeSourceRecords:
             "web_title": "Some blog post",
             "agent_name": "Scenario",
         }]
-        assert sanitize_source_records(records) == []
+        assert sanitize_source_records(records) == records
 
-    def test_tier3_web_fallback_record_dropped(self):
+    def test_tier3_web_fallback_record_kept_with_its_url(self):
         records = [{
             "source_type": "newacts",
             "title": "External blog on BNS §115",
             "web_url": "https://vakilsearch.com/blog/bns-115",
             "agent_name": "Newacts",
         }]
+        out = sanitize_source_records(records)
+        assert len(out) == 1 and out[0]["web_url"] == "https://vakilsearch.com/blog/bns-115"
+
+    def test_web_url_that_is_not_http_is_still_dropped(self):
+        records = [{"source_type": "scenario", "title": "x", "web_url": "javascript:alert(1)"}]
         assert sanitize_source_records(records) == []
+
+    def test_pdf_record_with_stray_web_url_keeps_only_the_pdf(self):
+        records = [{
+            "source_type": "sci_judgment", "title": "A v. B",
+            "doc_link": "https://api.sci.gov.in/supremecourt/x.pdf",
+            "web_url": "https://casemine.com/x",
+        }]
+        out = sanitize_source_records(records)
+        assert out[0]["doc_link"].startswith("https://api.sci.gov.in/") and out[0]["web_url"] is None
 
     def test_ungrounded_ai_marker_dropped(self):
         # web_search_fallback's "no grounding" marker record — no URL, no PDF.
@@ -189,16 +204,18 @@ class TestSanitizeSourceRecords:
         sci_url = "https://api.sci.gov.in/y.pdf"
         records = [
             {"source_type": "legislation", "title": "Section 302 IPC"},          # drop (no URL)
-            {"source_type": "scenario", "web_url": "https://external.com/x"},    # drop
+            {"source_type": "scenario", "web_url": "https://external.com/x"},    # keep (web source)
             {"source_type": "judgment", "doc_link": s3_url},                     # keep
-            {"source_type": "newacts", "web_url": "https://vakilsearch.com/x"},  # drop
+            {"source_type": "newacts", "web_url": "https://vakilsearch.com/x"},  # keep (web source)
             {"source_type": "sci_judgment", "pdf_links": [{"url": sci_url}]},    # keep
             {"source_type": "document", "title": "upload.pdf"},                  # drop
         ]
         cleaned = sanitize_source_records(records)
-        assert len(cleaned) == 2
-        assert cleaned[0]["doc_link"] == s3_url
-        assert cleaned[1]["pdf_links"][0]["url"] == sci_url
+        assert len(cleaned) == 4
+        assert cleaned[0]["web_url"] == "https://external.com/x"
+        assert cleaned[1]["doc_link"] == s3_url
+        assert cleaned[2]["web_url"] == "https://vakilsearch.com/x"
+        assert cleaned[3]["pdf_links"][0]["url"] == sci_url
 
     def test_non_dict_entries_dropped(self):
         records = ["not a dict", {"source_type": "judgment",

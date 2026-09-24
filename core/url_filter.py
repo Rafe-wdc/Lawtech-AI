@@ -58,23 +58,28 @@ def is_whitelisted_url(url: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 def sanitize_source_records(records: list | None) -> list:
-    """Keep ONLY source records that carry at least one whitelisted PDF URL.
+    """Keep source records the reader can open: a whitelisted PDF, or a web
+    page the answer was grounded on.
 
-    Post-2026-08-22 policy: the API `source_metadata` payload should surface
-    ONLY sources the user can click through to an authoritative PDF. Every
-    other record — Legal_Concepts markers, Scenario web-grounding records,
-    tier-3 web_search_fallback records, Legislation/Newacts/Constitution/
-    Maxim records that carry only citation text and no PDF, Document/PDF-
-    chat records — is dropped from the outgoing payload.
+    Post-2026-08-22 policy: the API `source_metadata` payload surfaces only
+    sources the user can click through to. Records with no URL at all —
+    Legal_Concepts markers, Legislation/Newacts/Constitution/Maxim records
+    that carry only citation text, Document/PDF-chat records — are dropped.
 
-    A record survives iff at least one of the following is a whitelisted URL:
-      - ``doc_link`` field
-      - ``web_url`` field
-      - any entry's ``url`` in the ``pdf_links`` list
+    2026-09-23: web-grounded records (Scenario grounding, tier-3
+    web_search_fallback) are kept again, for the sources panel only. They
+    had been dropped since 2026-08-22, so an answer built from the web
+    reached the reader with no source at all (lawyer report, Vinai Kumar v.
+    Om Prakash). `core.web_sources` resolves them to the real page first;
+    the answer text stays URL-free (see `sanitize_prose`).
 
-    Surviving records also have any *non-whitelisted* URL fields nulled
-    (defensive — should not happen because the survival rule already
-    requires a whitelisted URL, but keeps the payload strictly clean).
+    A record survives iff one of these holds:
+      - ``doc_link`` is a whitelisted URL
+      - any entry's ``url`` in ``pdf_links`` is a whitelisted URL
+      - ``web_url`` is an http(s) URL and the record has no doc_link /
+        pdf_links (a pure web source)
+
+    A surviving PDF record has any non-whitelisted URL fields nulled.
     """
     if not records:
         return records or []
@@ -97,6 +102,13 @@ def sanitize_source_records(records: list | None) -> list:
             p for p in pdf_links
             if isinstance(p, dict) and is_whitelisted_url(p.get("url"))
         ]
+        is_web_source = (
+            bool(web_url) and web_url.lower().startswith(("http://", "https://"))
+            and not doc_link and not pdf_links
+        )
+        if is_web_source:
+            cleaned.append(dict(rec))
+            continue
 
         if not (has_whitelisted_doc or has_whitelisted_web or whitelisted_pdf_links):
             # No whitelisted PDF anywhere on this record — drop.

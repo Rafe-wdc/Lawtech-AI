@@ -53,6 +53,7 @@ class ChatRunnerInputs:
     integration_token: str | None = None        # FSD JWT for Google/Notion
     cite_appendix: bool | None = None           # Drafting: include REFERENCES & CITATIONS block
     regenerate_of: str | None = None            # Sagar bug #5: refine previous response
+    user_plan: str | None = None                # subscription plan name, for the answer trace
     enable_cache: bool = True                   # /chat disables for uploads
     enable_quality_scoring: bool = True         # 10% sampling
     skip_thread_id_event: bool = False          # caller already emitted it
@@ -866,6 +867,28 @@ async def run_chat_pipeline(
     token_usage_dict = repair_zero_total(
         token_tracker.to_dict(include_calls=True), total_tokens,
     )
+
+    # Feedback loop, phase 1: record how this answer was produced so a later
+    # rating can be acted on. Fire-and-forget; never delays or fails the turn.
+    if conversation_turn and final_response:
+        from core.feedback_store import save_answer_trace
+        from core.logger import get_request_id
+        _models_used: dict[str, int] = {}
+        for _call in getattr(token_tracker, "calls", None) or []:
+            _m = getattr(_call, "model", "") or "unknown"
+            _models_used[_m] = _models_used.get(_m, 0) + int(getattr(_call, "total_tokens", 0) or 0)
+        _fire_and_forget(save_answer_trace(
+            models=_models_used,
+            thread_id=i.thread_id, turn_number=conversation_turn,
+            request_id=get_request_id(), endpoint=i.endpoint_name,
+            task=turn_task or "", agents_used=agents_used,
+            token_usage=token_usage_dict, source_metadata=all_source_metadata,
+            language=(getattr(turn_user_intent, "language", None)
+                      or i.preferred_language or ""),
+            user_plan=i.user_plan or "", web_fallback=any_fallback_used,
+            regenerate_of=i.regenerate_of or "", had_files=bool(i.file_context),
+            latency_ms=int((time.perf_counter() - start) * 1000),
+        ))
 
     # Cache first-turn responses. We SKIP caching when:
     #   - uploads / integration context were used (per-request content)

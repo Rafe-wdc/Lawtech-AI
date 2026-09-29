@@ -555,6 +555,18 @@ class FeedbackRequest(BaseModel):
     turn_number: int = Field(..., ge=1)
     rating: str = Field(..., pattern=r"^(up|down)$")
     comment: Optional[str] = None
+    # Why the answer was rated down: codes from GET /pyapi/feedback/reasons.
+    # Unknown codes are ignored, so an older or newer client never fails.
+    reasons: Optional[List[str]] = None
+    # The draft as the user left it after editing, when they edited it.
+    final_text: Optional[str] = Field(None, max_length=400_000)
+
+
+class FeedbackEventRequest(BaseModel):
+    thread_id: str = Field(..., min_length=1)
+    turn_number: int = Field(..., ge=1)
+    event: str = Field(..., pattern=r"^(copy|download|edit)$")
+    final_text: Optional[str] = Field(None, max_length=400_000)
 
 
 class PdfChatRequest(BaseModel):
@@ -1691,6 +1703,7 @@ async def chat_with_files(
                 integration_token=integration_token,
                 cite_appendix=cite_appendix,
                 regenerate_of=regenerate_of,
+                user_plan=plan or None,
                 enable_cache=False,   # uploads / integration context make caching unsafe
                 enable_quality_scoring=True,
                 skip_thread_id_event=True,  # /chat already emitted before file processing
@@ -2146,6 +2159,11 @@ async def admin_expire_threads(days: int = 30):
     try:
         days = max(7, min(int(days), 365))
         result = await chat_store.expire_old_threads(days=days)
+        try:
+            from core import feedback_store
+            result["feedback_texts_scrubbed"] = await feedback_store.scrub_expired()
+        except Exception as scrub_err:
+            log.warning("Feedback scrub after expiry failed", error=short_err(scrub_err))
         log.info("Threads expired", **result)
         return result
     except Exception as e:
@@ -2622,10 +2640,55 @@ async def submit_feedback(data: FeedbackRequest, request: Request):
             data.rating,
             data.comment or "",
         )
+        if data.reasons is not None or data.final_text:
+            from core import feedback_store
+            await feedback_store.save_feedback_detail(
+                data.thread_id, data.turn_number, data.reasons, data.final_text or "")
         return {"status": "ok", "message": "Feedback recorded"}
     except Exception as e:
         log.error("Failed to save feedback", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to save feedback")
+
+
+@app.get("/pyapi/feedback/reasons", dependencies=[Depends(require_user_key)])
+async def feedback_reasons():
+    """Reason codes and labels for the thumbs-down menu."""
+    from core.feedback_store import FEEDBACK_REASONS
+    return {"reasons": [{"code": c, "label": l} for c, l in FEEDBACK_REASONS.items()]}
+
+
+@app.post("/pyapi/feedback/event", dependencies=[Depends(require_user_key)])
+async def submit_feedback_event(data: FeedbackEventRequest, request: Request):
+    """Record what the user did with an answer: copy, download or edit."""
+    from core import feedback_store
+    try:
+        await feedback_store.save_feedback_event(data.thread_id, data.turn_number, data.event)
+        if data.event == "edit" and data.final_text:
+            await feedback_store.save_feedback_detail(
+                data.thread_id, data.turn_number, None, data.final_text)
+        return {"status": "ok"}
+    except Exception as e:
+        log.error("Failed to save feedback event", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to save feedback event")
+
+
+@app.get("/pyapi/admin/feedback/review", dependencies=[Depends(require_admin_key)])
+async def feedback_review(days: int = 7, rating: str = "down", limit: int = 200):
+    """Review queue: rated answers with question, answer, reasons, user
+    actions and how the answer was produced. rating = down | up | all."""
+    if rating not in ("down", "up", "all"):
+        raise HTTPException(status_code=400, detail="rating must be down, up or all")
+    from core import feedback_store
+    items = await feedback_store.review_queue(
+        days=max(1, min(days, 365)), rating=rating, limit=max(1, min(limit, 1000)))
+    return {"count": len(items), "items": items}
+
+
+@app.get("/pyapi/admin/feedback/summary", dependencies=[Depends(require_admin_key)])
+async def feedback_summary(days: int = 7):
+    """Counts for the period: answers, ratings, reasons, user actions."""
+    from core import feedback_store
+    return await feedback_store.summary(days=max(1, min(days, 365)))
 
 
 # --- Entrypoint ---

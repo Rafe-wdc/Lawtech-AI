@@ -249,3 +249,11 @@ def test_planner_rule_leaves_other_plans_alone():
 def test_sci_prompt_forbids_year_browsing_for_a_named_case():
     from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
     assert "Do NOT browse a whole year with search_by_date_range" in SCI_JUDGMENT_SYSTEM_PROMPT
+
+
+def test_sources_panel_lists_only_discussed_cases_for_a_react_agent():
+    from agents.orchestrator import _serialize_sources
+    titles = [d["title"] for d in _serialize_sources(_sci_supporter())]
+    assert titles == ["HANUMANT DASS VS VINAY KUMAR & ORS.", "STATE OF U.P. VS VINAY KUMAR JAIN"]
+    # nothing discussed by name -> capped, not all sixty
+    assert len(_serialize_sources(_sci_supporter(prose="General discussion only."))) == _SUPPORTING_CITATIONS_MAX

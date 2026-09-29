@@ -21,8 +21,8 @@ REDIRECT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIY
 
 
 def _web(i, title="casemine.com"):
-    return {"source_type": "judgment", "title": title, "web_url": f"{REDIRECT}{i}",
-            "web_title": title, "agent_name": "Judgment"}
+    return {"source_type": "scenario", "title": title, "web_url": f"{REDIRECT}{i}",
+            "web_title": title, "agent_name": "Scenario"}
 
 
 def _pdf():
@@ -109,3 +109,40 @@ def test_resolution_then_sanitiser_keeps_web_and_pdf_but_not_no_url_records():
 def test_empty_and_non_web_input_is_returned_unchanged():
     assert _resolve([]) == []
     assert _resolve([_pdf()]) == [_pdf()]
+
+
+# --- judgment answers: official court sources only (report 2026-09-29) -------
+
+def _judgment_web(i, agent="SCI_Judgment"):
+    rec = _web(i)
+    rec.update(source_type="judgment", agent_name=agent)
+    return rec
+
+
+def test_judgment_web_sources_from_third_party_sites_are_dropped():
+    # the-laws.com, casemine.com, and an unresolved redirect
+    out = _resolve([_pdf(), _judgment_web(1), _judgment_web(2), _judgment_web(3, "Judgment")])
+    assert out == [_pdf()]
+
+
+def test_judgment_web_source_on_an_official_court_site_is_kept():
+    out = _resolve([_judgment_web(4, "Judgment")])      # elegalix.allahabadhighcourt.in
+    assert len(out) == 1 and "allahabadhighcourt.in" in out[0]["web_url"]
+
+
+def test_non_judgment_web_sources_are_unaffected():
+    assert len(_resolve([_web(1), _web(2)])) == 2
+
+
+def test_official_court_hosts():
+    from core.web_sources import is_official_court_url as ok
+    for u in ["https://api.sci.gov.in/x.pdf", "https://main.sci.gov.in/judgment", "https://www.sci.gov.in/",
+              "https://judgments.ecourts.gov.in/x", "https://bombayhighcourt.nic.in/x",
+              "https://elegalix.allahabadhighcourt.in/x", "https://hcservices.ecourts.gov.in/x",
+              "https://delhihighcourt.nic.in/x"]:
+        assert ok(u), u
+    for u in ["https://www.casemine.com/x", "https://www.scconline.com/x", "https://lawfoyer.in/x",
+              "https://indiankanoon.org/doc/1", "https://images.assettype.com/x.pdf",
+              "https://notsci.gov.in.evil.com/x", "https://kommerstad.org/x",
+              "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x"]:
+        assert not ok(u), u

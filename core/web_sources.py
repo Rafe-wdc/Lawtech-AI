@@ -56,6 +56,27 @@ def _is_web_record(rec: dict) -> bool:
             and not rec.get("doc_link") and not rec.get("pdf_links"))
 
 
+# Judgment answers may cite only official court sources (report 2026-09-29:
+# CaseMine, LawFoyer, SCC Online and blogs listed next to a Supreme Court
+# judgment). Our own PDFs never reach this module; a web source from a
+# judgment agent survives only if it resolves to one of these hosts.
+_JUDGMENT_AGENTS = frozenset({"Judgment", "SCI_Judgment", "GST_Judgment"})
+_OFFICIAL_COURT_HOST_RE = re.compile(
+    r"(?:^|\.)(?:sci\.gov\.in|ecourts\.gov\.in|"
+    r"[a-z0-9-]*(?:highcourt|hc)[a-z0-9-]*\.(?:nic\.in|gov\.in|in))$")
+
+
+def is_official_court_url(url: str | None) -> bool:
+    """True for the Supreme Court's own site (sci.gov.in and its
+    subdomains), eCourts, and official High Court sites."""
+    return bool(_OFFICIAL_COURT_HOST_RE.search(_domain(url)))
+
+
+def _is_judgment_record(rec: dict) -> bool:
+    return (rec.get("agent_name") in _JUDGMENT_AGENTS
+            or "judgment" in str(rec.get("source_type") or "").lower())
+
+
 def _title_from(raw: str | None, final_url: str) -> str:
     text = re.sub(r"\s+", " ", html.unescape(raw or "")).strip()
     if not text or _BLOCK_TITLE_RE.match(text):
@@ -128,12 +149,17 @@ async def resolve_web_source_records(
                     rec["resolved"] = False
                     resolved[i] = rec
         out: list = []
+        judgment_dropped = 0
         seen_pages: set[str] = set()
         dropped_idx = set(web_idx[_MAX_WEB_SOURCES:])
         for i, rec in enumerate(records):
             if i in dropped_idx:
                 continue
             if i in resolved:
+                if (_is_judgment_record(resolved[i])
+                        and not is_official_court_url(resolved[i]["web_url"])):
+                    judgment_dropped += 1
+                    continue
                 page = resolved[i]["web_url"].split("#")[0].rstrip("/").lower()
                 if page in seen_pages:
                     continue
@@ -143,6 +169,7 @@ async def resolve_web_source_records(
                 out.append(rec)
         log.info("Web sources resolved",
                  web=len(web_idx), kept=sum(1 for r in out if _is_web_record(r)),
+                 judgment_non_official_dropped=judgment_dropped,
                  resolved=sum(1 for r in resolved.values() if r.get("resolved")),
                  ms=int((time.perf_counter() - started) * 1000))
         return out

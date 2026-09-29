@@ -3520,12 +3520,23 @@ _RAW_HIT_SOURCE_AGENTS = frozenset({"SCI_Judgment", "GST_Judgment"})
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:
-    """Serialize all SourceMetadata objects from an agent result into dicts."""
+    """Serialize an agent result's sources into dicts.
+
+    A ReAct agent's sources are every hit of every search it ran, so only the
+    ones its own answer discusses are listed (at most the first
+    `_SUPPORTING_CITATIONS_MAX` when it discussed none by name). The sources
+    panel otherwise showed unrelated namesakes ("Kapil Kumar v. Kudrat Ali"
+    under CBI v. Kapil Wadhawan, report 2026-09-29).
+    """
     if not result.sources:
         return []
 
+    sources = result.sources
+    if getattr(result, "agent_name", "") in _RAW_HIT_SOURCE_AGENTS:
+        sources = _discussed_sources(result) or sources[:_SUPPORTING_CITATIONS_MAX]
+
     serialized = []
-    for s in result.sources:
+    for s in sources:
         d = {
             "source_type": s.source_type,
             "title": s.title,

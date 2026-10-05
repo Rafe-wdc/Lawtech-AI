@@ -840,6 +840,116 @@ def _drop_duplicate_valuation_block(text: str) -> tuple[str, int]:
     return out, 1
 
 
+# --- sign-off block placement -------------------------------------------
+# Testers' report 2026-10-05 on the medical-negligence plaint: "Date, Place,
+# Name of Advocate missing in draft". Six live runs: the block (Place / Date /
+# plaintiff signature / advocate) was never absent, but in 2 of 6 drafts the
+# writer put it in the wrong place - opening the "VERIFICATION AND AFFIDAVIT"
+# section with it, or after the list of documents at the very end - so a
+# reader looking below the prayer sees nothing. The planner gives the sign-off
+# no section of its own, so the writer attaches it to whichever closing
+# section it is writing. A filed plaint / petition signs after the last
+# prayer clause and before the verification (Order VI Rules 14 and 15 CPC).
+_SIGNOFF_START_RE = re.compile(r"(?im)^[ \t]*\**place[ \t]*:")
+_SIGNOFF_LINE_RE = re.compile(r"^(?:\d{1,3}[.)]|[-*+]\s|#)")  # numbered / bulleted items and headings end the block
+_PRAYER_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*(?:prayer|reliefs?\b)")
+_VERIFICATION_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*verification")
+_DOCUMENTS_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*(?:list of documents|documents (?:relied|produced|filed|annexed)|schedule of documents|annexures?)")
+_AFFIDAVIT_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*affidavit")
+_HEADING_LINE_RE = re.compile(r"^#{1,4}[ \t]+\S")
+_SIGNOFF_PLACEHOLDER = (
+    "Place: [Place]\n\nDate: [Date]\n\n[Name of Plaintiff]\nPlaintiff\n\n"
+    "Through\n\n[Name of Advocate]\nAdvocate for the Plaintiff"
+)
+
+
+def _relocate_signoff_block(text: str) -> tuple[str, str]:
+    """Keep the sign-off block directly after the prayer.
+
+    Returns (text, status) with status one of: "" (no change), "moved",
+    "inserted". Acts only on drafts that carry both a PRAYER and a
+    VERIFICATION heading in English. The affidavit's own deponent block and a
+    verification's own trailing place / date are never touched: the block is
+    moved only when it OPENS a verification section or CLOSES a documents
+    section, which are the two misplacements observed."""
+    lines = text.split("\n")
+    heads = [i for i, ln in enumerate(lines) if _HEADING_LINE_RE.match(ln)]
+    prayer = next((i for i in heads if _PRAYER_HEADING_RE.match(lines[i])), None)
+    if prayer is None or not any(_VERIFICATION_HEADING_RE.match(lines[i]) for i in heads if i > prayer):
+        return text, ""
+    prayer_end = next((i for i in heads if i > prayer), len(lines))  # next heading after PRAYER
+
+    def section_of(i):
+        return max((h for h in heads if h < i), default=None)
+
+    def block_bounds(start):
+        """Block = Place: line through the last short line before a heading,
+        a rule, a list item or prose. Signature lines are short; the prose,
+        numbered paragraphs and document lists around them are not."""
+        end, j = start, start
+        while j < len(lines):
+            s = lines[j].strip()
+            if j > start and (_HEADING_LINE_RE.match(lines[j]) or s == "---"):
+                break
+            if s == "":
+                j += 1
+                continue
+            if _SIGNOFF_LINE_RE.match(s) or len(s) > 70:
+                break
+            end = j
+            j += 1
+        return start, end
+
+    for m_i in (i for i, ln in enumerate(lines) if i > prayer and _SIGNOFF_START_RE.match(ln)):
+        sec = section_of(m_i)
+        if sec is None:
+            continue
+        if sec == prayer:
+            return text, ""                       # already where it belongs
+        start, end = block_bounds(m_i)
+        if end - start > 16:
+            return text, ""
+        head = lines[sec]
+        if _VERIFICATION_HEADING_RE.match(head):
+            # misplaced only when the block OPENS the section
+            opening = all(not lines[k].strip() for k in range(sec + 1, start))
+            if not opening:
+                return text, ""
+        elif _DOCUMENTS_HEADING_RE.match(head):
+            # misplaced only when the block CLOSES the section
+            k = end + 1
+            while k < len(lines) and not lines[k].strip():
+                k += 1
+            if k < len(lines) and not (_HEADING_LINE_RE.match(lines[k]) or lines[k].strip() == "---"):
+                return text, ""
+        elif _AFFIDAVIT_HEADING_RE.match(head):
+            return text, ""                       # the affidavit's own place / date
+        else:
+            return text, ""
+        block = lines[start:end + 1]
+        # strip trailing blanks inside the block
+        while block and not block[-1].strip():
+            block.pop()
+        del lines[start:end + 1]
+        # drop blank run left behind
+        while start < len(lines) and start > 0 and not lines[start].strip() and not lines[start - 1].strip():
+            del lines[start]
+        if start < prayer_end:
+            prayer_end -= (end - start + 1)
+        insert_at = prayer_end
+        while insert_at > prayer + 1 and not lines[insert_at - 1].strip():
+            insert_at -= 1
+        lines[insert_at:insert_at] = [""] + block + [""]
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)), "moved"
+
+    # no sign-off block anywhere below the prayer: insert a standard one
+    insert_at = prayer_end
+    while insert_at > prayer + 1 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    lines[insert_at:insert_at] = [""] + _SIGNOFF_PLACEHOLDER.split("\n") + [""]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)), "inserted"
+
+
 def validate_draft(
     full_draft: str,
     stance=None,  # kept for signature compatibility; unused
@@ -1117,6 +1227,10 @@ def validate_draft(
     cleaned, _bolded = _bold_court_caption(cleaned)
     cleaned, _valuation = _drop_duplicate_valuation_block(cleaned)
     cleaned, _doubled = _dedupe_caption_words(cleaned)
+    # Sign-off block after the prayer (testers' report 2026-10-05).
+    cleaned, _signoff = _relocate_signoff_block(cleaned)
+    if _signoff:
+        warnings.append(f"Layout: sign-off block {_signoff} to follow the prayer.")
     if _labels or _bolded or _valuation or _doubled:
         warnings.append(
             f"Layout: removed {_labels} planner label heading(s); caption bolded: {bool(_bolded)}; "

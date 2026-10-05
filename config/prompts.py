@@ -2269,6 +2269,10 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
      lines (court name in bold) and do NOT print the planner's label ("Court
      Heading, Cause Title, and Description of Parties") as a heading. A filed
      pleading never carries that label (advocate mark-up, 2026-09-13).
+   - The sign-off block (Place, Date, signature of the party, name of the
+     Advocate) goes IMMEDIATELY after the last prayer clause and before the
+     Verification. Never open a Verification section with it and never push
+     it below the list of documents (testers' report, 2026-10-05).
    - The judge has already adapted each heading to the user's matter and rendered it in the user's target language. Use the heading exactly as given.
    - Format each heading as `## ` followed by the heading text. Sub-headings inside a section use `### `.
 

@@ -182,13 +182,25 @@ old content, so history is never lost.
 
 ## 8. Download
 
+**Available now** — send the artifact itself:
+
+```
+POST /pyapi/export   {"artifact": { ...the artifact from artifact_done... }, "format": "docx"}
+```
+
+**Planned** (once versions are stored server-side):
+
 ```
 POST /pyapi/export   {"artifact_id": "art_7f3c2a9e", "version": 3, "format": "docx" | "pdf"}
 ```
 
 The Word file is built from the same blocks: real centring, right-aligned
-party labels, hanging paragraph numbers and the page margins above. The
-existing `raw_text` / `thread_id` export keeps working unchanged.
+party labels on a right tab stop, hanging paragraph numbers (typed, never a
+Word auto-list, so they do not renumber when the advocate edits), highlighted
+blanks and the page margins above. `"format": "pdf"` currently goes through
+the Markdown renderer and loses the alignment; a block-based PDF is a later
+step. An invalid artifact returns `400`. The existing `raw_text` /
+`thread_id` export keeps working unchanged.
 
 ## 9. Panel behaviour (suggested)
 

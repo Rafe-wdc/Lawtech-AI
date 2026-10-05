@@ -2204,8 +2204,37 @@ class ExportRequest(BaseModel):
     thread_id: Optional[str] = None
     turn_number: Optional[int] = None
     raw_text: Optional[str] = None
+    # A draft in block format (core/draft_blocks.Artifact, see
+    # docs/draft_panel_frontend_contract.md). Takes precedence over the
+    # other sources; docx keeps the real layout, pdf goes via Markdown.
+    artifact: Optional[dict] = None
     title: Optional[str] = None
     format: str = Field(default="docx", pattern=r"^(docx|pdf)$")
+
+
+def _export_artifact(raw: dict, fmt: str, title: Optional[str]):
+    """Download for a block-format draft. Word is built from the blocks so
+    centring, right-aligned party labels and hanging numbers survive; PDF
+    uses the existing Markdown renderer until a block PDF exists."""
+    from pydantic import ValidationError
+    from .draft_blocks import Artifact, number_paragraphs, to_markdown
+    try:
+        artifact = number_paragraphs(Artifact.model_validate(raw))
+    except ValidationError as e:
+        return _error_response(400, "validation_error",
+                               f"Invalid artifact: {e.error_count()} error(s), first: "
+                               f"{e.errors()[0].get('msg', '')[:120]}")
+    if fmt == "docx":
+        from .draft_docx import artifact_to_docx, docx_filename
+        buf, filename = artifact_to_docx(artifact), docx_filename(artifact)
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        from .export import export_document
+        buf, filename, media_type = export_document(
+            title=title or artifact.title, md_text=to_markdown(artifact), fmt=fmt)
+    return StreamingResponse(
+        buf, media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.post("/pyapi/export", dependencies=[Depends(require_user_key)])
@@ -2225,6 +2254,9 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         title = data.title
         sources = None
         created_at = None
+
+        if data.artifact is not None:
+            return _export_artifact(data.artifact, data.format, data.title)
 
         if data.raw_text:
             md_text = data.raw_text

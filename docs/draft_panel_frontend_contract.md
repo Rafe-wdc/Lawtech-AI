@@ -1,9 +1,17 @@
 # Draft side panel: frontend contract
 
-**Status:** proposal v1, for review by the frontend team. The block format is
-implemented in `core/draft_blocks.py`. The events and the edit endpoint below
-are **not built yet**; they are specified here so the panel can be built in
-parallel against the sample data.
+**Status:** proposal v1, for review by the frontend team.
+
+| Part | State |
+|---|---|
+| Block format (`core/draft_blocks.py`) | built |
+| Word download from blocks (`POST /pyapi/export` with `artifact`) | built |
+| `artifact_done` event at the end of every draft | built, off unless the server sets `DRAFT_ARTIFACT_EVENTS=1` |
+| `artifact_start` / `artifact_section` (live while writing) | not built |
+| Edit, versions, save (`artifact_patch`, `/pyapi/artifact/...`) | not built; `version` is always 1 for now |
+
+The panel can be built against the sample data now, and against real drafts
+on the dev server once `DRAFT_ARTIFACT_EVENTS=1` is set there.
 
 **Files**
 

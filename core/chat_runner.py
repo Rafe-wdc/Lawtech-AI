@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import re
 import time
@@ -56,6 +57,30 @@ class ChatRunnerInputs:
     enable_cache: bool = True                   # /chat disables for uploads
     enable_quality_scoring: bool = True         # 10% sampling
     skip_thread_id_event: bool = False          # caller already emitted it
+
+
+def _draft_artifact_event(i: "ChatRunnerInputs", draft_md: str, language: str) -> dict | None:
+    """`artifact_done` for a finished draft, or None. Never fails a request.
+
+    The artifact id is stable per thread so a panel keeps one draft per
+    conversation; versions arrive with the edit/version work (contract §7).
+    """
+    if os.getenv("DRAFT_ARTIFACT_EVENTS", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    try:
+        from core.draft_to_blocks import markdown_to_artifact
+        art = markdown_to_artifact(draft_md, artifact_id=f"art_{i.thread_id.replace('-', '')[:12]}",
+                                   language=language or "en")
+        if not art.sections:
+            return None
+        log.info("Draft artifact emitted", endpoint=i.endpoint_name,
+                 sections=len(art.sections),
+                 blocks=sum(len(s.blocks) for s in art.sections))
+        return {"type": "artifact_done", "artifact_id": art.artifact_id,
+                "version": art.version, "artifact": art.model_dump()}
+    except Exception as e:
+        log.warning("Draft artifact skipped", endpoint=i.endpoint_name, error=str(e)[:200])
+        return None
 
 
 def _fire_and_forget(coro) -> asyncio.Task:
@@ -772,6 +797,16 @@ async def run_chat_pipeline(
         identical=stream_identical,
         reset_emitted=reset_emitted,
     )
+
+    # Draft side panel: the same draft as layout blocks (see
+    # docs/draft_panel_frontend_contract.md). Sent before `response` so a
+    # panel-aware client can open the panel first; clients without the panel
+    # ignore the event and render `response` as today. Off unless
+    # DRAFT_ARTIFACT_EVENTS=1.
+    if final_response and turn_primary_artifact_kind == "draft":
+        _artifact_ev = _draft_artifact_event(i, final_response, user_language_stream)
+        if _artifact_ev:
+            yield _sse(_artifact_ev)
 
     if final_response:
         yield _sse({"type": "response", "content": final_response})

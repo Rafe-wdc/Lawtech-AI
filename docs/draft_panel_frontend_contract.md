@@ -212,12 +212,44 @@ step. An invalid artifact returns `400`. The existing `raw_text` /
   advocate finish the draft ("6 blanks to fill").
 - Mobile: panel becomes a full-screen view toggled from the chat.
 
-## 10. Open questions for the frontend team
+## 10. Typing directly in the panel
+
+Decision: **yes**. The advocate can click into the page and type (fix a
+name, a date, a word), as in ChatGPT Canvas. Asking the assistant remains
+the way to make larger changes.
+
+- Each block is an editable region (a rich-text editor such as TipTap or
+  ProseMirror works well). Only the inline marks in section 4 are allowed.
+- **Locked while typing:** paragraph numbers and labels (they stay
+  backend-assigned), block type and alignment. Enter at the end of a `para`
+  creates a new `para` after it; the number appears after save.
+- Save after a short pause, or on an explicit Save:
+
+```
+PUT /pyapi/artifact/{artifact_id}
+{"globalThreadId": "…", "base_version": 3, "sections": [ ...changed sections, complete... ],
+ "source": "user"}
+→ 200 {"version": 4, "sections": [ ...as saved, with paragraphs renumbered... ]}
+→ 409 {"latest_version": 5}   if base_version is stale
+```
+
+- The response is authoritative: re-render the returned sections (numbers
+  may have changed).
+- The assistant always works from the latest saved version, so a later
+  instruction never undoes the advocate's typed fixes.
+
+## 11. Roadmap after v1
+
+| Phase | Features |
+|---|---|
+| 1 (this spec) | Panel, live sections, Word download, chat follow-ups update the draft, select-to-edit, typing in the panel, versions |
+| 2 | Blanks counter and one form to fill all blanks; citation marks (found in our database with PDF / not verified); highlighted changes with accept / reject |
+| 3 | Legal shortcut buttons (IPC to BNS, add interim prayer, translate, more formal); court format presets (margins, font per court) |
+| 4 | Share by link; comments in the margin; automatic update of "as stated in para N" references; annexure list; index and list of dates |
+
+## 12. Open questions for the frontend team
 
 1. Framework and existing SSE handling: anything in the current event
    handling that would make new event types a problem?
 2. Is a 409-and-refetch acceptable for stale edits, or do you want the
    server to merge?
-3. Should the panel be editable by hand (typing directly in the page), or
-   only through instructions to the assistant in v1? Hand-editing needs a
-   save endpoint and is not in this spec yet.

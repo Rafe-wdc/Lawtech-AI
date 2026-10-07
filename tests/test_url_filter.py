@@ -450,3 +450,42 @@ class TestStreamingUrlFilter:
         f = StreamingUrlFilter()
         assert f.push("") == ""
         assert f.flush() == ""
+
+
+# --- sources payload carries RAW links to our own S3 (report 2026-10-06) ------
+
+_ENC = ("https://lawttorney.s3.ap-south-1.amazonaws.com/supreme%20court/"
+        "STANDARD%20CHARTERED%20BANK%20vs.%20V.%20NOBLE%20KUMAR%20%26%20OTHERS.pdf")
+_RAW = ("https://lawttorney.s3.ap-south-1.amazonaws.com/supreme court/"
+        "STANDARD CHARTERED BANK vs. V. NOBLE KUMAR & OTHERS.pdf")
+
+
+def test_sources_doc_link_to_own_s3_is_sent_raw():
+    out = sanitize_source_records([{"source_type": "judgment", "doc_link": _ENC,
+                                    "pdf_links": [{"label": "Judgment PDF", "url": _ENC}]}])
+    assert out[0]["doc_link"] == _RAW
+    assert out[0]["pdf_links"] == [{"label": "Judgment PDF", "url": _RAW}]
+
+
+def test_raw_link_survives_a_client_that_encodes_once():
+    from urllib.parse import quote
+    out = sanitize_source_records([{"source_type": "judgment", "doc_link": _ENC}])
+    # what encodeURI() does to the path: one encoding, never "%2520"
+    assert "%2520" not in quote(out[0]["doc_link"], safe=":/&")
+    assert quote(out[0]["doc_link"], safe=":/") == _ENC
+
+
+def test_already_raw_and_plain_links_are_unchanged():
+    plain = "https://lawttorney.s3.ap-south-1.amazonaws.com/sc_pdfs/37759.pdf"
+    assert sanitize_source_records([{"doc_link": plain}])[0]["doc_link"] == plain
+    assert sanitize_source_records([{"doc_link": _RAW}])[0]["doc_link"] == _RAW
+
+
+def test_sci_gov_links_are_not_decoded():
+    sci = "https://api.sci.gov.in/supremecourt/2022/a%20b.pdf"
+    assert sanitize_source_records([{"doc_link": sci}])[0]["doc_link"] == sci
+
+
+def test_answer_text_keeps_the_encoded_link():
+    text = f"See [Judgment PDF]({_ENC})."
+    assert _ENC in sanitize_prose(text)

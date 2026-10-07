@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 from typing import Iterable
+from urllib.parse import unquote
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,14 @@ def is_whitelisted_url(url: str | None) -> bool:
 # ---------------------------------------------------------------------------
 # source_metadata sanitiser
 # ---------------------------------------------------------------------------
+
+def _raw_own_s3_url(url):
+    """Percent-decode a link to our own S3 bucket; anything else unchanged."""
+    if isinstance(url, str) and url.strip().lower().startswith(
+            ("https://lawttorney.s3.", "http://lawttorney.s3.")):
+        return unquote(url)
+    return url
+
 
 def sanitize_source_records(records: list | None) -> list:
     """Keep source records the reader can open: a whitelisted PDF, or a web
@@ -123,6 +132,22 @@ def sanitize_source_records(records: list | None) -> list:
             mutated["doc_link"] = None
         if len(whitelisted_pdf_links) != len(pdf_links):
             mutated["pdf_links"] = whitelisted_pdf_links
+
+        # Our own S3 links leave here RAW (not percent-encoded), as they did
+        # before 2026-09-17. generate_s3_link encodes them so a markdown link
+        # in the answer text survives spaces and parentheses; the production
+        # sources panel builds its href with encodeURI(), so an encoded link
+        # was encoded twice ("%2520") and S3 answered AccessDenied for every
+        # High Court PDF with a space in its name (report 2026-10-06). A raw
+        # link works whether the client encodes or not. Answer text keeps the
+        # encoded form.
+        if mutated.get("doc_link"):
+            mutated["doc_link"] = _raw_own_s3_url(mutated["doc_link"])
+        if mutated.get("pdf_links"):
+            mutated["pdf_links"] = [
+                {**p, "url": _raw_own_s3_url(p.get("url"))} if isinstance(p, dict) else p
+                for p in mutated["pdf_links"]
+            ]
 
         cleaned.append(mutated)
 

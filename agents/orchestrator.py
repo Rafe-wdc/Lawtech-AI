@@ -3523,17 +3523,20 @@ def _serialize_sources(result: AgentResult) -> list[dict]:
     """Serialize an agent result's sources into dicts.
 
     A ReAct agent's sources are every hit of every search it ran, so only the
-    ones its own answer discusses are listed (at most the first
-    `_SUPPORTING_CITATIONS_MAX` when it discussed none by name). The sources
-    panel otherwise showed unrelated namesakes ("Kapil Kumar v. Kudrat Ali"
-    under CBI v. Kapil Wadhawan, report 2026-09-29).
+    ones its own answer discusses are listed, and none when it discusses
+    none of them. The sources panel otherwise showed unrelated namesakes
+    ("Kapil Kumar v. Kudrat Ali" under CBI v. Kapil Wadhawan, report
+    2026-09-29). An earlier fallback listed the first five hits when none
+    was discussed; that is exactly the namesake case (five "Standard
+    Chartered Bank" judgments under Standard Chartered Bank v. V. Noble
+    Kumar, report 2026-10-07), so it is gone.
     """
     if not result.sources:
         return []
 
     sources = result.sources
     if getattr(result, "agent_name", "") in _RAW_HIT_SOURCE_AGENTS:
-        sources = _discussed_sources(result) or sources[:_SUPPORTING_CITATIONS_MAX]
+        sources = _discussed_sources(result)
 
     serialized = []
     for s in sources:

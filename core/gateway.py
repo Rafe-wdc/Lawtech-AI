@@ -201,6 +201,14 @@ async def lifespan(app: FastAPI):
     # depending on the prod-daily-cleanup.yml cron. Task lives for the
     # lifetime of the app; cancelled cleanly on shutdown below.
     from .settings import FILE_GC_ENABLED
+    # Load the new-codes embedding matrix off the request path, so the first
+    # topic query can already use vector ranking (tools/shared/newacts_vector).
+    try:
+        from tools.shared.newacts_vector import warm_in_background
+        warm_in_background()
+    except Exception as _warm_err:
+        log.warning("Newacts embedding warm-up not started", error=str(_warm_err)[:160])
+
     _gc_task = None
     if FILE_GC_ENABLED:
         from .file_gc import start_gc_loop

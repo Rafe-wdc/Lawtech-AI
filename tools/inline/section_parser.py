@@ -38,6 +38,22 @@ _SECTION_PATTERN = '|'.join(
 # Act name indicators for extraction
 _ACT_INDICATORS = r'(?:act|rule|law|code|regulation|ordinance|statute|scheme|policy|manual|notification)'
 
+# What may follow a section keyword as its identifier.
+#
+# A digit-led identifier ("138", "65b", "21a") is always accepted. A bare
+# letter ("Schedule A", "Form B2") or roman numeral ("Order VII") is accepted
+# only as a whole word that ends the reference: followed by the end of the
+# text, punctuation, a digit-led rule ("Order VII Rule 11") or a joining word.
+# Without that, the first letter of the next ordinary word was taken as the
+# section — "which section of IPC applies" parsed as Section "o", and
+# "which section i should use" as Section "i".
+_ENDS_REFERENCE = r'(?=\s*(?:$|[,.;:?!)\]]|(?:of|in|under|and|to|or|read|rule|r\.)\b))'
+_NUMBER_PATTERN = (
+    r'(\d+[a-z]\d+|\d+[a-z]*'
+    rf'|\b[ivxlc]+\b{_ENDS_REFERENCE}'
+    rf'|\b[a-z]\d*\b{_ENDS_REFERENCE})'
+)
+
 
 def _extract_act_name(query_lower: str, section_type: str) -> str:
     """Extract act/law name from a lowercased query string."""
@@ -67,7 +83,7 @@ def parse_section_info(query: str) -> dict | None:
     Returns None if no section/provision pattern is found.
     """
     query_lower = query.lower().strip()
-    number_pattern = r'(\d+[a-z]*|\b[ivx]+\b|[a-z]\d*|\d+[a-z]\d*)'
+    number_pattern = _NUMBER_PATTERN
 
     section_matches = re.findall(rf'({_SECTION_PATTERN})\s+{number_pattern}', query_lower)
 
@@ -98,7 +114,7 @@ def parse_multi_section_info(query: str) -> dict | None:
     Returns dict with keys: section_type, section_numbers, subsections, act_name
     """
     query_lower = query.lower().strip()
-    number_pattern = r'(\d+[a-z]*|\b[ivx]+\b|[a-z]\d*|\d+[a-z]\d*)'
+    number_pattern = _NUMBER_PATTERN
 
     # --- Step 1: Find section type keyword ---
     type_match = re.search(rf'({_SECTION_PATTERN})s?\s', query_lower)

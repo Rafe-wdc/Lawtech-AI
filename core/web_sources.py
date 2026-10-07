@@ -77,6 +77,16 @@ def _is_judgment_record(rec: dict) -> bool:
             or "judgment" in str(rec.get("source_type") or "").lower())
 
 
+# A page that asks for a captcha / security code before showing anything.
+# Official court sites do this (title "Security Code Check for Accessing
+# Judgment/Order"); listing it gave the reader a "source" that is a captcha
+# form (report 2026-10-07). Unlike a site that merely blocks our fetch
+# (CaseMine's 403), nothing behind it was read, so it is not a source.
+_GATE_TITLE_RE = re.compile(
+    r"security code|captcha|are you a robot|verify you are (?:a )?human|human verification",
+    re.IGNORECASE)
+
+
 def _title_from(raw: str | None, final_url: str) -> str:
     text = re.sub(r"\s+", " ", html.unescape(raw or "")).strip()
     if not text or _BLOCK_TITLE_RE.match(text):
@@ -103,6 +113,7 @@ async def _resolve_one(client: httpx.AsyncClient, rec: dict) -> dict:
         out["web_url"] = final_url
         out["web_title"] = _title_from(raw_title, final_url)
         out["resolved"] = True
+        out["gate"] = bool(raw_title and _GATE_TITLE_RE.search(html.unescape(raw_title)))
     except Exception as e:  # any transport problem: keep the redirect
         log.debug("Web source not resolved", url=url[:80], error=str(e)[:100])
         out["web_title"] = rec.get("web_title") or _domain(url)
@@ -150,12 +161,16 @@ async def resolve_web_source_records(
                     resolved[i] = rec
         out: list = []
         judgment_dropped = 0
+        gate_dropped = 0
         seen_pages: set[str] = set()
         dropped_idx = set(web_idx[_MAX_WEB_SOURCES:])
         for i, rec in enumerate(records):
             if i in dropped_idx:
                 continue
             if i in resolved:
+                if resolved[i].pop("gate", False):
+                    gate_dropped += 1
+                    continue
                 if (_is_judgment_record(resolved[i])
                         and not is_official_court_url(resolved[i]["web_url"])):
                     judgment_dropped += 1
@@ -170,6 +185,7 @@ async def resolve_web_source_records(
         log.info("Web sources resolved",
                  web=len(web_idx), kept=sum(1 for r in out if _is_web_record(r)),
                  judgment_non_official_dropped=judgment_dropped,
+                 captcha_pages_dropped=gate_dropped,
                  resolved=sum(1 for r in resolved.values() if r.get("resolved")),
                  ms=int((time.perf_counter() - started) * 1000))
         return out

@@ -8,10 +8,13 @@
 | Word download from blocks (`POST /pyapi/export` with `artifact`) | built |
 | `artifact_done` event at the end of every draft | built, off unless the server sets `DRAFT_ARTIFACT_EVENTS=1` |
 | `artifact_start` / `artifact_section` (live while writing) | not built |
-| Edit, versions, save (`artifact_patch`, `/pyapi/artifact/...`) | not built; `version` is always 1 for now |
+| Chat follow-up edits part of the draft (`artifact_patch`) | built, same flag |
+| `POST /pyapi/artifact/edit` (edit a selected section) | built |
+| `PUT /pyapi/artifact/{id}` (save typed text), versions, restore, export by id | built |
 
 The panel can be built against the sample data now, and against real drafts
-on the dev server once `DRAFT_ARTIFACT_EVENTS=1` is set there.
+on the dev server once `DRAFT_ARTIFACT_EVENTS=1` is set there. With the flag off the
+server stores no drafts, so the `/pyapi/artifact/...` endpoints return 404.
 
 **Files**
 
@@ -147,12 +150,36 @@ data: {"type":"done", ...}
 
 ## 6. Editing
 
-### a) Follow-up in the chat
+Only the part that changes is rewritten. The rest of the draft stays exactly
+as it was, and every change is a new version.
 
-The user types "add a ground on parity" in the chat. Nothing new is needed
-from the client: the backend recognises a change to the open draft and
-replies with `artifact_patch` (or a full `artifact_done` with the next
-version if the change touches most of the draft).
+### a) Follow-up typed in the chat
+
+The user types "add a ground on parity" in the chat. Send it as a normal
+chat message; nothing new is needed from the client. The server decides:
+
+| The message is… | What the server does | What the client receives |
+|---|---|---|
+| A change to part of the draft ("make ground B stronger", "the age is 36, not 34") | Rewrites only the sections it touches (usually one, at most four) | `artifact_patch`, then `response` (the whole updated draft as Markdown, for the transcript), then `done` with `"partial_edit": true` |
+| A request to redo the draft, translate it, or change its type ("redraft it", "in Marathi", "make it a plaint") | Runs the full drafting pipeline | `artifact_done` with the next `version`, then `response`, `done` |
+| A request for case law or citations ("add relevant case laws") | Runs the full pipeline, because only it can search the judgment database. A partial edit never adds a citation the user did not type | as above |
+| A question or anything else | Normal answer; the draft is not changed | the usual events, no artifact event |
+
+`artifact_patch`:
+
+```json
+{"type": "artifact_patch", "artifact_id": "art_7f3c2a9e", "base_version": 3, "version": 4,
+ "summary": "Updated Grounds For Grant Of Regular Bail",
+ "edited_section_ids": ["s3"],
+ "sections": [ {"id": "s3", "heading": "...", "blocks": [ ... ]}, {"id": "s4", ...} ]}
+```
+
+- `sections` holds every section that differs from `base_version`, complete.
+  Replace those sections in the panel by `id`.
+- `edited_section_ids` are the ones whose wording changed. Other sections in
+  the patch changed only because paragraph numbers moved (a paragraph was
+  added before them). Highlight only the edited ones.
+- Show `summary` in the chat instead of the full draft.
 
 ### b) Edit a selection in the panel
 
@@ -161,45 +188,48 @@ The user selects text or clicks a section and types an instruction.
 ```
 POST /pyapi/artifact/edit          (SSE response, same auth as /search/stream)
 {
-  "globalThreadId": "…",
   "artifact_id": "art_7f3c2a9e",
   "base_version": 3,
-  "target": {"section_id": "s3", "block_ids": ["s3.b2"], "selected_text": "BECAUSE the dispute is purely civil"},
-  "instruction": "make this ground stronger and cite the relevant Supreme Court position"
+  "instruction": "make this ground stronger",
+  "target": {"section_id": "s3", "selected_text": "BECAUSE the dispute is purely civil"}
 }
 ```
 
-- `section_id` is required; `block_ids` and `selected_text` narrow the
-  target and are optional.
-- Response stream: `artifact_patch` (the changed sections, complete), then
-  `done`. Only the targeted section changes.
-- If `base_version` is not the latest, the server replies `409` with the
-  latest version number; refetch and let the user retry.
+- With `target.section_id`, only that section is rewritten. `selected_text`
+  narrows the change to that passage and is optional.
+- Without `target`, the server works out which sections the instruction
+  touches.
+- Events: `status` (progress text), then `artifact_patch` and `done`.
+- `artifact_edit_declined` (`scope`: `"whole"` or `"none"`, `reason`) means the
+  instruction needs the whole draft redone, needs a case-law search, or is not
+  an edit. Send it as a normal chat message instead.
+- `409` with `latest_version` if `base_version` is not the latest: load the
+  latest and let the user retry. `404` unknown draft, `400` unknown section.
+- An `error` event with `"error": "edit_failed"` means nothing was changed.
 
 ## 7. Versions and loading
 
 ```
-GET /pyapi/artifact/{artifact_id}                 → latest artifact
-GET /pyapi/artifact/{artifact_id}?version=2       → that version
-GET /pyapi/artifact/{artifact_id}/versions        → [{version, created_at, change_summary}]
+GET  /pyapi/artifact/{artifact_id}                 → the latest artifact
+GET  /pyapi/artifact/{artifact_id}?version=2       → that version
+GET  /pyapi/artifact/{artifact_id}/versions        → {"versions": [{version, source, change_summary, created_at}]}
+POST /pyapi/artifact/{artifact_id}/restore   {"version": 2}   → the restored artifact, as a NEW version
 ```
 
-Use these to restore a thread's panel on reload, and for a version dropdown.
-Restoring an old version is a new version (`version` = latest + 1) with the
-old content, so history is never lost.
+- `artifact_id` is one per conversation: `"art_" +` the first 12 hex
+  characters of the thread id. A second draft in the same conversation is
+  the next version of the same artifact.
+- `source` is `draft` (generated), `assistant` (a partial edit), `user`
+  (typed in the panel) or `restore`.
+- Use the first call to restore a thread's panel on reload, and the list for
+  a version dropdown. Restoring never deletes history.
 
 ## 8. Download
 
-**Available now** — send the artifact itself:
-
 ```
-POST /pyapi/export   {"artifact": { ...the artifact from artifact_done... }, "format": "docx"}
-```
-
-**Planned** (once versions are stored server-side):
-
-```
-POST /pyapi/export   {"artifact_id": "art_7f3c2a9e", "version": 3, "format": "docx" | "pdf"}
+POST /pyapi/export   {"artifact_id": "art_7f3c2a9e", "format": "docx"}             → latest version
+POST /pyapi/export   {"artifact_id": "art_7f3c2a9e", "version": 3, "format": "docx"}
+POST /pyapi/export   {"artifact": { ...an artifact... }, "format": "docx"}          → without storing it
 ```
 
 The Word file is built from the same blocks: real centring, right-aligned
@@ -222,29 +252,37 @@ step. An invalid artifact returns `400`. The existing `raw_text` /
 
 ## 10. Typing directly in the panel
 
-Decision: **yes**. The advocate can click into the page and type (fix a
-name, a date, a word), as in ChatGPT Canvas. Asking the assistant remains
-the way to make larger changes.
+The advocate can click into the page and type (fix a name, a date, a word),
+as in ChatGPT Canvas. Asking the assistant remains the way to make larger
+changes.
 
 - Each block is an editable region (a rich-text editor such as TipTap or
   ProseMirror works well). Only the inline marks in section 4 are allowed.
 - **Locked while typing:** paragraph numbers and labels (they stay
   backend-assigned), block type and alignment. Enter at the end of a `para`
-  creates a new `para` after it; the number appears after save.
+  creates a new `para` after it with no `number`; the number appears after
+  save.
 - Save after a short pause, or on an explicit Save:
 
 ```
 PUT /pyapi/artifact/{artifact_id}
-{"globalThreadId": "…", "base_version": 3, "sections": [ ...changed sections, complete... ],
- "source": "user"}
-→ 200 {"version": 4, "sections": [ ...as saved, with paragraphs renumbered... ]}
-→ 409 {"latest_version": 5}   if base_version is stale
+{"base_version": 3, "sections": [ ...the changed sections, complete... ]}
+
+→ 200 {"artifact_id": "...", "version": 4, "sections": [ ...as saved... ]}
+→ 200 {"version": 3, "sections": [], "unchanged": true}     nothing differed
+→ 409 {"error": "stale_version", "latest_version": 5}
+→ 400 unknown section id, or a block that does not fit the format
 ```
 
-- The response is authoritative: re-render the returned sections (numbers
-  may have changed).
+- New blocks may be sent without an `id`; the server assigns them.
+- The response is authoritative: re-render the returned `sections`. It can
+  include sections you did not send, when their paragraph numbers moved.
+- Numbering rule: paragraphs are numbered in order through the document. A
+  paragraph numbered `1` that is the first numbered paragraph of its section
+  starts a new sequence (an affidavit, a list of documents). Lettered
+  paragraphs (`label`) are not numbered.
 - The assistant always works from the latest saved version, so a later
-  instruction never undoes the advocate's typed fixes.
+  instruction never undoes what the advocate typed.
 
 ## 11. Roadmap after v1
 

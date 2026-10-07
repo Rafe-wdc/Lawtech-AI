@@ -52,6 +52,8 @@ _LLM_ENDPOINTS = [
     ("add_statute_refs_endpoint",             "sanitize_output"),
     ("generate_toa_endpoint",                 "sanitize_output"),
     ("generate_research_memo",                "sanitize_output"),
+    # Draft panel: one-section edit; core.artifact_edit.edit_section sanitizes.
+    ("edit_artifact",                         "apply_instruction"),
 ]
 
 
@@ -71,6 +73,11 @@ _NON_LLM_ENDPOINTS = {
     "list_threads",
     "get_thread_messages",
     "save_turn_endpoint",
+    # Draft panel: stored blocks in, stored blocks out; no model call.
+    "get_artifact",
+    "list_artifact_versions",
+    "save_artifact",
+    "restore_artifact",
     "submit_feedback",
 }
 

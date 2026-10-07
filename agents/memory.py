@@ -637,6 +637,19 @@ async def memory_node(state: LegalAgentState) -> dict:
         prev_task = history_result.previous_task
         prev_artifact_kind = history_result.previous_artifact_kind
         prev_artifact_content = history_result.previous_artifact_content
+        # Draft panel: the advocate may have typed into the draft since the
+        # chat history last saw it. A follow-up must build on that text, not
+        # on the older copy. No-op unless DRAFT_ARTIFACT_EVENTS=1 and the
+        # thread has a stored draft.
+        if prev_artifact_kind == "draft":
+            try:
+                from core.artifact_followup import current_draft_markdown
+                _panel_draft = await current_draft_markdown(thread_id)
+                if _panel_draft and _panel_draft.strip():
+                    prev_artifact_content = _panel_draft
+            except Exception as e:
+                log.warning("Panel draft lookup failed; using chat history copy",
+                            error=short_err(e))
         # Compute REAL turn count: `_load_chat_history` returns a 2-message
         # placeholder ("Previous summary:" + "Fresh chat started.") for new
         # threads with no real history, and naive `len // 2` would mis-count

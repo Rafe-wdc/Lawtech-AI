@@ -167,14 +167,23 @@ def test_output_is_valid_and_exports():
             assert artifact_to_docx(a).getbuffer().nbytes > 1000
 
 
-def test_stream_event_is_flag_gated(monkeypatch):
+def test_stream_event_is_flag_gated(monkeypatch, tmp_path):
+    import asyncio
+    from core import artifact_followup as af
+    from core import artifact_store as store_mod
+    from core import chat_store as cs
     from core.chat_runner import ChatRunnerInputs, _draft_artifact_event
+    monkeypatch.setattr(cs, "chat_store", cs._SqliteChatHistoryStore(str(tmp_path / "t.db")))
+    monkeypatch.setattr(af, "artifact_store", store_mod._Store())
     i = ChatRunnerInputs(agent_graph=None, query="q", thread_id="4c583f65-3e59-4764-a69d-b77b7baca1fc",
                          is_first_turn=True, endpoint_name="/pyapi/chat")
     monkeypatch.delenv("DRAFT_ARTIFACT_EVENTS", raising=False)
-    assert _draft_artifact_event(i, BAIL, "en") is None
+    assert asyncio.run(_draft_artifact_event(i, BAIL, "en")) is None
     monkeypatch.setenv("DRAFT_ARTIFACT_EVENTS", "1")
-    ev = _draft_artifact_event(i, BAIL, "en")
+    ev = asyncio.run(_draft_artifact_event(i, BAIL, "en"))
     assert ev["type"] == "artifact_done" and ev["artifact_id"] == "art_4c583f653e59"
+    assert ev["version"] == 1
     Artifact.model_validate(ev["artifact"])
-    assert _draft_artifact_event(i, "", "en") is None
+    # a second draft in the same conversation is the next version of the same artifact
+    assert asyncio.run(_draft_artifact_event(i, BAIL, "en"))["version"] == 2
+    assert asyncio.run(_draft_artifact_event(i, "", "en")) is None

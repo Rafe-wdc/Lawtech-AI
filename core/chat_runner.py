@@ -59,27 +59,28 @@ class ChatRunnerInputs:
     skip_thread_id_event: bool = False          # caller already emitted it
 
 
-def _draft_artifact_event(i: "ChatRunnerInputs", draft_md: str, language: str) -> dict | None:
-    """`artifact_done` for a finished draft, or None. Never fails a request.
-
-    The artifact id is stable per thread so a panel keeps one draft per
-    conversation; versions arrive with the edit/version work (contract §7).
-    """
-    if os.getenv("DRAFT_ARTIFACT_EVENTS", "").strip().lower() not in ("1", "true", "yes", "on"):
-        return None
+async def _draft_artifact_event(i: "ChatRunnerInputs", draft_md: str, language: str) -> dict | None:
+    """`artifact_done` for a finished draft, stored as the thread's next draft
+    version (core.artifact_followup.record_draft). Never fails a request."""
     try:
-        from core.draft_to_blocks import markdown_to_artifact
-        art = markdown_to_artifact(draft_md, artifact_id=f"art_{i.thread_id.replace('-', '')[:12]}",
-                                   language=language or "en")
-        if not art.sections:
-            return None
-        log.info("Draft artifact emitted", endpoint=i.endpoint_name,
-                 sections=len(art.sections),
-                 blocks=sum(len(s.blocks) for s in art.sections))
-        return {"type": "artifact_done", "artifact_id": art.artifact_id,
-                "version": art.version, "artifact": art.model_dump()}
+        from core.artifact_followup import record_draft
+        return await record_draft(i.thread_id, draft_md, language)
     except Exception as e:
         log.warning("Draft artifact skipped", endpoint=i.endpoint_name, error=str(e)[:200])
+        return None
+
+
+async def _partial_draft_edit(i: "ChatRunnerInputs") -> dict | None:
+    """A follow-up that changes part of the thread's draft, handled without
+    the agent graph (core.artifact_followup.try_partial_edit). None when the
+    message is anything else, and on any failure — the normal pipeline runs."""
+    if i.is_first_turn or i.file_context or i.regenerate_of or i.integration_token:
+        return None
+    try:
+        from core.artifact_followup import try_partial_edit
+        return await try_partial_edit(i.thread_id, i.query)
+    except Exception as e:
+        log.warning("Partial draft edit skipped", endpoint=i.endpoint_name, error=str(e)[:200])
         return None
 
 
@@ -502,6 +503,58 @@ async def run_chat_pipeline(
                      agents=cached.agents_used, turn=cached_turn)
             return
 
+    # --- Partial edit of the thread's draft ---------------------------------
+    # "Make ground B stronger" changes one section; rewriting the whole draft
+    # for it is slow and risks changing what the advocate did not ask about.
+    # Only when DRAFT_ARTIFACT_EVENTS=1 and the thread already has a draft;
+    # a question, a whole-draft request or any failure returns None here and
+    # the pipeline below runs exactly as before.
+    from core.artifact_followup import enabled as _artifact_enabled
+    if _artifact_enabled() and not i.is_first_turn:
+        yield _sse({"type": "status", "agent": "drafting", "message": "Checking your draft..."})
+        # Start the request's token tracker now so the routing and edit calls
+        # are counted; the pipeline below reuses it if the edit does not apply.
+        from core.token_tracker import get_tracker as _edit_tracker, start_request as _edit_start
+        _tk = _edit_tracker() or _edit_start()
+        _edit = await _partial_draft_edit(i)
+        if _edit is not None:
+            yield _sse(_edit["patch"])
+            yield _sse({"type": "response", "content": _edit["markdown"]})
+            _edit_turn = 0
+            try:
+                _edit_turn = await chat_store.save_turn(
+                    i.thread_id, i.query, _edit["markdown"],
+                    task="Drafting", tasks_planned_json=json.dumps(["Drafting"]),
+                    primary_artifact_kind="draft",
+                )
+            except Exception as e:
+                log.error("Failed to save chat history (partial edit)",
+                          endpoint=i.endpoint_name, error=str(e))
+            _edit_ms = (time.perf_counter() - start) * 1000
+            _edit_usage = _tk.to_dict(include_calls=True) if _tk else {}
+            _fire_and_forget(chat_store.log_request(
+                thread_id=i.thread_id, endpoint=i.endpoint_name,
+                query_preview=i.query[:200],
+                user_language=(i.preferred_language or "en"),
+                tasks_planned=["Drafting"], agents_used=["Drafting"],
+                total_latency_ms=int(_edit_ms),
+                total_tokens=int(_edit_usage.get("total_tokens") or 0),
+                fallback_used=False, is_blocked=False,
+            ))
+            yield _sse({
+                "type": "done",
+                "agents_used": ["Drafting"],
+                "token_usage": _edit_usage,
+                "thread_id": i.thread_id,
+                "conversation_turn": _edit_turn,
+                "query_rewritten": False,
+                "effective_query": None,
+                "partial_edit": True,
+            })
+            log.info("Partial draft edit served", endpoint=i.endpoint_name,
+                     sections=_edit["sections"], latency_ms=round(_edit_ms))
+            return
+
     # --- Integration URL handling ------------------------------------------
     integration_context_dict: dict | None = None
     if i.integration_token:
@@ -804,7 +857,7 @@ async def run_chat_pipeline(
     # ignore the event and render `response` as today. Off unless
     # DRAFT_ARTIFACT_EVENTS=1.
     if final_response and turn_primary_artifact_kind == "draft":
-        _artifact_ev = _draft_artifact_event(i, final_response, user_language_stream)
+        _artifact_ev = await _draft_artifact_event(i, final_response, user_language_stream)
         if _artifact_ev:
             yield _sse(_artifact_ev)
 

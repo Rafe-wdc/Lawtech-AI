@@ -2208,6 +2208,9 @@ class ExportRequest(BaseModel):
     # docs/draft_panel_frontend_contract.md). Takes precedence over the
     # other sources; docx keeps the real layout, pdf goes via Markdown.
     artifact: Optional[dict] = None
+    # A stored draft by id (latest version unless `version` is given).
+    artifact_id: Optional[str] = None
+    version: Optional[int] = None
     title: Optional[str] = None
     format: str = Field(default="docx", pattern=r"^(docx|pdf)$")
 
@@ -2217,9 +2220,10 @@ def _export_artifact(raw: dict, fmt: str, title: Optional[str]):
     centring, right-aligned party labels and hanging numbers survive; PDF
     uses the existing Markdown renderer until a block PDF exists."""
     from pydantic import ValidationError
-    from .draft_blocks import Artifact, number_paragraphs, to_markdown
+    from .artifact_edit import renumber
+    from .draft_blocks import Artifact, to_markdown
     try:
-        artifact = number_paragraphs(Artifact.model_validate(raw))
+        artifact = renumber(Artifact.model_validate(raw))
     except ValidationError as e:
         return _error_response(400, "validation_error",
                                f"Invalid artifact: {e.error_count()} error(s), first: "
@@ -2257,6 +2261,12 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
 
         if data.artifact is not None:
             return _export_artifact(data.artifact, data.format, data.title)
+        if data.artifact_id:
+            from .artifact_store import artifact_store
+            stored = await artifact_store.get(data.artifact_id, data.version)
+            if stored is None:
+                return _error_response(404, "not_found", "Draft not found")
+            return _export_artifact(stored.model_dump(), data.format, data.title)
 
         if data.raw_text:
             md_text = data.raw_text
@@ -2295,6 +2305,194 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
     except Exception as e:
         log.error("Export failed", error=short_err(e), exc_info=True)
         return _error_response(500, "export_error", f"Export failed: {short_err(e)}")
+
+
+# --- Draft artifact endpoints (the draft side panel) ---------------------------
+# Contract: docs/draft_panel_frontend_contract.md. A draft is stored as
+# versions of a block artifact (core/artifact_store.py); nothing here changes
+# a version in place.
+
+class ArtifactSaveRequest(BaseModel):
+    base_version: int = Field(..., ge=1)
+    sections: list[dict] = Field(..., min_length=1, max_length=60)
+
+
+class ArtifactRestoreRequest(BaseModel):
+    version: int = Field(..., ge=1)
+
+
+class ArtifactEditTarget(BaseModel):
+    section_id: Optional[str] = None
+    selected_text: Optional[str] = Field(None, max_length=8000)
+
+
+class ArtifactEditRequest(BaseModel):
+    artifact_id: str = Field(..., min_length=4, max_length=64)
+    base_version: int = Field(..., ge=1)
+    instruction: str = Field(..., min_length=1, max_length=4000)
+    target: Optional[ArtifactEditTarget] = None
+
+
+def _stale(latest: int) -> JSONResponse:
+    return JSONResponse(status_code=409, content={
+        "error": "stale_version", "latest_version": latest,
+        "message": "The draft changed since this version. Load the latest and try again."})
+
+
+@app.get("/pyapi/artifact/{artifact_id}", dependencies=[Depends(require_user_key)])
+async def get_artifact(artifact_id: str, version: Optional[int] = None):
+    """The latest version of a draft artifact, or a specific one."""
+    from .artifact_store import artifact_store
+    try:
+        art = await artifact_store.get(artifact_id, version)
+    except Exception as e:
+        log.error("Artifact load failed", error=short_err(e))
+        return _error_response(500, "artifact_error", "Failed to load the draft")
+    if art is None:
+        return _error_response(404, "not_found", "Draft not found")
+    return JSONResponse(art.model_dump())
+
+
+@app.get("/pyapi/artifact/{artifact_id}/versions", dependencies=[Depends(require_user_key)])
+async def list_artifact_versions(artifact_id: str):
+    """Version history: [{version, source, change_summary, created_at}]."""
+    from .artifact_store import artifact_store
+    try:
+        versions = await artifact_store.versions(artifact_id)
+    except Exception as e:
+        log.error("Artifact versions failed", error=short_err(e))
+        return _error_response(500, "artifact_error", "Failed to load versions")
+    if not versions:
+        return _error_response(404, "not_found", "Draft not found")
+    return JSONResponse({"artifact_id": artifact_id, "versions": versions})
+
+
+@app.put("/pyapi/artifact/{artifact_id}", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def save_artifact(artifact_id: str, data: ArtifactSaveRequest, request: Request):
+    """Save what the advocate typed in the panel as a new version.
+
+    Send the changed sections, complete. The response carries the sections as
+    saved (paragraph numbers are re-assigned), which the panel should render.
+    """
+    from .artifact_edit import EditError, apply_user_sections, changed_sections
+    from .artifact_store import SOURCE_USER, StaleVersion, artifact_store
+    try:
+        current = await artifact_store.get(artifact_id)
+        if current is None:
+            return _error_response(404, "not_found", "Draft not found")
+        if data.base_version != current.version:
+            return _stale(current.version)
+        new = apply_user_sections(current, data.sections)
+        changed = changed_sections(current, new)
+        if not changed:
+            return JSONResponse({"artifact_id": artifact_id, "version": current.version,
+                                 "sections": [], "unchanged": True})
+        thread_id = await artifact_store.thread_of(artifact_id) or ""
+        new = await artifact_store.save(
+            new, thread_id=thread_id, source=SOURCE_USER,
+            change_summary="Edited by hand: " + ", ".join(s.heading for s in changed[:3]),
+            base_version=data.base_version)
+        return JSONResponse({"artifact_id": artifact_id, "version": new.version,
+                             "sections": [s.model_dump() for s in changed]})
+    except StaleVersion as e:
+        return _stale(e.latest)
+    except EditError as e:
+        return _error_response(400, "validation_error", str(e))
+    except Exception as e:
+        log.error("Artifact save failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "artifact_error", "Failed to save the draft")
+
+
+@app.post("/pyapi/artifact/{artifact_id}/restore", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def restore_artifact(artifact_id: str, data: ArtifactRestoreRequest, request: Request):
+    """Bring an earlier version back as a NEW version, so history is kept."""
+    from .artifact_store import SOURCE_RESTORE, artifact_store
+    try:
+        old = await artifact_store.get(artifact_id, data.version)
+        if old is None:
+            return _error_response(404, "not_found", "Version not found")
+        thread_id = await artifact_store.thread_of(artifact_id) or ""
+        new = await artifact_store.save(old, thread_id=thread_id, source=SOURCE_RESTORE,
+                                        change_summary=f"Restored version {data.version}")
+        return JSONResponse(new.model_dump())
+    except Exception as e:
+        log.error("Artifact restore failed", error=short_err(e), exc_info=True)
+        return _error_response(500, "artifact_error", "Failed to restore the version")
+
+
+@app.post("/pyapi/artifact/edit", dependencies=[Depends(require_user_key)])
+@limiter.limit(_get_limit_for_request)
+async def edit_artifact(data: ArtifactEditRequest, request: Request):
+    """Ask the assistant to change part of a draft (SSE).
+
+    With `target.section_id` only that section is rewritten. Without it the
+    instruction is routed to the sections it touches. Events: `status`, then
+    `artifact_patch` (changed sections, complete) and `done`; or
+    `artifact_edit_declined` when the instruction needs the whole draft
+    redone (send it as a normal chat message instead) or is not an edit.
+    """
+    from .artifact_edit import EditError, apply_instruction, route_instruction
+    from .artifact_store import SOURCE_ASSISTANT, StaleVersion, artifact_store
+    from .chat_runner import _sse
+
+    try:
+        current = await artifact_store.get(data.artifact_id)
+    except Exception as e:
+        log.error("Artifact load failed", error=short_err(e))
+        return _error_response(500, "artifact_error", "Failed to load the draft")
+    if current is None:
+        return _error_response(404, "not_found", "Draft not found")
+    if data.base_version != current.version:
+        return _stale(current.version)
+    target = data.target or ArtifactEditTarget()
+    if target.section_id and target.section_id not in [s.id for s in current.sections]:
+        return _error_response(400, "validation_error", f"Unknown section id: {target.section_id}")
+
+    async def events():
+        try:
+            if target.section_id:
+                section_ids = [target.section_id]
+            else:
+                yield _sse({"type": "status", "agent": "drafting",
+                            "message": "Finding the part to change..."})
+                route = await route_instruction(current, data.instruction)
+                if route["scope"] != "sections":
+                    yield _sse({"type": "artifact_edit_declined", "scope": route["scope"],
+                                "reason": route["reason"]})
+                    yield _sse({"type": "done"})
+                    return
+                section_ids = route["section_ids"]
+            yield _sse({"type": "status", "agent": "drafting",
+                        "message": "Updating the draft...", "section_ids": section_ids})
+            new, changed = await apply_instruction(
+                current, section_ids, data.instruction,
+                selected_text=target.selected_text or "")
+            edited = [s for s in changed if s.id in section_ids]
+            summary = "Updated " + ", ".join(s.heading for s in edited[:3])
+            thread_id = await artifact_store.thread_of(data.artifact_id) or ""
+            new = await artifact_store.save(
+                new, thread_id=thread_id, source=SOURCE_ASSISTANT,
+                change_summary=f"{summary}: {data.instruction.strip()[:160]}",
+                base_version=data.base_version)
+            yield _sse({"type": "artifact_patch", "artifact_id": new.artifact_id,
+                        "base_version": data.base_version, "version": new.version,
+                        "summary": summary, "edited_section_ids": [s.id for s in edited],
+                        "sections": [s.model_dump() for s in changed]})
+            yield _sse({"type": "done", "version": new.version})
+        except StaleVersion as e:
+            yield _sse({"type": "error", "error": "stale_version", "latest_version": e.latest,
+                        "data": "The draft changed while it was being edited. Load the latest and try again."})
+        except EditError as e:
+            yield _sse({"type": "error", "error": "edit_failed", "data": str(e)})
+        except Exception as e:
+            log.error("Artifact edit failed", error=short_err(e), exc_info=True)
+            from core.redact import redact_brands
+            yield _sse({"type": "error", "error": "edit_failed", "data": redact_brands(short_err(e))})
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # --- Save Turn Endpoint (for persisting compliance reports, revised drafts) ---

@@ -58,6 +58,11 @@ _SIGN_RE = re.compile(
     r"|for\s+m/s\b|verified\s+by\b|yours\s+(?:faithfully|sincerely)\b|"
     r"(?:the\s+)?(?:petitioners?|applicants?|appellants?|plaintiffs?|defendants?|respondents?"
     r"|accused|complainants?|opponents?|proprietor)(?:\s*/\s*[\w ]+)?\s*$)", re.I)
+# Grounds lettered "A. BECAUSE ..." (one capital, then a sentence).
+_GROUND_RE = re.compile(r"^([A-Z])\.\s+([A-Z\"“(\[].{12,})$")
+_PAGE_BREAK_MARK = "[page break]"
+_SIGN_MARK = ">> "
+_ROW_MARK = " || "
 _TABLE_RE = re.compile(r"^\s*\|.*\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]{3,}\|\s*$")
 # "[Name of Applicant]" -> blank; never a citation "[2024] 3 SCC", a footnote "[1]"
@@ -177,11 +182,14 @@ def _shorten(t: str) -> str:
 
 
 def markdown_to_artifact(md: str, *, doc_type: str = "draft", title: str | None = None,
-                         artifact_id: str | None = None, language: str = "en") -> Artifact:
+                         artifact_id: str | None = None, language: str = "en",
+                         start_in_body: bool = False) -> Artifact:
+    """`start_in_body=True` reads the text as body content from the first line
+    (used when a single body section is converted on its own)."""
     b = _Builder(title=(title or _title_from(md or ""))[:200], doc_type=doc_type or "draft",
                  artifact_id=artifact_id or f"art_{uuid.uuid4().hex[:8]}", language=language or "en")
     lines = (md or "").replace("\r", "").split("\n")
-    in_body = False
+    in_body = start_in_body
     party: list[str] = []
 
     def flush_party():
@@ -225,6 +233,32 @@ def markdown_to_artifact(md: str, *, doc_type: str = "draft", title: str | None 
             continue
 
         # --- body --------------------------------------------------------
+        # Explicit layout markers, written by section_to_markdown so a section
+        # survives a round trip through text (see artifact_edit).
+        if s == _PAGE_BREAK_MARK:
+            b.add(PageBreakBlock)
+            continue
+        if s.startswith(_SIGN_MARK):
+            line = _inline(s[len(_SIGN_MARK):])
+            if isinstance(b.last, SignatureBlock):
+                b.last.lines.append(line)
+            else:
+                b.add(SignatureBlock, lines=[line])
+            continue
+        if _ROW_MARK in s and not _TABLE_RE.match(s):
+            left, right = (x.strip() for x in s.split(_ROW_MARK, 1))
+            if isinstance(b.last, RowBlock) and getattr(b, "_row_open", False):
+                if left:
+                    b.last.left.append(_inline(left))
+                if right:
+                    b.last.right.append(_inline(right))
+            else:
+                b.add(RowBlock, left=[_inline(left)] if left else [],
+                      right=[_inline(right)] if right else [])
+            b._row_open = True
+            continue
+        b._row_open = False
+
         if _TABLE_RE.match(s):
             if not _TABLE_SEP_RE.match(s):
                 b.table.append([_inline(c) for c in s.strip().strip("|").split("|")])
@@ -236,7 +270,9 @@ def markdown_to_artifact(md: str, *, doc_type: str = "draft", title: str | None 
                  and (_caps(_unbold(s)) or len(_unbold(s).split()) <= 10)
                  and not _PLACE_DATE_RE.match(s)):
             text = (m.group(2) if m else _unbold(s)).strip("* ").rstrip(":")
-            if _PAGE_BREAK_HEADINGS.match(text) and any(blk for blk in b.sections[-1].blocks):
+            already_broken = isinstance(b.last, PageBreakBlock)
+            if (_PAGE_BREAK_HEADINGS.match(text) and not already_broken
+                    and any(blk for blk in b.sections[-1].blocks)):
                 b.section(text.title() if _caps(text) else text)
                 b.add(PageBreakBlock)
             else:
@@ -260,6 +296,10 @@ def markdown_to_artifact(md: str, *, doc_type: str = "draft", title: str | None 
         m = _BULLET_RE.match(raw)
         if m:
             b.add(ParaBlock, label="•", text=_inline(m.group(1)))
+            continue
+        m = _GROUND_RE.match(s)
+        if m:
+            b.last_para = b.add(ParaBlock, label=f"{m.group(1)}.", text=_inline(m.group(2)))
             continue
 
         if _PLACE_DATE_RE.match(s):
@@ -290,3 +330,90 @@ def markdown_to_artifact(md: str, *, doc_type: str = "draft", title: str | None 
 
     flush_party()
     return b.build()
+
+
+# ---------------------------------------------------------------------------
+# Blocks -> text, for handing one section to the model and reading it back
+# ---------------------------------------------------------------------------
+
+_NL = chr(10)
+_BLANK_RE = re.compile(r"\[\[([^\[\]]{1,80})\]\]")
+
+
+def _plain(text: str) -> str:
+    """[[blank]] back to [blank], the form the writer uses."""
+    return _BLANK_RE.sub(lambda m: f"[{m.group(1)}]", text)
+
+
+def artifact_to_markdown(artifact: Artifact) -> str:
+    """The whole draft as the Markdown the drafting agent itself writes, with
+    no internal markers. Used for the chat message and the saved turn after a
+    partial edit, so the conversation history holds the current draft."""
+    return (_NL * 2).join(
+        x for x in (section_to_markdown(s, cause_title=i == 0, clean=True)
+                    for i, s in enumerate(artifact.sections)) if x)
+
+
+def section_to_markdown(section: Section, *, cause_title: bool = False,
+                        clean: bool = False) -> str:
+    """One section as the Markdown `markdown_to_artifact` reads back to the
+    same blocks. Signature lines, page breaks and body rows carry explicit
+    markers (">> ", "[page break]", " || ") because plain text cannot show
+    them. `clean=True` leaves the markers out (for text shown to a person)."""
+    sign_mark = "" if clean else _SIGN_MARK
+    row_mark = "    " if clean else _ROW_MARK
+    out: list[str] = []
+    blocks = section.blocks
+    for i, b in enumerate(blocks):
+        if isinstance(b, TitleBlock):
+            if b.text == "Versus" and not b.bold:
+                out.append("**vs**")
+            elif cause_title and not b.bold:
+                out.append(_plain(b.text))
+            else:
+                out.append(f"**{_plain(b.text)}**")
+        elif isinstance(b, HeadingBlock):
+            out.append(("## " if b.level == 1 else "### ") + _plain(b.text))
+        elif isinstance(b, TextBlock):
+            out.append(_plain(b.text))
+        elif isinstance(b, RowBlock):
+            if cause_title:
+                out.append(_NL.join(_plain(x) for x in b.left))
+                out.append(_NL.join(_plain(x) for x in b.right))
+            else:
+                n = max(len(b.left), len(b.right))
+                left = list(b.left) + [""] * (n - len(b.left))
+                right = [""] * (n - len(b.right)) + list(b.right)
+                out.append(_NL.join(f"{_plain(l)}{row_mark}{_plain(r)}".strip()
+                                    for l, r in zip(left, right)))
+        elif isinstance(b, ParaBlock):
+            if b.label == "•":
+                head = "-"
+            else:
+                head = b.label or (f"{b.number}." if b.number else "")
+            lines = [f"{head} {_plain(b.text)}".strip()]
+            lines += [f"   {x.marker} {_plain(x.text)}" for x in b.sub]
+            out.append(_NL.join(lines))
+        elif isinstance(b, SignatureBlock):
+            out.append(_NL.join(f"{sign_mark}{_plain(x)}" for x in b.lines))
+        elif isinstance(b, TableBlock):
+            rows = ([b.header] if b.header else []) + list(b.rows)
+            if rows:
+                width = max(len(r) for r in rows)
+                t = ["| " + " | ".join(_plain(c) for c in rows[0]) + " |", "|" + "---|" * width]
+                t += ["| " + " | ".join(_plain(c) for c in r) + " |" for r in rows[1:]]
+                out.append(_NL.join(t))
+        elif isinstance(b, PageBreakBlock):
+            if not clean:
+                out.append(_PAGE_BREAK_MARK)
+    return (_NL * 2).join(x for x in out if x)
+
+
+def markdown_to_section(md: str, like: Section, *, cause_title: bool = False) -> Section:
+    """Read edited section text back into ONE section that keeps `like`'s id
+    and heading. Block ids are reassigned."""
+    art = markdown_to_artifact(md, start_in_body=not cause_title, artifact_id="tmp")
+    blocks = [b for s in art.sections for b in s.blocks]
+    for n, b in enumerate(blocks, 1):
+        b.id = f"{like.id}.b{n}"
+    return Section(id=like.id, heading=like.heading, blocks=blocks)

@@ -255,5 +255,21 @@ def test_sources_panel_lists_only_discussed_cases_for_a_react_agent():
     from agents.orchestrator import _serialize_sources
     titles = [d["title"] for d in _serialize_sources(_sci_supporter())]
     assert titles == ["HANUMANT DASS VS VINAY KUMAR & ORS.", "STATE OF U.P. VS VINAY KUMAR JAIN"]
-    # nothing discussed by name -> capped, not all sixty
-    assert len(_serialize_sources(_sci_supporter(prose="General discussion only."))) == _SUPPORTING_CITATIONS_MAX
+    # nothing discussed by name -> nothing listed (not the first few hits)
+    assert _serialize_sources(_sci_supporter(prose="General discussion only.")) == []
+
+
+def test_namesake_hits_are_not_listed_under_a_case_the_agent_does_not_hold():
+    # Report 2026-10-07: "Standard Chartered Bank vs V. Noble Kumar". The
+    # Supreme Court index does not hold it under that name; a party search
+    # returned five other Standard Chartered Bank judgments, and all five
+    # were listed as sources.
+    from agents.orchestrator import _serialize_sources
+    hits = ["VIJAY KUMAR JAIN VS STANDARD CHARTERED BANK", "STANDARD CHARTERED BANK VS THE CUSTODIAN",
+            "STANDARD CHARTERED BANK VS DIRECTORATE OF ENFORCEMENT .", "CITIBANK N.A. VS STANDARD CHARTERED BANK"]
+    result = AgentResult(
+        agent_name="SCI_Judgment",
+        content=("### Standard Chartered Bank v. V. Noble Kumar. "
+                 "The Supreme Court upheld direct recourse to Section 14 of the SARFAESI Act."),
+        sources=[_sci_source(t, 500 + i) for i, t in enumerate(hits)])
+    assert _serialize_sources(result) == []

@@ -518,6 +518,13 @@ def _rejoin_blankline_fragments(text: str) -> tuple[str, int]:
                 and not _LABEL_LINE_RE.match(first_line)
                 and not (first_line.upper() == first_line and any(c.isalpha() for c in first_line))
                 and not _INDIC_RE.search(last_line + first_line)
+                # A short Title Case line is a new cause-title line (a party's
+                # name), not the tail of a sentence: dev box 2026-10-06 joined
+                # "... Bharatiya Nyaya Sanhita, 2023" / blank / "Mr. Rahul
+                # Deshpande". Same exemption _unwrap_hard_wrapped_lines has.
+                # An open "[..." on the previous line still joins.
+                and not (len(first_line) < 40 and _is_title_case(first_line)
+                         and not open_bracket)
             ):
                 out[-1] = ps + " " + cs
                 joins += 1
@@ -3874,6 +3881,16 @@ def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_
     return missing
 
 
+def _emit_draft_stream(event: dict) -> None:
+    """Send a raw drafting event on the request stream. A no-op outside a
+    streaming context (batch endpoint, tests) and on any error."""
+    try:
+        from langgraph.config import get_stream_writer
+        get_stream_writer()(event)
+    except Exception:
+        pass
+
+
 async def _generate_sectionwise(
     *,
     sections: list[_Section],
@@ -3966,6 +3983,18 @@ async def _generate_sectionwise(
                 _detected_script = _name
                 _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
                 break
+
+    # Draft side panel: announce the plan, then each pair's text as it is
+    # written, so the panel can fill in while drafting runs. These are raw
+    # events; core.chat_runner turns them into artifact_start /
+    # artifact_section only when DRAFT_ARTIFACT_EVENTS=1 and ignores them
+    # otherwise. The finished draft (after clean-up and review) still arrives
+    # separately and replaces these previews.
+    _emit_draft_stream({
+        "type": "draft_plan",
+        "sections": [{"index": k + 1, "headings": [s.heading for s in sections[k:k + 2]]}
+                     for k in range(0, total, 2)],
+    })
 
     i = 0
     while i < total:
@@ -4207,6 +4236,10 @@ async def _generate_sectionwise(
                 )
         if pair_text.strip():
             completed.append(pair_text.strip())
+            _emit_draft_stream({
+                "type": "draft_section", "index": position_start,
+                "headings": [s.heading for s in pair], "text": pair_text.strip(),
+            })
         else:
             # Both attempts produced empty content OR both raised.
             failed_pairs.append({

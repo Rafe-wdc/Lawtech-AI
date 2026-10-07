@@ -7,7 +7,7 @@
 | Block format (`core/draft_blocks.py`) | built |
 | Word download from blocks (`POST /pyapi/export` with `artifact`) | built |
 | `artifact_done` event at the end of every draft | built, off unless the server sets `DRAFT_ARTIFACT_EVENTS=1` |
-| `artifact_start` / `artifact_section` (live while writing) | not built |
+| `artifact_start` / `artifact_section` (live while writing) | built, same flag. Sent for drafts written section by section; a short draft written in one pass (a notice) sends only `artifact_done` |
 | Chat follow-up edits part of the draft (`artifact_patch`) | built, same flag |
 | `POST /pyapi/artifact/edit` (edit a selected section) | built |
 | `PUT /pyapi/artifact/{id}` (save typed text), versions, restore, export by id | built |
@@ -114,8 +114,8 @@ without the panel ignore them and keep using `token` / `response`.
 
 | Event | When | Payload |
 |---|---|---|
-| `artifact_start` | Drafting begins and the section plan is known | `artifact_id`, `version`, `title`, `doc_type`, `language`, `page`, `sections: [{id, heading}]` (no blocks yet) |
-| `artifact_section` | Each section finishes | `artifact_id`, `version`, `section: {id, heading, blocks}`, `status: "preview"` |
+| `artifact_start` | Drafting begins and the section plan is known | `artifact_id`, `version`, `sections: [{id, heading}]` (no blocks yet). Ids are `p1`, `p3`, … : the writer drafts two planned sections at a time, and each preview section is one such pair |
+| `artifact_section` | Each pair finishes | `artifact_id`, `status: "preview"`, `section: {id, heading, blocks}` with an id from `artifact_start` |
 | `artifact_done` | The draft is final (after clean-up and review) | `artifact_id`, `version`, `artifact` (complete, authoritative) |
 | `artifact_patch` | An edit changed part of an existing draft | `artifact_id`, `base_version`, `version`, `sections: [ ... ]` (only the changed sections, complete) |
 
@@ -138,10 +138,10 @@ Example stream for a new draft:
 ```
 data: {"type":"thread_id", ...}
 data: {"type":"agents_planned","agents":["Drafting"]}
-data: {"type":"artifact_start","artifact_id":"art_7f3c2a9e","version":1,"title":"Bail Application under Section 483 BNSS", "sections":[{"id":"s1","heading":"Cause title"}, ...]}
+data: {"type":"artifact_start","artifact_id":"art_7f3c2a9e","version":1,"sections":[{"id":"p1","heading":"CAUSE TITLE / STATEMENT OF FACTS"},{"id":"p3","heading":"GROUNDS / PRAYER"},{"id":"p5","heading":"VERIFICATION"}]}
 data: {"type":"drafting_progress", ...}
-data: {"type":"artifact_section","artifact_id":"art_7f3c2a9e","version":1,"status":"preview","section":{"id":"s2", ...}}
-data: {"type":"artifact_section", ... "section":{"id":"s1", ...}}
+data: {"type":"artifact_section","artifact_id":"art_7f3c2a9e","status":"preview","section":{"id":"p1","heading":"CAUSE TITLE / STATEMENT OF FACTS","blocks":[ ... ]}}
+data: {"type":"artifact_section", ... "section":{"id":"p3", ...}}
 ...
 data: {"type":"artifact_done","artifact_id":"art_7f3c2a9e","version":1,"artifact":{ ... }}
 data: {"type":"response","content":"<markdown version>"}

@@ -43,8 +43,15 @@ _BOLD_LINE_RE = re.compile(r"^\*\*([^*].*?)\*\*:?\s*$")
 _NUM_RE = re.compile(r"^(\d{1,3})\.\s+(\S.*)$")
 _SUB_RE = re.compile(r"^\s*(\((?:[a-zA-Z]|[ivxlc]{1,6})\)|(?:[a-z]|[ivx]{1,5})\))\s+(\S.*)$")
 _BULLET_RE = re.compile(r"^\s*[-*•]\s+(\S.*)$")
-_VERSUS_RE = re.compile(r"^\**\s*(?:versus|vs\.?|v/s\.?)\s*\**$", re.I)
+# "vs" in English and the regional words drafts use for it (Hindi / Marathi
+# बनाम, विरुद्ध; Gujarati વિરુદ્ધ; Bengali বনাম; Tamil எதிர்; Telugu వర్సెస్;
+# Kannada ವಿರುದ್ಧ).
+_VERSUS_RE = re.compile(
+    r"^\**\s*(?:versus|vs\.?|v/s\.?|बनाम|विरुद्ध|વિરુદ્ધ|বনাম|எதிர்|వర్సెస్|ವಿರುದ್ಧ)\s*\**$", re.I)
 _LABEL_LINE_RE = re.compile(r"^[.…_\s]{2,}(\S.*)$")      # ".....Petitioner"
+# A dot leader then a short label: a party label in any language
+# (".....आवेदक / अभियुक्त").
+_DOT_LEADER_LABEL_RE = re.compile(r"^(?:\.{3,}|…+)\s*\S.{0,58}$")
 # "Petitioner", "Applicant / Accused", "Respondents / State", "Respondent No. 1"
 _PARTY_LABEL_RE = re.compile(rf"^{_LABEL_WORDS}\b.{{0,40}}$", re.I)
 _MATTER_RE = re.compile(r"^\**\s*(?:in\s+the\s+matter\s+of\b|and\s*$)", re.I)
@@ -140,7 +147,12 @@ class _Builder:
 
     def build(self) -> Artifact:
         self.flush_table()
-        return Artifact(sections=[s for s in self.sections if s.blocks], **self.meta)
+        sections = [s for s in self.sections if s.blocks]
+        # A notice or letter has no headings: the whole document is one
+        # section, and "Cause title" would be the wrong name for it.
+        if len(sections) == 1 and sections[0].heading == "Cause title":
+            sections[0].heading = "Document"
+        return Artifact(sections=sections, **self.meta)
 
 
 _DOC_NOUN_RE = re.compile(r"\b(?:application|petition|statement|notice|plaint|appeal|affidavit"
@@ -216,7 +228,8 @@ def markdown_to_artifact(md: str, *, doc_type: str = "draft", title: str | None 
                 b.add(TitleBlock, text="Versus", bold=False)
                 continue
             m = _LABEL_LINE_RE.match(s)
-            if m and _PARTY_LABEL_RE.match(m.group(1).strip().rstrip(".")):
+            if (m and _PARTY_LABEL_RE.match(m.group(1).strip().rstrip("."))) \
+                    or (party and _DOT_LEADER_LABEL_RE.match(s)):
                 b.add(RowBlock, left=[_inline(p) for p in party], right=[s.strip()])
                 party = []
                 continue

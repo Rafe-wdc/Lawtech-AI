@@ -55,6 +55,56 @@ async def record_draft(thread_id: str, draft_md: str, language: str = "en") -> d
         return None
 
 
+async def preview_start(thread_id: str, plan: list[dict]) -> dict | None:
+    """`artifact_start` when the drafting agent announces its section plan.
+
+    Preview sections are the pairs the writer drafts together, with ids
+    "p1", "p3", ... They are placeholders: `artifact_done` carries the final
+    sections (ids "s1", "s2", ...) and replaces them.
+    """
+    if not enabled() or not plan:
+        return None
+    try:
+        artifact_id = artifact_id_for_thread(thread_id)
+        try:
+            latest = await artifact_store.get(artifact_id)
+            version = (latest.version if latest else 0) + 1
+        except Exception:
+            version = 1
+        sections = []
+        for p in plan:
+            headings = [h for h in (p.get("headings") or []) if h]
+            sections.append({"id": f"p{int(p['index'])}",
+                             "heading": " / ".join(headings)[:120] or "Section"})
+        return {"type": "artifact_start", "artifact_id": artifact_id, "version": version,
+                "sections": sections}
+    except Exception as e:
+        log.warning("Artifact preview start skipped", error=str(e)[:160])
+        return None
+
+
+def preview_section(thread_id: str, index: int, headings: list[str], text: str) -> dict | None:
+    """`artifact_section` (status "preview") for one drafted pair."""
+    if not enabled() or not (text or "").strip():
+        return None
+    try:
+        sid = f"p{int(index)}"
+        art = markdown_to_artifact(text, artifact_id="preview", start_in_body=int(index) > 1)
+        blocks = [b for s in art.sections for b in s.blocks]
+        for n, b in enumerate(blocks, 1):
+            b.id = f"{sid}.b{n}"
+        if not blocks:
+            return None
+        return {"type": "artifact_section", "artifact_id": artifact_id_for_thread(thread_id),
+                "status": "preview",
+                "section": {"id": sid,
+                            "heading": " / ".join(h for h in headings if h)[:120] or "Section",
+                            "blocks": [b.model_dump() for b in blocks]}}
+    except Exception as e:
+        log.warning("Artifact preview section skipped", error=str(e)[:160])
+        return None
+
+
 async def _input_allowed(query: str) -> bool:
     """The same input guardrail the agent graph applies."""
     try:
@@ -100,7 +150,10 @@ async def try_partial_edit(thread_id: str, query: str) -> dict | None:
     if not edited:
         return None
     headings = [s.heading for s in edited]
-    summary = "Updated " + ", ".join(headings[:3]) + ("…" if len(headings) > 3 else "")
+    if len(artifact.sections) == 1:
+        summary = "Updated the draft"
+    else:
+        summary = "Updated " + ", ".join(headings[:3]) + ("…" if len(headings) > 3 else "")
     try:
         new = await artifact_store.save(new, thread_id=thread_id, source=SOURCE_ASSISTANT,
                                         change_summary=f"{summary}: {query.strip()[:160]}",

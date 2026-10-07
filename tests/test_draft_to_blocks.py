@@ -158,6 +158,20 @@ def test_notice_letter_shape():
     assert any(isinstance(x, SignatureBlock) and x.lines[0] == "Yours faithfully," for x in b)
 
 
+def test_regional_language_cause_title():
+    """Hindi draft from the local end-to-end run, 2026-10-07: the party labels
+    and "versus" are not English words."""
+    md = ("**सत्र न्यायाधीश, पुणे के न्यायालय में**\n\n**आपराधिक जमानत आवेदन संख्या [Bail Application No.] / 2026**\n\n"
+          "श्री अनिल जोशी\n\nआयु: 34 वर्ष\n\n.....आवेदक / अभियुक्त\n\n**बनाम**\n\n"
+          "1. महाराष्ट्र राज्य\n\n.....प्रत्यर्थी / अभियोजन पक्ष\n\n## तथ्यों का विवरण\n\n1. आवेदक एक विधि का पालन करने वाला नागरिक है।")
+    b = _blocks(markdown_to_artifact(md, language="hi"))
+    rows = [x for x in b if isinstance(x, RowBlock)]
+    assert [r.right[0] for r in rows] == [".....आवेदक / अभियुक्त", ".....प्रत्यर्थी / अभियोजन पक्ष"]
+    assert rows[0].left == ["श्री अनिल जोशी", "आयु: 34 वर्ष"]
+    assert any(isinstance(x, TitleBlock) and x.text == "Versus" for x in b)
+    assert any(isinstance(x, ParaBlock) and x.number == 1 for x in b)
+
+
 def test_output_is_valid_and_exports():
     from core.draft_docx import artifact_to_docx
     for md in (BAIL, NOTICE, "", "Just one sentence."):

@@ -158,7 +158,8 @@ async def edit_section(artifact: Artifact, section_id: str, instruction: str, *,
     if not (instruction or "").strip():
         raise EditError("No instruction given")
     section = artifact.sections[idx]
-    cause_title = idx == 0 and section.heading.lower().startswith("cause title")
+    # The first section opens the document (cause title, or a letterhead).
+    cause_title = idx == 0
     text = section_to_markdown(section, cause_title=cause_title)
 
     selection_block = ""

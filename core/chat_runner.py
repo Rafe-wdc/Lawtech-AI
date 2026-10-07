@@ -710,6 +710,19 @@ async def run_chat_pipeline(
                                 if optional in chunk:
                                     dp_event[optional] = chunk[optional]
                             yield _sse(dp_event)
+                        elif kind == "draft_plan":
+                            # Draft side panel: open with the section plan.
+                            from core.artifact_followup import preview_start as _pv_start
+                            _ev = await _pv_start(i.thread_id, chunk.get("sections") or [])
+                            if _ev:
+                                yield _sse(_ev)
+                        elif kind == "draft_section":
+                            # ...and fill each pair in as it is written.
+                            from core.artifact_followup import preview_section as _pv_section
+                            _ev = _pv_section(i.thread_id, chunk.get("index", 0),
+                                              chunk.get("headings") or [], chunk.get("text", ""))
+                            if _ev:
+                                yield _sse(_ev)
                         elif kind == "draft_incomplete":
                             yield _sse({
                                 "type": "draft_incomplete",

@@ -32,6 +32,11 @@ def _pdf():
 
 def _handler(request: httpx.Request) -> httpx.Response:
     url = str(request.url)
+    if url.endswith("AUZIYQ6"):
+        return httpx.Response(302, headers={"location": "https://hcservices.ecourts.gov.in/ecourtindiaHC/cases/display_pdf.php?x=1"})
+    if "hcservices.ecourts.gov.in" in url:
+        return httpx.Response(200, headers={"content-type": "text/html"},
+                              content=b"<html><head><title>Security Code Check for Accessing Judgment/Order</title></head></html>")
     if url.endswith("AUZIYQ1"):
         return httpx.Response(302, headers={"location": "https://www.the-laws.com/case?caseId=1"})
     if url.endswith("AUZIYQ2"):
@@ -146,3 +151,16 @@ def test_official_court_hosts():
               "https://notsci.gov.in.evil.com/x", "https://kommerstad.org/x",
               "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x"]:
         assert not ok(u), u
+
+
+# --- captcha pages are not sources (report 2026-10-07) -----------------------
+
+def test_official_court_captcha_page_is_dropped():
+    assert _resolve([_judgment_web(6, "Judgment")]) == []
+    assert _resolve([_web(6)]) == []                      # for any agent
+
+
+def test_real_official_page_next_to_a_captcha_page_is_kept():
+    out = _resolve([_judgment_web(6, "Judgment"), _judgment_web(4, "Judgment")])
+    assert len(out) == 1 and "allahabadhighcourt.in" in out[0]["web_url"]
+    assert "gate" not in out[0]

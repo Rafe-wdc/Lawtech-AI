@@ -29,7 +29,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
 from core.clients import (
-    get_es_client, get_gemini_flash, get_gemini_flash_full, get_retriever_embeddings,
+    get_es_client, get_gemini_flash, get_gemini_flash_full,
+)
+from tools.shared.newacts_vector import (
+    hybrid_hits as hybrid_newacts_hits,
+    text_for_embedding as newacts_search_text,
 )
 from core.retrieval_relevance import (
     check_retrieval_relevance, head_tail_apology_detected,
@@ -232,12 +236,14 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
     if metadata.section_number:
         filters.append({"terms": {"section_number.keyword": metadata.section_number}})
 
-    # Hybrid search: BM25 + cosine similarity on embedding field
+    # Hybrid search: this builds the BM25 half. The vector half is ranked in
+    # process and fused by `tools.shared.newacts_vector.hybrid_hits` — the
+    # index's `embedding` field is not a knn_vector, so the script_score /
+    # cosineSimilarity query that used to be built here failed on every call
+    # ("class_cast_exception") and search silently ran on BM25 alone.
     if metadata.hybrid_search and query_text:
-        log.debug("Building hybrid BM25+vector query",
+        log.debug("Building hybrid query (BM25 half)",
                   act_name=metadata.act_name)
-        embeddings = get_retriever_embeddings()
-        query_vector = embeddings.embed_query(query_text)
 
         should_clauses = [
             # Base BM25 on the raw query (existing behaviour)
@@ -292,29 +298,20 @@ def _build_newacts_query(metadata: ActQueryMetadata, query_text: str) -> dict:
         }
 
         return {
-            "size": 20,
+            # Wider than the 20 hits returned: fusion needs BM25 candidates
+            # below the cut that the vector ranking may promote.
+            "size": 50,
             "query": {
-                "script_score": {
-                    "query": {
-                        "boosting": {
-                            "positive": {
-                                "bool": {
-                                    "should": should_clauses,
-                                    "filter": filters,
-                                }
-                            },
-                            "negative": negative_query,
-                            "negative_boost": 0.3,
+                "boosting": {
+                    "positive": {
+                        "bool": {
+                            "should": should_clauses,
+                            "filter": filters,
+                            "minimum_should_match": 1,
                         }
                     },
-                    "script": {
-                        "source": """
-                            double bm25 = _score;
-                            double vector_score = cosineSimilarity(params.query_vector, 'embedding');
-                            return bm25 + (100 * vector_score);
-                        """,
-                        "params": {"query_vector": query_vector},
-                    },
+                    "negative": negative_query,
+                    "negative_boost": 0.3,
                 }
             },
             "sort": [
@@ -635,11 +632,26 @@ async def newacts_node(state: LegalAgentState) -> dict:
             ]
             is_cross_act = len(_mentioned_acts) >= 2
 
-            def _build_and_search() -> list:
-                """Single-search path — used when query isn't cross-act."""
-                q = _build_newacts_query(metadata, query)
+            def _search(meta: ActQueryMetadata) -> list:
+                """Run one newacts search: fused BM25 + vector for a topic
+                query, the exact filter otherwise."""
+                if meta.hybrid_search and query:
+                    # The Act is applied as a filter, so its name is dropped
+                    # from the search text: every row repeats it, and it only
+                    # dilutes the words that identify the section.
+                    q = _build_newacts_query(meta, newacts_search_text(query))
+                    return hybrid_newacts_hits(
+                        q, query,
+                        source=ACTS_PATHS.get(meta.act_name or ""),
+                        sections=meta.section_number,
+                    )
+                q = _build_newacts_query(meta, query)
                 es = get_es_client()
                 return es.search(index=ES_INDICES["newacts"], body=q)["hits"]["hits"]
+
+            def _build_and_search() -> list:
+                """Single-search path — used when query isn't cross-act."""
+                return _search(metadata)
 
             def _build_and_search_per_act() -> list:
                 """Cross-act path — run one search per mentioned act,
@@ -657,7 +669,6 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 full doctrine sections for each act.
                 """
                 _PER_ACT_LIMIT = 8
-                es = get_es_client()
                 all_hits: list = []
                 for act_full_name in _mentioned_acts:
                     # Build a copy of metadata with this act forced in
@@ -673,10 +684,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
                         "section_number": None,
                         "hybrid_search": True,
                     })
-                    q = _build_newacts_query(m_copy, query)
                     try:
-                        res = es.search(index=ES_INDICES["newacts"], body=q)
-                        hits_for_act = res["hits"]["hits"][:_PER_ACT_LIMIT]
+                        hits_for_act = _search(m_copy)[:_PER_ACT_LIMIT]
                         log.info("Cross-act per-act search",
                                  act=act_full_name, hits=len(hits_for_act))
                         all_hits.extend(hits_for_act)

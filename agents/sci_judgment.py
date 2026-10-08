@@ -31,6 +31,79 @@ from tools.shared import AGENT_TOOLS, search_by_topic
 log = get_logger("SCI_Judgment")
 
 
+# --- case-name lookup gate ----------------------------------------------
+# Cost audit 2026-10-08: a case-name lookup ("Laxman B. Kamble vs MHADA")
+# whose parties are not in the Supreme Court index still ran the full ReAct
+# research loop, 10 to 14 calls and $0.10 to $0.28, and produced surname
+# matches. One AND-match on the `parties` field decides it for free.
+_CASE_NAME_RE = re.compile(
+    r"^\s*(?P<pet>[^\n]{3,120}?)\s+(?:vs?\.?|versus|v\.)\s+(?P<resp>[^\n]{3,120}?)\s*(?:\(?\d{4}\)?)?\s*$",
+    re.IGNORECASE,
+)
+_PARTY_STOP = frozenset((
+    "and", "ors", "anr", "others", "another", "the", "of", "vs", "v", "versus", "shri", "smt",
+    "mr", "mrs", "ms", "dr", "m/s", "ltd", "pvt", "co", "sh", "state", "union", "india", "govt",
+    "government", "through", "thr", "its", "etc", "anor", "another", "sri", "kum", "ku",
+))
+
+
+_GOVT_PARTY_RE = re.compile(r"(?i)^\s*(?:the\s+)?(?:state|union|govt|government|commissioner|collector|secretary|cbi|central bureau|u\.?o\.?i)\b")
+
+
+def _significant_party_tokens(name: str) -> list[str]:
+    toks = re.findall(r"[a-z]{3,}", (name or "").lower())
+    return [t for t in toks if t not in _PARTY_STOP]
+
+
+def _case_name_lookup(query: str) -> tuple[str, str] | None:
+    """Return (petitioner, respondent) when the query is just a case name."""
+    if not query or "\n" in query or len(query.split()) > 14:
+        return None
+    m = _CASE_NAME_RE.match(query)
+    if not m:
+        return None
+    return m.group("pet").strip(" .,"), m.group("resp").strip(" .,")
+
+
+def _party_in_sci_index(petitioner: str, respondent: str) -> bool | None:
+    """True / False when the index can answer, None when it cannot (fail open)."""
+    # A government party (State of X, Union of India, CBI) matches thousands of
+    # cases; gate on the private party instead.
+    if _GOVT_PARTY_RE.match(petitioner or "") and not _GOVT_PARTY_RE.match(respondent or ""):
+        tokens = _significant_party_tokens(respondent)
+    else:
+        tokens = _significant_party_tokens(petitioner) or _significant_party_tokens(respondent)
+    if not tokens:
+        return None
+    try:
+        from core.clients import get_es_client
+        from core.settings import ES_INDICES
+        es = get_es_client()
+        r = es.search(index=ES_INDICES["sci_judgments"], body={
+            "size": 1, "_source": False,
+            "query": {"match": {"parties": {"query": " ".join(tokens), "operator": "and"}}},
+        }, request_timeout=15)
+        total = r["hits"]["total"]
+        return (total["value"] if isinstance(total, dict) else total) > 0
+    except Exception as e:  # noqa: BLE001
+        log.warning("Case-name party gate skipped (ES error)", error=short_err(e))
+        return None
+
+
+def _not_found_result(petitioner: str, respondent: str) -> AgentResult:
+    return AgentResult(
+        agent_name="SCI_Judgment",
+        content=(
+            f"No Supreme Court judgment titled \"{petitioner} vs {respondent}\" was found in the "
+            "Lawttorney database. The party names may be spelt differently on the record, or the "
+            "matter may be a High Court or unreported order. A case number, citation or date would "
+            "allow an exact lookup."
+        ),
+        sources=[],
+        tokens_consumed=0,
+    )
+
+
 async def sci_judgment_node(state: LegalAgentState) -> dict:
     """Search Supreme Court of India judgments using ReAct agent.
 
@@ -55,6 +128,14 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
     try:
         # Build ReAct agent with SCI tools
         progress("sci_judgment", "Preparing Supreme Court search...", step="prepare")
+        _lookup = None if user_context else _case_name_lookup(query)
+        if _lookup:
+            _present = await asyncio.to_thread(_party_in_sci_index, *_lookup)
+            if _present is False:
+                log.info("Case-name lookup: parties absent from SCI index, skipping research",
+                         petitioner=_lookup[0][:60], respondent=_lookup[1][:60])
+                progress("sci_judgment", "No matching Supreme Court case found", step="results")
+                return {"agent_results": {"SCI_Judgment": _not_found_result(*_lookup)}}
         # max_output_tokens capped at 8192 (~32k chars) to bound the ReAct
         # agent's final response and prevent runaway markdown-table padding.
         llm = get_gemini_flash_full(temperature=0, max_output_tokens=8192)

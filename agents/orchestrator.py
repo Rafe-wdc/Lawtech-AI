@@ -1600,9 +1600,14 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # at the `if dynamic_plan is not None` tail (present since 6ece09a).
     dynamic_plan = None
     # --- Short-circuit: greeting resolved ---
-    if is_greeting:
-        log.info("Greeting detected, short-circuiting classification",
-                 original=_original_query[:60])
+    # Cost audit 2026-10-08: acknowledgements ("thank you", "ok") were
+    # already forced to Non_legal AFTER classification and intent extraction
+    # had run, so every one paid the two planner calls (about $0.007, 93% of
+    # the request). Take the greeting short-circuit for them too.
+    if is_greeting or state.get("conversational_followup"):
+        log.info("Greeting / acknowledgement detected, short-circuiting classification",
+                 original=_original_query[:60],
+                 conversational_followup=bool(state.get("conversational_followup")))
         task = "Non_legal"
         tasks_planned = ["Non_legal"]
         response_instructions = ""

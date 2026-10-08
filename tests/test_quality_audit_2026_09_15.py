@@ -210,4 +210,4 @@ def test_greeting_short_circuit_initialises_dynamic_plan():
     # the non-greeting branch made, and the tail read the variable.
     import agents.orchestrator as orch
     src = inspect.getsource(orch.orchestrator_plan_node)
-    assert src.index("dynamic_plan = None") < src.index("if is_greeting:")
+    assert src.index("dynamic_plan = None") < src.index("if is_greeting")

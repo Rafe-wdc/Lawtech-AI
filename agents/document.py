@@ -478,12 +478,22 @@ the gap with general legal knowledge or invented details.""",
             intent,
             source_languages=source_langs,
         )
-        prompt_messages = [("system", system_prompt)]
+        # Message order matters for cost: Gemini's implicit context cache
+        # only matches a request PREFIX that is identical to an earlier
+        # request. The document is the same on every turn of a thread, the
+        # conversation history is not, so the document goes first and the
+        # history after it. Same content reaches the model; follow-up turns
+        # bill the document at the cached rate (cost audit 2026-10-08: the
+        # whole file, 24K tokens on a 28-page PDF, was re-billed in full on
+        # every follow-up because the history preceded it).
+        prompt_messages = [
+            ("system", system_prompt),
+            ("user", "Document content:\n{docs}"),
+            ("user", "Source size and required length: {size_note}"),
+        ]
         if history_text:
             prompt_messages.append(("user", "Previous conversation:\n{history}"))
         prompt_messages.extend([
-            ("user", "Document content:\n{docs}"),
-            ("user", "Source size and required length: {size_note}"),
             ("user", "Current Date: {date}"),
             ("user", "Question: {query}"),
         ])

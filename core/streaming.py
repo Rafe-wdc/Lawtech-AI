@@ -202,6 +202,7 @@ async def _stream_with_writer(chain, inputs: dict, writer):
 
     full = ""
     usage = {}
+    served_model = ""
     last_ch: str | None = None  # most recent same-char run anchor
     same_char_run = 0
     runaway_dropped = 0   # for log telemetry
@@ -211,6 +212,17 @@ async def _stream_with_writer(chain, inputs: dict, writer):
         # leaves Gemini 2.5 plain string content unchanged. AIMessageChunk
         # exposes the same `.text` property as AIMessage.
         token = (chunk.text or "") if hasattr(chunk, "text") else (chunk.content or "")
+        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+            # Gemini streams usage as per-chunk DELTAS: the first chunk
+            # carries the prompt count, later chunks carry only their own
+            # output tokens, the final chunk is often all zeros. Keeping
+            # the last chunk metered every streamed answer at in=0 / out=
+            # a few tokens, so Legislation, Newacts, Constitution and the
+            # merge synthesis were billed at ~$0 (cost audit 2026-10-08).
+            usage = merge_usage(usage, chunk.usage_metadata)
+        _rm = getattr(chunk, "response_metadata", None) or {}
+        if not served_model and isinstance(_rm, dict):
+            served_model = _rm.get("model_name") or _rm.get("model") or ""
         if not token:
             continue
 
@@ -249,14 +261,6 @@ async def _stream_with_writer(chain, inputs: dict, writer):
             if safe_out:
                 writer({"type": "token", "content": safe_out})
 
-        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
-            # Gemini streams usage as per-chunk DELTAS: the first chunk
-            # carries the prompt count, later chunks carry only their own
-            # output tokens, the final chunk is often all zeros. Keeping
-            # the last chunk metered every streamed answer at in=0 / out=
-            # a few tokens, so Legislation, Newacts, Constitution and the
-            # merge synthesis were billed at ~$0 (cost audit 2026-10-08).
-            usage = merge_usage(usage, chunk.usage_metadata)
 
     # Drain the URL filter's held tail through the prose sanitiser and emit.
     tail = url_filter.flush()
@@ -276,4 +280,7 @@ async def _stream_with_writer(chain, inputs: dict, writer):
     # AttributeError'd in streaming context, got caught by the outer try/except,
     # and the agent returned an empty AgentResult. Aliasing `.text = content`
     # here is a one-line pipeline-level fix that closes all those latent bugs.
-    return SimpleNamespace(content=full, text=full, usage_metadata=usage)
+    # The model name rides on the chunks' response_metadata; without it the
+    # meter cannot price the call and streamed answers cost $0 (audit 2026-10-08).
+    return SimpleNamespace(content=full, text=full, usage_metadata=usage,
+                           response_metadata={"model_name": served_model, "model": served_model})

@@ -23,7 +23,8 @@ from core import token_tracker as tt
 
 # ------------------------------------------------------------ 1. streaming
 def _chunk(text, **usage):
-    return SimpleNamespace(text=text, content=text, usage_metadata=usage or None)
+    return SimpleNamespace(text=text, content=text, usage_metadata=usage or None,
+                           response_metadata={"model_name": "gemini-3.8-flash"})
 
 
 class _FakeChain:
@@ -51,12 +52,24 @@ def test_streamed_usage_is_the_sum_of_chunk_deltas():
         _chunk("of the NI Act ", input_tokens=0, output_tokens=26, total_tokens=26),
         _chunk("makes dishonour ", input_tokens=0, output_tokens=29, total_tokens=29),
         _chunk("an offence.", input_tokens=0, output_tokens=0, total_tokens=0),
+        _chunk("", input_tokens=0, output_tokens=3, total_tokens=3),     # usage-only final chunk, no text
     ]
     out = asyncio.run(_stream_with_writer(_FakeChain(chunks), {}, lambda ev: None))
     assert out.usage_metadata["input_tokens"] == 22
-    assert out.usage_metadata["output_tokens"] == 72
-    assert out.usage_metadata["total_tokens"] == 94
+    assert out.usage_metadata["output_tokens"] == 75
+    assert out.usage_metadata["total_tokens"] == 97
     assert out.content == "Section 138 of the NI Act makes dishonour an offence."
+    assert out.response_metadata["model_name"] == "gemini-3.8-flash"
+
+
+def test_streamed_response_is_priced_by_the_meter():
+    tracker = tt.start_request()
+    chunks = [_chunk("a", input_tokens=5000, output_tokens=10, total_tokens=5010), _chunk("b", input_tokens=0, output_tokens=390, total_tokens=390)]
+    out = asyncio.run(_stream_with_writer(_FakeChain(chunks), {}, lambda ev: None))
+    tt.record("Legislation", "generate", out)
+    call = tracker.calls[-1]
+    assert call.input_tokens == 5000 and call.output_tokens == 400
+    assert call.cost_usd > 0, "streamed generation must not be priced at $0"
 
 
 # ------------------------------------------------------- 2. raw genai shim

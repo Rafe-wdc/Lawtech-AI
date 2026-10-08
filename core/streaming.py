@@ -153,6 +153,24 @@ async def stream_chain_response(
         )
 
 
+def merge_usage(acc: dict | None, delta: dict | None) -> dict:
+    """Sum two LangChain usage_metadata dicts, including the nested
+    input_token_details / output_token_details counters."""
+    out = dict(acc or {})
+    for k, v in (delta or {}).items():
+        if isinstance(v, dict):
+            sub = dict(out.get(k) or {})
+            for sk, sv in v.items():
+                if isinstance(sv, (int, float)):
+                    sub[sk] = (sub.get(sk) or 0) + sv
+            out[k] = sub
+        elif isinstance(v, (int, float)):
+            out[k] = (out.get(k) or 0) + v
+        else:
+            out.setdefault(k, v)
+    return out
+
+
 async def _stream_with_writer(chain, inputs: dict, writer):
     """Stream chain output token-by-token via the writer.
 
@@ -232,7 +250,13 @@ async def _stream_with_writer(chain, inputs: dict, writer):
                 writer({"type": "token", "content": safe_out})
 
         if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
-            usage = chunk.usage_metadata
+            # Gemini streams usage as per-chunk DELTAS: the first chunk
+            # carries the prompt count, later chunks carry only their own
+            # output tokens, the final chunk is often all zeros. Keeping
+            # the last chunk metered every streamed answer at in=0 / out=
+            # a few tokens, so Legislation, Newacts, Constitution and the
+            # merge synthesis were billed at ~$0 (cost audit 2026-10-08).
+            usage = merge_usage(usage, chunk.usage_metadata)
 
     # Drain the URL filter's held tail through the prose sanitiser and emit.
     tail = url_filter.flush()

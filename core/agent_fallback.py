@@ -21,6 +21,7 @@ from core.metrics import METRICS
 from core.settings import MODELS, TIMEOUT_WEB_SEARCH_SEC
 from core.token_tracker import record as _record_tokens
 from core.token_tracker import record_genai as _record_genai_tokens
+from core.token_tracker import record_grounding as _record_grounding, grounding_queries_of as _grounding_queries_of
 
 log = get_logger("AgentFallback")
 
@@ -281,6 +282,7 @@ async def web_search_fallback(
         # Closes the observability gap where web-grounded fallback tokens
         # (often the priciest calls in the pipeline) were invisible.
         _record_genai_tokens(agent_name, "web_grounded", response, _primary)
+        _record_grounding(agent_name, "web_grounded", _grounding_queries_of(response), _primary)
 
         # Stream the fallback content as tokens to the frontend. Run through
         # the URL scrubber so external Google-Search-grounded links don't
@@ -457,6 +459,7 @@ async def get_web_context(query: str, agent_name: str) -> str:
             text = response.candidates[0].content.parts[0].text or ""
         # Record tokens for cost attribution.
         _record_genai_tokens(agent_name, "web_enrich", response, _primary)
+        _record_grounding(agent_name, "web_enrich", _grounding_queries_of(response), _primary)
         log.debug("Web context enrichment completed",
                   agent=agent_name, context_len=len(text))
         return text

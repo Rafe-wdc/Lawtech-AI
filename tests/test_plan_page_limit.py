@@ -89,7 +89,7 @@ def test_one_document_over_the_budget_is_rejected(client, plan, budget):
     assert r.status_code == 403
     assert r.json()["message"] == (
         f"doc0.pdf has {budget + 1} pages. Your plan ({plan}) allows up to "
-        f"{budget} pages per chat, and this chat has {budget} pages left."
+        f"{budget} pages per chat."
     )
 
 

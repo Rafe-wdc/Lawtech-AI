@@ -106,7 +106,8 @@ def test_first_justice_single_file_over_the_budget_is_rejected(client, processed
     assert resp.status_code == 403
     msg = resp.json()["message"]
     assert "big.txt is 41 MB" in msg
-    assert "First Justice Plan" in msg and "40 MB" in msg and "40 MB left" in msg
+    assert msg == ("big.txt is 41 MB. Your plan (First Justice Plan) allows up to "
+                   "40 MB of documents per chat.")   # nothing used yet: no "left" clause
     assert processed == []
 
 

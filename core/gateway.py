@@ -1148,9 +1148,16 @@ def _plan_size_detail(plan: str, uploads: list[tuple[str, int]],
     total = sum(size for _, size in uploads)
     what = (f"{uploads[0][0]} is {_fmt_mb(total)}" if len(uploads) == 1
             else f"These documents are {_fmt_mb(total)} in total")
-    left = max(0, max_bytes - existing_bytes)
     return (f"{what}. Your plan ({plan}) allows up to {_fmt_mb(max_bytes)} of "
-            f"documents per chat, and this chat has {_fmt_mb(left)} left.")
+            f"documents per chat{_left_clause(_fmt_mb(max(0, max_bytes - existing_bytes)), existing_bytes)}.")
+
+
+def _left_clause(left: str, already_used: int) -> str:
+    """", and this chat has <left> left" — only when the chat has already used
+    part of the budget. On a chat that has used nothing the remainder equals
+    the limit just stated, and repeating it reads as noise (lawyer feedback,
+    2026-10-09: "60 pages per chat, and this chat has 60 pages left")."""
+    return f", and this chat has {left} left" if already_used > 0 else ""
 
 
 def _pdf_page_count(path: str) -> int:
@@ -1542,12 +1549,12 @@ async def chat_with_files(
                             file=original_name, plan=plan,
                             existing_mb=round(_existing_bytes / (1024 * 1024), 1),
                             cap_mb=plan_limits["max_mb_per_session"])
-                _left = max(0, _plan_max_bytes - _existing_bytes)
+                _left = _fmt_mb(max(0, _plan_max_bytes - _existing_bytes))
                 raise HTTPException(
                     status_code=403,
                     detail=f"These documents are larger than your plan allows. Your plan "
                            f"({plan}) allows up to {_fmt_mb(_plan_max_bytes)} of documents "
-                           f"per chat, and this chat has {_fmt_mb(_left)} left.",
+                           f"per chat{_left_clause(_left, _existing_bytes)}.",
                 )
 
             if exceeded_cap:
@@ -1618,7 +1625,7 @@ async def chat_with_files(
                 raise HTTPException(
                     status_code=403,
                     detail=f"{_what}. Your plan ({plan}) allows up to {_max_pages} "
-                           f"pages per chat, and this chat has {_left} pages left.",
+                           f"pages per chat{_left_clause(f'{_left} pages', _existing_pages)}.",
                 )
 
     async def event_generator():

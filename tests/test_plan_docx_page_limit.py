@@ -94,7 +94,7 @@ def test_docx_over_the_page_budget_is_rejected(client, converter, plan, budget):
     assert r.status_code == 403
     assert r.json()["message"] == (
         f"notice.docx has {budget + 1} pages. Your plan ({plan}) allows up to "
-        f"{budget} pages per chat, and this chat has {budget} pages left."
+        f"{budget} pages per chat."
     )
 
 

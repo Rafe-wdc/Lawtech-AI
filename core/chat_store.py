@@ -788,6 +788,23 @@ class _SqliteChatHistoryStore:
     async def get_thread_upload_usage(self, thread_id: str) -> tuple[int, int]:
         return await asyncio.to_thread(self._get_thread_upload_usage_sync, thread_id)
 
+    def _get_thread_upload_bytes_sync(self, thread_id: str) -> int:
+        """Total size in bytes of the files uploaded to a thread, for the
+        per-plan size limit."""
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM thread_files WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+            return int(row["total"])
+        finally:
+            conn.close()
+
+    async def get_thread_upload_bytes(self, thread_id: str) -> int:
+        return await asyncio.to_thread(self._get_thread_upload_bytes_sync, thread_id)
+
     def _update_ocr_status_sync(
         self, thread_id: str, file_id: str, status: str, error: str = "",
     ) -> None:
@@ -2230,6 +2247,20 @@ class _PostgresChatHistoryStore:
 
     async def get_thread_upload_usage(self, thread_id: str) -> tuple:
         return await asyncio.to_thread(self._get_thread_upload_usage_sync, thread_id)
+
+    def _get_thread_upload_bytes_sync(self, thread_id: str) -> int:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM thread_files WHERE thread_id = %s",
+                (thread_id,),
+            ).fetchone()
+        return int(row["total"])
+
+    async def get_thread_upload_bytes(self, thread_id: str) -> int:
+        return await asyncio.to_thread(self._get_thread_upload_bytes_sync, thread_id)
 
     def _update_ocr_status_sync(
         self, thread_id: str, file_id: str, status: str, error: str = "",

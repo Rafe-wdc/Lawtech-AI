@@ -1128,6 +1128,31 @@ def _match_plan(plan: str) -> str | None:
     return None
 
 
+def _fmt_mb(n_bytes: int) -> str:
+    """Bytes as MB for a user-facing message: "40 MB", "12.5 MB"."""
+    mb = n_bytes / (1024 * 1024)
+    return f"{mb:.0f} MB" if abs(mb - round(mb)) < 0.05 else f"{mb:.1f} MB"
+
+
+def _plan_counts_upload(filename: str) -> bool:
+    """Whether a file will be accepted at all, so it uses the plan's size
+    budget. A file rejected for its type (.exe, legacy .doc) uses none."""
+    from .file_processor import ALLOWED_EXTENSIONS
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in ALLOWED_EXTENSIONS and ext != ".doc"
+
+
+def _plan_size_detail(plan: str, uploads: list[tuple[str, int]],
+                      max_bytes: int, existing_bytes: int) -> str:
+    """Message for an upload that overruns the plan's size budget per chat."""
+    total = sum(size for _, size in uploads)
+    what = (f"{uploads[0][0]} is {_fmt_mb(total)}" if len(uploads) == 1
+            else f"These documents are {_fmt_mb(total)} in total")
+    left = max(0, max_bytes - existing_bytes)
+    return (f"{what}. Your plan ({plan}) allows up to {_fmt_mb(max_bytes)} of "
+            f"documents per chat, and this chat has {_fmt_mb(left)} left.")
+
+
 def _pdf_page_count(path: str) -> int:
     """Page count for the per-plan limit. An unreadable PDF counts as 0 and is
     left to process_files, which reports the extraction error."""
@@ -1384,6 +1409,37 @@ async def chat_with_files(
                            "Start a new chat to upload more documents.",
                 )
 
+        # Size budget per chat thread for the plan, the same shape as the
+        # page budget: the bytes already uploaded to this thread plus the
+        # files attached now must fit `max_mb_per_session`, and one document
+        # may use all of it. A budget that is already used up, and one the
+        # declared sizes overrun, are rejected before any body is read; the
+        # read loop below enforces it again on the bytes actually received.
+        _plan_max_bytes = None
+        _existing_bytes = 0
+        if plan_limits is not None and plan_limits.get("max_mb_per_session") and _new_docs:
+            _plan_max_bytes = int(plan_limits["max_mb_per_session"]) * 1024 * 1024
+            if globalThreadId:
+                _existing_bytes = await chat_store.get_thread_upload_bytes(thread_id)
+            if _existing_bytes >= _plan_max_bytes:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Your plan ({plan}) allows up to {_fmt_mb(_plan_max_bytes)} "
+                           f"of documents per chat, and this chat has already used "
+                           f"{_fmt_mb(_existing_bytes)}. Start a new chat to upload "
+                           "more documents.",
+                )
+            _declared = [(f.filename, getattr(f, "size", None)) for f in files
+                         if f.filename and _plan_counts_upload(f.filename)]
+            if _declared and all(sz is not None for _, sz in _declared):
+                if _existing_bytes + sum(sz for _, sz in _declared) > _plan_max_bytes:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=_plan_size_detail(plan, _declared, _plan_max_bytes,
+                                                 _existing_bytes),
+                    )
+        _plan_new_bytes = 0   # bytes accepted from this request so far
+
         # Per-file size cap (in bytes) used by the pre-read + chunked-read
         # checks below. Duplicated from validate_upload so we reject BEFORE
         # any body allocation. validate_upload still runs after as a
@@ -1451,6 +1507,7 @@ async def chat_with_files(
             tmp_path = tmp.name
             total_bytes = 0
             exceeded_cap = False
+            exceeded_plan = False
             try:
                 try:
                     f.file.seek(0)
@@ -1464,9 +1521,34 @@ async def chat_with_files(
                     if total_bytes > _size_cap_bytes:
                         exceeded_cap = True
                         break
+                    if (_plan_max_bytes is not None and
+                            _existing_bytes + _plan_new_bytes + total_bytes > _plan_max_bytes):
+                        exceeded_plan = True
+                        break
                     tmp.write(chunk)
             finally:
                 tmp.close()
+
+            if exceeded_plan:
+                # The declared sizes were missing or understated. Nothing from
+                # this request is kept: the plan budget covers the request as
+                # a whole, the same as the page budget.
+                for _p in temp_paths + [tmp_path]:
+                    try:
+                        os.unlink(_p)
+                    except OSError:
+                        pass
+                log.warning("Upload rejected mid-read (plan size budget)",
+                            file=original_name, plan=plan,
+                            existing_mb=round(_existing_bytes / (1024 * 1024), 1),
+                            cap_mb=plan_limits["max_mb_per_session"])
+                _left = max(0, _plan_max_bytes - _existing_bytes)
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"These documents are larger than your plan allows. Your plan "
+                           f"({plan}) allows up to {_fmt_mb(_plan_max_bytes)} of documents "
+                           f"per chat, and this chat has {_fmt_mb(_left)} left.",
+                )
 
             if exceeded_cap:
                 # Clean up the partial temp file, do NOT append to file_tuples.
@@ -1516,6 +1598,7 @@ async def chat_with_files(
                 page_counts[tmp_path] = _pages
                 upload_pages.append((original_name, _pages))
 
+            _plan_new_bytes += total_bytes
             file_tuples.append((tmp_path, filename, total_bytes))
 
         # Page budget: pages already used in this chat plus the new files.

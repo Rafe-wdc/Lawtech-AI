@@ -236,12 +236,20 @@ GEMINI_URI_EXPIRY_BUFFER_HOURS = 2  # re-upload if Gemini URI expires within thi
 #   max_docs_per_session   documents per chat
 #   max_pages_per_session  pages per chat; one document may use all of it.
 #                          PDF and Word count their pages, other files 1 each.
+#   max_mb_per_session     total upload size per chat, in MB (1 MB = 1024*1024
+#                          bytes); one document may use all of it. Every file
+#                          type counts, at the size it was uploaded.
 # A plan name that contains a configured name ("First Justice Plan Yearly")
 # gets that plan's limits. Any other plan, and a request without a plan, is
 # accepted with no plan limits (the global MAX_FILES_* caps still apply).
 PLAN_UPLOAD_LIMITS = {
-    "First Justice Plan": {"max_docs_per_session": 2, "max_pages_per_session": 60},   # 499
-    "Basic": {"max_docs_per_session": 5, "max_pages_per_session": 150},               # 999
+    # 499: 2 documents, 60 pages and 40 MB per chat (i.e. 30 pages / 20 MB each,
+    # or one document using the whole of either budget).
+    "First Justice Plan": {"max_docs_per_session": 2, "max_pages_per_session": 60,
+                           "max_mb_per_session": 40},
+    # 999: 5 documents, 150 pages and 100 MB per chat.
+    "Basic": {"max_docs_per_session": 5, "max_pages_per_session": 150,
+              "max_mb_per_session": 100},
 }
 
 # --- In-app file GC (Gap #4, 2026-09-02) ---

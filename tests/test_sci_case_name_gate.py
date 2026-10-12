@@ -79,11 +79,13 @@ def test_same_petitioner_against_a_private_party_is_not_the_case(monkeypatch):
 
 
 def test_name_cited_in_judgment_text_is_not_gated(monkeypatch):
-    # not a party in the index, but later judgments cite the case: research runs
-    es = _ES([], [], ["(full-text hit)"])
+    # not a party in the index, but later judgments cite the case: research runs.
+    # "Union of India" contributes no respondent token, so the title query is
+    # skipped: call 1 is the petitioner query, call 2 the full-text check.
+    es = _ES([], ["(full-text hit)"])
     monkeypatch.setattr("core.clients.get_es_client", lambda: es)
     assert sj._party_in_sci_index("Shreya Singhal", "Union of India Section 66A") == (None, [])
-    assert "full_text" in str(es.bodies[-1])
+    assert len(es.bodies) == 2 and "full_text" in str(es.bodies[-1])
 
 
 def test_unknown_petitioner_is_absent(monkeypatch):

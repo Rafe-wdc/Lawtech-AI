@@ -57,6 +57,7 @@ _PARTY_STOP = frozenset((
     "mr", "mrs", "ms", "dr", "m/s", "ltd", "pvt", "co", "sh", "state", "union", "india", "govt",
     "government", "through", "thr", "its", "etc", "anor", "sri", "kum", "ku",
     "judgment", "judgement", "case", "court", "supreme", "high", "ruling", "order", "decision",
+    "justice", "honble", "hon", "ble", "mr", "late",
 ))
 # Not party names: statute references and bare numbers.
 _NOT_A_PARTY = re.compile(r"(?i)\b(?:section|sections|article|rule|act|ipc|crpc|bns|bnss|bsa|cpc|\d{1,4})\b")
@@ -134,24 +135,60 @@ def _case_name_lookup(query: str) -> tuple[str, str] | None:
     return pet, resp
 
 
+def _respondent_key(respondent: str) -> str | None:
+    """At most ONE token from the respondent. Trailing topic words in a query
+    ("State of Kerala basic structure", "CBI bail guidelines") are not part of
+    the name; the index spells government parties many ways ("GOVT.OF U.P.",
+    "STATE (NCT OF DELHI)", "CENTRAL BUREAU OF INVESTIGATION"). A government
+    party contributes the state name after "of" when it is a real word, else
+    nothing; a private party contributes its first significant token."""
+    words = [w.strip(".,:;()").lower() for w in (respondent or "").split()]
+    if _GOVT_PARTY_RE.match(respondent or ""):
+        if "of" in words:
+            for w in words[words.index("of") + 1:]:
+                if len(w) >= 3 and w not in _PARTY_STOP and w not in ("nct",):
+                    return w
+                if len(w) >= 3:
+                    break
+        return None
+    toks = _significant_party_tokens(respondent)
+    return toks[0] if toks else None
+
+
+def _other_party_is_government(parties: str, pet_tokens: list[str]) -> bool | None:
+    """In an index `parties` string "A VS B", find the side that is NOT the
+    petitioner and say whether it is a government party. None when unclear."""
+    sides = [x.strip() for x in re.split(r"\s+v(?:s?\.?|ersus)\s+", parties or "", maxsplit=1, flags=re.IGNORECASE)]
+    if len(sides) != 2:
+        return None
+    def has_pet(side):
+        low = side.lower()
+        return all(t in low for t in pet_tokens)
+    other = sides[1] if has_pet(sides[0]) and not has_pet(sides[1]) else sides[0] if has_pet(sides[1]) else None
+    if other is None:
+        return None
+    return bool(_GOVT_PARTY_RE.match(other) or re.search(r"(?i)\b(?:govt|government|state|union of india|u\.?o\.?i|cbi|central bureau|nct)\b", other))
+
+
 def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | None, list[str]]:
     """(present, related). present is True / False when the index can answer,
     None when it cannot (fail open). related lists up to three real cases that
-    share the distinctive party when the full title is absent, so the answer
-    can say "no such case, but these exist" without any model call.
+    share the distinctive party when the title is absent.
 
-    Advocate test 2026-10-09: "Rajiv Mehta vs State of Gujarat 2021" passed a
-    petitioner-only gate because a Rajiv Mehta exists in the index against
-    other parties; the title as a whole does not.
+    Stage 1: petitioner tokens AND the respondent key. Stage 2 on a miss:
+    petitioner tokens alone; if the matching case's other party is the same
+    kind as the query's respondent (government vs private) the title is
+    treated as present (spelling variants such as "GOVT.OF U.P."); otherwise
+    it is a different case and the gate fires with the related list.
     """
-    pet_tokens = _significant_party_tokens(petitioner)
-    resp_tokens = _significant_party_tokens(respondent)
-    if _GOVT_PARTY_RE.match(petitioner or "") and not _GOVT_PARTY_RE.match(respondent or ""):
-        pet_tokens, resp_tokens = resp_tokens, pet_tokens      # gate on the private party
-    if not pet_tokens:
-        pet_tokens, resp_tokens = resp_tokens, []
+    pet, resp = petitioner, respondent
+    if _GOVT_PARTY_RE.match(pet or "") and not _GOVT_PARTY_RE.match(resp or ""):
+        pet, resp = resp, pet                                   # gate on the private party
+    pet_tokens = _significant_party_tokens(pet)
     if not pet_tokens:
         return None, []
+    resp_key = _respondent_key(resp)
+    resp_is_govt = bool(_GOVT_PARTY_RE.match(resp or ""))
     try:
         from core.clients import get_es_client
         from core.settings import ES_INDICES
@@ -165,15 +202,29 @@ def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | None, 
             }, request_timeout=15)
             return r["hits"]["hits"]
 
-        if _hits(pet_tokens + resp_tokens, 1):
+        if resp_key and _hits(pet_tokens + [resp_key], 1):
             return True, []
+        hits = _hits(pet_tokens, 3)
+        if not hits:
+            # The title is not a party in the index. If the name occurs in the
+            # TEXT of other judgments (a landmark case the corpus lacks but later
+            # cases cite), research can still ground an answer on those: do not
+            # gate. A truly unknown name occurs nowhere and the gate fires.
+            r = es.search(index=index, body={"size": 1, "_source": False,
+                "query": {"match_phrase": {"full_text": {"query": " ".join(pet_tokens), "slop": 1}}}}, request_timeout=15)
+            t = r["hits"]["total"]
+            if (t["value"] if isinstance(t, dict) else t) > 0:
+                return None, []
+            return False, []
         related = []
-        for h in _hits(pet_tokens, 3):
+        for h in hits:
             src = h.get("_source", {})
             parties = (src.get("parties") or "").strip()
-            if parties:
-                tail = ", ".join(x for x in (src.get("case_no"), src.get("judgment_date")) if x)
-                related.append(f"{parties}" + (f" ({tail})" if tail else ""))
+            kind = _other_party_is_government(parties, pet_tokens)
+            if kind is None or kind == resp_is_govt:
+                return True, []                                 # same title, variant spelling
+            tail = ", ".join(x for x in (src.get("case_no"), src.get("judgment_date")) if x)
+            related.append(parties + (f" ({tail})" if tail else ""))
         return False, related
     except Exception as e:  # noqa: BLE001
         log.warning("Case-name party gate skipped (ES error)", error=short_err(e))

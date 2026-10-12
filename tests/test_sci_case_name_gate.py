@@ -37,36 +37,64 @@ def test_significant_tokens_drop_initials_honorifics_and_state_words():
 
 
 class _ES:
-    """total hits for the combined query, then for the petitioner-only query."""
-    def __init__(self, combined, petitioner_only=0):
-        self.combined, self.petitioner_only, self.bodies = combined, petitioner_only, []
+    """Scripted index: a list of hit lists, one per search call."""
+    def __init__(self, *responses):
+        self.responses, self.bodies = list(responses), []
 
     def search(self, index=None, body=None, **kw):
         self.bodies.append(body)
-        n = self.combined if len(self.bodies) == 1 else self.petitioner_only
-        hits = [{"_source": {"parties": f"RAJIV MEHTA VS STATE OF MAHARASHTRA {i}", "case_no": f"Crl.A. {i}/2019", "judgment_date": f"2019-0{i}-01"}} for i in range(1, n + 1)]
-        return {"hits": {"total": {"value": n}, "hits": hits[:body.get("size", 1)]}}
+        hits = self.responses.pop(0) if self.responses else []
+        rows = [{"_source": {"parties": p, "case_no": "Crl.A. 1/2019", "judgment_date": "2019-01-01"}} for p in hits]
+        return {"hits": {"total": {"value": len(rows)}, "hits": rows[:body.get("size", 1)]}}
 
 
-def test_gate_matches_petitioner_and_respondent_together(monkeypatch):
-    es = _ES(combined=0, petitioner_only=2)
-    monkeypatch.setattr("core.clients.get_es_client", lambda: es)
-    present, related = sj._party_in_sci_index("Rajiv Mehta", "State of Gujarat")
-    assert present is False
-    q = es.bodies[0]["query"]["match"]["parties"]
-    assert q["operator"] == "and" and q["query"] == "rajiv mehta gujarat"
-    assert len(related) == 2 and "RAJIV MEHTA VS STATE OF MAHARASHTRA 1 (Crl.A. 1/2019, 2019-01-01)" in related
+def test_respondent_contributes_at_most_one_token():
+    assert sj._respondent_key("State of Kerala basic structure") == "kerala"
+    assert sj._respondent_key("State NCT of Delhi anticipatory bail") == "delhi"
+    assert sj._respondent_key("Union of India privacy") is None
+    assert sj._respondent_key("CBI bail guidelines") is None
+    assert sj._respondent_key("Sri Mohan presumption under Section 139") == "mohan"
+    assert sj._respondent_key("Shah Bano Begum") == "shah"
 
 
-def test_real_title_is_present_with_one_query(monkeypatch):
-    es = _ES(combined=5)
+def test_full_title_present_in_one_query(monkeypatch):
+    es = _ES(["ARNESH KUMAR VS STATE OF BIHAR"])
     monkeypatch.setattr("core.clients.get_es_client", lambda: es)
     assert sj._party_in_sci_index("Arnesh Kumar", "State of Bihar") == (True, [])
-    assert len(es.bodies) == 1 and es.bodies[0]["query"]["match"]["parties"]["query"] == "arnesh kumar bihar"
+    assert es.bodies[0]["query"]["match"]["parties"] == {"query": "arnesh kumar bihar", "operator": "and"}
+
+
+def test_variant_spelling_of_a_government_respondent_still_counts_as_present(monkeypatch):
+    # query says "Government of Uttar Pradesh", index says "GOVT.OF U.P."
+    es = _ES([], ["LALITA KUMARI VS GOVT.OF U.P.& ORS."])
+    monkeypatch.setattr("core.clients.get_es_client", lambda: es)
+    assert sj._party_in_sci_index("Lalita Kumari", "Government of Uttar Pradesh FIR registration") == (True, [])
+
+
+def test_same_petitioner_against_a_private_party_is_not_the_case(monkeypatch):
+    es = _ES([], ["MAHENDRASINH MADARSANG VAGHELA VS RAJIV MAHESHKUMAR MEHTA"])
+    monkeypatch.setattr("core.clients.get_es_client", lambda: es)
+    present, related = sj._party_in_sci_index("Rajiv Mehta", "State of Gujarat")
+    assert present is False and related == ["MAHENDRASINH MADARSANG VAGHELA VS RAJIV MAHESHKUMAR MEHTA (Crl.A. 1/2019, 2019-01-01)"]
+
+
+def test_name_cited_in_judgment_text_is_not_gated(monkeypatch):
+    # not a party in the index, but later judgments cite the case: research runs
+    es = _ES([], [], ["(full-text hit)"])
+    monkeypatch.setattr("core.clients.get_es_client", lambda: es)
+    assert sj._party_in_sci_index("Shreya Singhal", "Union of India Section 66A") == (None, [])
+    assert "full_text" in str(es.bodies[-1])
+
+
+def test_unknown_petitioner_is_absent(monkeypatch):
+    es = _ES([], [], [])
+    monkeypatch.setattr("core.clients.get_es_client", lambda: es)
+    assert sj._party_in_sci_index("Korshi Virpar Dadhlia Shah", "State of Maharashtra and ors") == (False, [])
+    assert "full_text" in str(es.bodies[-1])      # the text check ran and found nothing
 
 
 def test_gate_falls_back_to_respondent_when_petitioner_is_the_state(monkeypatch):
-    es = _ES(combined=3)
+    es = _ES(["STATE OF MAHARASHTRA VS TULSHIRAM BHANUDAS KAMBLE"])
     monkeypatch.setattr("core.clients.get_es_client", lambda: es)
     assert sj._party_in_sci_index("State of Maharashtra", "Tulshiram Bhanudas Kamble")[0] is True
     assert es.bodies[0]["query"]["match"]["parties"]["query"] == "tulshiram bhanudas kamble maharashtra"

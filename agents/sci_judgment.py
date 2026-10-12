@@ -37,14 +37,31 @@ log = get_logger("SCI_Judgment")
 # research loop, 10 to 14 calls and $0.10 to $0.28, and produced surname
 # matches. One AND-match on the `parties` field decides it for free.
 _CASE_NAME_RE = re.compile(
-    r"^\s*(?P<pet>[^\n]{3,120}?)\s+(?:vs?\.?|versus|v\.)\s+(?P<resp>[^\n]{3,120}?)\s*(?:\(?\d{4}\)?)?\s*$",
+    r"(?P<pre>(?:[^\s]+\s+){0,5}?[^\s]+)\s+(?:vs?\.?|versus|v\.)\s+(?P<post>[^\s]+(?:\s+[^\s]+){0,5})",
     re.IGNORECASE,
 )
+# Words that end the petitioner on the left ("Supreme Court judgment in X vs Y")
+# and the respondent on the right ("X vs Y 2021 Supreme Court judgment on bail").
+_STOP_BEFORE = frozenset((
+    "in", "judgment", "judgement", "case", "the", "court", "courts", "supreme", "high", "on",
+    "regarding", "ruling", "decision", "by", "matter", "law", "laws", "citation", "cite", "find",
+    "search", "about", "please", "me", "give", "show", "order", "for", "latest", "landmark", "a",
+))
+_STOP_AFTER = frozenset((
+    "supreme", "court", "courts", "judgment", "judgement", "on", "regarding", "about", "case", "appeal",
+    "under", "section", "sections", "with", "for", "ruling", "decision", "order", "law", "laws",
+    "arrest", "guidelines", "principles", "citation", "pdf", "link", "summary", "summarise", "summarize",
+))
 _PARTY_STOP = frozenset((
     "and", "ors", "anr", "others", "another", "the", "of", "vs", "v", "versus", "shri", "smt",
     "mr", "mrs", "ms", "dr", "m/s", "ltd", "pvt", "co", "sh", "state", "union", "india", "govt",
-    "government", "through", "thr", "its", "etc", "anor", "another", "sri", "kum", "ku",
+    "government", "through", "thr", "its", "etc", "anor", "sri", "kum", "ku",
+    "judgment", "judgement", "case", "court", "supreme", "high", "ruling", "order", "decision",
+    "justice", "honble", "hon", "ble", "mr", "late",
 ))
+# Not party names: statute references and bare numbers.
+_NOT_A_PARTY = re.compile(r"(?i)\b(?:section|sections|article|rule|act|ipc|crpc|bns|bnss|bsa|cpc|\d{1,4})\b")
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
 _GOVT_PARTY_RE = re.compile(r"(?i)^\s*(?:the\s+)?(?:state|union|govt|government|commissioner|collector|secretary|cbi|central bureau|u\.?o\.?i)\b")
@@ -55,53 +72,175 @@ def _significant_party_tokens(name: str) -> list[str]:
     return [t for t in toks if t not in _PARTY_STOP]
 
 
+def _trim_before(words: list[str]) -> list[str]:
+    """Keep the words after the last stop word ("Supreme Court judgment in X" -> X)."""
+    out: list[str] = []
+    for w in words:
+        if w.lower().strip(".,:;") in _STOP_BEFORE:
+            out = []
+        else:
+            out.append(w)
+    while out and out[0].lower().strip(".,:;") in ("of", "the", "in", "for", "and"):
+        out = out[1:]
+    return out
+
+
+def _trim_after(words: list[str]) -> list[str]:
+    """Keep the words up to the first stop word or year ("Y 2021 Supreme Court" -> Y)."""
+    out: list[str] = []
+    for w in words:
+        bare = w.strip(".,:;()")
+        if bare.lower() in _STOP_AFTER:
+            break
+        if _YEAR_RE.fullmatch(bare):
+            break
+        out.append(w)
+    return out
+
+
+def _looks_like_a_name(part: str, has_capitals: bool) -> bool:
+    if not part or _NOT_A_PARTY.search(part):
+        return False
+    if has_capitals and not any(w[:1].isupper() for w in part.split()):
+        return False
+    return True
+
+
 def _case_name_lookup(query: str) -> tuple[str, str] | None:
-    """Return (petitioner, respondent) when the query is just a case name."""
-    if not query or "\n" in query or len(query.split()) > 14:
+    """Return (petitioner, respondent) when the query contains a case name.
+
+    Works on a bare "X vs Y 2021" and on sentences such as "Supreme Court
+    judgment in X vs Y on arrest guidelines" (advocate test 2026-10-09: the
+    wrapped form bypassed the gate and ran 17 research calls on a case that
+    does not exist). Lowercase topic phrases ("dowry death vs cruelty") and
+    statute comparisons ("Section 420 vs Section 318 BNS") are not names and
+    are left alone.
+    """
+    if not query or "\n" in query:
         return None
-    m = _CASE_NAME_RE.match(query)
+    m = _CASE_NAME_RE.search(query)
     if not m:
         return None
-    return m.group("pet").strip(" .,"), m.group("resp").strip(" .,")
-
-
-def _party_in_sci_index(petitioner: str, respondent: str) -> bool | None:
-    """True / False when the index can answer, None when it cannot (fail open)."""
-    # A government party (State of X, Union of India, CBI) matches thousands of
-    # cases; gate on the private party instead.
-    if _GOVT_PARTY_RE.match(petitioner or "") and not _GOVT_PARTY_RE.match(respondent or ""):
-        tokens = _significant_party_tokens(respondent)
-    else:
-        tokens = _significant_party_tokens(petitioner) or _significant_party_tokens(respondent)
-    if not tokens:
+    pet = " ".join(_trim_before(m.group("pre").split())).strip(" .,:;")
+    resp = " ".join(_trim_after(m.group("post").split())).strip(" .,:;")
+    has_caps = any(ch.isupper() for ch in query)
+    if not (_looks_like_a_name(pet, has_caps) and _looks_like_a_name(resp, has_caps)):
         return None
+    if not has_caps and not _GOVT_PARTY_RE.match(resp) and not _GOVT_PARTY_RE.match(pet):
+        # "dowry death vs cruelty" / "anticipatory bail vs regular bail": a
+        # lowercase pair with no State / Union party is a topic, not a case.
+        return None
+    if len(pet.split()) > 6 or len(resp.split()) > 6:
+        return None
+    return pet, resp
+
+
+def _respondent_key(respondent: str) -> str | None:
+    """At most ONE token from the respondent. Trailing topic words in a query
+    ("State of Kerala basic structure", "CBI bail guidelines") are not part of
+    the name; the index spells government parties many ways ("GOVT.OF U.P.",
+    "STATE (NCT OF DELHI)", "CENTRAL BUREAU OF INVESTIGATION"). A government
+    party contributes the state name after "of" when it is a real word, else
+    nothing; a private party contributes its first significant token."""
+    words = [w.strip(".,:;()").lower() for w in (respondent or "").split()]
+    if _GOVT_PARTY_RE.match(respondent or ""):
+        if "of" in words:
+            for w in words[words.index("of") + 1:]:
+                if len(w) >= 3 and w not in _PARTY_STOP and w not in ("nct",):
+                    return w
+                if len(w) >= 3:
+                    break
+        return None
+    toks = _significant_party_tokens(respondent)
+    return toks[0] if toks else None
+
+
+def _other_party_is_government(parties: str, pet_tokens: list[str]) -> bool | None:
+    """In an index `parties` string "A VS B", find the side that is NOT the
+    petitioner and say whether it is a government party. None when unclear."""
+    sides = [x.strip() for x in re.split(r"\s+v(?:s?\.?|ersus)\s+", parties or "", maxsplit=1, flags=re.IGNORECASE)]
+    if len(sides) != 2:
+        return None
+    def has_pet(side):
+        low = side.lower()
+        return all(t in low for t in pet_tokens)
+    other = sides[1] if has_pet(sides[0]) and not has_pet(sides[1]) else sides[0] if has_pet(sides[1]) else None
+    if other is None:
+        return None
+    return bool(_GOVT_PARTY_RE.match(other) or re.search(r"(?i)\b(?:govt|government|state|union of india|u\.?o\.?i|cbi|central bureau|nct)\b", other))
+
+
+def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | None, list[str]]:
+    """(present, related). present is True / False when the index can answer,
+    None when it cannot (fail open). related lists up to three real cases that
+    share the distinctive party when the title is absent.
+
+    Stage 1: petitioner tokens AND the respondent key. Stage 2 on a miss:
+    petitioner tokens alone; if the matching case's other party is the same
+    kind as the query's respondent (government vs private) the title is
+    treated as present (spelling variants such as "GOVT.OF U.P."); otherwise
+    it is a different case and the gate fires with the related list.
+    """
+    pet, resp = petitioner, respondent
+    if _GOVT_PARTY_RE.match(pet or "") and not _GOVT_PARTY_RE.match(resp or ""):
+        pet, resp = resp, pet                                   # gate on the private party
+    pet_tokens = _significant_party_tokens(pet)
+    if not pet_tokens:
+        return None, []
+    resp_key = _respondent_key(resp)
+    resp_is_govt = bool(_GOVT_PARTY_RE.match(resp or ""))
     try:
         from core.clients import get_es_client
         from core.settings import ES_INDICES
         es = get_es_client()
-        r = es.search(index=ES_INDICES["sci_judgments"], body={
-            "size": 1, "_source": False,
-            "query": {"match": {"parties": {"query": " ".join(tokens), "operator": "and"}}},
-        }, request_timeout=15)
-        total = r["hits"]["total"]
-        return (total["value"] if isinstance(total, dict) else total) > 0
+        index = ES_INDICES["sci_judgments"]
+
+        def _hits(tokens, size):
+            r = es.search(index=index, body={
+                "size": size, "_source": ["parties", "judgment_date", "case_no"],
+                "query": {"match": {"parties": {"query": " ".join(tokens), "operator": "and"}}},
+            }, request_timeout=15)
+            return r["hits"]["hits"]
+
+        if resp_key and _hits(pet_tokens + [resp_key], 1):
+            return True, []
+        hits = _hits(pet_tokens, 3)
+        if not hits:
+            # The title is not a party in the index. If the name occurs in the
+            # TEXT of other judgments (a landmark case the corpus lacks but later
+            # cases cite), research can still ground an answer on those: do not
+            # gate. A truly unknown name occurs nowhere and the gate fires.
+            r = es.search(index=index, body={"size": 1, "_source": False,
+                "query": {"match_phrase": {"full_text": {"query": " ".join(pet_tokens), "slop": 1}}}}, request_timeout=15)
+            t = r["hits"]["total"]
+            if (t["value"] if isinstance(t, dict) else t) > 0:
+                return None, []
+            return False, []
+        related = []
+        for h in hits:
+            src = h.get("_source", {})
+            parties = (src.get("parties") or "").strip()
+            kind = _other_party_is_government(parties, pet_tokens)
+            if kind is None or kind == resp_is_govt:
+                return True, []                                 # same title, variant spelling
+            tail = ", ".join(x for x in (src.get("case_no"), src.get("judgment_date")) if x)
+            related.append(parties + (f" ({tail})" if tail else ""))
+        return False, related
     except Exception as e:  # noqa: BLE001
         log.warning("Case-name party gate skipped (ES error)", error=short_err(e))
-        return None
+        return None, []
 
 
-def _not_found_result(petitioner: str, respondent: str) -> AgentResult:
-    return AgentResult(
-        agent_name="SCI_Judgment",
-        content=(
-            f"No Supreme Court judgment titled \"{petitioner} vs {respondent}\" was found in the "
-            "Lawttorney database. The party names may be spelt differently on the record, or the "
-            "matter may be a High Court or unreported order. A case number, citation or date would "
-            "allow an exact lookup."
-        ),
-        sources=[],
-        tokens_consumed=0,
+def _not_found_result(petitioner: str, respondent: str, related: list[str] | None = None) -> AgentResult:
+    msg = (
+        f"No Supreme Court judgment titled \"{petitioner} vs {respondent}\" was found in the "
+        "Lawttorney database. The party names may be spelt differently on the record, or the "
+        "matter may be a High Court or unreported order. A case number, citation or date would "
+        "allow an exact lookup."
     )
+    if related:
+        msg += "\n\nSupreme Court cases in the database with the same party name:\n" + "\n".join(f"- {r}" for r in related)
+    return AgentResult(agent_name="SCI_Judgment", content=msg, sources=[], tokens_consumed=0)
 
 
 async def sci_judgment_node(state: LegalAgentState) -> dict:
@@ -128,14 +267,16 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
     try:
         # Build ReAct agent with SCI tools
         progress("sci_judgment", "Preparing Supreme Court search...", step="prepare")
-        _lookup = None if user_context else _case_name_lookup(query)
+        _lookup = None if user_context else (
+            _case_name_lookup(state.get("original_query") or "") or _case_name_lookup(query)
+        )
         if _lookup:
-            _present = await asyncio.to_thread(_party_in_sci_index, *_lookup)
+            _present, _related = await asyncio.to_thread(_party_in_sci_index, *_lookup)
             if _present is False:
                 log.info("Case-name lookup: parties absent from SCI index, skipping research",
                          petitioner=_lookup[0][:60], respondent=_lookup[1][:60])
                 progress("sci_judgment", "No matching Supreme Court case found", step="results")
-                return {"agent_results": {"SCI_Judgment": _not_found_result(*_lookup)}}
+                return {"agent_results": {"SCI_Judgment": _not_found_result(*_lookup, related=_related)}}
         # max_output_tokens capped at 8192 (~32k chars) to bound the ReAct
         # agent's final response and prevent runaway markdown-table padding.
         llm = get_gemini_flash_full(temperature=0, max_output_tokens=8192)

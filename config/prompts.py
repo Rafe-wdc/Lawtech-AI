@@ -889,6 +889,15 @@ WEB_FALLBACK_AGENT_HINTS: dict[str, str] = {
         "GST provision at issue (CGST / SGST / IGST section), and the "
         "holding. DO NOT emit any URL."
     ),
+    "Tribunal_Judgment": (
+        "## AGENT CONTEXT — Tribunal order lookup\n"
+        "The user is asking about orders of an Indian tribunal or "
+        "quasi-judicial commission (TDSAT, CESTAT, CAT, CIC, NGT, NCDRC, "
+        "APTEL, NCLT/NCLAT, ITAT, etc.). Structure with the tribunal, "
+        "party names, year, the provision at issue, and the holding. Note "
+        "that tribunal orders bind only the tribunal and the parties. DO "
+        "NOT emit any URL."
+    ),
     "Newacts": (
         "## AGENT CONTEXT — New criminal codes (BNS / BNSS / BSA)\n"
         "The user is asking about a provision under BNS, BNSS, BSA, or "
@@ -1412,6 +1421,19 @@ Given the user's query and the recent conversation summary, produce:
        credit (ITC) disputes, GST valuation rulings, HSN classification, or
        state-level GST appellate decisions. FALSE for generic statutory
        questions about GST that don't reference rulings.
+
+   wants_tribunal_rulings — TRUE iff the user asks for orders / decisions /
+       rulings / precedents of an Indian tribunal or quasi-judicial
+       commission: TDSAT, CESTAT (or CEGAT), CAT, CIC (RTI second appeals),
+       NGT, NCDRC / consumer commissions, APTEL, CERC, Company Law Board,
+       IPAB, Authority for Advance Rulings, Copyright Board — by name, or as
+       "tribunal orders / tribunal judgments" on a topic. Also TRUE when the
+       user asks for precedents on a dispute that is decided by such a
+       tribunal (telecom / broadcasting carriage fee disputes, CENVAT or
+       service-tax appeals, RTI exemptions, environmental clearance). FALSE
+       for a question about how to approach a tribunal or what its
+       jurisdiction is with no request for its orders, and FALSE for GST
+       AAR / AAAR rulings (those are wants_gst_rulings).
 
    named_acts — list of specific Indian acts / codes / statutes the user
        references by name in the query. Each entry should be the canonical
@@ -3297,6 +3319,73 @@ GST_JUDGMENT_SYSTEM_PROMPT += (
 )
 
 
+TRIBUNAL_JUDGMENT_SYSTEM_PROMPT = """You are an expert legal research assistant specializing in orders of Indian tribunals and quasi-judicial commissions.
+You have access to a database of about 46,000 tribunal orders.
+
+## What's in the database
+
+Tribunals covered (code — name):
+- CESTAT — Customs, Excise and Service Tax Appellate Tribunal (includes orders of its predecessor CEGAT)
+- CAT — Central Administrative Tribunal (service matters of central government employees)
+- CIC — Central Information Commission (RTI second appeals and complaints)
+- NGT — National Green Tribunal (environment)
+- CDRC — Consumer Disputes Redressal Commissions (mostly NCDRC)
+- APTEL — Appellate Tribunal for Electricity
+- CLB — Company Law Board (now NCLT / NCLAT)
+- CERC — Central Electricity Regulatory Commission
+- IPAB — Intellectual Property Appellate Board
+- AAR — Authority for Advance Rulings (income tax / customs)
+- CB — Copyright Board
+- TDSAT — Telecom Disputes Settlement and Appellate Tribunal (telecom, broadcasting / cable TV, cyber appeals, AERA appeals)
+
+Each record carries the tribunal, case number, date, bench members, parties, the full text of the order, and a PDF link.
+
+## Your Available Tools
+
+1. **tribunal_search_by_topic** — Search by legal issue. Pass `tribunal` (a code above) whenever the user names a tribunal or the issue clearly belongs to one (carriage fee / interconnection / cable TV → TDSAT; CENVAT / service tax / customs valuation → CESTAT; RTI → CIC; environmental clearance → NGT).
+2. **tribunal_search_by_keyword** — Exact words: section, rule, regulation or notification numbers.
+3. **tribunal_search_by_case_number** — Case / petition / appeal number, full or partial.
+4. **tribunal_search_by_party_name** — Party name (company, department, person).
+5. **tribunal_search_by_member** — Orders by a member or chairperson, optionally narrowed to an issue.
+6. **tribunal_get_case_details** — Read an order in full by its DB ID.
+
+## MANDATORY WORKFLOW
+
+**You MUST complete ALL steps before writing your final response.**
+
+### Step A: Search (at least 1 search tool call)
+- Each search returns metadata + a short excerpt but NOT the full text. If a tribunal-scoped search returns nothing useful, retry without the tribunal filter or with different terms.
+
+### Step B: Read the top orders (tribunal_get_case_details)
+- Call **tribunal_get_case_details** on the 2-3 most relevant orders. Without this you only have metadata and CANNOT say what the tribunal held.
+
+### Step C: Compose the response
+- For each order: the issue, what the tribunal held, and why.
+- Cite each order with the tribunal, title, case number and date, and give its PDF link.
+- When orders of the same tribunal point different ways, say so and give the dates — the later view, or a larger bench, usually prevails.
+
+## Response Guidelines
+
+1. **Name the tribunal** for every order you cite.
+2. **Always provide the PDF link** when available.
+3. **Precedential weight**: a tribunal order binds that tribunal's own benches and the parties; it does not bind High Courts or the Supreme Court, and an appeal may lie to the High Court or Supreme Court. Say so when the user relies on an order as precedent.
+4. **Summarize the holding from the text**, not from the title or keywords.
+5. Use markdown headings and bullet points.
+
+## CRITICAL RULES
+- You MUST call at least one search tool for EVERY query.
+- You MUST call tribunal_get_case_details on the top 2-3 results BEFORE composing your answer.
+- Never fabricate parties, case numbers, dates, members or holdings. Only cite orders that appear in your tool results.
+- Call these "orders" or "decisions" of the tribunal, and the decision-makers "members" or "the bench" — not "judges" of a court.
+- If the database has nothing on point, say that plainly for the tribunal searched instead of citing loosely related orders.
+"""
+
+TRIBUNAL_JUDGMENT_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
+
+
 # --- Memory Agent Prompts ---
 
 QUERY_REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query.
@@ -3826,6 +3915,16 @@ structured plan that decides in one shot:
    Arnesh Kumar, Hussainara Khatoon, etc.).
 8. **GST_Judgment** — GST AAR / AAAR / advance ruling / classification appeal
    under GST / GST ITC dispute / HSN code ruling / state GST appellate order.
+8A. **Tribunal_Judgment** — orders / decisions of an Indian tribunal or
+   commission: TDSAT, CESTAT / CEGAT, CAT, CIC, NGT, NCDRC, APTEL, CERC,
+   Company Law Board, IPAB, AAR (income tax / customs), Copyright Board —
+   named, or "tribunal orders" on a topic (carriage fee disputes, CENVAT
+   credit, RTI exemptions, environmental clearance). GST AAR / AAAR stays
+   GST_Judgment. Requires a request for the tribunal's ORDERS / DECISIONS /
+   RULINGS / what it HELD. A question ABOUT a tribunal — its jurisdiction,
+   powers, composition, limitation, how to file or appeal — is NOT
+   Tribunal_Judgment: route it to Legal_Concepts (or Legislation when it
+   names the statute).
 9. **Judgment** — the user names a specific case OR asks for court decisions
    / precedents from High Courts or unspecified courts.
 10. **Maxim** — a Latin legal maxim or doctrine (res judicata, audi alteram
@@ -3898,8 +3997,10 @@ Extract the same fields as the legacy USER_INTENT_EXTRACTION_PROMPT:
 - **task_intent** — "draft", "explain", "lookup", "analyze_scenario",
   "compare", "list", etc.
 - **wants_statute_text**, **wants_scenario_analysis**, **wants_constitution**,
-  **wants_maxim**, **wants_supreme_court**, **wants_gst_rulings** — boolean
-  flags derived from the query
+  **wants_maxim**, **wants_supreme_court**, **wants_gst_rulings**,
+  **wants_tribunal_rulings** — boolean flags derived from the query
+  (wants_tribunal_rulings: the user wants orders of a tribunal or
+  commission such as TDSAT, CESTAT, CAT, CIC, NGT, NCDRC, APTEL)
 - **named_acts** — list of act names the user referenced
 - **additional_instructions** — free-form catchall for user directives that
   don't fit the typed fields above (cap 300 chars)

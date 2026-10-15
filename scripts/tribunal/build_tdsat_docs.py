@@ -44,6 +44,10 @@ TDSAT_CODE, TDSAT_NAME = TDSAT.code, TDSAT.name
 # Chars per page below which an order is treated as scanned.
 MIN_TEXT_PER_PAGE = 50
 
+# OCR fallbacks when Gemini refuses a page, tried in order (keys from --env).
+CLAUDE_OCR_MODEL = "claude-sonnet-5-5"
+OPENAI_OCR_MODEL = "gpt-4o"
+
 # Where upload_tdsat_pdfs.py puts the PDFs, next to the migrated tribunal PDFs.
 S3_PREFIX = "tribunal/tdsat/"
 
@@ -123,12 +127,70 @@ def extract_text(pdf: Path) -> tuple[str, int]:
         return "\n".join(p.get_text() for p in doc), doc.page_count
 
 
-def ocr_text(pdf: Path, pages: int) -> str:
+def ocr_text(pdf: Path, pages: int) -> tuple[str, str]:
+    """(text, method). Gemini first, as the app does for uploads. Gemini
+    returns nothing with finish_reason RECITATION for some orders, because
+    their text is already published on the web; those go to Claude."""
     from core.file_processor import _vision_ocr_pdf
     text = _vision_ocr_pdf(str(pdf), pages, file_name=pdf.name)
     # The OCR output is markdown for the chat UI: drop page markers and bold.
-    text = re.sub(r"(?m)^-{3} Pages? [\d\-– ]+ -{3}\s*$", "", text)
-    return text.replace("**", "")
+    text = re.sub(r"(?m)^-{3} Pages? [\d\-– ]+ -{3}\s*$", "", text).replace("**", "")
+    if text.strip():
+        return text, "gemini_vision_ocr"
+    errors = []
+    for name, fn in (("claude_vision_ocr", claude_ocr), ("openai_vision_ocr", openai_ocr)):
+        try:
+            text = fn(pdf)
+            if text.strip():
+                return text, name
+        except Exception as e:  # no key / no credit: try the next provider
+            errors.append(f"{name}: {str(e)[:120]}")
+    raise RuntimeError("all OCR providers failed: " + " | ".join(errors))
+
+
+_OCR_INSTRUCTION = ("Transcribe all text on this page of an Indian tribunal order exactly, "
+                    "in reading order. Output only the text, no commentary or formatting.")
+
+
+def _page_pngs(pdf: Path) -> list[str]:
+    import base64
+    import fitz
+    with fitz.open(pdf) as doc:
+        return [base64.b64encode(p.get_pixmap(dpi=150).tobytes("png")).decode() for p in doc]
+
+
+def claude_ocr(pdf: Path) -> str:
+    """Transcribe each page with Claude vision (no recitation filter)."""
+    import anthropic
+    client = anthropic.Anthropic()
+    out = []
+    for b64 in _page_pngs(pdf):
+        msg = client.messages.create(
+            model=CLAUDE_OCR_MODEL, max_tokens=4096,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
+                {"type": "text", "text": _OCR_INSTRUCTION},
+            ]}],
+        )
+        out.append("".join(b.text for b in msg.content if b.type == "text").strip())
+    return "\n\n".join(t for t in out if t)
+
+
+def openai_ocr(pdf: Path) -> str:
+    """Transcribe each page with OpenAI vision."""
+    from openai import OpenAI
+    client = OpenAI()
+    out = []
+    for b64 in _page_pngs(pdf):
+        resp = client.chat.completions.create(
+            model=OPENAI_OCR_MODEL, max_tokens=4096, temperature=0,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": _OCR_INSTRUCTION},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            ]}],
+        )
+        out.append((resp.choices[0].message.content or "").strip())
+    return "\n\n".join(t for t in out if t)
 
 
 def build_doc(row: dict, pdf_dir: Path, use_ocr: bool) -> dict:
@@ -137,9 +199,9 @@ def build_doc(row: dict, pdf_dir: Path, use_ocr: bool) -> dict:
     method = "pymupdf"
     if len(text.strip()) < MIN_TEXT_PER_PAGE * max(pages, 1):
         if use_ocr:
-            ocr = ocr_text(pdf, pages)
+            ocr, ocr_method = ocr_text(pdf, pages)
             if len(ocr.strip()) > len(text.strip()):
-                text, method = ocr, "gemini_vision_ocr"
+                text, method = ocr, ocr_method
         else:
             method = "pymupdf_low_text"
 

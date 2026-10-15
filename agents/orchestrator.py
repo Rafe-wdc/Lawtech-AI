@@ -191,7 +191,7 @@ class IdentifyTaskSchema(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "GST_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="The primary legal task type")
 
@@ -201,12 +201,12 @@ class ClassifyAndPlan(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "GST_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="The primary legal task type")
     agents: list[str] = Field(
         ...,
-        description="List of agent names to invoke (1-3): Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document",
+        description="List of agent names to invoke (1-3): Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Tribunal_Judgment, Document",
     )
     reasoning: str = Field(..., description="Brief reasoning for task type and agent selection")
 
@@ -253,6 +253,8 @@ def _classify_task_from_intent(intent: UserIntent | None) -> str | None:
         return "SCI_Judgment"
     if intent.wants_gst_rulings:
         return "GST_Judgment"
+    if intent.wants_tribunal_rulings:
+        return "Tribunal_Judgment"
     if intent.wants_constitution:
         return "Constitution"
     if intent.wants_maxim:
@@ -269,7 +271,7 @@ def _classify_task_from_intent(intent: UserIntent | None) -> str | None:
 class AgentPlan(BaseModel):
     agents: list[str] = Field(
         ...,
-        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document",
+        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Tribunal_Judgment, Document",
     )
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
@@ -402,6 +404,17 @@ doubt, do NOT pick Drafting.
    Arnesh Kumar, Hussainara Khatoon, etc.).
 8. **GST_Judgment** — GST AAR / AAAR / advance ruling / classification appeal
    under GST / GST ITC dispute / HSN code ruling / state GST appellate order.
+8A. **Tribunal_Judgment** — orders / decisions of an Indian tribunal or
+   commission: TDSAT, CESTAT / CEGAT, CAT, CIC, NGT, NCDRC, APTEL, CERC,
+   Company Law Board, IPAB, AAR (income tax / customs), Copyright Board —
+   named, or "tribunal orders" on a topic (carriage fee disputes, CENVAT
+   credit, RTI exemptions, environmental clearance). GST AAR / AAAR stays
+   GST_Judgment. Requires a request for the tribunal's ORDERS / DECISIONS /
+   RULINGS / what it HELD. A question ABOUT a tribunal — its jurisdiction,
+   powers, composition, limitation, how to file or appeal ("What is the
+   jurisdiction of the NGT?", "How do I file a complaint before TDSAT?") —
+   is NOT Tribunal_Judgment: route it to Legal_Concepts (or Legislation
+   when it names the statute).
 9. **Judgment** — the user names a specific case OR asks for court decisions
    / precedents from High Courts or unspecified courts.
 10. **Maxim** — a Latin legal maxim or doctrine (res judicata, audi alteram
@@ -547,6 +560,8 @@ def _select_citation_agents(
         agents.append("SCI_Judgment")
     if intent is not None and intent.wants_gst_rulings:
         agents.append("GST_Judgment")
+    if intent is not None and intent.wants_tribunal_rulings:
+        agents.append("Tribunal_Judgment")
     # Corpus-aware statute pick. Newacts indexes BNS/IPC, BNSS/CrPC,
     # BSA/IEA; Legislation indexes everything else. Prefer Newacts when
     # the planner already routed there.
@@ -623,6 +638,8 @@ def _detect_multi_intent(intent: UserIntent | None, task: str) -> list[str]:
         extra.append("SCI_Judgment")
     if intent.wants_gst_rulings and task != "GST_Judgment":
         extra.append("GST_Judgment")
+    if intent.wants_tribunal_rulings and task != "Tribunal_Judgment":
+        extra.append("Tribunal_Judgment")
     if intent.task_intent == "draft" and task != "Drafting":
         extra.append("Drafting")
     return extra
@@ -645,6 +662,7 @@ Each agent has a different database and purpose:
 - Legal_Concepts: General legal explanation. Query should be the legal concept to explain.
 - SCI_Judgment: Searches Supreme Court database. Query should focus on: SC-specific case names, constitutional questions, landmark rulings.
 - GST_Judgment: Searches GST AAAR (Appellate Authority for Advance Ruling) order database. Query should focus on: GST issue (classification / ITC / valuation / exemption), HSN code, GST section/notification, applicant name, state. Do NOT include unrelated tax topics (income tax, customs).
+- Tribunal_Judgment: Searches orders of Indian tribunals and commissions (TDSAT, CESTAT/CEGAT, CAT, CIC, NGT, NCDRC, APTEL, CERC, CLB, IPAB, AAR, Copyright Board). Query should focus on: the tribunal named (keep its name or abbreviation exactly), the issue, the statute / regulation and section, party names written as case parties. Do NOT add High Court or Supreme Court wording.
 
 Rules:
 1. Each rewritten query must be self-contained and optimized for that agent's search database.
@@ -655,7 +673,7 @@ Rules:
 6. Return valid JSON object mapping agent name to rewritten query.
 7. LANGUAGE HANDLING — two-tier by backend. Do NOT blindly force English.
 
-   ENGLISH-INDEXED AGENTS (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment) — translate the SURROUNDING NARRATIVE to English for retrieval efficiency, but PRESERVE VERBATIM every noun that carries retrieval signal: party names (both transliterated Latin form AND the original non-Latin form when present), section numbers, act names, dates, monetary amounts, and any explicit COUNT / SCOPE directive ("5 judgments", "top 3 cases", "landmark rulings only", "High Court only"). The rewritten query is an English sentence that CARRIES the native / original nouns, not a translation that DROPS them.
+   ENGLISH-INDEXED AGENTS (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment, Tribunal_Judgment) — translate the SURROUNDING NARRATIVE to English for retrieval efficiency, but PRESERVE VERBATIM every noun that carries retrieval signal: party names (both transliterated Latin form AND the original non-Latin form when present), section numbers, act names, dates, monetary amounts, and any explicit COUNT / SCOPE directive ("5 judgments", "top 3 cases", "landmark rulings only", "High Court only"). The rewritten query is an English sentence that CARRIES the native / original nouns, not a translation that DROPS them.
    Example — input "मुझे BNSS की धारा 480 पर 5 सुप्रीम कोर्ट के जजमेंट दो":
      SCI_Judgment: "Section 480 BNSS anticipatory bail Supreme Court cases (5 landmark judgments requested)"
      Newacts:      "Section 480 BNSS anticipatory bail"
@@ -1301,6 +1319,12 @@ def _validate_and_enrich_plan(
             log.info("Plan enriched: wants_gst_rulings → GST_Judgment",
                      plan=tasks_planned)
 
+    if intent.wants_tribunal_rulings and "Tribunal_Judgment" not in tasks_planned:
+        if len(tasks_planned) < 3:
+            tasks_planned.append("Tribunal_Judgment")
+            log.info("Plan enriched: wants_tribunal_rulings → Tribunal_Judgment",
+                     plan=tasks_planned)
+
     # Break #6 (pipeline_investigation.md): the extractor populates 6 wants_*
     # fields but this validator historically honoured only 2. When the LLM
     # classifier misses a required content agent AND the intent extractor
@@ -1396,7 +1420,7 @@ _REVIEW_REDRAFT_VERBS_RE = re.compile(
     re.IGNORECASE,
 )
 
-_CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment")
+_CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment", "Tribunal_Judgment")
 
 # Agents that _select_citation_agents auto-adds as the drafting appendix.
 # When cite_appendix is OFF, these are the ONLY agents that should be
@@ -1412,7 +1436,7 @@ _CITATIONS_ONLY_PREFIX = (
 )
 
 _CITATION_APPENDIX_AGENTS = frozenset({
-    "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts", "Legislation",
+    "Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Newacts", "Legislation",
 })
 
 
@@ -2261,7 +2285,7 @@ def _build_source_registry(agent_results: dict[str, AgentResult]) -> SourceRegis
             record = None
             if st == "sci_judgment":
                 record = source_from_sci(meta)
-            elif st in ("judgment", "gst_judgment"):
+            elif st in ("judgment", "gst_judgment", "tribunal_judgment"):
                 record = source_from_hc(meta)
             elif st in ("legislation", "newacts", "constitution", "maxim"):
                 record = source_from_legislation(meta)
@@ -2515,7 +2539,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         # negligence and partition drafting prompts (draft_len roughly
         # doubled → back to primary-draft-only length).
         _CITATION_SHAPED_AGENTS = {
-            "Judgment", "SCI_Judgment", "GST_Judgment",
+            "Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment",
             "Legislation", "Newacts", "Document",
         }
         _discarded_content = [
@@ -2619,6 +2643,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         "Constitution":   "Constitution",
         "Maxim":          "Maxim",
         "GST_Judgment":   "GST_Judgment",
+        "Tribunal_Judgment": "Tribunal_Judgment",
         "Legal_Concepts": "Legal_Concepts",
         "Other":          "Scenario",   # fallback per planner contract
     }
@@ -2632,6 +2657,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         "Scenario":     "## Additional Analysis",
         "Document":     "## From Your Uploaded Document",
         "GST_Judgment": "## Related GST/AAAR Authority",
+        "Tribunal_Judgment": "## Related Tribunal Orders",
     }
 
     primary_task_state = state.get("task")
@@ -3521,7 +3547,7 @@ _SUPPORTING_CITATIONS_MAX = 5
 # own text discussed may be listed. A Supreme Court supporter that searched
 # two party names and the year 1980 appended 140 unrelated judgments under
 # "Related Supreme Court Authority" (prod, 2026-09-22).
-_RAW_HIT_SOURCE_AGENTS = frozenset({"SCI_Judgment", "GST_Judgment"})
+_RAW_HIT_SOURCE_AGENTS = frozenset({"SCI_Judgment", "GST_Judgment", "Tribunal_Judgment"})
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:

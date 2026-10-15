@@ -1033,6 +1033,7 @@ _NODE_STATUS = {
     "document": "Searching uploaded documents...",
     "sci_judgment": "Searching Supreme Court judgments...",
     "gst_judgment": "Searching GST AAAR orders...",
+    "tribunal_judgment": "Searching tribunal orders...",
     "orchestrator_synthesize": "Injecting citations into draft...",
     "guardrail_output": "Finalizing...",
     "blocked_response": "Query blocked.",

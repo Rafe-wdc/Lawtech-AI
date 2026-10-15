@@ -1315,6 +1315,7 @@ class _SqliteChatHistoryStore:
         "judgment":     0.00250,   # GPT-4o metadata + Gemini Flash
         "sci_judgment": 0.00250,   # GPT-4o metadata + Gemini Flash
         "gst_judgment": 0.00250,   # Gemini Flash ReAct (same shape as SCI)
+        "tribunal_judgment": 0.00250,  # Gemini Flash ReAct (same shape as GST)
         "newacts":      0.00150,   # GPT-4o-mini + Gemini Flash
         "constitution": 0.00015,   # Gemini Flash
         "maxim":        0.00015,   # Gemini Flash
@@ -1699,6 +1700,7 @@ class _PostgresChatHistoryStore:
         "judgment":       0.00250,
         "sci_judgment":   0.00250,
         "gst_judgment":   0.00250,
+        "tribunal_judgment": 0.00250,
         "newacts":        0.00150,
         "constitution":   0.00015,
         "maxim":          0.00015,

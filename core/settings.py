@@ -206,6 +206,8 @@ ES_INDICES = {
     "newacts": "newacts_v1",
     "sci_judgments": "supreme_court_judgement",
     "gst_judgments": "gst_judgements",
+    # Alias over tribunal_judgements_v1 (scripts/tribunal/tribunal_index.py)
+    "tribunal_judgments": "tribunal_judgements",
     "constitution": "constitution",
     "maxims": "legal_maxims",
 }

@@ -141,6 +141,16 @@ from .gst_judgment_tools import (
     gst_get_case_details,
 )
 
+# --- Tribunal Tools ---
+from .tribunal_tools import (
+    tribunal_search_by_topic,
+    tribunal_search_by_keyword,
+    tribunal_search_by_case_number,
+    tribunal_search_by_party_name,
+    tribunal_search_by_member,
+    tribunal_get_case_details,
+)
+
 
 # ============================================================
 # ALL_TOOLS — flat list of every tool for convenience
@@ -235,6 +245,13 @@ ALL_TOOLS = [
     gst_search_by_date_range,
     gst_search_by_state,
     gst_get_case_details,
+    # Tribunal (6)
+    tribunal_search_by_topic,
+    tribunal_search_by_keyword,
+    tribunal_search_by_case_number,
+    tribunal_search_by_party_name,
+    tribunal_search_by_member,
+    tribunal_get_case_details,
 ]
 
 
@@ -351,5 +368,13 @@ AGENT_TOOLS = {
         gst_search_by_date_range,
         gst_search_by_state,
         gst_get_case_details,
+    ],
+    "tribunal_judgment": [
+        tribunal_search_by_topic,
+        tribunal_search_by_keyword,
+        tribunal_search_by_case_number,
+        tribunal_search_by_party_name,
+        tribunal_search_by_member,
+        tribunal_get_case_details,
     ],
 }

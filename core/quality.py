@@ -27,7 +27,7 @@ log = get_logger("QualityScorer")
 # in a Q&A over an uploaded PDF that we can meaningfully compare
 # faithfulness against without also parsing the source doc).
 _SCOREABLE_AGENTS = {
-    "Legislation", "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts",
+    "Legislation", "Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Newacts",
     "Constitution", "Maxim", "Legal_Concepts", "Scenario",
     "Drafting",  # Added 2026-08-02 (P2 G-31). Sampled at 5% (see
                  # should_score below) — half the rate of retrieval

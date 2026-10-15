@@ -17,7 +17,7 @@ from core.source_registry import SourceRegistry, merge_source_registries
 TaskType = Literal[
     "Drafting", "Judgment", "Legislation", "Constitution",
     "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-    "SCI_Judgment", "GST_Judgment", "Document",
+    "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
     "Non_legal", "Other",
 ]
 

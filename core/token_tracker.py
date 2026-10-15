@@ -83,8 +83,26 @@ _MODEL_PRICES_USD_PER_M: dict[str, tuple[float, float]] = {
 }
 
 
-def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Best-effort cost in USD. Returns 0.0 if model is unknown or empty."""
+# Cached input is billed at a fraction of the normal input rate: Gemini
+# implicit/explicit context cache 25%, Anthropic prompt cache read 10%.
+_CACHE_READ_FACTOR = {"anthropic": 0.10, "google": 0.25}
+
+# Google Search grounding is a per-query charge on top of tokens: Gemini 3.x
+# $14 per 1,000 search queries, Gemini 2.5 $35 per 1,000 grounded prompts.
+_GROUNDING_USD_PER_QUERY = {"gemini-3": 0.014, "gemini-2.5": 0.035}
+
+
+def grounding_cost_usd(model: str, queries: int) -> float:
+    m = (model or "").lower()
+    rate = _GROUNDING_USD_PER_QUERY["gemini-2.5"] if "2.5" in m else _GROUNDING_USD_PER_QUERY["gemini-3"]
+    return round(max(0, queries) * rate, 6)
+
+
+def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int,
+                       cache_read_tokens: int = 0) -> float:
+    """Best-effort cost in USD. Returns 0.0 if model is unknown or empty.
+    `cache_read_tokens` is the cached part of `input_tokens`, billed at the
+    provider's cache-read factor instead of the full input rate."""
     if not model:
         return 0.0
     rates = _MODEL_PRICES_USD_PER_M.get(model)
@@ -105,7 +123,10 @@ def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> flo
     if not rates:
         return 0.0
     in_rate, out_rate = rates
-    return (input_tokens * in_rate + output_tokens * out_rate) / 1_000_000
+    cached = min(max(cache_read_tokens or 0, 0), max(input_tokens, 0))
+    factor = _CACHE_READ_FACTOR["anthropic"] if "claude" in model.lower() else _CACHE_READ_FACTOR["google"]
+    billed_input = (input_tokens - cached) * in_rate + cached * in_rate * factor
+    return (billed_input + output_tokens * out_rate) / 1_000_000
 
 
 # ── Per-call record ───────────────────────────────────────────────────────
@@ -157,6 +178,7 @@ class TokenUsage:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     reasoning_tokens: int = 0
+    grounded_queries: int = 0      # Google Search grounding queries (per-query charge)
     cost_usd: float = 0.0
     by_agent: dict[str, dict[str, int]] = field(default_factory=dict)
     by_model: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -216,7 +238,7 @@ class TokenUsage:
         )
         model = served or model
 
-        cost = _estimate_cost_usd(model, ip, op + reasoning)
+        cost = _estimate_cost_usd(model, ip, op + reasoning, cache_read)
 
         call = TokenCall(
             agent=agent, step=step, model=model,
@@ -285,6 +307,7 @@ class TokenUsage:
                 "cache_read_tokens": self.cache_read_tokens,
                 "cache_creation_tokens": self.cache_creation_tokens,
                 "reasoning_tokens": self.reasoning_tokens,
+                "grounded_queries": self.grounded_queries,
                 "cost_usd": round(self.cost_usd, 6),
                 "by_agent": {k: dict(v) for k, v in self.by_agent.items()},
             }
@@ -362,9 +385,50 @@ def record_genai(agent: str, step: str, response: Any, model: str = "") -> int:
             "input_tokens":  getattr(um, "prompt_token_count", 0) or 0,
             "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
             "total_tokens":  getattr(um, "total_token_count", 0) or 0,
+            # Gemini 3 thinks by default on raw calls; thoughts are billed as
+            # output and were never priced here (cost audit 2026-10-08).
+            "input_token_details": {"cache_read": getattr(um, "cached_content_token_count", 0) or 0},
+            "output_token_details": {"reasoning": getattr(um, "thoughts_token_count", 0) or 0},
         },
     )
     return record(agent, step, shim, model=model)
+
+
+def record_grounding(agent: str, step: str, queries: int, model: str = "") -> float:
+    """Add the Google Search grounding charge for one grounded call.
+
+    `queries` is len(grounding_metadata.web_search_queries); a grounded call
+    that reports chunks but no query list is counted as one query. Returns
+    the USD added (0.0 when no tracker is active)."""
+    tracker = get_tracker()
+    if tracker is None or queries <= 0:
+        return 0.0
+    cost = grounding_cost_usd(model, queries)
+    with tracker._lock:
+        tracker.grounded_queries += queries
+        tracker.cost_usd += cost
+        ag = tracker.by_agent.setdefault(agent, {
+            "input": 0, "output": 0, "total": 0,
+            "cache_read": 0, "calls": 0, "cost_usd": 0.0,
+        })
+        ag["cost_usd"] = round(ag["cost_usd"] + cost, 6)
+        ag["grounded"] = ag.get("grounded", 0) + queries
+        tracker.calls.append(TokenCall(agent=agent, step=f"{step}_grounding", model=model, cost_usd=cost))
+    return cost
+
+
+def grounding_queries_of(response: Any) -> int:
+    """Count the search queries Google ran for a grounded response."""
+    try:
+        gm = getattr(response.candidates[0], "grounding_metadata", None)
+    except Exception:
+        return 0
+    if not gm:
+        return 0
+    q = getattr(gm, "web_search_queries", None) or []
+    if q:
+        return len(q)
+    return 1 if (getattr(gm, "grounding_chunks", None) or []) else 0
 
 
 def repair_zero_total(usage: dict | None, fallback_total: int) -> dict:

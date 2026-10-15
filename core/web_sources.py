@@ -60,7 +60,7 @@ def _is_web_record(rec: dict) -> bool:
 # CaseMine, LawFoyer, SCC Online and blogs listed next to a Supreme Court
 # judgment). Our own PDFs never reach this module; a web source from a
 # judgment agent survives only if it resolves to one of these hosts.
-_JUDGMENT_AGENTS = frozenset({"Judgment", "SCI_Judgment", "GST_Judgment"})
+_JUDGMENT_AGENTS = frozenset({"Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment"})
 _OFFICIAL_COURT_HOST_RE = re.compile(
     r"(?:^|\.)(?:sci\.gov\.in|ecourts\.gov\.in|"
     r"[a-z0-9-]*(?:highcourt|hc)[a-z0-9-]*\.(?:nic\.in|gov\.in|in))$")

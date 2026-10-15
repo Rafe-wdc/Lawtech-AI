@@ -41,6 +41,7 @@ Seventeen user-facing capabilities. Readable without any codebase knowledge.
 | **High Court case law** | Judgments with parties, court, year, and downloadable S3 PDF links | [`agents/judgment.py`](../agents/judgment.py) | ES `judgements` + AWS S3 |
 | **Supreme Court research** | Multi-step research over 44,000+ SC judgments — by topic, party, bench, case number, date | [`agents/sci_judgment.py`](../agents/sci_judgment.py) | ES `supreme_court_judgement` |
 | **GST advance rulings** | 533 GST AAAR orders — classification, ITC, valuation, HSN, state appellate orders | [`agents/gst_judgment.py`](../agents/gst_judgment.py) | OpenSearch `gst_judgements` |
+| **Tribunal orders** | ~46.5k orders of 12 tribunals — TDSAT, CESTAT/CEGAT, CAT, CIC, NGT, consumer commissions, APTEL, CLB, CERC, IPAB, AAR, Copyright Board — searchable per tribunal | [`agents/tribunal_judgment.py`](../agents/tribunal_judgment.py) | OpenSearch `tribunal_judgements` |
 | **Constitutional provisions** | Articles, Parts, fundamental rights | [`agents/constitution_maxim.py`](../agents/constitution_maxim.py) | ES `constitution` + web enrichment |
 | **Legal maxims** | Latin maxims and doctrines | [`agents/constitution_maxim.py`](../agents/constitution_maxim.py) | ES `legal_maxims` + web enrichment |
 | **Concept explanation** | Plain-language explanation of a legal concept | [`agents/constitution_maxim.py`](../agents/constitution_maxim.py) | Google Search grounding only |
@@ -263,6 +264,12 @@ strategy · fallback tiers · gotchas**.
 - Forked from `sci_judgment`, with `gst_search_by_state` replacing `search_by_judge` and
   `state_ut` / `brief_of_order` / `ar_order_no_date` replacing bench and judge fields.
   Same zero-tool-call rescue and web last resort.
+
+#### Tribunal orders — `tribunal_judgment`
+
+- **Entry** [`agents/tribunal_judgment.py`](../agents/tribunal_judgment.py) · **Task** `Tribunal_Judgment` (intent `wants_tribunal_rulings`) · **Source** OpenSearch alias `tribunal_judgements` → `tribunal_judgements_v1` · **Model** Flash ReAct, 90 s bound
+- Forked from `gst_judgment`. Six tools ([`tools/shared/tribunal_tools.py`](../tools/shared/tribunal_tools.py)); every search takes a `tribunal` filter resolved through [`config/tribunals.py`](../config/tribunals.py) (codes, names, CEGAT → CESTAT).
+- Index built by [`scripts/tribunal/`](../scripts/tribunal/): the 45,031 `court_name = tribunal` documents copied from `judgements_v2` (tagged with `tribunal_code` from their source path) plus the scraped TDSAT orders (text layer or Gemini OCR, PDFs copied to S3 `tribunal/tdsat/` because only our S3 links survive `core/url_filter`).
 
 ### 3.6 Constitution · Maxim · Legal Concepts
 

@@ -371,6 +371,15 @@ class UserIntent(BaseModel):
                     "ITC disputes, GST valuation rulings, HSN classification. "
                     "Drives GST_Judgment routing.",
     )
+    wants_tribunal_rulings: bool = Field(
+        False,
+        description="TRUE iff the user wants orders / decisions of an Indian "
+                    "tribunal or commission (TDSAT, CESTAT/CEGAT, CAT, CIC, "
+                    "NGT, NCDRC, APTEL, CERC, Company Law Board, IPAB, AAR, "
+                    "Copyright Board), named or as 'tribunal orders' on a "
+                    "topic those tribunals decide. FALSE for GST AAR/AAAR "
+                    "(wants_gst_rulings). Drives Tribunal_Judgment routing.",
+    )
 
     named_acts: list[str] = Field(
         default_factory=list,
@@ -468,7 +477,7 @@ def default_intent() -> UserIntent:
 TASK_TYPES = (
     "Drafting", "Judgment", "Legislation", "Constitution",
     "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-    "SCI_Judgment", "GST_Judgment", "Document",
+    "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
     "Non_legal", "Other",
 )
 
@@ -492,7 +501,7 @@ class DynamicPlan(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "GST_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="Primary task type.")
 

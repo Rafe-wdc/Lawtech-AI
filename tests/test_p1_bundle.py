@@ -196,6 +196,7 @@ class TestMetricsWiring:
         import re
         expected = {
             "agents/gst_judgment.py": "GST_Judgment",
+            "agents/tribunal_judgment.py": "Tribunal_Judgment",
             "agents/sci_judgment.py": "SCI_Judgment",
             "agents/judgment.py": "Judgment",
             "agents/drafting.py": "Drafting",

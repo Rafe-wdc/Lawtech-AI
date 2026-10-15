@@ -200,6 +200,28 @@ def test_node_returns_answer_and_sources(es, monkeypatch):
     assert [s.db_id for s in result.sources] == ["tdsat__070110005102017_1640"]
 
 
+def test_mistyped_pdf_links_are_repaired_or_removed():
+    """Live run 2026-10-15: the model dropped a digit of the TDSAT file id."""
+    from core.state import SourceMetadata
+    from agents.tribunal_judgment import _repair_pdf_links
+
+    base = "https://lawttorney.s3.ap-south-1.amazonaws.com/tribunal/tdsat/"
+    good = base + "0436_BROADCASTING_PETITION_360_2013_18-03-2016_070110006292013_163.pdf"
+    other = base + "1197_BROADCASTING_APPEAL_3_2010_16-12-2010_070110003742010_774.pdf"
+    sources = [SourceMetadata(doc_link=good), SourceMetadata(doc_link=other)]
+    typo = good.replace("070110006292013", "07011006292013")
+    answer = (f"1. [Judgment PDF]({typo})\n"
+              f"2. [Judgment PDF]({other})\n"
+              f"3. [Judgment PDF]({base}made_up_file.pdf)\n"
+              f"4. See {typo}.")
+    fixed, repaired, removed = _repair_pdf_links(answer, sources)
+    assert fixed == (f"1. [Judgment PDF]({good})\n"
+                     f"2. [Judgment PDF]({other})\n"
+                     f"3. Judgment PDF\n"
+                     f"4. See {good}.")
+    assert (repaired, removed) == (2, 1)
+
+
 def test_node_error_is_recorded(monkeypatch):
     import agents.tribunal_judgment as agent_mod
 

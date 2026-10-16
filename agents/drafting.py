@@ -4001,6 +4001,28 @@ def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_
     return missing
 
 
+def _parallel_sections_enabled() -> bool:
+    """Sections after the opening pair are drafted concurrently unless
+    DRAFTING_PARALLEL_SECTIONS=0 (switch back without a deploy)."""
+    return os.getenv("DRAFTING_PARALLEL_SECTIONS", "1") != "0"
+
+
+def _parallel_sections_max() -> int:
+    try:
+        return max(1, int(os.getenv("DRAFTING_PARALLEL_MAX", "4")))
+    except ValueError:
+        return 4
+
+
+def _parallel_plan_time_s(n_sections: int, pair_p90_s: float) -> float:
+    """Wall time the parallel schedule needs: the opening pair, then the
+    remaining sections in waves of DRAFTING_PARALLEL_MAX, each wave about
+    one pair's p90 (a single long section on Claude runs 45-90 s)."""
+    rest = max(0, n_sections - 2)
+    waves = -(-rest // _parallel_sections_max())
+    return pair_p90_s * (1 + waves)
+
+
 async def _generate_sectionwise(
     *,
     sections: list[_Section],
@@ -4094,11 +4116,37 @@ async def _generate_sectionwise(
                 _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
                 break
 
-    i = 0
-    while i < total:
-        pair = sections[i:i + 2]
-        position_start = i + 1
+    def _assemble(position_start: int, pair: list, pair_text: str, failure) -> None:
+        """Append one finished batch in document order: drop sections it
+        re-emitted that already exist (rule 1 of the pair prompt does not
+        hold on its own; see _drop_reemitted_sections), else record it as
+        failed."""
+        if pair_text.strip():
+            _already = [h for h, _ in _split_heading_blocks("\n\n".join(completed)) if h]
+            pair_text, _reemitted = _drop_reemitted_sections(
+                pair_text, [sec.heading for sec in pair], _already,
+            )
+            if _reemitted:
+                log.warning(
+                    "Section pair re-emitted already-drafted sections; dropped",
+                    position_start=position_start, dropped=_reemitted,
+                )
+        if pair_text.strip():
+            completed.append(pair_text.strip())
+        else:
+            failed_pairs.append(failure or {
+                "position_start": position_start,
+                "headings": [s.heading for s in pair],
+                "reason": "empty_after_dedup",
+            })
 
+    async def _write_batch(pair: list, position_start: int, prior_text: str):
+        """Write one batch (one or two sections) seeing `prior_text`.
+
+        Returns (text, None) on success or ("", failure) when both attempts
+        failed. Shared by the sequential and the parallel schedule; the
+        re-emission drop and the ordered assembly happen in the caller.
+        """
         for offset, sec in enumerate(pair):
             position = position_start + offset
             progress_emit(
@@ -4107,8 +4155,6 @@ async def _generate_sectionwise(
                 substep=True,
                 step=f"section:{position}",
             )
-
-        prior_text = "\n\n".join(completed)
 
         pair_user_facts = user_facts
         if chunking_enabled:
@@ -4320,29 +4366,64 @@ async def _generate_sectionwise(
                 break
 
         if pair_text.strip():
-            # Drop sections this pair re-emitted that already exist in the
-            # document so far (rule 1 of the pair prompt does not hold on
-            # its own). See _drop_reemitted_sections.
-            _already = [h for h, _ in _split_heading_blocks("\n\n".join(completed)) if h]
-            pair_text, _reemitted = _drop_reemitted_sections(
-                pair_text, [sec.heading for sec in pair], _already,
-            )
-            if _reemitted:
-                log.warning(
-                    "Section pair re-emitted already-drafted sections; dropped",
-                    position_start=position_start, dropped=_reemitted,
-                )
-        if pair_text.strip():
-            completed.append(pair_text.strip())
-        else:
-            # Both attempts produced empty content OR both raised.
-            failed_pairs.append({
-                "position_start": position_start,
-                "headings": [s.heading for s in pair],
-                "reason": short_err(_pair_err) if _pair_err else "empty_content",
-            })
+            return pair_text.strip(), None
+        return "", {
+            "position_start": position_start,
+            "headings": [s.heading for s in pair],
+            "reason": short_err(_pair_err) if _pair_err else "empty_content",
+        }
 
-        i += 2
+    # --- Schedule -----------------------------------------------------------
+    # Sequential (the original): pairs in order, each seeing everything before
+    # it. Parallel (default since 2026-10-16): the first pair (cause title +
+    # opening facts) is written first; every remaining section is then
+    # written as its own call, up to DRAFTING_PARALLEL_MAX at a time, each
+    # seeing that opening. Claude Sonnet 5 writes ~80-115 output tokens/s, so
+    # a 7-section petition written strictly in sequence took ~8 minutes and
+    # its longest pair overran the per-call limit; in parallel the wall time
+    # is roughly the first pair plus the slowest single section. Paragraph
+    # numbers restart in each parallel section and are continued by
+    # validate_draft's renumbering pass.
+    parallel = _parallel_sections_enabled() and total > 2
+    if not parallel:
+        i = 0
+        while i < total:
+            pair = sections[i:i + 2]
+            # Assemble as we go so each pair sees the cleaned document so far.
+            prior_text = "\n\n".join(completed)
+            text, fail = await _write_batch(pair, i + 1, prior_text)
+            _assemble(i + 1, pair, text, fail)
+            i += 2
+    else:
+        head = sections[:2]
+        text, fail = await _write_batch(head, 1, "")
+        _assemble(1, head, text, fail)
+        opening = "\n\n".join(completed)
+        rest = list(enumerate(sections[2:], start=3))
+        progress_emit(
+            "drafting",
+            f"Drafting sections 3-{total} in parallel...",
+            substep=True, step="sections:parallel",
+        )
+        log.info("Section drafting: parallel schedule",
+                 total=total, parallel_sections=len(rest),
+                 max_concurrent=_parallel_sections_max())
+        sem = asyncio.Semaphore(_parallel_sections_max())
+
+        async def _one(pos: int, sec):
+            async with sem:
+                try:
+                    t, f = await _write_batch([sec], pos, opening)
+                except Exception as e:      # one section never sinks the rest
+                    log.warning("Parallel section raised", position=pos,
+                                section=sec.heading[:40], error=short_err(e))
+                    t, f = "", {"position_start": pos, "headings": [sec.heading],
+                                "reason": short_err(e)}
+                return pos, sec, t, f
+
+        results = await asyncio.gather(*[_one(p, sec) for p, sec in rest])
+        for pos, sec, t, f in sorted(results, key=lambda r: r[0]):
+            _assemble(pos, [sec], t, f)
 
     draft = "\n\n".join(completed)
 
@@ -4799,9 +4880,15 @@ async def _generate_draft(
         _rem = _plan_remaining()
         if _rem is not None:
             _budget_left = _rem - SELF_REFINE_RESERVE_S - LANG_GATE_RESERVE_S
-            _fitted, _feasible, _action = _fit_plan_to_budget(
-                strategy.sections, _budget_left,
-            )
+            _n = len(strategy.sections)
+            if (_parallel_sections_enabled() and _n > 2
+                    and _parallel_plan_time_s(_n, OBSERVED_PAIR_TIME_P90_S) <= _budget_left):
+                # The parallel schedule fits the whole plan; no trimming.
+                _fitted, _feasible, _action = list(strategy.sections), _n, "kept"
+            else:
+                _fitted, _feasible, _action = _fit_plan_to_budget(
+                    strategy.sections, _budget_left,
+                )
             if _action == "kept":
                 log.info(
                     "Plan fits budget",
@@ -5481,8 +5568,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     draft,
                     user_query=query,
                     intent=intent_obj,
-                    critic_llm=get_drafting_llm(max_output_tokens=8192),
-                    refiner_llm=get_drafting_llm(max_output_tokens=24000),
+                    # Thinking off: the critic's structured output fails
+                    # with it on (see get_drafting_llm).
+                    critic_llm=get_drafting_llm(max_output_tokens=8192, thinking=False),
+                    refiner_llm=get_drafting_llm(max_output_tokens=24000, thinking=False),
+                    # One critique+rewrite round, then the closing critique.
+                    # A Claude rewrite of a 46k-char petition takes ~118 s;
+                    # two rounds took the request to 459 s of 465 (2026-10-16).
+                    max_iterations=1,
                     source_languages=source_langs,
                     source_registry=_registry,
                     # A finished draft has no business getting materially

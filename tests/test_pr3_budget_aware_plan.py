@@ -83,6 +83,8 @@ def test_reserves_and_p90_are_sane():
 
 
 def test_dispatch_hook_trims_when_clock_is_short(monkeypatch):
+    # Trimming applies to the sequential schedule; parallel fits more.
+    monkeypatch.setenv("DRAFTING_PARALLEL_SECTIONS", "0")
     """Drive the real hook through _generate_draft's dispatch by stubbing
     the judge, the clock and both generators."""
     import asyncio

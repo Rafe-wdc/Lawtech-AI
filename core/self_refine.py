@@ -1970,9 +1970,9 @@ async def _refine(
                         ),
                     },
                 ),
-                # 60s -> 120s (2026-10-16): a Claude refine re-emits the
-                # whole draft at ~80 tokens/s.
-                local_timeout=120,
+                # 60s -> 180s (2026-10-16): a Claude refine re-emits the
+                # whole draft at ~80 tokens/s; a 48k-char writ took 115 s.
+                local_timeout=180,
             )
         _record_tokens("SelfRefine", "refine", result)
         record_gemini_flash_success()

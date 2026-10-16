@@ -432,8 +432,8 @@ async def metrics_middleware(request: Request, call_next):
 # Sized so N_workers × MAX_INFLIGHT_PER_WORKER ≥ target concurrency × 1.2
 # (e.g. 6 × 10 = 60 capacity for a 50-stream target). Tune via env.
 
-# 10 -> 20 (2026-10-16): drafting may now hold 8 requests per worker
-# (DRAFTING_MAX_CONCURRENT) for ~5 min each; at 10 that left 2 slots for
+# 10 -> 20 (2026-10-16): drafting may now hold 10 requests per worker
+# (DRAFTING_MAX_CONCURRENT) for ~5 min each; at 10 that left no slots for
 # every other call, thread lists and feedback included.
 _MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT_PER_WORKER", "20"))
 _inflight_sem = asyncio.Semaphore(_MAX_INFLIGHT)

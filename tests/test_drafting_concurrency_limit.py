@@ -12,9 +12,9 @@ os.environ.setdefault("EMBEDDING_SERVICE_URL", "http://127.0.0.1:9")
 import agents.drafting as d
 
 
-def test_default_is_eight(monkeypatch):
+def test_default_is_ten(monkeypatch):
     monkeypatch.delenv("DRAFTING_MAX_CONCURRENT", raising=False)
-    assert d._drafting_max_concurrent() == 8
+    assert d._drafting_max_concurrent() == 10
 
 
 def test_env_override_and_bad_values(monkeypatch):
@@ -23,7 +23,7 @@ def test_env_override_and_bad_values(monkeypatch):
     monkeypatch.setenv("DRAFTING_MAX_CONCURRENT", "0")
     assert d._drafting_max_concurrent() == 1
     monkeypatch.setenv("DRAFTING_MAX_CONCURRENT", "lots")
-    assert d._drafting_max_concurrent() == 8
+    assert d._drafting_max_concurrent() == 10
 
 
 def test_semaphore_uses_the_limit():

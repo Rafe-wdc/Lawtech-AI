@@ -575,16 +575,18 @@ async def run_chat_pipeline(
     turn_primary_artifact_kind = ""    # "draft" when Drafting produced content
 
     try:
-        # Seed the request-scoped deadline (285s = 300s outer envelope
-        # minus 15s slack for final `response`/`sources`/`done` events).
+        # Seed the request-scoped deadline (CHAT_REQUEST_DEADLINE_S = the
+        # outer envelope minus 15s slack for final `response`/`sources`/
+        # `done` events; 465s of 480s since 2026-10-16).
         # Deeply nested `bounded_wait_for` calls clamp their local
         # timeouts to what's left, so a slow judge doesn't blow the
         # budget for the refiner. Contextvar propagates to every child
         # asyncio task spawned during the graph run; when this SSE
         # generator ends the contextvar's scope ends with it.
         from core.deadline import set_deadline_seconds
-        set_deadline_seconds(285)
-        async with async_timeout_cm(300):
+        from core.settings import CHAT_REQUEST_DEADLINE_S, CHAT_REQUEST_TIMEOUT_S
+        set_deadline_seconds(CHAT_REQUEST_DEADLINE_S)
+        async with async_timeout_cm(CHAT_REQUEST_TIMEOUT_S):
             async for event in i.agent_graph.astream(
                 initial_state,
                 config=config,

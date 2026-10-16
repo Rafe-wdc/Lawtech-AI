@@ -28,7 +28,7 @@ def _plan(n):
 
 
 def test_plan_that_fits_is_kept_unchanged():
-    secs, feasible, action = _fit_plan_to_budget(_plan(7), budget_left_s=200)
+    secs, feasible, action = _fit_plan_to_budget(_plan(7), budget_left_s=200, pair_p90_s=45.0)
     assert action == "kept"
     assert feasible == 8          # 200 // 45 = 4 pairs = 8 sections
     assert [s.heading for s in secs] == [s.heading for s in _plan(7)]
@@ -36,7 +36,7 @@ def test_plan_that_fits_is_kept_unchanged():
 
 def test_plan_is_collapsed_keeping_first_and_last():
     plan = _plan(8)
-    secs, feasible, action = _fit_plan_to_budget(plan, budget_left_s=140)
+    secs, feasible, action = _fit_plan_to_budget(plan, budget_left_s=140, pair_p90_s=45.0)
     assert action == "collapsed"
     assert feasible == 6          # 140 // 45 = 3 pairs
     assert len(secs) == 6
@@ -54,20 +54,20 @@ def test_plan_is_collapsed_keeping_first_and_last():
 
 
 def test_below_one_pair_goes_single_pass():
-    secs, feasible, action = _fit_plan_to_budget(_plan(5), budget_left_s=40)
+    secs, feasible, action = _fit_plan_to_budget(_plan(5), budget_left_s=40, pair_p90_s=45.0)
     assert action == "single_pass"
     assert feasible == 0
     assert secs == []
 
 
 def test_negative_budget_goes_single_pass():
-    secs, feasible, action = _fit_plan_to_budget(_plan(3), budget_left_s=-30)
+    secs, feasible, action = _fit_plan_to_budget(_plan(3), budget_left_s=-30, pair_p90_s=45.0)
     assert action == "single_pass"
 
 
 def test_three_section_plan_into_two_merges_into_the_opening():
     plan = _plan(3)
-    secs, feasible, action = _fit_plan_to_budget(plan, budget_left_s=50)
+    secs, feasible, action = _fit_plan_to_budget(plan, budget_left_s=50, pair_p90_s=45.0)
     assert feasible == 2 and action == "collapsed"
     assert len(secs) == 2
     assert secs[-1].heading == plan[-1].heading
@@ -77,8 +77,9 @@ def test_three_section_plan_into_two_merges_into_the_opening():
 def test_reserves_and_p90_are_sane():
     # The reserves must leave room for at least one pair on a healthy
     # request: 285s budget - reserves must exceed one p90 pair.
-    assert 285 - SELF_REFINE_RESERVE_S - LANG_GATE_RESERVE_S > OBSERVED_PAIR_TIME_P90_S * 2
-    assert 30 <= OBSERVED_PAIR_TIME_P90_S <= 60
+    from core.settings import CHAT_REQUEST_DEADLINE_S
+    assert CHAT_REQUEST_DEADLINE_S - SELF_REFINE_RESERVE_S - LANG_GATE_RESERVE_S > OBSERVED_PAIR_TIME_P90_S * 2
+    assert 30 <= OBSERVED_PAIR_TIME_P90_S <= 120
 
 
 def test_dispatch_hook_trims_when_clock_is_short(monkeypatch):
@@ -110,7 +111,8 @@ def test_dispatch_hook_trims_when_clock_is_short(monkeypatch):
     monkeypatch.setattr(d, "_judge_fanout", fake_judge)
     monkeypatch.setattr(d, "_generate_sectionwise", fake_sectionwise)
     monkeypatch.setattr(d, "_generate_single_pass", fake_single)
-    monkeypatch.setattr("core.deadline.remaining", lambda: 200.0)  # 200-65 = 135 -> 3 pairs
+    # 360 - (100 + 20) reserves = 240s -> 240 // 75 = 3 pairs = 6 sections
+    monkeypatch.setattr("core.deadline.remaining", lambda: 360.0)
 
     # Niche selector and language gate are network / model calls; neutralise.
     async def fake_niche(*a, **k):

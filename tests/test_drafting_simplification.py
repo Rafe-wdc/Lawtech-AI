@@ -725,7 +725,9 @@ class TestGenerateSectionwise:
     def _silent_progress(*args, **kwargs):
         pass
 
-    def test_walks_pairs_and_threads_prior_text(self):
+    def test_walks_pairs_and_threads_prior_text(self, monkeypatch):
+        # The original sequential schedule (DRAFTING_PARALLEL_SECTIONS=0).
+        monkeypatch.setenv("DRAFTING_PARALLEL_SECTIONS", "0")
         sections = [
             _Section(id="cause_title", heading="CAUSE TITLE", summary="court + parties"),
             _Section(id="facts", heading="FACTS", summary="numbered facts"),
@@ -854,7 +856,9 @@ class TestGenerateSectionwise:
         assert "Body of A" not in out
         assert "Body of B" not in out
 
-    def test_progress_event_per_section(self):
+    def test_progress_event_per_section(self, monkeypatch):
+        # The original sequential schedule (DRAFTING_PARALLEL_SECTIONS=0).
+        monkeypatch.setenv("DRAFTING_PARALLEL_SECTIONS", "0")
         """One progress event per section (not per pair) — frontend needs
         section-level granularity for the per-section checklist UI."""
         sections = [

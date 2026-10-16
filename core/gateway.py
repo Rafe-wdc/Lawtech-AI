@@ -800,14 +800,16 @@ async def search(data: SearchRequest, request: Request):
         # calls clamp their local timeouts to the remaining budget instead
         # of blindly using 45s + 60s + ... and blowing the outer envelope.
         from core.deadline import deadline_scope
-        with log_time(log, "Full graph execution"), deadline_scope(seconds=285):
+        from core.settings import CHAT_REQUEST_DEADLINE_S, CHAT_REQUEST_TIMEOUT_S
+        with log_time(log, "Full graph execution"), deadline_scope(seconds=CHAT_REQUEST_DEADLINE_S):
             final_state = await asyncio.wait_for(
                 agent_graph.ainvoke(initial_state, config=config),
-                timeout=300,  # 5 minute hard timeout
+                timeout=CHAT_REQUEST_TIMEOUT_S,
             )
     except asyncio.TimeoutError:
         _graph_error = "timeout"
-        log.error("Agent graph execution timed out after 300s", query=data.prompt_query[:100])
+        log.error("Agent graph execution timed out",
+                  timeout_s=CHAT_REQUEST_TIMEOUT_S, query=data.prompt_query[:100])
         raise HTTPException(status_code=504, detail="Request timed out. Please try a simpler query.")
     except Exception as e:
         _graph_error = short_err(e)

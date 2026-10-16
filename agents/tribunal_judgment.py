@@ -87,6 +87,62 @@ def _parse_tribunal_blocks(text: str) -> list[SourceMetadata]:
     return sources
 
 
+_S3_URL_RE = re.compile(r"https?://lawttorney\.s3\.[^\s)\]>\"']+", re.IGNORECASE)
+_MD_S3_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://lawttorney\.s3\.[^)\s]+)\)", re.IGNORECASE)
+
+
+def _repair_pdf_links(answer: str, sources: list[SourceMetadata]) -> tuple[str, int, int]:
+    """Make every S3 PDF link in the answer one the tools actually returned.
+
+    The model copies URLs into its prose by hand and sometimes drops a digit
+    of the 15-digit TDSAT file id ("07011006292013" for "070110006292013"),
+    which 404s. A link that is not an exact tool URL is replaced by the
+    closest tool URL when they differ by a typo, otherwise the link is
+    removed and its label kept. Returns (answer, repaired, removed)."""
+    import difflib
+
+    known = [s.doc_link for s in sources if s.doc_link]
+    if not answer or not known:
+        return answer, 0, 0
+    known_set = set(known)
+    stats = {"repaired": 0, "removed": 0}
+
+    def closest(url: str) -> str | None:
+        if url in known_set:
+            return url
+        best = difflib.get_close_matches(url, known, n=1, cutoff=0.95)
+        return best[0] if best else None
+
+    def fix_md(m: re.Match) -> str:
+        label, url = m.group(1), m.group(2)
+        good = closest(url)
+        if good == url:
+            return m.group(0)
+        if good:
+            stats["repaired"] += 1
+            return f"[{label}]({good})"
+        stats["removed"] += 1
+        return label
+
+    answer = _MD_S3_LINK_RE.sub(fix_md, answer)
+
+    # Markdown links are already exact tool URLs here, so they pass through.
+    def fix_bare(m: re.Match) -> str:
+        url = m.group(0).rstrip(".,;:")
+        tail = m.group(0)[len(url):]
+        good = closest(url)
+        if good == url:
+            return m.group(0)
+        if good:
+            stats["repaired"] += 1
+            return good + tail
+        stats["removed"] += 1
+        return tail
+
+    answer = _S3_URL_RE.sub(fix_bare, answer)
+    return answer, stats["repaired"], stats["removed"]
+
+
 def _message_text(msg) -> str:
     raw = msg.text
     if isinstance(raw, list):
@@ -207,6 +263,11 @@ async def tribunal_judgment_node(state: LegalAgentState) -> dict:
                 seen_ids.add(s.db_id)
             unique_sources.append(s)
         sources = unique_sources
+
+        answer, repaired, removed = _repair_pdf_links(answer, sources)
+        if repaired or removed:
+            log.warning("PDF links in answer did not match tool URLs",
+                        repaired=repaired, removed=removed)
 
         if sources:
             progress("tribunal_judgment", f"Found {len(sources)} tribunal orders",

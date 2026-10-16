@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -39,7 +40,13 @@ def main() -> int:
 
     if args.check:
         def reachable(d):
-            return requests.head(d["pdf_links"][0]["url"], timeout=30).status_code == 200
+            # Retry: a burst of parallel lookups can fail DNS resolution locally.
+            for attempt in range(4):
+                try:
+                    return requests.head(d["pdf_links"][0]["url"], timeout=30).status_code == 200
+                except requests.RequestException:
+                    time.sleep(2 ** attempt)
+            return False
         with ThreadPoolExecutor(args.workers) as pool:
             ok = list(pool.map(reachable, docs))
         missing = [d["s3_key"] for d, good in zip(docs, ok) if not good]

@@ -69,9 +69,10 @@ def test_pair_clock_is_strictly_decreasing_across_all_four_calls(monkeypatch):
 
 
 def test_default_budget_bounds_the_worst_case_below_the_request_budget():
-    # Four 60s calls used to cost 240s of a 285s request. The cap must be
-    # well under that so a stalled pair cannot starve the sections after it.
-    assert PAIR_TOTAL_BUDGET_S <= 120
+    # A stalled pair must not starve the sections after it: the cap stays
+    # well under half the request deadline (150s of 465s since 2026-10-16).
+    from core.settings import CHAT_REQUEST_DEADLINE_S
+    assert PAIR_TOTAL_BUDGET_S <= CHAT_REQUEST_DEADLINE_S / 3
     assert _PAIR_RETRY_MIN_REMAINING_S < PAIR_TOTAL_BUDGET_S
 
 

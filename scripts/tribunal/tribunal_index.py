@@ -171,7 +171,10 @@ def _migrate_reindex(c: Client, expected: int) -> None:
     while True:
         t = c.req("GET", f"_tasks/{task}").json()
         st = t.get("task", {}).get("status", {})
-        print(f"  {st.get('created', 0) + st.get('updated', 0)}/{expected} copied, "
+        # With slices the parent's own counters stay 0; the slices carry them.
+        parts = [s for s in (st.get("slices") or []) if s] or [st]
+        done = sum(p.get("created", 0) + p.get("updated", 0) for p in parts)
+        print(f"  {done}/{expected} copied, "
               f"failures so far: {len(t.get('response', {}).get('failures', []))}")
         if t.get("completed"):
             resp = t.get("response", {})

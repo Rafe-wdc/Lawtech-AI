@@ -18,7 +18,8 @@ import os
 workers = int(os.getenv("GUNICORN_WORKERS", "1"))
 worker_class = "uvicorn.workers.UvicornWorker"
 bind = f"{os.getenv('HOST', '0.0.0.0')}:{os.getenv('PORT', '5001')}"
-timeout = int(os.getenv("GUNICORN_TIMEOUT", "300"))
+# Above CHAT_REQUEST_TIMEOUT_S (480s) so the app's own deadline fires first.
+timeout = int(os.getenv("GUNICORN_TIMEOUT", "500"))
 graceful_timeout = 30
 # keepalive: idle-connection timeout between requests on a kept-alive
 # socket. Original 5s was too short — SSE streams take 30–120 s and the

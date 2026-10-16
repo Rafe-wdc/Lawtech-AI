@@ -3956,6 +3956,9 @@ structured plan that decides in one shot:
   judgments (verbatim): add BOTH **Judgment** AND **SCI_Judgment**. Skip
   SCI_Judgment if the user scoped to "High Court only"; skip Judgment if
   they scoped to "Supreme Court only" or named a specific SC case.
+  EXCEPTION: when the task is **Tribunal_Judgment**, do NOT add Judgment or
+  SCI_Judgment unless the user ALSO asks for High Court / Supreme Court
+  judgments in so many words.
 - Asks for statutory text alongside another primary: add **Legislation**
   (or **Newacts** if it's one of the 6 codes — never both).
 - Invokes a fundamental right alongside another primary: add **Constitution**.

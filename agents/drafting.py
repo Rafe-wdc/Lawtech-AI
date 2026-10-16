@@ -3085,7 +3085,14 @@ async def _generate_section_pair(
     # and lets the `draft_incomplete` flag tell the user when a section was
     # lost. Lower it if outage-time completeness matters more than provider
     # consistency day to day.
-    _SECTION_PAIR_LOCAL_TIMEOUT = 60
+    # 2026-10-16: 60s -> 120s. The figures above were measured on Gemini.
+    # Drafting has run on Claude Sonnet 5 since 2026-09-07; it writes ~80
+    # output tokens/s, so a long section pair (4-7k tokens: Grounds,
+    # Statement of Facts) needs 55-90s and was routinely cut off at 60s and
+    # handed to Gemini with whatever was left of the pair budget - often too
+    # little, so the section was lost ("2 of 2 section(s) could not be
+    # generated", writ petition, 2026-10-16).
+    _SECTION_PAIR_LOCAL_TIMEOUT = 120
 
     if len(sections_to_write) == 1:
         section_label = f"section {section_position_start}"
@@ -3354,7 +3361,9 @@ _OFF_TARGET_RETRY_MIN_BUDGET_S = 150
 # "N of M sections could not be generated". Healthy pairs run 9-56s
 # (p90 32s), so 90s leaves room for one slow call plus one failover and
 # still bounds the damage a hung provider can do to the rest of the draft.
-PAIR_TOTAL_BUDGET_S = 90
+# 2026-10-16: 90s -> 150s with the per-call timeout at 120s (Claude Sonnet 5
+# needs 55-90s for a long pair): one full Claude call plus a 30s failover.
+PAIR_TOTAL_BUDGET_S = 150
 
 # Do not start another attempt for this pair with less than this much of
 # its budget left — the call would be clamped to a few seconds and fail.
@@ -3518,7 +3527,9 @@ def _retrieve_source_for_pair(
 # adaptive single-pass band (PR 2) is one critique + one refine ≈ 5s + 32s;
 # the language gate and the deterministic guards are cheap unless they
 # regenerate, which the reserve does not attempt to fund.
-SELF_REFINE_RESERVE_S = 45.0
+# 2026-10-16: 45s -> 100s; on Claude a critique runs 25-45s and a refine
+# 30-60s (the old 45s/60s call limits timed both out on a writ petition).
+SELF_REFINE_RESERVE_S = 100.0
 LANG_GATE_RESERVE_S = 20.0
 
 # p90 wall time of ONE section-pair call (two sections). Constant for now,
@@ -3526,7 +3537,9 @@ LANG_GATE_RESERVE_S = 20.0
 # calibration comment in _generate_section_pair (124 calls: p90 32s); the
 # margin covers the odd failover. Wire to telemetry once the
 # `Section pair gen` timings are aggregated.
-OBSERVED_PAIR_TIME_P90_S = 45.0
+# 2026-10-16: 45s -> 75s. Those timings were Gemini's; on Claude Sonnet 5
+# measured pairs ran 19-90s (writ petition, same prompt on prod/dev/local).
+OBSERVED_PAIR_TIME_P90_S = 75.0
 
 
 def _fit_plan_to_budget(

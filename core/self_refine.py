@@ -1807,7 +1807,9 @@ async def _critique(
                         ),
                     },
                 ),
-                local_timeout=45,
+                # 45s -> 90s (2026-10-16): Claude critiques of long drafts
+                # ran past 45s and the review was skipped.
+                local_timeout=90,
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
         result: Critique = raw_and_parsed["parsed"]
@@ -1968,7 +1970,9 @@ async def _refine(
                         ),
                     },
                 ),
-                local_timeout=60,
+                # 60s -> 120s (2026-10-16): a Claude refine re-emits the
+                # whole draft at ~80 tokens/s.
+                local_timeout=120,
             )
         _record_tokens("SelfRefine", "refine", result)
         record_gemini_flash_success()

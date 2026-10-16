@@ -224,6 +224,17 @@ EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "")
 # --- ChromaDB (PDF uploads only) ---
 CHROMA_STORE_ROOT = str(_PROJECT_ROOT / "chroma_store")
 
+# --- Request time budget ---
+# Outer timeout for one chat request (SSE stream and the batch endpoint), and
+# the deadline every nested call is clamped to (15 s kept for the final
+# response / sources / done events). Raised from 300 s on 2026-10-16: drafting
+# runs on Claude Sonnet 5 (~80 output tokens/s), and a long section pair alone
+# needs 55-90 s, so a 7-section writ petition did not fit in 300 s - sections
+# were cut off, handed to Gemini with too little time, or lost. nginx allows
+# 600 s; the frontend / Node proxy must allow at least this much.
+CHAT_REQUEST_TIMEOUT_S = int(os.getenv("CHAT_REQUEST_TIMEOUT_S", "480"))
+CHAT_REQUEST_DEADLINE_S = CHAT_REQUEST_TIMEOUT_S - 15
+
 # --- File Upload Storage ---
 UPLOADS_ROOT = str(_PROJECT_ROOT / "uploads")
 MAX_FILES_PER_REQUEST = 30          # max files per single message

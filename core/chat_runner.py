@@ -649,6 +649,11 @@ async def run_chat_pipeline(
                             })
                         elif kind == "progress":
                             yield _sse(chunk)
+                        elif kind == "heartbeat":
+                            # SSE comment: keeps proxies from closing an idle
+                            # stream during a long model call; parsers ignore
+                            # lines starting with ":".
+                            yield ": ping\n\n"
                     continue
 
                 # --- Update events: node-level progress ---

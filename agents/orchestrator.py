@@ -450,6 +450,10 @@ doubt, do NOT pick Drafting.
   judgments (verbatim): add BOTH **Judgment** AND **SCI_Judgment**. Skip
   SCI_Judgment if the user scoped to "High Court only"; skip Judgment if
   they scoped to "Supreme Court only" or named a specific SC case.
+  EXCEPTION: when the task is **Tribunal_Judgment**, the orders / rulings
+  asked for are the tribunal's — do NOT add Judgment or SCI_Judgment. Add
+  them only if the user ALSO asks for High Court / Supreme Court judgments
+  in so many words ("TDSAT orders and Supreme Court rulings on ...").
 - Asks for statutory text alongside another primary: add **Legislation**
   (or **Newacts** if it's one of the 6 codes — never both).
 - Invokes a fundamental right alongside another primary: add **Constitution**.
@@ -603,7 +607,16 @@ def _detect_multi_intent(intent: UserIntent | None, task: str) -> list[str]:
     if task == "Legal_Concepts":
         return []
     extra: list[str] = []
-    if intent.include_case_law:
+    # A question about a tribunal's orders is answered from the tribunal
+    # index. The HC and SC agents have nothing on, say, a TDSAT petition,
+    # fall back to the web, and show "searching the web" while the tribunal
+    # agent answers (dev, 2026-10-16). The SC agent still joins when the user
+    # names the Supreme Court (wants_supreme_court, below). Keyed on the
+    # primary task, not on wants_tribunal_rulings: "case laws on medical
+    # negligence" also wants consumer-commission orders, and still needs the
+    # HC and SC precedents.
+    tribunal_scoped = task == "Tribunal_Judgment"
+    if intent.include_case_law and not tribunal_scoped:
         # Fan out to BOTH High Court (Judgment) AND Supreme Court (SCI_Judgment)
         # when case law is requested, regardless of whether the user explicitly
         # named the apex court.

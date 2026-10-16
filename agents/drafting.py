@@ -77,9 +77,21 @@ from core.self_refine import self_refine
 log = get_logger("Drafting")
 
 
-# Limit concurrent Drafting executions per worker process (avoids Gemini
-# rate limits and gives the orchestrator a back-pressure signal).
-_AGENT_SEMAPHORE = asyncio.Semaphore(3)
+# Limit concurrent Drafting executions per worker process (back-pressure
+# for the orchestrator). 3 -> 8 (2026-10-16): the limit dated from Gemini
+# rate limits, when a draft held its slot ~1-2 min. A complete Claude draft
+# holds it ~5 min, so the 4th concurrent user queued for minutes, and the
+# wait counts against the same 480 s request deadline. Claude's limits are
+# far higher and drafting mostly waits on the network. Tune with
+# DRAFTING_MAX_CONCURRENT.
+def _drafting_max_concurrent() -> int:
+    try:
+        return max(1, int(os.getenv("DRAFTING_MAX_CONCURRENT", "8")))
+    except ValueError:
+        return 8
+
+
+_AGENT_SEMAPHORE = asyncio.Semaphore(_drafting_max_concurrent())
 
 
 # ---------------------------------------------------------------------------

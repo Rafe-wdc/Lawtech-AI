@@ -1435,6 +1435,22 @@ Given the user's query and the recent conversation summary, produce:
        jurisdiction is with no request for its orders, and FALSE for GST
        AAR / AAAR rulings (those are wants_gst_rulings).
 
+   draft_edit_scope — only when the previous turn produced a DRAFT (see the
+       previous-turn intent: task_intent "draft") and the current query asks
+       to change that document; "none" otherwise.
+       "partial" — change, add or remove SPECIFIC parts and keep the rest:
+           "change paragraph 3 to say the rent was due from February",
+           "remove the second ground", "add a paragraph on limitation after
+           the facts", "make the prayer also ask for costs", "correct the
+           date in para 5 to 12.03.2024", "rewrite the facts section".
+       "whole" — the change runs through the whole document: "translate it
+           to Hindi", "shorten it", "make it more formal", "convert to bullet
+           points", "replace the petitioner's name everywhere".
+       "none" — not a change to the earlier draft, including a request for a
+           DIFFERENT new document ("now draft the reply notice") or a
+           question about the draft ("is paragraph 4 legally sound?").
+       Same rule in any language or script.
+
    named_acts — list of specific Indian acts / codes / statutes the user
        references by name in the query. Each entry should be the canonical
        English act name with year when given. Examples:
@@ -2512,6 +2528,54 @@ DRAFTING_MODIFICATION_PROMPT += (
     + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
+
+
+# --- Drafting follow-up: targeted edit (core/draft_edit.py) ---
+# The user asked to change specific parts of a draft from an earlier turn.
+# The model returns edit operations on numbered blocks; code applies them, so
+# every block it does not name reaches the user unchanged. Fixed rules here
+# (cached system prompt); the numbered draft and the instruction go in
+# DRAFTING_TARGETED_EDIT_INPUTS. Used with .format() and no arguments, like
+# DRAFTING_MODIFICATION_PROMPT, so literal braces must be doubled.
+DRAFTING_TARGETED_EDIT_PROMPT = """You are editing an EXISTING Indian-law legal draft. The user has asked for a change to SPECIFIC parts of it. You do NOT return the document. You return a list of edit operations on its numbered blocks; the system applies them and keeps every other block exactly as it is.
+
+## The draft
+The draft is given as blocks, each under an id such as [B7]. A block is a paragraph, a heading, a table, or a list.
+
+## Operations
+- `replace` — `block` = the id, `text` = the complete new text of that block.
+- `insert_after` / `insert_before` — `block` = the neighbouring id, `text` = the complete new block.
+- `delete` — `block` = the id, `text` empty.
+
+## Rules
+1. Change ONLY what the instruction asks for. Do not touch any other block, not even to improve it. The fewer operations, the better — usually one to three.
+2. A `replace` text is the WHOLE block after the change, not a fragment and not a diff. Keep the block's own formatting: its paragraph number, bold, list markers, indentation, and language.
+3. New paragraphs follow the draft's style: same numbering format ("7." / "**7.**" / "(g)"), same tone, same language and script. Number an inserted paragraph as if it sat at that position; the system renumbers the rest of the series.
+4. Keep every party name, court, case number, date, amount and statutory reference exactly as the draft has them, unless the instruction changes that value. Never replace a real value with a [placeholder]. If the instruction needs a value that is neither in the draft nor in the instruction, use a clearly bracketed placeholder such as [Date of Agreement] — never invent one.
+5. If the user changes a value that appears in several blocks (a date, an amount, a name), edit every block where it appears.
+6. Paragraph references in the instruction ("paragraph 5", "the second ground", "the prayer") mean the numbering and headings visible in the draft, not block ids. Find the block that holds it.
+7. Set `whole_document` to true, with no edits, ONLY when the change genuinely runs through the entire document — translate it, shorten or expand all of it, change the tone or format throughout. A change to one or a few parts is never whole_document.
+8. If the instruction refers to a part that does not exist in the draft, add it in the place a lawyer would expect it (for example a missing verification clause after the prayer).
+"""
+
+DRAFTING_TARGETED_EDIT_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
+
+DRAFTING_TARGETED_EDIT_INPUTS = """## USER INTENT DIRECTIVES
+{intent_directives_block}
+
+## EXISTING DRAFT (numbered blocks)
+{numbered_draft}
+
+## USER INSTRUCTION
+{user_directive}
+
+Return the edit operations now.
+"""
 
 
 # --- Drafting Pipeline: Citation Injection (with real DB results) ---
@@ -4009,6 +4073,11 @@ Extract the same fields as the legacy USER_INTENT_EXTRACTION_PROMPT:
   **wants_tribunal_rulings** — boolean flags derived from the query
   (wants_tribunal_rulings: the user wants orders of a tribunal or
   commission such as TDSAT, CESTAT, CAT, CIC, NGT, NCDRC, APTEL)
+- **draft_edit_scope** — "partial" / "whole" / "none": whether a follow-up
+  changes specific parts of the document drafted in the previous turn
+  ("change paragraph 3", "remove the second ground") or the whole of it
+  ("translate it", "shorten it"); "none" for anything else, including a new
+  document
 - **named_acts** — list of act names the user referenced
 - **additional_instructions** — free-form catchall for user directives that
   don't fit the typed fields above (cap 300 chars)

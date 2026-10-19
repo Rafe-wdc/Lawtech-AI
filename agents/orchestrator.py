@@ -787,7 +787,9 @@ def _extract_user_intent(
                     f"- language_explicit: {getattr(previous_intent, 'language_explicit', False)}\n"
                     f"- strict_language: {getattr(previous_intent, 'strict_language', False)}\n"
                     f"- response_depth: {getattr(previous_intent, 'response_depth', 'standard')}\n"
-                    f"- legal_artifact: {_artifact or 'unspecified'}"
+                    f"- legal_artifact: {_artifact or 'unspecified'}\n"
+                    # draft_edit_scope reads this: an edit needs a prior draft.
+                    f"- task_intent: {getattr(previous_intent, 'task_intent', 'other')}"
                 )
             raw_and_parsed = chain.invoke({
                 # Both inputs flow into an LLM call, so they MUST be wrapped
@@ -908,7 +910,8 @@ def _dynamic_plan(
                     f"- language_explicit: {getattr(previous_intent, 'language_explicit', False)}\n"
                     f"- strict_language: {getattr(previous_intent, 'strict_language', False)}\n"
                     f"- response_depth: {getattr(previous_intent, 'response_depth', 'standard')}\n"
-                    f"- legal_artifact: {_artifact or 'unspecified'}"
+                    f"- legal_artifact: {_artifact or 'unspecified'}\n"
+                    f"- task_intent: {getattr(previous_intent, 'task_intent', 'other')}"
                 )
             raw_and_parsed = chain.invoke({
                 "query":                wrap_untrusted(query),

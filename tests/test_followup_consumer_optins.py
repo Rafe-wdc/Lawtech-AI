@@ -69,11 +69,12 @@ class TestRewriterSkipOnDraftingDirective:
         university notice. Now the skip requires fast-path ON — with it
         off the code walks past the skip branch and calls the LLM (not
         exercised here, just documenting the guard)."""
-        monkeypatch.delenv("DRAFTING_FOLLOWUP_FAST_PATH", raising=False)
+        monkeypatch.setenv("DRAFTING_FOLLOWUP_FAST_PATH", "0")
         # Same inputs as test_skips_short_directive_after_drafting above
         # — with fast-path OFF the skip branch's condition evaluates
         # False, so the code walks past it. Assert only that the guard
         # condition evaluates correctly by mirroring the check inline.
+        # (The fast path is on by default; "0" is the explicit off switch.)
         from agents.drafting import _fast_path_enabled
         assert _fast_path_enabled() is False
 

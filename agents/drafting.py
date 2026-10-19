@@ -2369,65 +2369,8 @@ async def _generate_single_pass(
                 "copies of source-document text from the prompt."
             )
 
-    # A non-empty answer can still be a broken draft. Dev 2026-10-19: 1 of 9
-    # identical legal-notice requests returned 419 chars (letterhead, "To",
-    # "From", then the signature, no body) after a generate call that billed
-    # thousands of output tokens. self_refine skips anything under 500 chars,
-    # so it shipped. Retry once and keep the longer result; the logged shape
-    # (model, finish reason, block types) is what tells us why next time.
-    if len(text.strip()) < _MIN_PLAUSIBLE_DRAFT_CHARS:
-        log.error(
-            "Draft generation returned an implausibly short draft; retrying once",
-            length=len(text.strip()), **_response_shape(response),
-        )
-        try:
-            with log_time(log, "Draft generation retry (short draft)"):
-                retry = await _invoke_once(
-                    "IMPORTANT: a previous attempt returned only the heading and "
-                    "the signature of this document. Return the COMPLETE document "
-                    "with its full body, from the first line to the last."
-                )
-            _record_tokens("Drafting", "generate_retry_short", retry)
-            retry_text = getattr(retry, "text", "") or ""
-            log.info("Short-draft retry finished", length=len(retry_text.strip()),
-                     **_response_shape(retry))
-            if len(retry_text.strip()) > len(text.strip()):
-                text = retry_text
-        except Exception as e:
-            log.error("Short-draft retry failed", error=str(e)[:200], exc_info=True)
-
     log.info("Draft generated", length=len(text))
     return text
-
-
-# A filing-ready draft is never this short: the shortest legal notice in the
-# reference corpus is several times longer. Below it, single-pass generation
-# is treated as having failed and retried once.
-_MIN_PLAUSIBLE_DRAFT_CHARS = 800
-
-
-def _response_shape(response) -> dict:
-    """Why a generation came back short: which model answered (a Gemini
-    fallback announces itself here), the finish reason, the token split, and
-    the content blocks by type and length."""
-    meta = getattr(response, "response_metadata", None) or {}
-    usage = getattr(response, "usage_metadata", None) or {}
-    content = getattr(response, "content", None)
-    if isinstance(content, list):
-        blocks = [
-            f"{b.get('type', '?')}:{len(str(b.get('text') or b.get('thinking') or ''))}"
-            if isinstance(b, dict) else f"str:{len(b)}"
-            for b in content
-        ]
-    else:
-        blocks = [f"str:{len(content or '')}"]
-    return {
-        "model": meta.get("model_name") or meta.get("model") or "unknown",
-        "finish_reason": str(meta.get("finish_reason") or meta.get("stop_reason") or "unknown"),
-        "output_tokens": usage.get("output_tokens"),
-        "reasoning_tokens": (usage.get("output_token_details") or {}).get("reasoning"),
-        "blocks": blocks[:12],
-    }
 
 
 # ---------------------------------------------------------------------------

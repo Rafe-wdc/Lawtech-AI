@@ -3938,18 +3938,7 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
             return False
         if raw_first_line.lstrip().startswith("#"):
             return True
-        # A bold line is a section heading only when it reads like a pleading
-        # caption: short, written in capitals ("MOST RESPECTFULLY SHOWETH",
-        # "PRAYER"), and not a reference line. Mixed case is a name, a
-        # placeholder or a sentence. Both were dropped as "repeats" on dev
-        # 2026-10-19: "**Subject: Legal notice demanding ...**" took the whole
-        # body with it, and the signature's "**[Advocate Name]**" (already in
-        # the From block) took the sign-off. Scripts without case
-        # (Devanagari, Tamil, ...) have no lowercase and still qualify.
-        words = head.split()
-        return (2 <= len(words) <= _MAX_BOLD_HEADING_WORDS
-                and not any(ch.islower() for ch in raw_first_line)
-                and not _REFERENCE_LINE_RE.match(head))
+        return len(head.split()) >= 2
 
     def _same(a: str, b: str) -> bool:
         if a == b:
@@ -3958,18 +3947,11 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
             return True
         if a.startswith("verif") and b.startswith("verif"):
             return True
-        # One heading inside another is the same section only when the
-        # shorter carries a real share of the longer ("brief facts" /
-        # "brief facts of the case"). Dev 2026-10-19: "legal notice" (the
-        # title) sat inside the 15-word subject line, the subject block was
-        # dropped as a repeat, and with it every line down to the signature.
-        short, long_ = sorted((a.split(), b.split()), key=len)
-        if (a in b or b in a) and len(short) >= 2 and len(short) >= 0.4 * len(long_):
+        if (a in b or b in a) and len(a.split()) >= 2 and len(b.split()) >= 2:
             return True
         return False
 
     seen: list[str] = []
-    seen_len: dict[str, int] = {}
     kept, dropped = [], []
     # The supporting affidavit restates the court caption and case number
     # BEFORE its own heading. Audit 2026-09-11 reproduced both being
@@ -3981,36 +3963,13 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
         first = block.lstrip().split("\n", 1)[0]
         is_head = _is_section_heading(first, head)
         in_affidavit = _aff_idx is not None and idx >= max(0, _aff_idx - 8)
-        match = next((h for h in seen if _same(head, h)), None) if is_head and not in_affidavit else None
-        if match is not None:
-            # A repeat is about the size of the section it repeats. A block
-            # far larger than its "original" is the document's body behind a
-            # wrongly matched heading: keep it rather than ship a skeleton.
-            if len(block) > _REPEAT_MAX_GROWTH * seen_len[match] + _REPEAT_SLACK_CHARS:
-                log.warning(
-                    "Repeated-section match ignored: the block is far larger than the section it repeats",
-                    heading=head[:60], matched=match[:60],
-                    block_chars=len(block), original_chars=seen_len[match],
-                )
-            else:
-                dropped.append(head)
-                continue
+        if is_head and not in_affidavit and any(_same(head, h) for h in seen):
+            dropped.append(head)
+            continue
         if is_head:
             seen.append(head)
-            seen_len.setdefault(head, len(block))
         kept.append(block)
     return "".join(kept), dropped
-
-
-# Bold lines longer than this are sentences (a subject line, a party
-# description), not section headings.
-_MAX_BOLD_HEADING_WORDS = 12
-# Reference lines at the top of a notice or letter.
-_REFERENCE_LINE_RE = re.compile(r"^(?:subject|sub|re|ref|reference|kind attention|attn)\b\s*[:.\-]?", re.I)
-# A block dropped as a repeat may be at most this many times the size of the
-# section it repeats, plus a fixed allowance for a short original heading.
-_REPEAT_MAX_GROWTH = 3
-_REPEAT_SLACK_CHARS = 500
 
 
 def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:

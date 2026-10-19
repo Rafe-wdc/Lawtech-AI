@@ -4636,7 +4636,7 @@ async def _generate_draft_modification(
     detects an empty result and routes through the full pipeline instead,
     so the fast-path is always a strict improvement over today.
     """
-    from config.prompts import DRAFTING_MODIFICATION_PROMPT
+    from config.prompts import DRAFTING_MODIFICATION_PROMPT, DRAFTING_MODIFICATION_INPUTS
     from core.language import _format_intent_directives, localize_prompt
     from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -4649,17 +4649,18 @@ async def _generate_draft_modification(
         else "(no new files uploaded this turn — modify the EXISTING DRAFT alone)"
     )
 
-    # Order matters: format() FIRST (fills our known placeholders on the raw
-    # template), localize_prompt() SECOND (appends language + intent directive
-    # blocks that may contain literal { characters we don't want format() to
-    # see). Swapping the order can throw KeyError on the localized text.
-    system_prompt = DRAFTING_MODIFICATION_PROMPT.format(
+    # Fixed rules in the (cached) system prompt; the draft, directive and
+    # language block in the user message after it, so the rules are an
+    # identical prefix on every call. format() with no arguments only undoes
+    # the {{ }} escaping. The language block is appended unformatted — it may
+    # contain literal { characters.
+    system_prompt = DRAFTING_MODIFICATION_PROMPT.format()
+    user_message = DRAFTING_MODIFICATION_INPUTS.format(
         existing_draft=prior_draft,
         user_directive=user_directive.strip(),
         intent_directives_block=intent_directives_block,
         new_source_documents=new_source_block,
-    )
-    system_prompt = localize_prompt(system_prompt, user_language, user_intent)
+    ) + localize_prompt("", user_language, user_intent)
 
     llm = get_drafting_llm(
         max_output_tokens=24000,
@@ -4677,7 +4678,7 @@ async def _generate_draft_modification(
             response = await asyncio.to_thread(
                 llm.invoke,
                 [SystemMessage(content=cacheable_system(system_prompt)),
-                 HumanMessage(content="Produce the complete modified draft now.")],
+                 HumanMessage(content=user_message)],
             )
     except Exception as e:
         log.error("Draft modification LLM call failed",

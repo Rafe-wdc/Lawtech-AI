@@ -2475,8 +2475,13 @@ You are NOT drafting from scratch. You are NOT producing a diff. You are NOT ret
 5. If a value the directive references is NOT present in the EXISTING DRAFT or the NEW UPLOADED SOURCES, use a clearly-bracketed placeholder (e.g. `[Advocate's Address]`, `[Bank Reference Number]`) — never invent it.
 
 6. Output ONLY the complete modified document. No preamble ("Here is the modified draft:"). No postscript ("This has been updated per your request."). No meta-commentary. No diff notation. No `~~strikethrough~~` marking what changed. Just the final document.
+"""
 
-## USER INTENT DIRECTIVES
+# The per-request inputs, sent as the user message AFTER the fixed rules
+# above (2026-10-19). They used to sit in the middle of the system prompt,
+# ahead of ~5,800 tokens of appended rules, so neither Claude's prompt
+# cache nor Gemini's implicit cache could reuse those rules.
+DRAFTING_MODIFICATION_INPUTS = """## USER INTENT DIRECTIVES
 {intent_directives_block}
 
 ## EXISTING DRAFT

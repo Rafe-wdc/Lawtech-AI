@@ -170,16 +170,29 @@ def _other_party_is_government(parties: str, pet_tokens: list[str]) -> bool | No
     return bool(_GOVT_PARTY_RE.match(other) or re.search(r"(?i)\b(?:govt|government|state|union of india|u\.?o\.?i|cbi|central bureau|nct)\b", other))
 
 
-def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | None, list[str]]:
+def _same_private_party(other_side: str, respondent: str) -> bool:
+    """A private respondent spelt differently in the index ("Vaidhyan" /
+    "Vaidyan") still shares a 4-letter stem with it. A different person
+    ("PARAMESWARAN GOVINDAN" for "Sankaran Vaidhyan Balan") shares none."""
+    stems = {t[:4] for t in _significant_party_tokens(respondent) if len(t) >= 4}
+    return any(t[:4] in stems for t in _significant_party_tokens(other_side) if len(t) >= 4)
+
+
+def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | str | None, list[str]]:
     """(present, related). present is True / False when the index can answer,
-    None when it cannot (fail open). related lists up to three real cases that
-    share the distinctive party when the title is absent.
+    "cited" when the title is not a judgment in the index but its name occurs
+    in the text of other judgments, None when the index cannot answer (fail
+    open). related lists up to three real cases that share the distinctive
+    party when the title is absent.
 
     Stage 1: petitioner tokens AND the respondent key. Stage 2 on a miss:
-    petitioner tokens alone; if the matching case's other party is the same
-    kind as the query's respondent (government vs private) the title is
-    treated as present (spelling variants such as "GOVT.OF U.P."); otherwise
-    it is a different case and the gate fires with the related list.
+    petitioner tokens alone; a matching case counts as the title when its
+    other party is the same kind as the query's respondent (government
+    spelling variants such as "GOVT.OF U.P.") or, for a private respondent,
+    the same person spelt differently. Every stage-2 hit is checked, not a
+    top few, because hits sharing a surname tie on score and come back in
+    arbitrary order (K. Bhaskaran v. Sankaran Vaidhyan Balan passed the gate
+    on 5 of 8 runs through "PARAMESWARAN GOVINDAN VS KRISHNAN BHASKARAN").
     """
     pet, resp = petitioner, respondent
     if _GOVT_PARTY_RE.match(pet or "") and not _GOVT_PARTY_RE.match(resp or ""):
@@ -202,29 +215,48 @@ def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | None, 
             }, request_timeout=15)
             return r["hits"]["hits"]
 
+        def _glued(tokens, size):
+            # "C.C.ALAVI HAJI" indexes "c.c.alavi" as one word and names are
+            # stemmed ("palapetty" -> "palapetti"), so a word match misses the
+            # party; a five-letter infix finds it. The infix must start a word
+            # ("shrey" is not Shreya in "RAM ASHREY SINGH").
+            r = es.search(index=index, body={
+                "size": size, "_source": ["parties", "judgment_date", "case_no"],
+                "query": {"bool": {"filter": [{"wildcard": {"parties": {"value": f"*{t[:5]}*"}}} for t in tokens]}},
+            }, request_timeout=15)
+            return [h for h in r["hits"]["hits"]
+                    if all(re.search(rf"(?<![a-z]){re.escape(t[:5])}", (h.get("_source", {}).get("parties") or "").lower())
+                           for t in tokens)]
+
+        def _in_text(tokens, slop):
+            r = es.search(index=index, body={"size": 1, "_source": False,
+                "query": {"match_phrase": {"full_text": {"query": " ".join(tokens), "slop": slop}}}}, request_timeout=15)
+            t = r["hits"]["total"]
+            return (t["value"] if isinstance(t, dict) else t) > 0
+
         if resp_key and _hits(pet_tokens + [resp_key], 1):
             return True, []
-        hits = _hits(pet_tokens, 3)
-        if not hits:
-            # The title is not a party in the index. If the name occurs in the
-            # TEXT of other judgments (a landmark case the corpus lacks but later
-            # cases cite), research can still ground an answer on those: do not
-            # gate. A truly unknown name occurs nowhere and the gate fires.
-            r = es.search(index=index, body={"size": 1, "_source": False,
-                "query": {"match_phrase": {"full_text": {"query": " ".join(pet_tokens), "slop": 1}}}}, request_timeout=15)
-            t = r["hits"]["total"]
-            if (t["value"] if isinstance(t, dict) else t) > 0:
-                return None, []
-            return False, []
+        hits = _hits(pet_tokens, 10) or _glued(pet_tokens, 10)
         related = []
         for h in hits:
             src = h.get("_source", {})
             parties = (src.get("parties") or "").strip()
             kind = _other_party_is_government(parties, pet_tokens)
-            if kind is None or kind == resp_is_govt:
+            if kind is None or (kind == resp_is_govt and (kind or _same_private_party(parties, resp))):
                 return True, []                                 # same title, variant spelling
-            tail = ", ".join(x for x in (src.get("case_no"), src.get("judgment_date")) if x)
-            related.append(parties + (f" ({tail})" if tail else ""))
+            if len(related) < 3:
+                tail = ", ".join(x for x in (src.get("case_no"), src.get("judgment_date")) if x)
+                related.append(parties + (f" ({tail})" if tail else ""))
+        if resp_key and _glued(pet_tokens + [resp_key], 1):
+            return True, []
+        # The title is not a judgment in the index. If later judgments cite it
+        # by name (a landmark the corpus lacks), research can report what they
+        # say; the caller tells the user the judgment itself is absent. Slop 4
+        # spans "v. the State of". A party-less name occurring anywhere in
+        # judgment text counts too (the pre-existing rule). A name that occurs
+        # nowhere gates.
+        if _in_text(pet_tokens + ([resp_key] if resp_key else []), 4) or (not hits and _in_text(pet_tokens, 1)):
+            return "cited", []
         return False, related
     except Exception as e:  # noqa: BLE001
         log.warning("Case-name party gate skipped (ES error)", error=short_err(e))
@@ -241,6 +273,30 @@ def _not_found_result(petitioner: str, respondent: str, related: list[str] | Non
     if related:
         msg += "\n\nSupreme Court cases in the database with the same party name:\n" + "\n".join(f"- {r}" for r in related)
     return AgentResult(agent_name="SCI_Judgment", content=msg, sources=[], tokens_consumed=0)
+
+
+def _cited_only_directive(petitioner: str, respondent: str) -> str:
+    """Appended to the ReAct user message when the title is cited by other
+    judgments but is not itself in the index. Without it the agent wrote a
+    full summary of the absent judgment from memory and listed the citing
+    judgments' PDFs under it as if they were its source."""
+    return (
+        f"\n\n[Database note: no judgment titled \"{petitioner} vs {respondent}\" is in the "
+        "Supreme Court database; its name occurs only in the text of other judgments. Do not "
+        "write a summary of that judgment as if you had read it, and do not present any PDF as "
+        "its judgment. Find the judgments that cite or discuss it, read them, and report what "
+        "THEY say about it, attributing each point to the citing judgment by name. List each PDF "
+        "link only under the name of the judgment it belongs to.]"
+    )
+
+
+def _cited_only_notice(petitioner: str, respondent: str) -> str:
+    return (
+        f"> **Note:** The judgment *{petitioner} vs {respondent}* is not in the Lawttorney "
+        "Supreme Court database, so its own judgment PDF is not available here. The discussion "
+        "below is drawn from other Supreme Court judgments that cite it, and each PDF link "
+        "belongs to the judgment named with it.\n\n"
+    )
 
 
 async def sci_judgment_node(state: LegalAgentState) -> dict:
@@ -270,6 +326,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         _lookup = None if user_context else (
             _case_name_lookup(state.get("original_query") or "") or _case_name_lookup(query)
         )
+        _cited_only = None
         if _lookup:
             _present, _related = await asyncio.to_thread(_party_in_sci_index, *_lookup)
             if _present is False:
@@ -277,6 +334,10 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                          petitioner=_lookup[0][:60], respondent=_lookup[1][:60])
                 progress("sci_judgment", "No matching Supreme Court case found", step="results")
                 return {"agent_results": {"SCI_Judgment": _not_found_result(*_lookup, related=_related)}}
+            if _present == "cited":
+                log.info("Case-name lookup: title absent from SCI index but cited in judgment text",
+                         petitioner=_lookup[0][:60], respondent=_lookup[1][:60])
+                _cited_only = _lookup
         # max_output_tokens capped at 8192 (~32k chars) to bound the ReAct
         # agent's final response and prevent runaway markdown-table padding.
         llm = get_gemini_flash_full(temperature=0, max_output_tokens=8192)
@@ -308,10 +369,11 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         # Invoke the ReAct sub-agent. Bounded because a hung ReAct
         # trajectory can otherwise consume the whole 180-300s gateway
         # budget with no local ceiling.
+        react_query = query + (_cited_only_directive(*_cited_only) if _cited_only else "")
         progress("sci_judgment", "Running multi-step research (ReAct agent)...", step="react")
         with log_time(log, "ReAct agent execution"):
             result = await asyncio.wait_for(
-                agent.ainvoke({"messages": [("user", query)]}),
+                agent.ainvoke({"messages": [("user", react_query)]}),
                 timeout=90,
             )
 
@@ -405,7 +467,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                         retry_result = await asyncio.wait_for(
                             agent.ainvoke(
                                 {"messages": [
-                                    ("user", query),
+                                    ("user", react_query),
                                     ("assistant", f"I searched for cases and found these results:\n\n{fallback_result}\n\nLet me present these findings to the user."),
                                 ]}
                             ),
@@ -524,6 +586,9 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             except Exception as web_err:
                 log.warning("SCI web fallback failed",
                             error=short_err(web_err))
+
+        if _cited_only and answer and answer.strip():
+            answer = _cited_only_notice(*_cited_only) + answer
 
         result = AgentResult(
             agent_name="SCI_Judgment",

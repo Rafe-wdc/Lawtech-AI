@@ -3941,6 +3941,13 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
     def _is_section_heading(raw_first_line: str, head: str) -> bool:
         if not head:
             return False
+        # Never a section, in any heading style: a reference line ("Subject:
+        # Legal notice demanding ..." was taken for a repeat of the "LEGAL
+        # NOTICE" title on dev 2026-10-19 and the whole body went with it) or
+        # a bracketed placeholder ("[Advocate Name]", printed in the From
+        # block and again in the signature).
+        if _REFERENCE_LINE_RE.match(head) or _PLACEHOLDER_LINE_RE.match(head):
+            return False
         if raw_first_line.lstrip().startswith("#"):
             return True
         return len(head.split()) >= 2
@@ -3957,6 +3964,7 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
         return False
 
     seen: list[str] = []
+    seen_len: dict[str, int] = {}
     kept, dropped = [], []
     # The supporting affidavit restates the court caption and case number
     # BEFORE its own heading. Audit 2026-09-11 reproduced both being
@@ -3968,13 +3976,49 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
         first = block.lstrip().split("\n", 1)[0]
         is_head = _is_section_heading(first, head)
         in_affidavit = _aff_idx is not None and idx >= max(0, _aff_idx - 8)
-        if is_head and not in_affidavit and any(_same(head, h) for h in seen):
-            dropped.append(head)
-            continue
+        match = next((h for h in seen if _same(head, h)), None) if is_head and not in_affidavit else None
+        if match is not None:
+            # Only a genuine duplicate is dropped. A signature block is not a
+            # section even when the signer's name was printed in the From
+            # block, and a block far larger than the section it supposedly
+            # repeats is the document's body behind a wrong match.
+            if not head.startswith(("prayer", "verif")) and _is_signoff_block(block):
+                log.info("Repeated-section match ignored: signature block", heading=head[:60])
+            elif len(block) > _REPEAT_MAX_GROWTH * seen_len[match] + _REPEAT_SLACK_CHARS:
+                log.warning(
+                    "Repeated-section match ignored: the block is far larger than the section it repeats",
+                    heading=head[:60], matched=match[:60],
+                    block_chars=len(block), original_chars=seen_len[match],
+                )
+            else:
+                dropped.append(head)
+                continue
         if is_head:
             seen.append(head)
+            seen_len.setdefault(head, len(block))
         kept.append(block)
     return "".join(kept), dropped
+
+
+# Reference lines at the top of a notice or letter are not sections.
+_REFERENCE_LINE_RE = re.compile(r"^(?:subject|sub|re|ref|reference|kind attention|attn)\b\s*[:.\-]?", re.I)
+# A heading that is only a bracketed blank: "**[Advocate Name]**".
+_PLACEHOLDER_LINE_RE = re.compile(r"^\[[^\]]*\]\s*:?$")
+# A dropped repeat may be at most this many times the size of the section it
+# repeats, plus a fixed allowance for a short original.
+_REPEAT_MAX_GROWTH = 3
+_REPEAT_SLACK_CHARS = 500
+# Lines that make a block a signature / sign-off rather than a section.
+_SIGNOFF_MARKER_RE = re.compile(
+    r"(?im)^[ \t*_]*(?:advocate\b|counsel for\b|\(?signature\)?|yours faithfully|"
+    r"yours sincerely|sd/-|through\b|place[ \t]*:|date[ \t]*:|enrol(?:l)?ment no)"
+)
+
+
+def _is_signoff_block(block: str) -> bool:
+    """A short block whose lines after the name are sign-off lines."""
+    lines = [ln for ln in block.strip().splitlines()[1:] if ln.strip()]
+    return 0 < len(lines) <= 8 and bool(_SIGNOFF_MARKER_RE.search("\n".join(lines)))
 
 
 def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:

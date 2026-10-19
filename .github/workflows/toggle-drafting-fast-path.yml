@@ -8,9 +8,10 @@ name: Toggle drafting follow-up fast path (manual)
 #     one call returns block edits, every other paragraph is kept as it was
 #   - "translate it", "shorten it"                      -> one whole-document
 #     rewrite call
-# Off (default), every follow-up re-runs the full pipeline. Measured
-# 2026-10-19 on dev and prod: "shorten it" on a two-page notice cost ~53k
-# tokens with the flag off.
+# The fast path is ON by default in code (agents/drafting.py
+# _fast_path_enabled); this workflow is mainly the kill switch (value 0).
+# Off, every follow-up re-runs the full pipeline: measured 2026-10-19 on dev
+# and prod, "shorten it" on a two-page notice cost ~53k tokens.
 #
 # workflow_dispatch only. Idempotent: replaces the line if present, appends
 # it otherwise. Rollback: run again with value 0. Same SSH secrets, app

@@ -185,9 +185,8 @@ If any rule in the default drafting system prompt below CONTRADICTS this MODE OV
 # Detection is verb-based (surface signal) plus a length ceiling. Gated on
 # `previous_artifact_kind == "draft"` and a non-trivial `previous_artifact_content`
 # so it can NEVER fire on Turn 1 or on threads whose previous turn was not
-# drafting. Behind `DRAFTING_FOLLOWUP_FAST_PATH=1` env flag — off by default
-# during initial rollout so the first prod week only validates the WRITE side
-# of Level 1.
+# drafting. On by default since 2026-10-19 (it was off during the initial
+# rollout); `DRAFTING_FOLLOWUP_FAST_PATH=0` in .env turns it off.
 # ---------------------------------------------------------------------------
 
 # Directive verbs that indicate "modify the prior draft" intent. Deliberately
@@ -270,10 +269,16 @@ _INLINED_PRIOR_DRAFT_MARKER = "PRIOR DRAFT (the text the user wants to modify"
 
 
 def _fast_path_enabled() -> bool:
-    """Env-flag gate. Off by default; ops flips DRAFTING_FOLLOWUP_FAST_PATH=1
-    once Level 1's write path has been validated on real prod data.
+    """Follow-up edits of a draft skip the full pipeline (targeted edit or one
+    whole-document rewrite).
+
+    On unless DRAFTING_FOLLOWUP_FAST_PATH is explicitly 0 / false / off / no.
+    It was opt-in during rollout, and the flag never reached the servers'
+    .env: on 2026-10-19 both dev and prod re-ran the full pipeline for
+    "change paragraph 2" (~60k tokens). The env var remains the kill switch.
     """
-    return os.getenv("DRAFTING_FOLLOWUP_FAST_PATH", "0") == "1"
+    value = os.getenv("DRAFTING_FOLLOWUP_FAST_PATH", "1").strip().lower()
+    return value not in ("0", "false", "off", "no")
 
 
 def _is_drafting_followup_directive(
@@ -5363,7 +5368,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # Reads previous_artifact_kind + previous_artifact_content populated
         # by memory_node from Level 1's SQLite storage.
         #
-        # Guarded on DRAFTING_FOLLOWUP_FAST_PATH=1 (off during initial rollout).
+        # On by default; DRAFTING_FOLLOWUP_FAST_PATH=0 turns it off.
         # Uses `original_query` — the raw user directive — so per-agent
         # rewriting or memory rewriter expansion can't hide "in Marathi" from
         # detection. On empty fast-path output falls through to the existing

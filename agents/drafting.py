@@ -313,6 +313,44 @@ def _is_drafting_followup_directive(
     return bool(_DIRECTIVE_VERBS_RE.search(query))
 
 
+# An edit instruction can quote the new wording of a paragraph, so the
+# intent-detected path allows a longer query than the verb regex does.
+_FOLLOWUP_EDIT_MAX_QUERY_CHARS = 2000
+
+
+def _followup_edit_scope(
+    user_intent,
+    query: str,
+    previous_artifact_kind: str,
+    previous_artifact_content: str,
+    new_upload_this_turn: bool,
+) -> str | None:
+    """'partial', 'whole' or None (not an edit of the prior draft).
+
+    The typed intent decides (UserIntent.draft_edit_scope, filled by the
+    intent extractor in any wording or language). The verb regex is the
+    fallback when the intent is missing or unsure, and only ever yields
+    'whole' — the behaviour the fast path had before targeted edits."""
+    if (
+        previous_artifact_kind != "draft"
+        or len(previous_artifact_content or "") < _FOLLOWUP_DIRECTIVE_MIN_PRIOR_CHARS
+        or _DRAFT_INCOMPLETE_BANNER_MARKER in (previous_artifact_content or "")[:400]
+        or not (query or "").strip()
+        or new_upload_this_turn
+    ):
+        return None
+    scope = "none"
+    if user_intent is not None and getattr(user_intent, "confidence", 0) >= 0.5:
+        scope = getattr(user_intent, "draft_edit_scope", "none") or "none"
+    if scope in ("partial", "whole") and len(query) <= _FOLLOWUP_EDIT_MAX_QUERY_CHARS:
+        return scope
+    if _is_drafting_followup_directive(
+        query, previous_artifact_kind, previous_artifact_content, new_upload_this_turn,
+    ):
+        return "whole"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Input sanitisation (used by the ES `match` query in `_acquire_reference_draft`)
 # ---------------------------------------------------------------------------
@@ -4706,6 +4744,87 @@ async def _generate_draft_modification(
     return text
 
 
+async def _generate_targeted_edit(
+    *,
+    user_directive: str,
+    prior_draft: str,
+    user_intent,
+    user_language: str,
+    progress_emit,
+) -> tuple[str, dict] | None:
+    """Change only the blocks of the prior draft the user asked about.
+
+    One call returns edit operations (core.draft_edit.DraftEditPlan) instead of
+    a document; core.draft_edit applies them, so untouched paragraphs are
+    byte-identical and output tokens scale with the change, not the draft.
+    Returns (draft, meta), or None when the caller should rewrite the whole
+    document instead: the call failed, the plan does not apply, or the model
+    judged the change document-wide.
+    """
+    from config.prompts import DRAFTING_TARGETED_EDIT_PROMPT, DRAFTING_TARGETED_EDIT_INPUTS
+    from core.draft_edit import DraftEditPlan, EditError, apply_edits, render_numbered, split_blocks
+    from core.language import _format_intent_directives, localize_prompt
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    split = split_blocks(prior_draft)
+    intent_directives_block = (
+        _format_intent_directives(user_intent) if user_intent is not None else ""
+    ) or "(no explicit user directives)"
+    user_message = DRAFTING_TARGETED_EDIT_INPUTS.format(
+        intent_directives_block=intent_directives_block,
+        numbered_draft=render_numbered(split),
+        user_directive=user_directive.strip(),
+    ) + localize_prompt("", user_language, user_intent)
+
+    # Thinking off: Claude does not honour forced structured output with it
+    # on (see get_drafting_llm). The plan is small, so 8k output is ample.
+    llm = get_drafting_llm(max_output_tokens=8192, thinking=False).with_structured_output(
+        DraftEditPlan, include_raw=True,
+    )
+    progress_emit("drafting", "Editing the requested parts of your draft...", step="modify")
+
+    try:
+        with log_time(log, "Draft targeted edit"):
+            out = await asyncio.to_thread(
+                llm.invoke,
+                [SystemMessage(content=cacheable_system(DRAFTING_TARGETED_EDIT_PROMPT.format())),
+                 HumanMessage(content=user_message)],
+            )
+    except Exception as e:
+        log.error("Targeted edit LLM call failed", error=short_err(e), exc_info=True)
+        return None
+
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Drafting", "targeted_edit", out.get("raw"))
+
+    plan = out.get("parsed")
+    if plan is None:
+        log.warning("Targeted edit returned no parseable plan",
+                    error=short_err(out.get("parsing_error")) if out.get("parsing_error") else "none")
+        return None
+    if plan.whole_document:
+        log.info("Targeted edit: model judged the change document-wide")
+        return None
+    try:
+        result = apply_edits(prior_draft, plan)
+    except EditError as e:
+        log.warning("Targeted edit plan could not be applied", error=str(e),
+                    edits=len(plan.edits))
+        return None
+
+    log.info(
+        "Targeted edit applied",
+        blocks=len(split.blocks), changed=result.changed_blocks,
+        inserted=result.inserted, prior_len=len(prior_draft), new_len=len(result.text),
+    )
+    return result.text, {
+        "edit_ops": len(plan.edits),
+        "edited_blocks": result.changed_blocks,
+        "inserted_blocks": result.inserted,
+        "total_blocks": len(split.blocks),
+    }
+
+
 async def _generate_draft(
     query: str,
     user_facts: str,
@@ -5252,12 +5371,51 @@ async def drafting_node(state: LegalAgentState) -> dict:
         _prev_kind = state.get("previous_artifact_kind", "") or ""
         _prev_content = state.get("previous_artifact_content", "") or ""
         _new_upload_this_turn = bool(fc and fc.has_content)
-        if (
-            _fast_path_enabled()
-            and _is_drafting_followup_directive(
-                original_query, _prev_kind, _prev_content, _new_upload_this_turn,
+        _edit_scope = (
+            _followup_edit_scope(
+                intent_obj, original_query, _prev_kind, _prev_content,
+                _new_upload_this_turn,
             )
-        ):
+            if _fast_path_enabled() else None
+        )
+        if _edit_scope == "partial":
+            # Change only the blocks the user named; everything else is
+            # copied through untouched. A plan that cannot be applied, or a
+            # model that says the change is document-wide, falls through to
+            # the whole-document rewrite below.
+            log.info(
+                "Fast path: targeted edit of the prior draft",
+                directive_preview=original_query[:80],
+                prior_len=len(_prev_content),
+            )
+            edited = await _generate_targeted_edit(
+                user_directive=original_query,
+                prior_draft=_prev_content,
+                user_intent=intent_obj,
+                user_language=user_language,
+                progress_emit=progress,
+            )
+            if edited is not None:
+                edited_text, edit_meta = edited
+                edited_text, edit_warnings = validate_draft(edited_text)
+                return {"agent_results": {"Drafting": AgentResult(
+                    agent_name="Drafting",
+                    content=edited_text,
+                    sources=[SourceMetadata(
+                        source_type="drafting",
+                        title="Edited from your previous draft",
+                        content=[_prev_content[:300]],
+                        file_name="<prior_turn:targeted_edit>",
+                        agent_name="Drafting",
+                        template_type="prior_turn_targeted_edit",
+                    )],
+                    tokens_consumed=0,
+                    meta={"reference_kind": "prior_turn", "edit_mode": "targeted",
+                          **edit_meta,
+                          **({"draft_warnings": edit_warnings} if edit_warnings else {})},
+                )}}
+            _edit_scope = "whole"
+        if _edit_scope == "whole":
             log.info(
                 "Fast path: drafting follow-up directive detected",
                 directive_preview=original_query[:80],
@@ -5297,9 +5455,9 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     tokens_consumed=0,
                     meta=(
                         {"draft_warnings": fast_warnings,
-                         "reference_kind": "prior_turn"}
+                         "reference_kind": "prior_turn", "edit_mode": "whole"}
                         if fast_warnings
-                        else {"reference_kind": "prior_turn"}
+                        else {"reference_kind": "prior_turn", "edit_mode": "whole"}
                     ),
                 )
                 return {"agent_results": {"Drafting": _fast_result}}

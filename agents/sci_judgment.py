@@ -15,6 +15,7 @@ Data Source: Elasticsearch "supreme_court_judgement" index
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 
 from langchain_core.messages import SystemMessage
@@ -178,6 +179,74 @@ def _same_private_party(other_side: str, respondent: str) -> bool:
     return any(t[:4] in stems for t in _significant_party_tokens(other_side) if len(t) >= 4)
 
 
+def _gate_parties(petitioner: str, respondent: str) -> tuple[list[str], str, str | None]:
+    """(petitioner tokens, respondent, respondent key), keyed on the private
+    party when the petitioner is the State."""
+    pet, resp = petitioner, respondent
+    if _GOVT_PARTY_RE.match(pet or "") and not _GOVT_PARTY_RE.match(resp or ""):
+        pet, resp = resp, pet
+    return _significant_party_tokens(pet), resp, _respondent_key(resp)
+
+
+# Text handed to the ReAct agent for a judgment found in the general index;
+# Bhaskaran is 29k chars, a long constitution-bench judgment is several times that.
+_HC_INDEX_TEXT_CAP = 60_000
+
+
+def _sc_judgment_in_judgements_index(petitioner: str, respondent: str) -> dict | None:
+    """A Supreme Court judgment filed in the general `judgements` index.
+
+    38,404 SC judgments sit there (court_name "supreme court"), several
+    thousand of them absent from the SCI index: K. Bhaskaran v. Sankaran
+    Vaidhyan Balan, Shreya Singhal v. UoI, Indra Sawhney v. UoI. The SCI
+    tools cannot reach them, so the gate used to answer "not in the
+    database" while the Judgment agent returned the PDF in the same reply.
+    The `source` field is the file name, which carries both party names.
+    Returns {title, text, pdf} or None (also on an ES error).
+    """
+    pet_tokens, _resp, resp_key = _gate_parties(petitioner, respondent)
+    if not pet_tokens:
+        return None
+    try:
+        from core.clients import get_es_client
+        from core.settings import ES_INDICES
+        from tools.shared.storage_tools import generate_s3_link
+        r = get_es_client().search(index=ES_INDICES["judgments"], body={
+            "size": 1, "_source": ["source", "page_content"],
+            "query": {"bool": {
+                "filter": [{"match_phrase": {"court_name": "supreme court"}}],
+                "must": [{"match": {"source": {
+                    "query": " ".join(pet_tokens + ([resp_key] if resp_key else [])),
+                    "operator": "and"}}}],
+            }},
+        }, request_timeout=15)
+        hits = r["hits"]["hits"]
+        if not hits:
+            return None
+        src = hits[0].get("_source", {})
+        file_name = src.get("source") or ""
+        title = re.sub(r"\.pdf$", "", os.path.basename(file_name.replace("\\", "/")), flags=re.IGNORECASE)
+        pdf = generate_s3_link.invoke({"court": "supreme", "file_name": file_name, "title": title})
+        return {"title": title, "text": (src.get("page_content") or "")[:_HC_INDEX_TEXT_CAP], "pdf": pdf}
+    except Exception as e:  # noqa: BLE001
+        log.warning("SC lookup in judgements index skipped (ES error)", error=short_err(e))
+        return None
+
+
+def _hc_index_directive(found: dict) -> str:
+    """Appended to the ReAct user message: the judgment's own text, so the
+    answer is grounded on it rather than on later cases or memory."""
+    link = f" Its PDF: {found['pdf']}" if found.get("pdf") else ""
+    return (
+        f"\n\n[Database note: the requested judgment, \"{found['title']}\", is in the Lawttorney "
+        "judgments database but not reachable through your Supreme Court search tools. Its "
+        "full text is given below. Base every statement about this judgment (facts, issues, "
+        "holdings, outcome) ONLY on this text and cite its PDF link." + link + " Use the search "
+        "tools only for other, related judgments, and list each PDF link under the name of the "
+        "judgment it belongs to.]\n\n## TEXT OF THE REQUESTED JUDGMENT\n" + found["text"]
+    )
+
+
 def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | str | None, list[str]]:
     """(present, related). present is True / False when the index can answer,
     "cited" when the title is not a judgment in the index but its name occurs
@@ -194,13 +263,9 @@ def _party_in_sci_index(petitioner: str, respondent: str) -> tuple[bool | str | 
     arbitrary order (K. Bhaskaran v. Sankaran Vaidhyan Balan passed the gate
     on 5 of 8 runs through "PARAMESWARAN GOVINDAN VS KRISHNAN BHASKARAN").
     """
-    pet, resp = petitioner, respondent
-    if _GOVT_PARTY_RE.match(pet or "") and not _GOVT_PARTY_RE.match(resp or ""):
-        pet, resp = resp, pet                                   # gate on the private party
-    pet_tokens = _significant_party_tokens(pet)
+    pet_tokens, resp, resp_key = _gate_parties(petitioner, respondent)
     if not pet_tokens:
         return None, []
-    resp_key = _respondent_key(resp)
     resp_is_govt = bool(_GOVT_PARTY_RE.match(resp or ""))
     try:
         from core.clients import get_es_client
@@ -293,7 +358,7 @@ def _cited_only_directive(petitioner: str, respondent: str) -> str:
 def _cited_only_notice(petitioner: str, respondent: str) -> str:
     return (
         f"> **Note:** The judgment *{petitioner} vs {respondent}* is not in the Lawttorney "
-        "Supreme Court database, so its own judgment PDF is not available here. The discussion "
+        "database, so its own judgment PDF is not available here. The discussion "
         "below is drawn from other Supreme Court judgments that cite it, and each PDF link "
         "belongs to the judgment named with it.\n\n"
     )
@@ -327,14 +392,21 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
             _case_name_lookup(state.get("original_query") or "") or _case_name_lookup(query)
         )
         _cited_only = None
+        _in_hc_index = None
         if _lookup:
             _present, _related = await asyncio.to_thread(_party_in_sci_index, *_lookup)
-            if _present is False:
+            if _present is False or _present == "cited":
+                _in_hc_index = await asyncio.to_thread(_sc_judgment_in_judgements_index, *_lookup)
+            if _in_hc_index:
+                log.info("Case-name lookup: title absent from SCI index, found in judgements index",
+                         title=_in_hc_index["title"][:80], has_pdf=bool(_in_hc_index["pdf"]),
+                         text_chars=len(_in_hc_index["text"]))
+            elif _present is False:
                 log.info("Case-name lookup: parties absent from SCI index, skipping research",
                          petitioner=_lookup[0][:60], respondent=_lookup[1][:60])
                 progress("sci_judgment", "No matching Supreme Court case found", step="results")
                 return {"agent_results": {"SCI_Judgment": _not_found_result(*_lookup, related=_related)}}
-            if _present == "cited":
+            elif _present == "cited":
                 log.info("Case-name lookup: title absent from SCI index but cited in judgment text",
                          petitioner=_lookup[0][:60], respondent=_lookup[1][:60])
                 _cited_only = _lookup
@@ -370,6 +442,8 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         # trajectory can otherwise consume the whole 180-300s gateway
         # budget with no local ceiling.
         react_query = query + (_cited_only_directive(*_cited_only) if _cited_only else "")
+        if _in_hc_index:
+            react_query = query + _hc_index_directive(_in_hc_index)
         progress("sci_judgment", "Running multi-step research (ReAct agent)...", step="react")
         with log_time(log, "ReAct agent execution"):
             result = await asyncio.wait_for(
@@ -423,7 +497,11 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                  total_messages=len(messages))
 
         # Fallback: if ReAct agent didn't call any tools, force a semantic search
-        if not tools_used:
+        # Not when the requested judgment's text was supplied: answering from
+        # it without a search is correct, and the forced topic search only
+        # added unrelated sources (and its retry is rejected by Gemini: a
+        # request ending on an assistant turn returns 400).
+        if not tools_used and not _in_hc_index:
             log.warning("ReAct agent returned 0 tool calls, forcing semantic search fallback",
                         query=query[:100])
             try:
@@ -542,6 +620,16 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                 seen_ids.add(s.db_id)
             unique_sources.append(s)
         sources = unique_sources
+        if _in_hc_index:
+            # The requested judgment leads the source list with its own PDF.
+            sources.insert(0, SourceMetadata(
+                source_type="sci_judgment",
+                title=_in_hc_index["title"],
+                parties=_in_hc_index["title"],
+                doc_link=_in_hc_index["pdf"],
+                pdf_links=[{"label": "Judgment PDF", "url": _in_hc_index["pdf"]}] if _in_hc_index["pdf"] else [],
+                agent_name="SCI_Judgment",
+            ))
 
         if sources:
             progress("sci_judgment", f"Found {len(sources)} Supreme Court judgments", found=len(sources), step="results")

@@ -220,3 +220,73 @@ def test_glued_name_check_needs_the_name_to_start_a_word(monkeypatch):
     es = _ES([], ["RAM ASHREY SINGH VS RAM BUX SINGH ."], [])
     monkeypatch.setattr("core.clients.get_es_client", lambda: es)
     assert sj._party_in_sci_index("Shreya Singhal", "Union of India") == (False, [])
+
+
+# --- SC judgments filed in the general `judgements` index (2026-10-21) -----
+# K. Bhaskaran, Shreya Singhal and Indra Sawhney are absent from the SCI index
+# but present in `judgements` (court_name "supreme court"); the gate said
+# "not in the database" while the Judgment agent returned the PDF.
+
+class _HcES:
+    def __init__(self, hits=None, boom=False):
+        self.hits, self.boom, self.bodies = hits or [], boom, []
+
+    def search(self, index=None, body=None, **kw):
+        if self.boom:
+            raise RuntimeError("down")
+        self.bodies.append((index, body))
+        return {"hits": {"hits": [{"_source": h} for h in self.hits]}}
+
+
+class _Link:
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, args):
+        self.calls.append(args)
+        return "https://lawttorney.s3.ap-south-1.amazonaws.com/supreme/K.%20BHASKARAN.pdf"
+
+
+def test_sc_judgment_found_in_judgements_index(monkeypatch):
+    es = _HcES([{"source": "K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR..pdf",
+                 "page_content": "K. BHASKARAN v. SANKARAN VAIDHYAN BALAN ... Appeal partly allowed."}])
+    link = _Link()
+    monkeypatch.setattr("core.clients.get_es_client", lambda: es)
+    monkeypatch.setattr("tools.shared.storage_tools.generate_s3_link", link)
+    found = sj._sc_judgment_in_judgements_index("K. Bhaskaran", "Sankaran Vaidhyan Balan")
+    assert found["title"] == "K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR."
+    assert found["pdf"].endswith(".pdf") and "Appeal partly allowed" in found["text"]
+    index, body = es.bodies[0]
+    assert index == "judgements"
+    assert body["query"]["bool"]["filter"] == [{"match_phrase": {"court_name": "supreme court"}}]
+    assert body["query"]["bool"]["must"][0]["match"]["source"] == {"query": "bhaskaran sankaran", "operator": "and"}
+    assert link.calls[0]["court"] == "supreme"
+
+
+def test_sc_judgment_lookup_misses_and_errors_return_none(monkeypatch):
+    monkeypatch.setattr("core.clients.get_es_client", lambda: _HcES([]))
+    assert sj._sc_judgment_in_judgements_index("Korshi Shah", "State of Maharashtra") is None
+    monkeypatch.setattr("core.clients.get_es_client", lambda: _HcES(boom=True))
+    assert sj._sc_judgment_in_judgements_index("Korshi Shah", "State of Maharashtra") is None
+    assert sj._sc_judgment_in_judgements_index("Union of India", "State of Bihar") is None
+
+
+def test_hc_index_directive_grounds_the_answer_on_the_judgment_text():
+    d = sj._hc_index_directive({"title": "K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR.",
+                                "text": "JUDGMENT TEXT HERE", "pdf": "https://x/y.pdf"})
+    assert "ONLY on this text" in d and "https://x/y.pdf" in d and d.endswith("JUDGMENT TEXT HERE")
+
+
+def test_node_checks_judgements_index_before_answering_not_found():
+    import inspect
+    src = inspect.getsource(sj.sci_judgment_node)
+    assert src.index("_sc_judgment_in_judgements_index") < src.index("_not_found_result(")
+    assert src.index("_sc_judgment_in_judgements_index") < src.index("_cited_only = _lookup")
+    assert "react_query = query + _hc_index_directive(_in_hc_index)" in src
+    assert "sources.insert(0, SourceMetadata(" in src
+
+
+def test_no_forced_topic_search_when_the_judgment_text_was_supplied():
+    import inspect
+    src = inspect.getsource(sj.sci_judgment_node)
+    assert "if not tools_used and not _in_hc_index:" in src

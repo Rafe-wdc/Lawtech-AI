@@ -253,6 +253,36 @@ def test_intent_routes_to_tribunal_agent():
         "Legislation", "Tribunal_Judgment"]
 
 
+def test_tribunal_question_does_not_pull_in_high_court_and_supreme_court():
+    """Dev 2026-10-16: 'What did TDSAT decide in Kal Cables ...' also ran the
+    HC and SC agents, which found nothing and searched the web."""
+    from agents.orchestrator import _detect_multi_intent
+
+    intent = _intent(wants_tribunal_rulings=True, include_case_law=True)
+    extra = _detect_multi_intent(intent, "Tribunal_Judgment")
+    assert "Judgment" not in extra and "SCI_Judgment" not in extra
+
+
+def test_tribunal_question_naming_the_supreme_court_still_adds_it():
+    from agents.orchestrator import _detect_multi_intent
+
+    intent = _intent(wants_tribunal_rulings=True, include_case_law=True, wants_supreme_court=True)
+    extra = _detect_multi_intent(intent, "Tribunal_Judgment")
+    assert "SCI_Judgment" in extra and "Judgment" not in extra
+
+
+def test_ordinary_case_law_question_still_fans_out_to_hc_and_sc():
+    from agents.orchestrator import _detect_multi_intent
+
+    extra = _detect_multi_intent(_intent(include_case_law=True), "Legislation")
+    assert "Judgment" in extra and "SCI_Judgment" in extra
+    # consumer-law case law also wants commission orders, but is not a
+    # tribunal-only question: HC and SC stay
+    extra = _detect_multi_intent(
+        _intent(include_case_law=True, wants_tribunal_rulings=True), "Legislation")
+    assert {"Judgment", "SCI_Judgment", "Tribunal_Judgment"} <= set(extra)
+
+
 def test_gst_still_wins_over_tribunal_for_task():
     from agents.orchestrator import _classify_task_from_intent
     assert _classify_task_from_intent(

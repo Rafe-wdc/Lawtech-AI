@@ -1653,6 +1653,40 @@ def _source_language_mismatch(
     return False
 
 
+_INPUTS_MARKER = "\n## Inputs\n"
+
+
+def _is_anthropic_llm(llm) -> bool:
+    """True for ChatAnthropic, bare or as the primary of .with_fallbacks()."""
+    inner = getattr(llm, "runnable", llm)
+    return type(inner).__name__ == "ChatAnthropic"
+
+
+def _prompt_for(template: str, llm) -> ChatPromptTemplate:
+    """The critic/refiner prompt, with its fixed instructions cached on Claude.
+
+    CRITIQUE_PROMPT is ~16k tokens of fixed instructions followed by the
+    per-request inputs (from "## Inputs" on); REFINE_PROMPT is ~2k + inputs.
+    Sent as one human message they were billed at full input price on every
+    call (two critiques per draft). On Claude the fixed part goes in a
+    system block with cache_control, so repeat calls within 5 minutes read
+    it at 0.1x. Gemini (and any template without the marker) gets the
+    original single message, unchanged.
+    """
+    if llm is None or not _is_anthropic_llm(llm) or _INPUTS_MARKER not in template:
+        return ChatPromptTemplate.from_template(template)
+    cut = template.index(_INPUTS_MARKER)
+    # The fixed part is sent as literal text, not a template: undo the
+    # {{ }} escaping it carries for from_template.
+    fixed = template[:cut].replace("{{", "{").replace("}}", "}")
+    from langchain_core.messages import SystemMessage
+    return ChatPromptTemplate.from_messages([
+        SystemMessage(content=[{"type": "text", "text": fixed,
+                                "cache_control": {"type": "ephemeral"}}]),
+        ("human", template[cut + 1:]),
+    ])
+
+
 def _format_violations(violations: list[Violation]) -> str:
     """Render the violation list for the refiner prompt."""
     if not violations:
@@ -1783,7 +1817,7 @@ async def _critique(
                 temperature=0.0, max_output_tokens=4096, thinking_budget=0,
             )).with_structured_output(Critique, include_raw=True)
             intent_json = intent.model_dump_json(indent=2)
-            prompt = ChatPromptTemplate.from_template(CRITIQUE_PROMPT)
+            prompt = _prompt_for(CRITIQUE_PROMPT, critic_llm)
             chain = prompt | llm
             # Bound the critic call. Without this, a hung Gemini Flash
             # blocks the caller's drafting semaphore slot until gunicorn
@@ -1949,7 +1983,7 @@ async def _refine(
             if _lang != "en":
                 from core.language import localize_prompt as _localize
                 language_directive = _localize("", _lang, intent).strip()
-            prompt = ChatPromptTemplate.from_template(REFINE_PROMPT)
+            prompt = _prompt_for(REFINE_PROMPT, refiner_llm)
             chain = prompt | llm
             # Bound the refiner too — same reasoning as the critic above,
             # with deadline-aware clamping.

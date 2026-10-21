@@ -380,6 +380,18 @@ class UserIntent(BaseModel):
                     "topic those tribunals decide. FALSE for GST AAR/AAAR "
                     "(wants_gst_rulings). Drives Tribunal_Judgment routing.",
     )
+    draft_edit_scope: Literal["none", "partial", "whole"] = Field(
+        "none",
+        description="How a follow-up changes a document the assistant drafted "
+                    "earlier in this conversation. 'partial': change, add or "
+                    "remove SPECIFIC parts (a paragraph, clause, ground, the "
+                    "prayer, a date or amount in one place). 'whole': a change "
+                    "that applies across the whole document (translate, "
+                    "shorten / expand overall, change tone or format "
+                    "throughout, rename a party everywhere). 'none': not an "
+                    "edit of an earlier draft, including a request for a NEW "
+                    "document. Drives the drafting agent's edit path.",
+    )
 
     named_acts: list[str] = Field(
         default_factory=list,

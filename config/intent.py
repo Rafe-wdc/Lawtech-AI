@@ -251,6 +251,25 @@ class UserIntent(BaseModel):
                     "False if the user explicitly says 'no citations' / "
                     "'without references'.",
     )
+    no_unsupplied_law: bool = Field(
+        False,
+        description="True iff the user explicitly forbids adding statutory "
+                    "provisions, rules, notifications, case law or legal "
+                    "requirements they did not supply ('do not introduce "
+                    "invented statutory provisions ... or legal "
+                    "requirements'). FALSE when the user only asks that "
+                    "citations be real or accurate ('don't cite fake "
+                    "judgments', 'no hallucinated cases', 'be accurate'): "
+                    "that asks for real law, not for no law.",
+    )
+    unresolved_marker: str = Field(
+        "",
+        max_length=80,
+        description="The exact marker the user told you to use for "
+                    "unresolved / unconfirmed details, copied verbatim "
+                    "without quotes (e.g. 'TO BE CONFIRMED BEFORE "
+                    "EXECUTION'). Empty when the user named none.",
+    )
     include_examples: bool = Field(
         False,
         description="True iff user explicitly asked for examples / illustrations / "

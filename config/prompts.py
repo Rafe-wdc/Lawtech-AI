@@ -1130,6 +1130,18 @@ Given the user's query and the recent conversation summary, produce:
        Downstream: critic checks response is within ±25% of this target.
 
    include_citations — default TRUE. Set FALSE only if user said "no citations".
+   no_unsupplied_law — TRUE iff the user explicitly forbids adding
+       statutory provisions, rules, notifications, case law or legal
+       requirements they did not supply ("do not introduce invented
+       statutory provisions, case law, rules ... or legal requirements",
+       "without inventing any statutory provision"). FALSE by default, and
+       FALSE when the user only asks that citations be real or accurate
+       ("don't cite fake judgments", "no hallucinated cases", "be
+       accurate in law") — that asks for real law, not for no law.
+   unresolved_marker — the exact marker the user told you to use for
+       unresolved details, verbatim without quotes ("Flag any unresolved
+       detail with 'TO BE CONFIRMED BEFORE EXECUTION'" →
+       TO BE CONFIRMED BEFORE EXECUTION). Empty string otherwise.
    include_examples  — TRUE iff user asked for examples / illustrations.
    include_case_law  — TRUE iff the user EXPLICITLY asked for case laws /
        precedents / judgments / rulings / "cases on" / "leading cases" /
@@ -4058,6 +4070,12 @@ Extract the same fields as the legacy USER_INTENT_EXTRACTION_PROMPT:
 - **response_depth** — "brief" / "standard" / "detailed"
 - **target_word_count** — integer if user named one (10-5000), null otherwise
 - **include_citations** — default True, False iff user said "no citations"
+- **no_unsupplied_law** — True iff the user explicitly forbids adding
+  statutory provisions, rules, notifications, case law or legal
+  requirements they did not supply. False by default, and False when the
+  user only asks that citations be real ("don't cite fake judgments")
+- **unresolved_marker** — the exact marker the user named for unresolved
+  details ("TO BE CONFIRMED BEFORE EXECUTION"), verbatim; "" otherwise
 - **include_examples** — True iff user asked for examples
 - **include_case_law** — True iff user explicitly asked for case laws /
   precedents / judgments. FALSE by default — do NOT set True merely

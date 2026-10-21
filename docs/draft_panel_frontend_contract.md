@@ -1,6 +1,7 @@
 # Draft side panel: frontend contract
 
-**Status:** proposal v1, for review by the frontend team.
+**Status:** proposal v1, for review by the web and mobile app teams. The
+API is the same for both; mobile-specific notes are in section 12.
 
 | Part | State |
 |---|---|
@@ -293,9 +294,66 @@ PUT /pyapi/artifact/{artifact_id}
 | 3 | Legal shortcut buttons (IPC to BNS, add interim prayer, translate, more formal); court format presets (margins, font per court) |
 | 4 | Share by link; comments in the margin; automatic update of "as stated in para N" references; annexure list; index and list of dates |
 
-## 12. Open questions for the frontend team
+## 12. Mobile app
+
+The mobile app sends the same requests and receives the same events, so
+sections 3 to 8 apply unchanged. What differs is how the draft is shown.
+
+**Before the server flag is turned on (both apps).** `DRAFT_ARTIFACT_EVENTS=1`
+is a server setting, not per app: once it is on, every client on that server
+receives the new `artifact_*` events. Confirm the current app (web and every
+mobile build in users' hands) **skips SSE event types it does not know**
+rather than failing on them. If a released mobile build fails on unknown
+events, the flag must stay off on that server until users have an updated
+build. Nothing else changes for an old build: `response` still carries the
+whole draft as Markdown, so the chat keeps working.
+
+**Showing the draft.** Two ways, pick one:
+
+| | Web view | Native |
+|---|---|---|
+| How | Load `docs/draft_panel_preview.html` (or the web panel) in a WebView and pass it the artifact JSON | Render each block type with native components following section 4 |
+| Effort | Small: the renderer already exists | Larger |
+| Matches the web app and the Word file exactly | Yes | Only if section 4 is followed closely |
+
+**Small screens.**
+
+- A4 does not fit a phone. Either scale the page to the screen width (looks
+  like the printed page, small text, pinch to zoom) or reflow (readable text,
+  page breaks shown as a divider). Reflow is recommended for reading;
+  the Word download keeps the real page layout either way.
+- `row` blocks on a narrow screen: if left and right do not fit on one line,
+  put the right column (the party label, "...Applicant") on its own line,
+  right-aligned, under the left column. Never let it run into the left text.
+- Keep the hanging number for `para` blocks; reduce the gutter to about 1.6em.
+- The panel is a full-screen view opened from the chat (a "View draft" chip on
+  the message), not a side-by-side split.
+
+**Editing on mobile.** Suggested for v1:
+
+- Asking the assistant (section 6): yes. A long-press on a section opens
+  "Change this section", which calls `POST /pyapi/artifact/edit` with that
+  `section_id`.
+- Typing in the draft (section 10): optional in v1. If added, edit one block
+  at a time in a plain text field rather than a full rich-text editor, then
+  save with `PUT /pyapi/artifact/{id}`.
+- Download: `POST /pyapi/export` with `artifact_id`, then open the `.docx` with
+  the system share sheet.
+
+**Regional languages.** Drafts can be in Hindi, Marathi, Gujarati, Bengali,
+Tamil, Telugu, Kannada and others (`artifact.language`). Make sure the font
+used for the draft renders those scripts.
+
+**Connections.** A draft takes about 1 to 3 minutes. If the app goes to the
+background and the stream drops, reopen the thread and call
+`GET /pyapi/artifact/{artifact_id}` (one id per conversation, see section 7)
+to get the finished draft instead of drafting again.
+
+## 13. Open questions for the frontend team
 
 1. Framework and existing SSE handling: anything in the current event
    handling that would make new event types a problem?
 2. Is a 409-and-refetch acceptable for stale edits, or do you want the
    server to merge?
+3. Mobile: native rendering or a web view? Does the released app skip
+   unknown SSE event types (section 12)?

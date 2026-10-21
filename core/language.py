@@ -579,6 +579,33 @@ def _format_intent_directives(intent) -> str:
             "the Defendant/Respondent' — so the two perspectives are not "
             "blended into a single narrative."
         )
+    # The user's own rules on law and unknowns outrank every default of the
+    # prompt this block is appended to (niche-overlay statutory anchors,
+    # retrieved legal context, the bracket-placeholder rule). Emitted only
+    # when the user said so: carried in every prompt it made ordinary drafts
+    # cite less law (A/B 2026-10-21, lease deed 13 -> 7 statutory refs).
+    if getattr(intent, "no_unsupplied_law", False):
+        parts.append(
+            "USER LEGAL-MATERIAL RULE (outranks every other rule in this "
+            "prompt, the NICHE OVERLAY's statutory anchors and any RELEVANT "
+            "LEGAL CONTEXT): the user forbids adding statutory provisions, rules, "
+            "notifications, case law or legal requirements they did not "
+            "supply. Cite no statute, rule, notification or judgment that the "
+            "USER QUERY or uploaded documents do not name; where a legal hook "
+            "is needed, write 'in accordance with applicable law'. Supply no "
+            "commercial or technical term the user did not give: no rates, "
+            "percentages, periods, penalties, liquidated damages, retention "
+            "money, defect-liability periods, interest, or material grades "
+            "and standards. Where the document needs one, write the clause "
+            "and mark the value as unresolved."
+        )
+    marker = (getattr(intent, "unresolved_marker", "") or "").strip()
+    if marker:
+        parts.append(
+            f"USER MARKER: mark every unresolved detail with exactly "
+            f"\"{marker}\" instead of a bracketed [Field] placeholder. The "
+            f"ban on 'to be confirmed' wording does not apply to this marker."
+        )
     extra = getattr(intent, "additional_instructions", "") or ""
     if extra.strip():
         # Already capped at 300 chars at extraction; safe to inject verbatim.

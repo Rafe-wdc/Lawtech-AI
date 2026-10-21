@@ -4874,6 +4874,18 @@ async def _generate_targeted_edit(
     }
 
 
+_STATUTORY_ANCHORS_RE = re.compile(
+    r"^\*\*[^\n]*\banchors\b[^\n]*\*\*\n(?:- [^\n]*\n?)*\n?", re.MULTILINE,
+)
+
+
+def _strip_statutory_anchors(overlay: str) -> str:
+    """Drop the `**Mandatory statutory anchors:**` and `**Doctrinal
+    anchors ...:**` bullet blocks from a niche overlay, keeping its
+    structural skeleton and do-not list."""
+    return _STATUTORY_ANCHORS_RE.sub("", overlay or "")
+
+
 async def _generate_draft(
     query: str,
     user_facts: str,
@@ -4920,6 +4932,18 @@ async def _generate_draft(
             "Niche selection failed; proceeding with base prompt only",
             error=short_err(e),
         )
+
+    # The user forbade adding law they did not supply (typed intent). The
+    # directive in USER DIRECTIVES says so, but a prompt rule alone was not
+    # enough: with the overlay's "mandatory statutory anchors" and retrieved
+    # Punjab construction-workers Rules still in front of it, the writer cited
+    # Rule 17 / Rule 203 anyway (A/B 2026-10-21). Do not hand it that material.
+    if getattr(user_intent, "no_unsupplied_law", False):
+        niche_overlay = _strip_statutory_anchors(niche_overlay)
+        gathered_context = None
+        log.info("Drafting: user forbade unsupplied law; overlay anchors and "
+                 "retrieved legal context withheld",
+                 overlay_chars=len(niche_overlay))
 
     # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens. English
     # text tokenises at ~4 chars/token so the raw-char ceiling is ~4M

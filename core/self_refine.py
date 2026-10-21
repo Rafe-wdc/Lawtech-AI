@@ -759,7 +759,10 @@ violations specific to Indian drafting practice:
 
   placeholder_marker — surviving `[CITE: ...]` brackets, "(citation
     needed)", "{{section number}}", "<insert party>", "TBD", "FILL IN".
-    The drafting prompt forbids these; if they survive, MAJOR.
+    The drafting prompt forbids these; if they survive, MAJOR. A marker
+    the USER QUERY itself names for unresolved items (e.g. "TO BE
+    CONFIRMED BEFORE EXECUTION") is the requested output, not a
+    placeholder defect — never flag it.
 
   orphan_citation_tail — sentences ending with "as held in.", "the
     Supreme Court in.", "the Hon'ble Court in." — the LLM started a
@@ -930,7 +933,8 @@ violations specific to Indian drafting practice:
     to you below. Also flag as MAJOR every bracketed placeholder like
     "[citation to be verified]", "[verify]", "[TBD]", "[citation
     needed]", "[to be confirmed]" or similar — even if the surrounding
-    prose is otherwise fine. Also flag citation drift: same party names
+    prose is otherwise fine (but not a marker the USER QUERY itself asked
+    for, e.g. "TO BE CONFIRMED BEFORE EXECUTION"). Also flag citation drift: same party names
     but different volume / page / court abbreviation / year from the
     retrieved-source record. If a case appears in the response but no
     entry in the retrieved-sources block contains those party names,

@@ -173,6 +173,55 @@ def _apply_argument_override(query: str, task: str, tasks_planned: list[str], in
     return task, tasks_planned, intent, changed
 
 
+# Agents that do the research half of a research-before-draft request: the
+# analysis agents plus the statute agents the planner may have chosen.
+_RESEARCH_AGENTS = ("Scenario", "Legal_Concepts", "Legislation", "Newacts")
+
+
+def _research_mode(intent) -> str:
+    return (getattr(intent, "research_before_draft", "none") or "none") if intent is not None else "none"
+
+
+def _apply_research_first_override(task: str, tasks_planned: list[str], intent):
+    """Honour an explicit research-before-draft instruction. Pure.
+
+    Returns (task, tasks_planned, intent, changed). The classifier's rule
+    "production verb + document noun -> Drafting" fires on "I need to prepare
+    a draft of suit ... (before drafting I want to research the legal aspect,
+    how should I state the facts)" (prod 2026-10-25): the plan became
+    ['Drafting'] alone, the strip removed the research agents, and a full
+    plaint shipped in place of the research.
+
+    research_only      -> Scenario primary, Drafting out of the plan, the
+                          planner's research agents kept; task_intent set to
+                          "analyze" so no later rule (multi-intent, drafting
+                          reconciliation, draft-from-file) re-adds Drafting.
+    research_and_draft -> Drafting primary, Scenario guaranteed in the plan;
+                          the cite-appendix strip keeps the research agents
+                          and synthesis puts the research first.
+    """
+    mode = _research_mode(intent)
+    if mode == "research_only":
+        before = (task, list(tasks_planned))
+        if getattr(intent, "task_intent", None) == "draft":
+            intent = intent.model_copy(update={"task_intent": "analyze"})
+        if task == "Drafting":
+            task = "Scenario"
+        tasks_planned = [a for a in tasks_planned if a != "Drafting"]
+        if task == "Scenario" and "Scenario" not in tasks_planned:
+            tasks_planned = ["Scenario"] + tasks_planned
+        if not tasks_planned:
+            tasks_planned = [task]
+        return task, tasks_planned, intent, (task, tasks_planned) != before
+    if mode == "research_and_draft":
+        before = (task, list(tasks_planned))
+        task = "Drafting"
+        rest = [a for a in tasks_planned if a not in ("Drafting", "Scenario")]
+        tasks_planned = (["Drafting", "Scenario"] + rest)[:4]
+        return task, tasks_planned, intent, (task, tasks_planned) != before
+    return task, tasks_planned, intent, False
+
+
 def _wants_drafting(intent: UserIntent | None) -> bool:
     """True iff the user wants the AI to PRODUCE a legal document.
 
@@ -366,6 +415,11 @@ doubt, do NOT pick Drafting.
    application, affidavit, legal notice, agreement, contract, deed, MOU, will,
    divorce petition, reply, rejoinder, etc.).
    NOT Drafting:
+   - The user asks to research / analyse the law or how to state the facts
+     BEFORE drafting, or not to draft yet ("before drafting I want to
+     research...", "first analyse the law", "don't draft yet") and does not
+     ask for the document in this response → **Scenario**, even with a
+     production verb and a document noun.
    - Tactical outputs (arguments, cross-examination questions, strategy,
      defences, briefs of advice) → **Scenario**, even if the user says "draft".
    - Questions ABOUT documents (format, essential elements, requirements,
@@ -1451,6 +1505,19 @@ _CITATIONS_ONLY_PREFIX = (
     "Issues / matter: "
 )
 
+# research_and_draft scopes, appended to each side's query (see plan node).
+_RESEARCH_ONLY_SCOPE = (
+    "\n\n[SCOPE: RESEARCH SECTION ONLY. Another agent writes the document the user "
+    "asked for and it is placed after your section. Do NOT draft, outline or restate "
+    "the document. Write the legal research the user asked for: applicable law, "
+    "issues, risks, missing documents, forum, and how to state the facts.]"
+)
+_DOCUMENT_ONLY_SCOPE = (
+    "\n\n[SCOPE: DOCUMENT ONLY. The legal research and analysis the user asked for "
+    "are written separately and placed before your document. Write only the "
+    "document itself; no research notes, strategy, risk lists or forum analysis.]"
+)
+
 _CITATION_APPENDIX_AGENTS = frozenset({
     "Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Newacts", "Legislation",
 })
@@ -1944,6 +2011,17 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     if _arg_changed:
         log.warning("Argument request: routing corrected away from Drafting",
                     query=_original_query[:80], before=_prev, after=(task, tasks_planned))
+    # Explicit research-before-draft instruction outranks the classifier's
+    # production-verb + document-noun rule. Same position as the argument
+    # override: before every consumer that can re-add Drafting.
+    _prev = (task, list(tasks_planned))
+    task, tasks_planned, extracted_intent, _rbd_changed = _apply_research_first_override(
+        task, tasks_planned, extracted_intent,
+    )
+    if _rbd_changed:
+        log.info("Research-before-draft: routing adjusted",
+                 mode=_research_mode(extracted_intent),
+                 before=_prev, after=(task, tasks_planned))
     if task not in ("Non_legal", "Document"):
         extra = _detect_multi_intent(extracted_intent, task)
         for agent in extra:
@@ -2062,6 +2140,10 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                 "Scenario", "Constitution", "Maxim", "Legal_Concepts",
             })
             _strip_set = _CITATION_APPENDIX_AGENTS | _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING
+            if _research_mode(extracted_intent) == "research_and_draft":
+                # The user asked for the research as its own output: those
+                # agents are the first half of the response, not redundant.
+                _strip_set = _strip_set - set(_RESEARCH_AGENTS)
             _kept = [t for t in tasks_planned if t not in _strip_set]
             _stripped = [t for t in tasks_planned if t in _strip_set]
             tasks_planned = _kept[:4]
@@ -2143,9 +2225,23 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # happens whenever the rewrite fails), they write a second pleading
         # that the appendix then carried verbatim (advocate report, 2026-09-11).
         if task == "Drafting":
-            for _ca in [a for a in tasks_planned if a in _CITATION_APPENDIX_AGENTS]:
+            # In research_and_draft mode the statute agents write part of the
+            # research section, so they keep their research query.
+            _research_agents = (set(_RESEARCH_AGENTS)
+                                if _research_mode(extracted_intent) == "research_and_draft" else set())
+            for _ca in [a for a in tasks_planned if a in _CITATION_APPENDIX_AGENTS and a not in _research_agents]:
                 _base = agent_queries.get(_ca) or query
                 agent_queries[_ca] = _CITATIONS_ONLY_PREFIX + _base[:1500]
+            # research_and_draft: each side writes only its part. The USER
+            # DIRECTIVES line alone did not hold - asked for "analysis, then
+            # the notice", the research agent also wrote the notice and the
+            # drafter also wrote the analysis (local A/B 2026-10-26). Appended
+            # after the user's text so the drafter's template search still
+            # leads with it.
+            if _research_agents:
+                agent_queries["Drafting"] = (agent_queries.get("Drafting") or query) + _DOCUMENT_ONLY_SCOPE
+                for _ra in [a for a in tasks_planned if a in _research_agents]:
+                    agent_queries[_ra] = (agent_queries.get(_ra) or query) + _RESEARCH_ONLY_SCOPE
 
     # NOTE: Previously this block concatenated 30K chars of PDF text into
     # agent_queries["Drafting"] so the drafting agent would receive the
@@ -2541,6 +2637,14 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     if "Drafting" in valid_results:
         drafting_result = valid_results.pop("Drafting")
 
+        # research_and_draft: the user asked for the research as its own
+        # output, before the document. The research agents' content leads,
+        # the draft follows; neither goes into the citation appendix.
+        research_results = {}
+        if _research_mode(state.get("user_intent")) == "research_and_draft":
+            research_results = {k: valid_results.pop(k) for k in _RESEARCH_AGENTS
+                                if k in valid_results and (valid_results[k].content or "").strip()}
+
         # Restrict citation_results to CITATION-SHAPED agents only. The plan
         # phase already separates content agents (Scenario, Constitution,
         # Maxim, Legal_Concepts) from citation agents (Judgment, SCI_Judgment,
@@ -2612,6 +2716,15 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 enriched, user_query=state.get("original_query") or query)
             if citations_text.strip():
                 enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
+            if research_results:
+                research = "\n\n".join(r.content.strip() for r in research_results.values())
+                for r in research_results.values():
+                    total_tokens += r.tokens_consumed
+                    all_serialized_sources.extend(_serialize_sources(r))
+                enriched = ("## Part 1 — Legal Research and Framing of Facts\n\n" + research
+                            + "\n\n---\n\n## Part 2 — Draft\n\n" + enriched)
+                log.info("Research-and-draft synthesis: research placed before the draft",
+                         research_agents=list(research_results.keys()), research_len=len(research))
 
             log.info("Draft synthesis completed (append-only)",
                      enriched_len=len(enriched),

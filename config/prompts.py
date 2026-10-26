@@ -1384,6 +1384,38 @@ Given the user's query and the recent conversation summary, produce:
        Be CONSERVATIVE: when in doubt between "draft" and "explain", pick
        "explain". When in doubt between "analyze" and "lookup", pick "lookup".
 
+   research_before_draft — sequencing of research and drafting. Set ONLY on
+       an EXPLICIT instruction; default "none".
+       "research_only"      the user asks to research / analyse / discuss the
+                            law or how to state the facts BEFORE drafting, or
+                            says not to draft yet, and does NOT ask for the
+                            document in this same response: "before drafting
+                            I want to research the legal aspect, how should I
+                            state the facts", "first analyse the law, then I
+                            will ask for the plaint", "don't draft yet".
+       "research_and_draft" the user asks for BOTH a research / analysis
+                            output AND the document in this same response:
+                            "review the material and discuss the matter in
+                            depth, then DRAFT THE LEGAL NOTICE", numbered
+                            outputs listing an analysis and the document,
+                            "give me both: first the analysis, then the
+                            notice".
+       "none"               everything else. In particular "none" for:
+                            a plain draft request; "draft X with detailed
+                            legal reasoning", "draft X with case laws /
+                            citations / grounds" — reasoning or authorities
+                            INSIDE the draft are part of the draft, not a
+                            separate research output; and "draft X after
+                            researching Y" / "analyse the notice and draft a
+                            reply" — there the research is how the draft is
+                            made, not something the user wants to read.
+                            research_and_draft needs an analysis the user
+                            wants to RECEIVE as its own deliverable, before
+                            or beside the document ("first discuss / explain
+                            ... then draft", "give me both", "(a) a research
+                            note and (b) the petition", numbered outputs
+                            naming the analysis).
+
    wants_statute_text — TRUE iff the user wants statutory text / a specific
        section / specific act provisions surfaced. Triggers (any language):
          - explicit section / article / rule / order references: "section 138",
@@ -3972,6 +4004,11 @@ structured plan that decides in one shot:
    prayer clause") — the drafting agent handles both new drafts AND
    directive-driven modifications of prior drafts.
    NOT Drafting:
+   - The user asks to research / analyse the law or how to state the facts
+     BEFORE drafting, or not to draft yet ("before drafting I want to
+     research...", "don't draft yet") and does not ask for the document in
+     this response → **Scenario**, even with a production verb and a document
+     noun (intent.research_before_draft = "research_only").
    - Tactical outputs (arguments, cross-examination questions, strategy,
      defences, briefs of advice) → **Scenario**, even if the user says "draft".
    - Questions ABOUT documents (format, essential elements, requirements,
@@ -4052,6 +4089,11 @@ When the user's query bundles multiple distinct asks in one turn (e.g. draft
 a suit + explain a scenario + cite case laws), include ALL relevant agents
 up to the 4-cap. Do NOT collapse to just the drafting agent — the classifier's
 job is to honour the full request.
+NOT multi-intent: research that is only how the draft gets made ("draft X
+after researching Y", "analyse the notice and draft a reply", "draft X with
+case laws") — that is plain **Drafting** with intent.research_before_draft =
+"none". Multi-intent needs an analysis the user wants to RECEIVE as its own
+output.
 
 ## PART 3 — Structured intent (populate `intent` field)
 
@@ -4086,6 +4128,19 @@ Extract the same fields as the legacy USER_INTENT_EXTRACTION_PROMPT:
   legal_notice, office_application, agreement, etc.) or "none"
 - **task_intent** — "draft", "explain", "lookup", "analyze_scenario",
   "compare", "list", etc.
+- **research_before_draft** — "none" (default) / "research_only" /
+  "research_and_draft". "research_only" ONLY when the user explicitly asks to
+  research / analyse the law or how to state the facts BEFORE drafting, or not
+  to draft yet, without asking for the document in this response.
+  "research_and_draft" ONLY when the user explicitly asks for a SEPARATE
+  analysis deliverable before or beside the document in this response
+  ("first...", "before drafting...", "discuss / review in depth, then draft",
+  "give me both", numbered outputs naming the analysis) — an analysis the
+  user wants to RECEIVE. "none" for a plain draft request, for "draft X with
+  detailed legal reasoning / case laws / citations", and for "draft X after
+  researching Y" / "analyse the notice and draft a reply" (research as the
+  drafter's method, not a deliverable). "I will need X later, but first
+  explain the law" is "research_only".
 - **wants_statute_text**, **wants_scenario_analysis**, **wants_constitution**,
   **wants_maxim**, **wants_supreme_court**, **wants_gst_rulings**,
   **wants_tribunal_rulings** — boolean flags derived from the query

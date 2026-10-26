@@ -335,6 +335,25 @@ class UserIntent(BaseModel):
                     "user attaches a file and asks any question that's not a "
                     "draft request, prefer 'ask_about_file'.",
     )
+    research_before_draft: Literal["none", "research_only", "research_and_draft"] = Field(
+        "none",
+        description="Sequencing of research and drafting, set ONLY on an "
+                    "explicit instruction. 'research_only': the user asks to "
+                    "research / analyse / discuss the law or how to frame the "
+                    "facts BEFORE drafting, or says not to draft yet, and does "
+                    "not ask for the document in this same response ('before "
+                    "drafting I want to research...', 'first analyse the law', "
+                    "'don't draft yet'). 'research_and_draft': the user asks "
+                    "for BOTH a research / analysis output and the document in "
+                    "this same response ('review and discuss first, then draft "
+                    "the notice'; numbered outputs listing an analysis and the "
+                    "document) - an analysis the user wants to RECEIVE. "
+                    "'none': everything else, including a plain draft "
+                    "request, 'draft X with detailed legal reasoning / case "
+                    "laws' (reasoning inside the draft), and 'draft X after "
+                    "researching Y' / 'analyse the notice and draft a reply' "
+                    "(research as the drafter's method, not a deliverable).",
+    )
 
     # — Content corpus directives. Each is TRUE iff the user explicitly asked
     #   for that kind of supporting content alongside the primary task.

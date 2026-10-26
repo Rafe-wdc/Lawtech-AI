@@ -599,6 +599,30 @@ def _format_intent_directives(intent) -> str:
             "and standards. Where the document needs one, write the clause "
             "and mark the value as unresolved."
         )
+    # Research-before-draft sequencing. Every agent of the plan receives this
+    # block (Scenario, Legal_Concepts, the statute agents, Drafting), so the
+    # wording tells each its own part. Emitted only on the user's explicit
+    # instruction; absent, the prompts are unchanged.
+    rbd = getattr(intent, "research_before_draft", "none") or "none"
+    if rbd == "research_only":
+        parts.append(
+            "USER SEQUENCING: research first, no draft in this response. The "
+            "user asked to research the law and how to state the facts BEFORE "
+            "any drafting. Do NOT draft the document. Answer the legal "
+            "questions the user raised, explain how to state the facts and "
+            "what each fact must establish, flag gaps and risks, and end by "
+            "offering to draft the document next."
+        )
+    elif rbd == "research_and_draft":
+        parts.append(
+            "USER SEQUENCING: research section first, then the document. The "
+            "response has two parts written by different agents: a research "
+            "section (legal analysis, risks, missing documents, forum, how to "
+            "state the facts) placed before the document, and the document "
+            "itself. If you are writing the document, write ONLY the document. "
+            "If you are writing the research, write ONLY the research and do "
+            "not draft the document."
+        )
     marker = (getattr(intent, "unresolved_marker", "") or "").strip()
     if marker:
         parts.append(

@@ -95,6 +95,10 @@ class CitedCase:
     petitioner: str
     respondent: str
     citation: str = ""
+    # The "X v. Y" is a list / heading label ("1. **Signed Delivery Note vs.
+    # Pre-Delivery Defects:**"), not a sentence citing a case. Reported only
+    # when the lookup confirms a real judgment by those parties.
+    label: bool = False
 
     @property
     def display(self) -> str:
@@ -214,6 +218,64 @@ _ROLE_OR_LEADER_RE = re.compile(
 )
 
 
+# A label line: only list / heading markers and emphasis before the "X v. Y",
+# and a colon within a few words after it.
+_LABEL_BEFORE_RE = re.compile(r"^[ \t]*(?:#{1,6}[ \t]+)?(?:(?:\d+|[a-z]|[ivx]+)[.)][ \t]+|[-*+][ \t]+)?[*_]*[ \t]*$",
+                              re.IGNORECASE)
+_LABEL_AFTER_RE = re.compile(r"^[^\n:]{0,60}?[*_]*:")
+
+
+def _is_label(text: str, start: int, end: int) -> bool:
+    line_start = text.rfind("\n", 0, start) + 1
+    return bool(_LABEL_BEFORE_RE.match(text[line_start:start])
+                and _LABEL_AFTER_RE.match(text[end:end + 70]))
+
+
+# Is an "X v. Y" label a comparison of two concepts ("Pleadings v. Evidence",
+# "Factum v. Validity") rather than a case? Any party marker, an all-caps
+# name, initials or "(Dead)" means a case; otherwise a concept needs an
+# abstract-noun word. Checked on 94 hand-classified prod labels (32/35
+# concepts, 0/58 cases wrong) and 54 unseen ones (31/34, 0/20).
+_PARTY_MARKERS = {
+    "state", "union", "india", "govt", "government", "commissioner", "corporation",
+    "association", "authority", "ltd", "limited", "pvt", "co", "company", "bank", "board",
+    "bureau", "cbi", "society", "trust", "council", "university", "ors", "anr", "smt",
+    "shri", "sri", "dr", "justice", "municipal", "collector", "director", "police",
+    "inspector", "secretary", "industries", "enterprises", "motors", "services",
+    "development", "welfare", "corpn", "inc", "llp", "bros", "trading", "nct", "uoi",
+    "officer", "tribunal", "registrar", "panchayat", "hospital", "insurance", "railway",
+}
+_CONCEPT_SUFFIXES = ("tion", "sion", "ity", "ment", "ence", "ance", "ness", "ship")
+_GENERIC_CONCEPTS = {
+    "scope", "form", "test", "evidence", "bar", "law", "fact", "status", "right",
+    "title", "property", "intent", "strategy", "capacity", "defect", "consent", "demand",
+    "refund", "custody", "standard", "contract", "pleading", "document", "record", "memo",
+    "ground", "source", "matter", "factum", "validity", "income", "search", "project",
+    "member", "buyer", "name", "case", "remedy", "liability", "duty", "burden", "proof",
+    "procedure", "jurisdiction", "limitation", "presumption",
+}
+
+
+def _concept_label(petitioner: str, respondent: str) -> bool:
+    sides = (petitioner, respondent)
+    for side in sides:
+        letters = re.sub(r"[^A-Za-z]", "", side)
+        if letters and letters.isupper() and len(letters) > 3:
+            return False
+        if re.search(r"\b[A-Z]\.\s*[A-Z]\.|\((?:dead|d|retd\.?)\)", side, re.I):
+            return False
+        if {w.lower() for w in re.findall(r"[A-Za-z]+", side)} & _PARTY_MARKERS:
+            return False
+    for w in (w.lower() for s in sides for w in re.findall(r"[A-Za-z]{3,}", s)):
+        stem = w[:-1] if w.endswith("s") and len(w) > 4 else w
+        if stem.endswith("ing"):
+            if len(stem) >= 8:                  # "Encouraging"; not the name "Narsing"
+                return True
+        elif stem.endswith(_CONCEPT_SUFFIXES) or stem in _GENERIC_CONCEPTS:
+            return True
+    return False
+
+
 def extract_cited_cases(text: str, own_parties_text: str = "") -> list[CitedCase]:
     """Every distinct "X v. Y" case cited in `text`, in order of first mention.
 
@@ -235,12 +297,19 @@ def extract_cited_cases(text: str, own_parties_text: str = "") -> list[CitedCase
             continue
         tail = _CITATION_TAIL_RE.match(text[m.end():m.end() + 80])
         citation = re.sub(r"\s+", " ", tail.group("cit")).strip() if tail else ""
+        label = not citation and _is_label(text, m.start(), m.end())
         # Same case mentioned again, possibly with a stray sentence word in
-        # front ("Again Jacob Mathew v. ...") or a shorter name.
-        if any(tb == sb and (ta <= sa or sa <= ta) for sa, sb in seen):
+        # front ("Again Jacob Mathew v. ...") or a shorter name. A citing
+        # sentence anywhere makes it a citation, even if a label came first.
+        dup = next((i for i, (sa, sb) in enumerate(seen)
+                    if tb == sb and (ta <= sa or sa <= ta)), None)
+        if dup is not None:
+            if not label and out[dup].label:
+                out[dup] = CitedCase(out[dup].petitioner, out[dup].respondent,
+                                     out[dup].citation or citation, label=False)
             continue
         seen.append((ta, tb))
-        out.append(CitedCase(a, b, citation))
+        out.append(CitedCase(a, b, citation, label=label))
         if len(out) >= MAX_CASES:
             break
     return out
@@ -419,6 +488,20 @@ async def append_judgments_cited(draft: str, lookup=None, user_query: str = "") 
                     cases=len(cases), error=f"{type(e).__name__}: {e}"[:200])
         return draft
 
+    # A heading label that reads as two concepts and is not a judgment in
+    # either index is the answer's own heading ("Consent for Part Replacement
+    # vs. Demand for Complete Replacement:"), not an authority - leave it out
+    # rather than list it as "not verified" (prod 2026-10-25, thread 1f08702).
+    # Real cases used as labels ("Vikas v. Bhagwati:") stay, verified or not.
+    def _heading_not_case(c: CitedCase, f) -> bool:
+        return c.label and f is None and _concept_label(c.petitioner, c.respondent)
+    dropped = [c.display for c, f in results if _heading_not_case(c, f)]
+    results = [(c, f) for c, f in results if not _heading_not_case(c, f)]
+    if dropped:
+        log.info("Judgments Cited: unverified heading labels left out", labels=dropped[:5])
+    if not results:
+        return draft
+    cases = [c for c, _ in results]
     found = sum(1 for _, f in results if f is not None)
     linked = sum(1 for _, f in results if f is not None and f.pdf_url)
     log.info("Judgments Cited appended", cases=len(cases), found=found,

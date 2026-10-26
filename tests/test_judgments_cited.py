@@ -248,3 +248,93 @@ def test_parties_from_the_users_own_request_are_skipped():
     names = [f"{c.petitioner} v. {c.respondent}"
              for c in extract_cited_cases(draft, own_parties_text=query)]
     assert names == ["Jacob Mathew v. State of Punjab"]
+
+
+# --- heading labels are not citations (prod 2026-10-25, thread 1f08702) ---------
+# A consumer-notice answer listed its own risk headings as cases:
+#   "1. **Signed Delivery Acknowledgement Note vs. Pre-Delivery Defects:**"
+# came out as "*Signed Delivery Acknowledgement Note v. Pre-Delivery Defects* -
+# not verified in Lawttorney database".
+
+LABEL_ANSWER = (
+    "#### A. Evidentiary Weaknesses\n"
+    "1. **Signed Delivery Acknowledgement Note vs. Pre-Delivery Defects:**\n"
+    "- *Risk:* the signed note may be read as a waiver.\n\n"
+    "3. **Consent for Part Replacement vs. Demand for Complete Replacement / Refund:**\n"
+    "- *Risk:* the email may be read as acceptance.\n\n"
+    "The National Commission held so in Neena Aneja v. Bharti Cellular Ltd., and the "
+    "Supreme Court followed it in Tata Motors Ltd. v. Antonio Paulo Vaz.\n"
+)
+
+
+def _lookup_only_tata(case):
+    if "Tata Motors" in case.petitioner:
+        return FoundJudgment("Supreme Court of India", "18-02-2021", "https://x/40090.pdf")
+    return None
+
+
+def test_heading_labels_are_marked_and_prose_citations_are_not():
+    cases = {c.petitioner: c.label for c in extract_cited_cases(LABEL_ANSWER)}
+    assert cases["Signed Delivery Acknowledgement Note"] is True
+    assert cases["Consent for Part Replacement"] is True
+    assert cases["Neena Aneja"] is False and cases["Tata Motors Ltd."] is False
+
+
+def test_unverified_heading_labels_are_left_out_of_the_block():
+    out = asyncio.run(append_judgments_cited(LABEL_ANSWER, lookup=_lookup_only_tata))
+    block = out[out.index(HEADING):]
+    assert "Delivery Acknowledgement" not in block and "Part Replacement" not in block
+    assert "Tata Motors Ltd. v. Antonio Paulo Vaz" in block and "40090.pdf" in block
+    # a real case cited in prose stays, verified or not
+    assert f"Neena Aneja v. Bharti Cellular Ltd.* — {NOT_VERIFIED}" in block
+
+
+def test_a_label_that_is_a_real_judgment_is_kept():
+    text = "1. **Arnesh Kumar v. State of Bihar:**\n- arrest guidelines under Section 41A.\n"
+    found = FoundJudgment("Supreme Court of India", "02-07-2014", "https://x/a.pdf")
+    out = asyncio.run(append_judgments_cited(text, lookup=lambda c: found))
+    assert "Arnesh Kumar v. State of Bihar" in out[out.index(HEADING):]
+
+
+def test_a_case_cited_in_prose_after_its_label_stays_even_unverified():
+    text = ("2. **Neena Aneja v. Bharti Cellular Ltd.:**\n- consumer jurisdiction.\n\n"
+            "As held in Neena Aneja v. Bharti Cellular Ltd., the remedy is available.\n")
+    (case,) = extract_cited_cases(text)
+    assert case.label is False
+    out = asyncio.run(append_judgments_cited(text, lookup=lambda c: None))
+    assert "Neena Aneja v. Bharti Cellular Ltd." in out[out.index(HEADING):]
+
+
+def test_a_label_carrying_a_reporter_citation_is_a_citation():
+    (case,) = extract_cited_cases("1. **Arnesh Kumar v. State of Bihar, (2014) 8 SCC 273:**\n")
+    assert case.label is False and case.citation == "(2014) 8 SCC 273"
+
+
+def test_answer_with_only_unverified_labels_is_returned_unchanged():
+    text = "1. **Oral Agreement vs. Written Agreement:**\n- which prevails.\n"
+    assert asyncio.run(append_judgments_cited(text, lookup=lambda c: None)) == text
+
+
+def test_a_real_case_used_as_a_label_stays_even_unverified():
+    # High Court / unreported cases headed as labels must keep their
+    # "not verified" line - only concept comparisons are left out.
+    text = ("1. **Vikas v. Bhagwati:**\n- maintenance where the wife earns.\n\n"
+            "2. **Pleadings v. Evidence:**\n- no evidence beyond the pleadings.\n")
+    out = asyncio.run(append_judgments_cited(text, lookup=lambda c: None))
+    block = out[out.index(HEADING):]
+    assert f"Vikas v. Bhagwati* — {NOT_VERIFIED}" in block
+    assert "Pleadings" not in block
+
+
+def test_concept_rule_on_prod_labels():
+    from core.judgments_cited import _concept_label
+    for a, b in [("Pleadings", "Evidence"), ("Factum", "Validity"), ("Scope", "Compounding"),
+                 ("Privity of Consideration", "Privity of Contract"),
+                 ("Civil Contracts", "Criminal Prosecutions"),
+                 ("Signed Delivery Acknowledgement Note", "Pre-Delivery Defects")]:
+        assert _concept_label(a, b), (a, b)
+    for a, b in [("Chotulal Narsing Pawara", "Gitabai Chotulal Pawara"), ("Vikas", "Bhagwati"),
+                 ("Akkamma", "Vemavathi"), ("State of Haryana", "Bhajan Lal"),
+                 ("SHYAM KUMAR", "STATE"), ("Justice K.S. Puttaswamy (Retd.)", "Union of India"),
+                 ("Tata Cellular", "Union of India"), ("Badat and Co.", "East India Trading Co.")]:
+        assert not _concept_label(a, b), (a, b)

@@ -324,6 +324,33 @@ class _SqliteChatHistoryStore:
                     conn.commit()
                     log.info("Migrated messages: added column", column=col_name)
 
+            # --- User memory (docs/user_memory_design.md) ---
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS user_memory (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id     TEXT NOT NULL,
+                    slot        TEXT NOT NULL,
+                    value       TEXT NOT NULL,
+                    source      TEXT NOT NULL CHECK (source IN ('user_stated', 'inferred')),
+                    confidence  REAL NOT NULL DEFAULT 1.0,
+                    thread_id   TEXT NOT NULL DEFAULT '',
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (user_id, slot, value)
+                );
+                CREATE INDEX IF NOT EXISTS idx_user_memory_user ON user_memory(user_id);
+                CREATE TABLE IF NOT EXISTS user_memory_settings (
+                    user_id     TEXT PRIMARY KEY,
+                    enabled     INTEGER NOT NULL DEFAULT 1,
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+            """)
+            thread_cols = {row[1] for row in conn.execute("PRAGMA table_info(threads)")}
+            if "no_memory" not in thread_cols:
+                conn.execute("ALTER TABLE threads ADD COLUMN no_memory INTEGER NOT NULL DEFAULT 0")
+                conn.commit()
+                log.info("Migrated threads: added column", column="no_memory")
+
             self._initialized = True
             log.info("Schema initialized", db_path=self._db_path)
         finally:
@@ -1117,6 +1144,175 @@ class _SqliteChatHistoryStore:
 
 
     # ------------------------------------------------------------------
+    # User memory (cross-session lawyer profile) - docs/user_memory_design.md
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _memory_row(row) -> dict:
+        return {
+            "id": row["id"], "user_id": row["user_id"], "slot": row["slot"],
+            "value": row["value"], "source": row["source"],
+            "confidence": float(row["confidence"] or 0.0),
+            "thread_id": row["thread_id"], "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def _load_user_memory_sync(self, user_id: str) -> list[dict]:
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM user_memory WHERE user_id = ? ORDER BY slot, created_at, id",
+                (user_id,),
+            ).fetchall()
+            return [self._memory_row(r) for r in rows]
+        finally:
+            conn.close()
+
+    async def load_user_memory(self, user_id: str) -> list[dict]:
+        return await asyncio.to_thread(self._load_user_memory_sync, user_id)
+
+    def _insert_user_memory_sync(self, user_id, slot, value, source, confidence, thread_id) -> int:
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO user_memory (user_id, slot, value, source, confidence, thread_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, slot, value) DO UPDATE SET
+                        source = excluded.source,
+                        confidence = excluded.confidence,
+                        updated_at = datetime('now')
+                """, (user_id, slot, value, source, float(confidence), thread_id or ""))
+                row = conn.execute(
+                    "SELECT id FROM user_memory WHERE user_id = ? AND slot = ? AND value = ?",
+                    (user_id, slot, value),
+                ).fetchone()
+                conn.commit()
+                return int(row["id"]) if row else 0
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def insert_user_memory(self, user_id: str, slot: str, value: str, source: str,
+                                 confidence: float, thread_id: str = "") -> int:
+        return await asyncio.to_thread(
+            self._insert_user_memory_sync, user_id, slot, value, source, confidence, thread_id)
+
+    def _update_user_memory_sync(self, row_id, user_id, value, source, confidence) -> bool:
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("""
+                    UPDATE user_memory SET value = ?, source = ?, confidence = ?,
+                        updated_at = datetime('now')
+                    WHERE id = ? AND user_id = ?
+                """, (value, source, float(confidence), int(row_id), user_id))
+                conn.commit()
+                return cur.rowcount > 0
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    async def update_user_memory(self, row_id: int, user_id: str, value: str,
+                                 source: str, confidence: float) -> bool:
+        return await asyncio.to_thread(
+            self._update_user_memory_sync, row_id, user_id, value, source, confidence)
+
+    def _delete_user_memory_sync(self, row_id, user_id) -> bool:
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("DELETE FROM user_memory WHERE id = ? AND user_id = ?",
+                                   (int(row_id), user_id))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    async def delete_user_memory(self, row_id: int, user_id: str) -> bool:
+        return await asyncio.to_thread(self._delete_user_memory_sync, row_id, user_id)
+
+    def _delete_user_memory_all_sync(self, user_id) -> int:
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("DELETE FROM user_memory WHERE user_id = ?", (user_id,))
+                conn.commit()
+                return cur.rowcount
+            finally:
+                conn.close()
+
+    async def delete_user_memory_all(self, user_id: str) -> int:
+        return await asyncio.to_thread(self._delete_user_memory_all_sync, user_id)
+
+    def _get_user_memory_enabled_sync(self, user_id) -> bool:
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT enabled FROM user_memory_settings WHERE user_id = ?",
+                               (user_id,)).fetchone()
+            return True if row is None else bool(row["enabled"])
+        finally:
+            conn.close()
+
+    async def get_user_memory_enabled(self, user_id: str) -> bool:
+        return await asyncio.to_thread(self._get_user_memory_enabled_sync, user_id)
+
+    def _set_user_memory_enabled_sync(self, user_id, enabled_flag) -> None:
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO user_memory_settings (user_id, enabled) VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled,
+                        updated_at = datetime('now')
+                """, (user_id, 1 if enabled_flag else 0))
+                conn.commit()
+            finally:
+                conn.close()
+
+    async def set_user_memory_enabled(self, user_id: str, enabled_flag: bool) -> None:
+        await asyncio.to_thread(self._set_user_memory_enabled_sync, user_id, enabled_flag)
+
+    def _get_thread_no_memory_sync(self, thread_id) -> bool:
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT no_memory FROM threads WHERE thread_id = ?",
+                               (thread_id,)).fetchone()
+            return bool(row["no_memory"]) if row is not None else False
+        finally:
+            conn.close()
+
+    async def get_thread_no_memory(self, thread_id: str) -> bool:
+        return await asyncio.to_thread(self._get_thread_no_memory_sync, thread_id)
+
+    def _set_thread_no_memory_sync(self, thread_id, flag) -> None:
+        self._ensure_schema()
+        with self._write_lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("INSERT OR IGNORE INTO threads (thread_id) VALUES (?)", (thread_id,))
+                conn.execute("UPDATE threads SET no_memory = ? WHERE thread_id = ?",
+                             (1 if flag else 0, thread_id))
+                conn.commit()
+            finally:
+                conn.close()
+
+    async def set_thread_no_memory(self, thread_id: str, flag: bool) -> None:
+        await asyncio.to_thread(self._set_thread_no_memory_sync, thread_id, flag)
+
+    # ------------------------------------------------------------------
     # Fallback Log (web search fallback tracking for ES backfill)
     # ------------------------------------------------------------------
 
@@ -1878,6 +2074,40 @@ class _PostgresChatHistoryStore:
                 except Exception:
                     conn.rollback()  # column already exists
 
+            # --- User memory (docs/user_memory_design.md) ---
+            with self._get_pool().connection() as conn:
+                conn.row_factory = dict_row
+                for stmt in (
+                    """CREATE TABLE IF NOT EXISTS user_memory (
+                        id          BIGSERIAL PRIMARY KEY,
+                        user_id     TEXT NOT NULL,
+                        slot        TEXT NOT NULL,
+                        value       TEXT NOT NULL,
+                        source      TEXT NOT NULL CHECK (source IN ('user_stated', 'inferred')),
+                        confidence  DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+                        thread_id   TEXT NOT NULL DEFAULT '',
+                        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE (user_id, slot, value)
+                    )""",
+                    "CREATE INDEX IF NOT EXISTS idx_user_memory_user ON user_memory(user_id)",
+                    """CREATE TABLE IF NOT EXISTS user_memory_settings (
+                        user_id     TEXT PRIMARY KEY,
+                        enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+                        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )""",
+                ):
+                    conn.execute(stmt)
+                conn.commit()
+                try:
+                    conn.execute(
+                        "ALTER TABLE threads ADD COLUMN no_memory BOOLEAN NOT NULL DEFAULT FALSE"
+                    )
+                    conn.commit()
+                    log.info("PG migration: added no_memory to threads")
+                except Exception:
+                    conn.rollback()  # column already exists
+
             self._schema_ok = True
             log.info("PostgreSQL chat-store schema ensured")
 
@@ -2475,6 +2705,141 @@ class _PostgresChatHistoryStore:
         return await asyncio.to_thread(
             self._save_feedback_sync, thread_id, turn_number, rating, comment
         )
+
+    # ------------------------------------------------------------------
+    # User memory (cross-session lawyer profile) - docs/user_memory_design.md
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _memory_row(row) -> dict:
+        return {
+            "id": int(row["id"]), "user_id": row["user_id"], "slot": row["slot"],
+            "value": row["value"], "source": row["source"],
+            "confidence": float(row["confidence"] or 0.0),
+            "thread_id": row["thread_id"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else "",
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else "",
+        }
+
+    def _load_user_memory_sync(self, user_id: str) -> list:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            rows = conn.execute(
+                "SELECT * FROM user_memory WHERE user_id = %s ORDER BY slot, created_at, id",
+                (user_id,),
+            ).fetchall()
+        return [self._memory_row(r) for r in rows]
+
+    async def load_user_memory(self, user_id: str) -> list:
+        return await asyncio.to_thread(self._load_user_memory_sync, user_id)
+
+    def _insert_user_memory_sync(self, user_id, slot, value, source, confidence, thread_id) -> int:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("""
+                INSERT INTO user_memory (user_id, slot, value, source, confidence, thread_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, slot, value) DO UPDATE SET
+                    source = EXCLUDED.source,
+                    confidence = EXCLUDED.confidence,
+                    updated_at = NOW()
+                RETURNING id
+            """, (user_id, slot, value, source, float(confidence), thread_id or "")).fetchone()
+            conn.commit()
+        return int(row["id"]) if row else 0
+
+    async def insert_user_memory(self, user_id: str, slot: str, value: str, source: str,
+                                 confidence: float, thread_id: str = "") -> int:
+        return await asyncio.to_thread(
+            self._insert_user_memory_sync, user_id, slot, value, source, confidence, thread_id)
+
+    def _update_user_memory_sync(self, row_id, user_id, value, source, confidence) -> bool:
+        self._ensure_schema()
+        with self._get_pool().connection() as conn:
+            cur = conn.execute("""
+                UPDATE user_memory SET value = %s, source = %s, confidence = %s, updated_at = NOW()
+                WHERE id = %s AND user_id = %s
+            """, (value, source, float(confidence), int(row_id), user_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    async def update_user_memory(self, row_id: int, user_id: str, value: str,
+                                 source: str, confidence: float) -> bool:
+        return await asyncio.to_thread(
+            self._update_user_memory_sync, row_id, user_id, value, source, confidence)
+
+    def _delete_user_memory_sync(self, row_id, user_id) -> bool:
+        self._ensure_schema()
+        with self._get_pool().connection() as conn:
+            cur = conn.execute("DELETE FROM user_memory WHERE id = %s AND user_id = %s",
+                               (int(row_id), user_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    async def delete_user_memory(self, row_id: int, user_id: str) -> bool:
+        return await asyncio.to_thread(self._delete_user_memory_sync, row_id, user_id)
+
+    def _delete_user_memory_all_sync(self, user_id) -> int:
+        self._ensure_schema()
+        with self._get_pool().connection() as conn:
+            cur = conn.execute("DELETE FROM user_memory WHERE user_id = %s", (user_id,))
+            conn.commit()
+            return cur.rowcount
+
+    async def delete_user_memory_all(self, user_id: str) -> int:
+        return await asyncio.to_thread(self._delete_user_memory_all_sync, user_id)
+
+    def _get_user_memory_enabled_sync(self, user_id) -> bool:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("SELECT enabled FROM user_memory_settings WHERE user_id = %s",
+                               (user_id,)).fetchone()
+        return True if row is None else bool(row["enabled"])
+
+    async def get_user_memory_enabled(self, user_id: str) -> bool:
+        return await asyncio.to_thread(self._get_user_memory_enabled_sync, user_id)
+
+    def _set_user_memory_enabled_sync(self, user_id, enabled_flag) -> None:
+        self._ensure_schema()
+        with self._get_pool().connection() as conn:
+            conn.execute("""
+                INSERT INTO user_memory_settings (user_id, enabled) VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
+            """, (user_id, bool(enabled_flag)))
+            conn.commit()
+
+    async def set_user_memory_enabled(self, user_id: str, enabled_flag: bool) -> None:
+        await asyncio.to_thread(self._set_user_memory_enabled_sync, user_id, enabled_flag)
+
+    def _get_thread_no_memory_sync(self, thread_id) -> bool:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute("SELECT no_memory FROM threads WHERE thread_id = %s",
+                               (thread_id,)).fetchone()
+        return bool(row["no_memory"]) if row is not None else False
+
+    async def get_thread_no_memory(self, thread_id: str) -> bool:
+        return await asyncio.to_thread(self._get_thread_no_memory_sync, thread_id)
+
+    def _set_thread_no_memory_sync(self, thread_id, flag) -> None:
+        self._ensure_schema()
+        with self._get_pool().connection() as conn:
+            conn.execute("INSERT INTO threads (thread_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                         (thread_id,))
+            conn.execute("UPDATE threads SET no_memory = %s WHERE thread_id = %s",
+                         (bool(flag), thread_id))
+            conn.commit()
+
+    async def set_thread_no_memory(self, thread_id: str, flag: bool) -> None:
+        await asyncio.to_thread(self._set_thread_no_memory_sync, thread_id, flag)
 
     # ------------------------------------------------------------------
     # Fallback Log

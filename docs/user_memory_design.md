@@ -1,9 +1,10 @@
-# User memory (cross-session lawyer profile) - design for review
+# User memory (cross-session lawyer profile)
 
-Status: DESIGN, nothing built yet. Review the profile schema (section 2) and
-the extraction prompt (section 4) before implementation starts.
+Status: BUILT on branch `feat/user-memory` (2026-10-27), behind
+`USER_MEMORY_ENABLED` (default off). Design approved 2026-10-27 with the
+amendments folded in below.
 
-Scope, as agreed on 2026-10-27:
+Scope:
 
 - Memory is per **user**, not per thread. It stores durable facts about the
   lawyer only. It never stores client, opposite-party, matter, case-number,
@@ -12,10 +13,10 @@ Scope, as agreed on 2026-10-27:
   the operations are applied to the table. The table is never append-only.
 - The profile is injected **after** the static system prompt and **before**
   the user message, so the cached prefix stays byte-identical across users.
-- A per-thread `no_memory` flag skips extraction for that thread.
+- A per-thread `no_memory` flag skips extraction for that thread. A per-user
+  setting switches memory off entirely (no injection, no extraction).
 - Explicit "remember that ..." / "forget that ..." messages are saved or
-  deleted directly with a `user_stated` tag, and the reply confirms it.
-- Everything is gated on `USER_MEMORY_ENABLED` (default off).
+  deleted directly as `user_stated`, and the reply confirms what changed.
 - First consumer: drafting fills `[Advocate Name]`, `[Advocate Address]`
   and the signature block from the profile.
 
@@ -23,363 +24,272 @@ Scope, as agreed on 2026-10-27:
 
 | Step | Where | What |
 |---|---|---|
-| Identify the user | `core/gateway.py` `chat_with_files` / `chat` | New form field `user_id` (same style as `plan`), header `X-User-Id` accepted as fallback. Empty -> memory is off for that request. |
-| Per-thread opt-out | `core/gateway.py` + `threads.no_memory` | New form field `no_memory` (bool). Once set on a thread it sticks for the thread. |
-| Load profile | `agents/memory.py::memory_node` | One SELECT by `user_id`, rendered to the injection block (section 5). Put on state as `user_profile_block`. |
-| Inject | `agents/drafting.py` (3 call sites that build `[SystemMessage(cacheable_system(...)), HumanMessage(...)]`) | A second, uncached system text block after the cached one. Section 5. |
-| Direct save / delete | `agents/memory.py::memory_node`, before the rewriter | Regex for a whole-message "remember that ..." / "forget that ..." (English, Hindi, Marathi forms). Section 6. |
-| Extract | `core/gateway.py`, right after `chat_store.save_turn(...)` | Fire-and-forget task, 20 s ceiling, Gemini Flash Lite. Never on the request's critical path. Section 4. |
-| Review API | `core/gateway.py` | `GET /pyapi/memory`, `PATCH /pyapi/memory/{id}`, `DELETE /pyapi/memory/{id}`, `DELETE /pyapi/memory`. Section 7. |
+| Identify the user | `core/gateway.py` (`_resolve_memory_user`) -> `core/user_memory.py::resolve_user_id` | `X-User-Id` header, verified (section 8). Empty or unverifiable -> memory is off for that request. |
+| Per-thread opt-out | form field / JSON field `no_memory` -> `threads.no_memory` | Sticky per thread once set. |
+| Direct command | `core/chat_runner.py` and `/pyapi/search`, before the cache and the graph | "remember that ..." / "forget ..." as the whole message. Graph does not run. Section 6. |
+| Load profile | same place, `load_profile_block(user_id)` | One SELECT; rendered block goes on state as `user_profile_block`. A profile-bearing request never reads or writes the shared response cache. |
+| Inject | `agents/drafting.py::drafting_node` sets a request-scoped ContextVar; `core/clients.py::cacheable_system` appends it | A second, uncached system text block after the cached one. Section 5. |
+| Extract | after `chat_store.save_turn(...)` in both paths | Fire-and-forget, 20 s ceiling, Gemini Flash Lite, raw user text only. Section 4. |
+| Review API | `core/gateway.py` `/pyapi/memory*` | Section 7. |
 
-Both chat stores (`_SqliteChatHistoryStore` for dev, `_PostgresChatHistoryStore`
-for prod) get the same new table and the same five methods:
-`load_user_memory`, `apply_memory_ops`, `delete_user_memory`,
-`set_thread_no_memory`, `get_thread_no_memory`.
+Both chat stores (`_SqliteChatHistoryStore` dev, `_PostgresChatHistoryStore`
+prod) carry the same tables and methods: `load_user_memory`,
+`insert_user_memory`, `update_user_memory`, `delete_user_memory`,
+`delete_user_memory_all`, `get/set_user_memory_enabled`,
+`get/set_thread_no_memory`. Schema is created on first use, like the other
+tables.
 
 ## 2. Profile schema
 
-One row per fact. A fixed set of **slots** keeps UPDATE and DELETE
-well-defined and keeps the injected block predictable.
-
 ```sql
-CREATE TABLE IF NOT EXISTS user_memory (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,   -- BIGSERIAL on Postgres
+CREATE TABLE user_memory (
+    id          INTEGER PRIMARY KEY,     -- BIGSERIAL on Postgres
     user_id     TEXT NOT NULL,
-    slot        TEXT NOT NULL,          -- closed set, see table below
-    value       TEXT NOT NULL,          -- plain text, <= 300 chars
+    slot        TEXT NOT NULL,           -- closed set below
+    value       TEXT NOT NULL,           -- plain text, <= 300 chars
     source      TEXT NOT NULL CHECK (source IN ('user_stated', 'inferred')),
-    confidence  REAL NOT NULL DEFAULT 1.0,   -- 1.0 for user_stated; 0.70-0.95 for inferred
-    thread_id   TEXT NOT NULL DEFAULT '',    -- where it was learned; audit only, never injected
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    confidence  REAL NOT NULL DEFAULT 1.0,   -- 1.0 user_stated; 0.70-0.95 inferred
+    thread_id   TEXT NOT NULL DEFAULT '',    -- where learned; audit only, never injected
+    created_at, updated_at,
     UNIQUE (user_id, slot, value)
 );
-CREATE INDEX IF NOT EXISTS idx_user_memory_user ON user_memory(user_id);
-
-ALTER TABLE threads ADD COLUMN no_memory INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE user_memory_settings (       -- per-user on/off for the review page
+    user_id     TEXT PRIMARY KEY,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at
+);
+ALTER TABLE threads ADD COLUMN no_memory BOOLEAN NOT NULL DEFAULT FALSE;
 ```
 
-Slots:
-
-| Slot | Cardinality | Example value | Used by drafting for |
+| Slot | Cardinality | Identity | Drafting uses it for |
 |---|---|---|---|
-| `advocate_name` | single | `Adv. Priya S. Kulkarni` | `[Advocate Name]`, signature block |
-| `enrolment_no` | single | `MAH/1234/2015` | signature block, Vakalatnama |
-| `firm_name` | single | `Kulkarni & Associates` | letterhead line, From block |
-| `office_address` | single | `201, Lex Towers, Fergusson College Rd, Pune 411004` | `[Advocate Address]`, From block |
-| `phone` | single | `+91 98xxxxxx12` | From block, notices |
-| `email` | single | `priya@kulkarnilaw.in` | From block, notices |
-| `courts` | multi | `Bombay High Court`; `District Court, Pune` | default forum when the user does not say |
-| `practice_areas` | multi | `criminal`; `family`; `cheque dishonour` | nothing yet (future: retrieval hints) |
-| `preferred_language` | single | `mr` | default draft language when `preferred_language` form field is empty |
-| `drafting_preference` | multi | `prefers "Hon'ble Court" over "the Court"`; `wants prayer clauses numbered (a), (b)` | style instruction in the injection block |
-| `note` | multi | `teaches at ILS Law College on Saturdays` | nothing; shown to the user on the review page only |
+| `advocate_name` | single | yes | `[Advocate Name]`, signature block |
+| `designation` | single | yes | "Advocate" / "Senior Advocate" / "Partner" in the signature block |
+| `enrolment_no` | single | yes | signature block, Vakalatnama |
+| `firm_name` | single | yes | letterhead, From block |
+| `office_address` | single | yes | `[Advocate Address]`, From block |
+| `phone`, `email` | single | yes | From block, notices |
+| `courts` | multi (<= 8) | no | default forum when the request names none |
+| `practice_areas` | multi (<= 8) | no | nothing yet |
+| `preferred_language` | single | no | default draft language |
+| `drafting_preference` | multi (<= 8) | no | style lines in the injected block |
+| `note` | multi (<= 8) | no | review page only, never injected |
 
 Rules:
 
-- Single-cardinality slots hold at most one row per user. ADD on an existing
-  single slot behaves as UPDATE.
-- Multi slots can hold up to 8 rows per user. A 9th ADD evicts the oldest
-  `inferred` row; if all 8 are `user_stated`, the ADD is dropped and logged.
-- `user_stated` rows are never changed or deleted by the extractor. Only the
-  user (a "forget that ..." message or the review API) can remove them. The
-  extractor may still UPDATE an `inferred` row with a `user_stated` one.
-- Total profile cap: 40 rows per user.
-- `thread_id` is written on insert and never shown to the model.
+- Single slots hold one row; ADD on an existing single slot is an UPDATE.
+- **Identity slots**: inferred rows are stored but **never injected**. The
+  review page shows them as unconfirmed (`confirmed: false`,
+  `injected: false`); PATCH (edit or plain confirm) promotes them to
+  `user_stated`.
+- A `user_stated` row can be modified (UPDATE, DELETE, or ADD-as-UPDATE on
+  a single slot) **only by an op that is itself `user_stated`**
+  (confidence 1.0). Enforced server-side in `validate_ops`, independent of
+  what the extractor claims.
+- Multi slots: a 9th ADD evicts the oldest `inferred` row; if all 8 are
+  `user_stated` the ADD is dropped. Whole profile caps at 40 rows.
 
 ## 3. Operations contract
 
-The extractor returns:
+Extractor output:
 
 ```json
 {"ops": [
   {"op": "ADD",    "slot": "courts",         "value": "Bombay High Court",            "source": "inferred",    "confidence": 0.85},
-  {"op": "UPDATE", "slot": "office_address", "value": "201, Lex Towers, Pune 411004", "source": "user_stated", "confidence": 1.0},
-  {"op": "DELETE", "slot": "phone",          "value": "+91 98xxxxxx12"}
+  {"op": "UPDATE", "slot": "office_address", "value": "201, Lex Towers, Pune 411004", "old_value": "...", "source": "user_stated", "confidence": 1.0},
+  {"op": "DELETE", "slot": "phone",          "value": "+91 98xxxxxx12", "source": "user_stated", "confidence": 1.0}
 ]}
 ```
 
-`{"ops": []}` means NONE. Applying:
+`{"ops": []}` means NONE. Server-side validation before any write:
 
-| op | single slot | multi slot |
-|---|---|---|
-| ADD | replace the existing row (same as UPDATE) | insert if `(user_id, slot, value)` not present |
-| UPDATE | replace the existing row's value, source, confidence | find row by `(slot, old_value)` if given, else by exact `value`; replace |
-| DELETE | delete the row for the slot | delete the row matching `(slot, value)`; a missing row is a no-op |
+- `slot`, `op`, `source` from the closed sets; `value` 1-300 chars.
+- `user_stated` is forced to confidence 1.0; `inferred` below 0.70 drops.
+- Hard-exclusion filter on every value: CNR pattern, case-number patterns
+  (`No. 123`, `123/2026`, `FIR/WP/CC ... 12`), amounts (`Rs`, `₹`, `lakh`,
+  `/-`), dates (numeric and written), and for identity slots any
+  party-role word (client, accused, petitioner, ...). `enrolment_no` is
+  exempt from the case-number pattern only (`MAH/1234/2015`).
+- The `user_stated` protection rule above.
+- UPDATE with no matching row becomes ADD; DELETE with no match drops.
 
-Server-side validation before any write (the model is not trusted):
+## 4. Extraction
 
-- `slot` must be in the closed set, `op` in the three verbs, `value` 1-300
-  chars after trim, `confidence` in [0, 1].
-- `inferred` ops with confidence < 0.70 are dropped.
-- A hard-exclusion filter runs on every `value` regardless of what the
-  model said: anything matching a CNR pattern (`[A-Z]{4}\d{12}`), a case
-  number pattern (`\d+/\d{4}`, `No\. ?\d+`), a currency amount
-  (`Rs\.?|₹|INR` followed by digits), or a date is dropped and logged.
-- The extractor cannot DELETE or UPDATE a `user_stated` row.
+Model: `get_gemini_flash_lite(temperature=0)`, one call per turn after
+`save_turn`, 20 s ceiling, never on the request path. Skipped when any of
+these hold, cheapest first:
 
-## 4. Extraction prompt
+1. flag off, or no verified `user_id`;
+2. the message looks like a pasted document (over 1,500 chars, 8+ line
+   breaks, or markers such as "IN THE HON'BLE COURT", "WHEREAS",
+   "VERIFICATION", "PRAYER", "AFFIDAVIT", markdown headings);
+3. no first-person marker. English: I, I'm, I've, I am, my, me, we, our,
+   us. Hinglish / Marathi romanised: mera, meri, mere, hamara, hamari,
+   hum, main, mujhe, majha, majhi, amcha, amchi, mala, aamhi. Devanagari:
+   मैं, मेरा, मेरी, मेरे, मुझे, हम, हमारा, हमारी, हमें, मी, माझ, मला,
+   आम्ही, आमच;
+4. the user has memory switched off;
+5. the thread is `no_memory`.
 
-Model: `get_gemini_flash_lite(temperature=0.0)`, JSON output, called once per
-turn after `save_turn`, with a 20 s ceiling. It is skipped when any of these
-hold: flag off, no `user_id`, thread `no_memory`, the turn was a
-conversational acknowledgement, or the user message has no first-person
-marker (`\b(I|I'm|my|me|we|our|मैं|मेरा|मेरी|हम|मी|माझ[ाीे]|आम्ही)\b`).
-The last check avoids paying for turns such as "what does section 138 say".
+Input: the current profile as JSON, and the **user text only**, capped at
+500 characters, plus a short window around the first first-person marker
+when it lies past the cap (so "I'm Adv. X" at the end of a long request
+still reaches the extractor). The assistant reply, uploads and pasted
+drafts are never passed.
 
-Inputs are the current profile (as a JSON list of `{slot, value, source}`),
-the user's message for this turn (first 4,000 characters, uploads excluded),
-and the first 600 characters of the assistant's reply. Pasted drafts and
-uploaded documents are never passed.
-
-```text
-You maintain a short profile of the LAWYER who is using a legal drafting
-assistant. Your only job is to decide what, if anything, in this
-conversation turn is a DURABLE fact about the lawyer themself, and to
-return the operations needed to keep the profile correct.
-
-The profile is used to fill the advocate's own details in court documents
-(signature block, "From" address, Vakalatnama) and to apply the lawyer's
-standing preferences. It is NOT a record of the lawyer's cases.
-
-## What to store (durable facts about the lawyer)
-- Their own name, enrolment / bar council number, firm name, office
-  address, phone, email.
-- Courts and forums where they regularly practise.
-- Practice areas.
-- Preferred language for drafts.
-- Standing drafting preferences ("always number prayer clauses", "use
-  'Hon'ble Court'", "keep notices under two pages").
-- Other stable personal-professional facts the lawyer states about
-  themself (teaches, is a notary, is a senior counsel).
-
-## What you MUST NOT store, under any circumstances
-- Client names, opposite-party names, accused, complainant, witness,
-  deponent, or any person who is not the lawyer.
-- Facts of any matter: what happened, where, when, to whom.
-- Case numbers, CNR numbers, FIR numbers, diary numbers, file numbers.
-- Hearing dates, filing dates, limitation dates, or any date tied to a
-  matter.
-- Amounts: claim values, cheque amounts, fees, compensation, fines.
-- Anything taken from an uploaded document or a pasted draft.
-- Judges' names, opposing counsel's names.
-- Anything about the current matter's court or forum when it is said
-  only for this matter ("file this in Agra ITAT"). Store a court ONLY
-  when the lawyer says they practise there regularly or asks to use it
-  by default.
-- Temporary states ("I am busy today", "I have a hearing tomorrow").
-- Anything the lawyer asks you to forget.
-If a fact is about a matter rather than about the lawyer, return no
-operation for it. When in doubt, do not store.
-
-## Slots (use exactly these names)
-single-valued: advocate_name, enrolment_no, firm_name, office_address,
-               phone, email, preferred_language
-multi-valued:  courts, practice_areas, drafting_preference, note
-
-## Operations
-- ADD: a new fact. For a single-valued slot this replaces any existing
-  value.
-- UPDATE: the lawyer corrected or changed an existing fact. Give the new
-  value in "value" and the old one in "old_value".
-- DELETE: the lawyer said a fact is wrong or no longer applies, or asked
-  to forget it. Give the exact stored value.
-- If nothing durable about the lawyer appears, return {"ops": []}.
-
-## Source and confidence
-- "user_stated": the lawyer said it about themself in plain words, or
-  used "remember that". confidence 1.0.
-- "inferred": a reasonable reading that the lawyer did not state
-  outright (for example, their fourth draft in Bombay High Court
-  suggests they practise there). confidence between 0.70 and 0.95.
-  Below 0.70, return nothing.
-Never UPDATE or DELETE a fact whose source is "user_stated" unless the
-lawyer explicitly changes or withdraws it in this turn.
-
-## Output
-Return ONLY a JSON object, no prose, no code fence:
-{"ops": [{"op": "ADD|UPDATE|DELETE", "slot": "<slot>", "value": "<text>",
-          "old_value": "<text or omit>", "source": "user_stated|inferred",
-          "confidence": <number>}]}
-Values are plain text, at most 300 characters, written the way they
-should appear in a document (for example "Adv. Priya S. Kulkarni", not
-"the user is Priya").
-
-## Examples
-Turn: "Draft a bail application for my client Ramesh Yadav, FIR 112/2026
-PS Hadapsar, hearing on 3 Nov. I'm Adv. Priya Kulkarni, enrolment
-MAH/1234/2015, office at 201 Lex Towers, Pune."
--> ops: ADD advocate_name "Adv. Priya Kulkarni" (user_stated, 1.0);
-        ADD enrolment_no "MAH/1234/2015" (user_stated, 1.0);
-        ADD office_address "201 Lex Towers, Pune" (user_stated, 1.0).
-   Nothing about Ramesh Yadav, the FIR, Hadapsar or 3 Nov.
-
-Turn: "Reply to this legal notice. The notice demands Rs 4,50,000."
--> {"ops": []}
-
-Turn: "Our office has moved to 5th floor, Sadhu Vaswani Chowk, Pune."
-Profile has office_address "201 Lex Towers, Pune".
--> ops: UPDATE office_address value "5th floor, Sadhu Vaswani Chowk,
-        Pune", old_value "201 Lex Towers, Pune" (user_stated, 1.0).
-
-Turn: "Forget my phone number."
-Profile has phone "+91 98xxxxxx12".
--> ops: DELETE phone "+91 98xxxxxx12".
-
-Turn: "Always write the prayer clauses as (a), (b), (c), not 1, 2, 3."
--> ops: ADD drafting_preference "number prayer clauses (a), (b), (c)"
-        (user_stated, 1.0).
-
-Turn: "File this appeal in ITAT Agra."
--> {"ops": []}   (forum for this matter only)
-
-## Current profile
-{profile_json}
-
-## This turn
-User: {user_message}
-Assistant (first part): {assistant_preview}
-```
+The prompt is `EXTRACTION_PROMPT` in `core/user_memory.py` (the approved
+text, with `designation` added to the slot list and
+`preferred_language` pinned to ISO codes).
 
 ## 5. Injection block
 
-Rendered by `core/user_memory.py::render_profile_block(rows)`. Empty profile
--> no block, no second system message, so requests from users without a
-profile are byte-identical to today.
+Rendered by `render_profile_block(rows)`. Empty profile, or only inferred
+identity rows, -> no block and no second system message, so such requests
+are byte-identical to today.
 
 ```text
 ## ABOUT THE ADVOCATE USING THIS ASSISTANT (saved profile)
 These are the advocate's OWN details and standing preferences. Use them
-to fill the advocate's name, enrolment number, firm, address, phone and
-email wherever a document needs them (signature block, "From" block,
-Vakalatnama, notice letterhead) instead of bracketed placeholders. They
-are NOT facts of the matter: never present the advocate as a party,
-witness or deponent. If the current request gives a different value for
-any of these, the request wins.
+to fill the advocate's name, designation, enrolment number, firm, address,
+phone and email wherever a document needs them (signature block, "From"
+block, Vakalatnama, notice letterhead) instead of bracketed placeholders
+such as [Advocate Name] or [Advocate Address]. They are NOT facts of the
+matter: never present the advocate as a party, witness or deponent. If
+the current request gives a different value for any of these, the
+request wins.
 
-Advocate: Adv. Priya S. Kulkarni (Enrolment MAH/1234/2015)
+Advocate: Adv. Priya S. Kulkarni, Advocate (Enrolment MAH/1234/2015)
 Firm: Kulkarni & Associates
 Office: 201, Lex Towers, Fergusson College Rd, Pune 411004
 Phone: +91 98xxxxxx12 | Email: priya@kulkarnilaw.in
 Regular courts: Bombay High Court; District Court, Pune
+Practice areas: criminal; cheque dishonour
 Preferred draft language: Marathi
 Drafting preferences:
 - number prayer clauses (a), (b), (c)
 - prefers "Hon'ble Court" over "the Court"
 ```
 
-Size: about 150-250 tokens for a full profile; hard cap 500 tokens (rows
-dropped from the bottom, `note` first).
+About 150-250 tokens; hard cap 2,000 characters (~500 tokens), trimmed
+from the bottom. `thread_id`, `source`, `confidence` and `note` rows are
+never injected.
 
-Placement, per the caching rule:
+Placement (`cacheable_system(text, trailer)`; `trailer=None` reads the
+request-scoped block the drafting node set):
 
 ```python
 # Anthropic: cached static block first, then an UNCACHED block.
-[SystemMessage(content=[
-     {"type": "text", "text": static_prompt, "cache_control": {"type": "ephemeral"}},
-     {"type": "text", "text": profile_block},
- ]),
- HumanMessage(content=user_block)]
-
-# Gemini / OpenAI: string system prompt; profile appended AFTER the static
-# text so the implicit-cache prefix is unchanged.
-[SystemMessage(content=static_prompt + "\n\n" + profile_block),
- HumanMessage(content=user_block)]
+SystemMessage(content=[
+    {"type": "text", "text": static_prompt, "cache_control": {"type": "ephemeral"}},
+    {"type": "text", "text": profile_block},
+])
+# Gemini / OpenAI: string system prompt; profile appended AFTER the static text.
+SystemMessage(content=static_prompt + "\n\n" + profile_block)
 ```
 
-Implemented as `cacheable_system(text, trailer=profile_block)` in
-`core/clients.py`, so the three drafting call sites change by one argument.
-The `thread_id`, `source`, `confidence` and `note` rows are never injected.
+No static prompt text changed, so caching and output for users without a
+profile are unaffected.
 
 ## 6. Explicit "remember that" / "forget that"
 
-Detected deterministically in `memory_node` before the rewriter, only when
-the **whole** message is the directive (so a long drafting request that
-contains "remember that I ..." mid-sentence still goes to the normal
-pipeline, and the extractor picks the fact up with `user_stated`).
+Detected deterministically when the **whole** message (<= 600 chars) is
+the directive: `remember / note / save (that) ...`, `forget / delete /
+remove (that|about) ...`, Hindi and Marathi forms (`याद रखो कि`, `लक्षात ठेव`,
+`भूल जाओ`, `विसरा`), romanised `yaad rakho`, `bhool jao`. "Forget
+everything" / "delete all my details" clears the profile.
 
-Patterns (case-insensitive, leading/trailing punctuation ignored):
-
-```text
-^(please )?(remember|note|save) (that )?(.+)$
-^(please )?(forget|delete|remove) (that )?(.+)$
-^(याद रखो|याद रखें|लक्षात ठेव|लक्षात ठेवा) (कि )?(.+)$
-^(भूल जाओ|भूल जाइए|विसरा|विसरून जा) (कि )?(.+)$
-```
-
-- "remember": the remainder goes through the same extractor with the
-  instruction "the user explicitly asked you to remember this; every
-  durable lawyer fact here is user_stated". Hard exclusions still apply.
-  If the extractor returns nothing storable (for example "remember that
-  the hearing is on 3 Nov"), the reply says so and explains what memory
-  does and does not keep.
-- "forget": the remainder is matched against the profile by the extractor
-  (DELETE ops only). "Forget everything" / "सब भूल जाओ" deletes the whole
-  profile.
-- The graph is not run. The reply is a short confirmation listing exactly
-  what was saved or removed, with the stored wording, so the user can
-  correct it. Example:
+- The graph does not run; the turn is still saved to history as task
+  `Memory`.
+- "remember": the remainder goes to the extractor in remember mode; every
+  resulting op is forced to `user_stated`; hard exclusions still apply, so
+  "remember the hearing is on 3 Nov" saves nothing and the reply says why.
+- "forget": extractor in forget mode, DELETE ops only, `user_stated`.
+- Reply lists exactly what was saved or removed, in the stored wording:
 
 ```text
 Saved to your profile:
 - Advocate name: Adv. Priya S. Kulkarni
 - Enrolment number: MAH/1234/2015
+
 You can see or change this any time from your profile page.
 ```
 
+A long drafting request that merely contains "remember that I ..." goes
+through the normal pipeline; the post-turn extractor picks the fact up as
+`user_stated`.
+
 ## 7. Review API
 
-All routes read `user_id` from the `X-User-Id` header (see section 8 on
-trusting it).
+All routes need the usual `X-API-Key` and a verified `X-User-Id`
+(section 8). 404 when the flag is off; 401 when the id is missing or the
+signature is bad. Error bodies follow the gateway's `{error, message}`
+shape.
 
-| Route | Returns |
-|---|---|
-| `GET /pyapi/memory` | `{"enabled": true, "rows": [{id, slot, label, value, source, updated_at}]}` |
-| `PATCH /pyapi/memory/{id}` body `{"value": "..."}` | the updated row; sets `source=user_stated` |
-| `DELETE /pyapi/memory/{id}` | 204 |
-| `DELETE /pyapi/memory` | 204, deletes the whole profile |
-| `POST /pyapi/memory` body `{"slot": "...", "value": "..."}` | the created row, `source=user_stated` |
+| Route | Body | Returns |
+|---|---|---|
+| `GET /pyapi/memory` | - | `{memory_on, rows: [{id, slot, label, value, source, confirmed, injected, updated_at}], slots: [{slot, label, single}]}` |
+| `PUT /pyapi/memory/settings` | `{"memory_on": bool}` | per-user on/off |
+| `POST /pyapi/memory` | `{"slot", "value"}` | adds a `user_stated` row (400 if the value looks like matter data, 409 if duplicate / slot full) |
+| `PATCH /pyapi/memory/{id}` | `{"value"?}` | edits, or with no value confirms; becomes `user_stated` |
+| `DELETE /pyapi/memory/{id}` | - | removes one row |
+| `DELETE /pyapi/memory` | - | clears the profile |
 
-`label` is the display name per slot ("Advocate name", "Office address").
-The frontend page is the frontend team's work; this is the contract.
+`confirmed: false` rows are the "unconfirmed" items on the page;
+`injected` says whether the model currently sees the row.
 
-## 8. Flags, cost, guardrails
+## 8. Identity, flags, cost, guardrails
 
-- `USER_MEMORY_ENABLED` (default `0`). Off: no table reads, no extraction,
-  no injection, review API returns 404. On with no `user_id`: same as off
-  for that request.
-- `USER_MEMORY_EXTRACT_MODEL` (default Flash Lite). Each extraction is one
-  call of roughly 1,500 input / 100 output tokens; about USD 0.0002 per
-  turn, and the first-person pre-filter skips most turns.
-- Extraction never blocks the response. A failure is logged and dropped.
-- `no_memory` on a thread also stops the "remember that" shortcut, and
-  the reply says memory is off for this chat.
-- Confidentiality: the extractor's hard exclusions plus the regex filter
-  in section 3 are both in place because the model alone is not enough.
-  Every stored row keeps `thread_id` so a bad row can be traced to the
-  turn that produced it.
-- Trust in `user_id`: the frontend calls the Python API directly, so a
-  bare `X-User-Id` header is spoofable and would let one user read
-  another's profile. Recommended: Node signs the id (HMAC with a shared
-  secret in `USER_MEMORY_ID_SECRET`, sent as `X-User-Id: <id>.<sig>`),
-  Python verifies. If Node cannot do that this sprint, phase 1 accepts
-  the bare id, with the risk noted here.
-- Shared logins: a firm account used by several advocates will build one
-  mixed profile. The review page is the remedy; nothing automatic.
+**User id (decided)**: header `X-User-Id`. Signing is required before
+prod, in this order of preference:
 
-## 9. Open decisions (need an answer before build)
+1. If Node already issues a JWT the frontend sends as
+   `Authorization: Bearer <jwt>`, set `USER_MEMORY_JWT_SECRET` to Node's
+   HS256 secret. Python verifies the signature and `exp`, and takes the
+   id from `sub` / `userId` / `user_id` / `uid` / `id` / `_id`. With this
+   set, a bare `X-User-Id` is ignored.
+2. Otherwise set `USER_MEMORY_ID_SECRET`; Node sends
+   `X-User-Sig = hex(HMAC-SHA256(secret, user_id))` beside `X-User-Id`.
+   A missing or wrong signature means memory is off for that request and
+   the review API answers 401.
+3. With neither secret set a bare `X-User-Id` is accepted, with a warning
+   in the log. Dev only.
 
-1. Who sends `user_id`, and in which form: form field `user_id` next to
-   `plan`, or `X-User-Id` header. Both are supported; one must be chosen
-   for the frontend brief.
-2. Signed id (section 8) in phase 1, or bare id now and signing later.
-3. The slot list in section 2: anything to add or remove.
+Flags:
 
-## 10. Build plan once approved
+| Env | Default | Meaning |
+|---|---|---|
+| `USER_MEMORY_ENABLED` | `0` | master switch |
+| `USER_MEMORY_ID_SECRET` | unset | HMAC secret for `X-User-Sig` |
+| `USER_MEMORY_JWT_SECRET` | unset | HS256 secret of Node's JWT |
+| `USER_MEMORY_EXTRACT_TIMEOUT_S` | `20` | ceiling on the extraction call |
 
-| Day | Work |
-|---|---|
-| 1 | `user_memory` table + `no_memory` column in both stores; `core/user_memory.py` (render, validate, apply ops, hard-exclusion filter); unit tests |
-| 2 | Extraction call + post-`save_turn` hook; "remember/forget" shortcut; tests with the prompt examples above as fixtures |
-| 3 | Injection via `cacheable_system(trailer=)`; drafting consumer check (signature block filled, no `[Advocate Name]` left when the profile has a name); review API; eval of 10 drafts with and without a profile to confirm no regression elsewhere in the draft |
-| 4 | Frontend brief, dev deploy with flag on for internal users only |
+Cost: one Flash Lite call of roughly 1,800 input / 100 output tokens per
+extracted turn (about USD 0.0002), and the gates skip most turns.
+
+Guardrails: hard exclusions plus the regex filter run on every value;
+every row keeps `thread_id` for tracing; a profile-bearing request never
+touches the shared response cache (a cached draft would carry one
+lawyer's signature block to the next user); shared firm logins build one
+mixed profile, which the review page is the remedy for.
+
+## 9. Frontend brief (short)
+
+1. Send `X-User-Id` (and `X-User-Sig` or the JWT per section 8) on
+   `POST /pyapi/chat`, `POST /pyapi/search/stream`, `POST /pyapi/search`
+   and all `/pyapi/memory*` calls.
+2. Optional `no_memory=true` form field on `POST /pyapi/chat` (JSON field
+   on the search endpoints) for a "private chat" toggle.
+3. A profile page built on section 7: list rows grouped by `label`, mark
+   `confirmed: false` as "unconfirmed, tap to confirm", edit / delete,
+   "Clear all", and the memory on/off switch.
+4. A memory-command reply arrives as a normal `response` event with
+   `agents_used: ["Memory"]` in `done`; no special rendering needed.
+
+## 10. Tests
+
+`tests/test_user_memory_core.py` (gates, exclusions, validation rules,
+rendering, direct-command parsing, id verification),
+`tests/test_user_memory_store.py` (SQLite store, apply_ops, extraction
+pipeline with a stubbed extractor, remember / forget),
+`tests/test_user_memory_injection.py` (cacheable_system placement,
+ContextVar propagation, review API via TestClient).

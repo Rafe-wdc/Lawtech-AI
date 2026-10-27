@@ -712,8 +712,15 @@ def get_drafting_llm(max_output_tokens: int = 65535,
 
 
 
-def cacheable_system(text: str) -> "str | list":
+def cacheable_system(text: str, trailer: "str | None" = None) -> "str | list":
     """System-message content that Anthropic will prompt-cache.
+
+    `trailer` is appended AFTER the cached block (user memory, see
+    docs/user_memory_design.md): a second, uncached text block on
+    Anthropic, plain concatenation after the static text on Gemini. Either
+    way the cached / implicit-cache prefix stays byte-identical across
+    users. None reads the request-scoped block set by the drafting node;
+    "" disables it.
 
     Returns the string unchanged for Gemini/OpenAI. For Anthropic, wraps it in
     a single text block carrying `cache_control: ephemeral` so the prefix is
@@ -730,11 +737,17 @@ def cacheable_system(text: str) -> "str | list":
     drafting prompt clears it comfortably. A shorter prompt simply won't cache
     and costs the same as today, so this is safe to apply unconditionally.
     """
+    if trailer is None:
+        from core.user_memory import current_profile_block
+        trailer = current_profile_block()
     provider, _bare = _split_provider(GEMINI_MODELS["generation"])
     if provider != "anthropic":
-        return text
-    return [{"type": "text", "text": text,
-             "cache_control": {"type": "ephemeral"}}]
+        return text + "\n\n" + trailer if trailer else text
+    blocks = [{"type": "text", "text": text,
+               "cache_control": {"type": "ephemeral"}}]
+    if trailer:
+        blocks.append({"type": "text", "text": trailer})
+    return blocks
 
 
 # --- Google GenAI client (for Gemini with Google Search grounding) ---

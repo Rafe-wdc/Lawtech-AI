@@ -525,6 +525,9 @@ class SearchRequest(BaseModel):
     # detects integration URLs in prompt_query, checks user's connection,
     # extracts content, and injects it into the agent state.
     integration_token: Optional[str] = None
+    # User memory (docs/user_memory_design.md): True marks this thread as
+    # no-memory (no profile extraction from its turns). Sticky per thread.
+    no_memory: Optional[bool] = None
     # Drafting-only: include "## REFERENCES & CITATIONS" appendix (fans out
     # Scenario/Legislation/Judgment alongside Drafting). None → use
     # DRAFTING_CITE_APPENDIX_DEFAULT env default (off).
@@ -627,6 +630,8 @@ def _build_initial_state(
     preferred_language: str | None = None,
     cite_appendix: bool | None = None,
     regenerate_of: str | None = None,
+    user_id: str = "",
+    user_profile_block: str = "",
 ) -> dict:
     """Build the initial LangGraph state with all required fields."""
     # Validate and normalise preferred_language (client override for user_language)
@@ -656,10 +661,24 @@ def _build_initial_state(
         # short-circuits when this is set — see _refine_existing_response in
         # agents/orchestrator.py.
         "regenerate_of": regenerate_of,
+        # User memory (docs/user_memory_design.md)
+        "user_id": user_id,
+        "user_profile_block": user_profile_block,
         "final_response": "",
         "source_metadata": [],
         "tokens_consumed": 0,
     }
+
+
+def _resolve_memory_user(request: Request) -> str:
+    """Verified lawyer id for user memory, or "" (flag off / no header /
+    bad signature). See core.user_memory.resolve_user_id."""
+    from core import user_memory as _um
+    try:
+        return _um.resolve_user_id(request.headers)
+    except Exception as e:
+        log.warning("User id resolution failed", error=short_err(e))
+        return ""
 
 
 def _safe_persist_dir(unique_string: str) -> str:
@@ -694,9 +713,40 @@ async def search(data: SearchRequest, request: Request):
              query=data.prompt_query[:100], thread_id=thread_id,
              query_len=len(data.prompt_query))
 
+    # --- User memory (docs/user_memory_design.md) ---
+    from core import user_memory as _um
+    _user_id = _um.resolve_user_id(request.headers)
+    _profile_block = ""
+    if _user_id:
+        if data.no_memory is not None:
+            try:
+                await chat_store.set_thread_no_memory(thread_id, bool(data.no_memory))
+            except Exception as e:
+                log.warning("Failed to set thread no_memory", error=str(e)[:200])
+        _cmd = _um.parse_direct_command(data.prompt_query)
+        if _cmd is not None:
+            try:
+                _reply = await _um.handle_direct_command(
+                    _user_id, thread_id, _cmd[0], _cmd[1])
+            except Exception as e:
+                log.warning("Direct memory command failed", error=str(e)[:200])
+                _reply = "Sorry, I could not update your profile just now. Please try again."
+            _mem_turn = 0
+            try:
+                _mem_turn = await chat_store.save_turn(
+                    thread_id, data.prompt_query, _reply, task="Memory")
+            except Exception as e:
+                log.error("Failed to save memory-command turn", error=str(e))
+            return SearchResponse(
+                globalThreadId=thread_id, result=_reply, token_usage=None,
+                source=[], agents_used=["Memory"], conversation_turn=_mem_turn,
+            )
+        _profile_block = await _um.load_profile_block(_user_id)
+
     # --- Cache check: skip graph for repeated first-turn queries ---
+    # A profile-bearing request never reads or writes the shared cache.
     _is_first_turn = not data.globalThreadId  # no thread = first turn
-    if _is_first_turn:
+    if _is_first_turn and not _profile_block:
         cached = response_cache.get(
             data.prompt_query,
             language=(data.preferred_language or ""),
@@ -780,6 +830,8 @@ async def search(data: SearchRequest, request: Request):
         preferred_language=data.preferred_language,
         cite_appendix=data.cite_appendix,
         regenerate_of=data.regenerate_of,
+        user_id=_user_id,
+        user_profile_block=_profile_block,
     )
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -954,6 +1006,9 @@ async def search(data: SearchRequest, request: Request):
         except Exception as e:
             log.error("Failed to save chat history",
                       thread_id=thread_id[:12], error=str(e))
+        if _user_id:
+            _fire_and_forget(_um.after_turn_extraction(
+                _user_id, thread_id, data.prompt_query))
 
     # Generate follow-up suggestions (non-blocking)
     followup_suggestions = []
@@ -989,6 +1044,7 @@ async def search(data: SearchRequest, request: Request):
 
     if (
         _is_first_turn
+        and not _profile_block
         and final_response
         and not final_state.get("is_blocked")
         and not _fallback_used
@@ -1079,6 +1135,8 @@ async def search_stream(data: SearchRequest, request: Request):
         regenerate_of=getattr(data, "regenerate_of", None),
         enable_cache=True,
         enable_quality_scoring=True,
+        user_id=_resolve_memory_user(request),
+        no_memory=getattr(data, "no_memory", None),
     )
 
     async def event_generator():
@@ -1334,6 +1392,9 @@ async def chat_with_files(
     # Subscription plan name, e.g. "First Justice Plan" or "Basic". When set,
     # every uploaded PDF must fit that plan's page limit (PLAN_UPLOAD_LIMITS).
     plan: Optional[str] = Form(None),
+    # User memory (docs/user_memory_design.md): true marks this thread as
+    # no-memory (no profile extraction from its turns). Sticky per thread.
+    no_memory: Optional[bool] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -1350,6 +1411,7 @@ async def chat_with_files(
     from .settings import MAX_FILES_PER_REQUEST as MAX_FILES
     from .settings import PLAN_UPLOAD_LIMITS
 
+    _memory_user_id = _resolve_memory_user(request)
     plan = (plan or "").strip()
     plan_limits = None
     if plan:
@@ -1798,6 +1860,8 @@ async def chat_with_files(
                 enable_cache=False,   # uploads / integration context make caching unsafe
                 enable_quality_scoring=True,
                 skip_thread_id_event=True,  # /chat already emitted before file processing
+                user_id=_memory_user_id,
+                no_memory=no_memory,
             )
             async for sse_chunk in run_chat_pipeline(
                 pipeline_inputs,
@@ -2730,6 +2794,140 @@ async def submit_feedback(data: FeedbackRequest, request: Request):
     except Exception as e:
         log.error("Failed to save feedback", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to save feedback")
+
+
+# ============================================================
+# User memory review API (docs/user_memory_design.md section 7)
+# ============================================================
+
+class MemoryRowUpdate(BaseModel):
+    value: Optional[str] = Field(None, min_length=1, max_length=300)
+
+
+class MemoryRowCreate(BaseModel):
+    slot: str = Field(..., min_length=1, max_length=40)
+    value: str = Field(..., min_length=1, max_length=300)
+
+
+class MemorySettingsUpdate(BaseModel):
+    memory_on: bool
+
+
+def _memory_user_or_error(request: Request) -> str:
+    from core import user_memory as _um
+    if not _um.enabled():
+        raise HTTPException(status_code=404, detail="User memory is not enabled")
+    user_id = _um.resolve_user_id(request.headers)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing or invalid X-User-Id")
+    return user_id
+
+
+@app.get("/pyapi/memory", dependencies=[Depends(require_user_key)])
+async def memory_list(request: Request):
+    """Everything remembered about the signed-in lawyer, for the profile page."""
+    from core import user_memory as _um
+    user_id = _memory_user_or_error(request)
+    try:
+        rows = await chat_store.load_user_memory(user_id)
+        memory_on = await chat_store.get_user_memory_enabled(user_id)
+    except Exception as e:
+        log.error("Failed to load user memory", error=short_err(e))
+        raise HTTPException(status_code=500, detail="Failed to load memory")
+    return {
+        "status": "ok",
+        "enabled": True,
+        "memory_on": memory_on,
+        "rows": _um.rows_for_review(rows),
+        "slots": [{"slot": s, "label": _um.slot_label(s), "single": s in _um.SINGLE_SLOTS}
+                  for s in _um.SLOTS],
+    }
+
+
+@app.put("/pyapi/memory/settings", dependencies=[Depends(require_user_key)])
+async def memory_settings(data: MemorySettingsUpdate, request: Request):
+    """Per-user memory on/off. Off: nothing is injected or extracted."""
+    user_id = _memory_user_or_error(request)
+    try:
+        await chat_store.set_user_memory_enabled(user_id, data.memory_on)
+    except Exception as e:
+        log.error("Failed to update memory setting", error=short_err(e))
+        raise HTTPException(status_code=500, detail="Failed to update setting")
+    return {"status": "ok", "memory_on": data.memory_on}
+
+
+@app.post("/pyapi/memory", dependencies=[Depends(require_user_key)])
+async def memory_create(data: MemoryRowCreate, request: Request):
+    """Add a fact by hand from the profile page (always user_stated)."""
+    from core import user_memory as _um
+    user_id = _memory_user_or_error(request)
+    slot = data.slot.strip().lower()
+    if slot not in _um.SLOTS:
+        raise HTTPException(status_code=400, detail="Unknown slot")
+    reason = _um.hard_excluded(slot, data.value)
+    if reason:
+        raise HTTPException(status_code=400, detail=f"Value looks like matter data ({reason})")
+    try:
+        rows = await chat_store.load_user_memory(user_id)
+        ops, _dropped = _um.validate_ops(
+            [{"op": "ADD", "slot": slot, "value": data.value,
+              "source": _um.SOURCE_USER, "confidence": 1.0}], rows)
+        applied = await _um.apply_ops(user_id, "", ops, rows)
+        rows = await chat_store.load_user_memory(user_id)
+    except Exception as e:
+        log.error("Failed to add memory row", error=short_err(e))
+        raise HTTPException(status_code=500, detail="Failed to save")
+    if not applied:
+        raise HTTPException(status_code=409, detail="Nothing saved (duplicate or slot full)")
+    return {"status": "ok", "rows": _um.rows_for_review(rows)}
+
+
+@app.patch("/pyapi/memory/{row_id}", dependencies=[Depends(require_user_key)])
+async def memory_update(row_id: int, data: MemoryRowUpdate, request: Request):
+    """Edit or confirm a row. Either way it becomes user_stated."""
+    from core import user_memory as _um
+    user_id = _memory_user_or_error(request)
+    try:
+        rows = await chat_store.load_user_memory(user_id)
+        row = next((r for r in rows if r["id"] == row_id), None)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        value = (data.value or row["value"]).strip()
+        reason = _um.hard_excluded(row["slot"], value)
+        if reason:
+            raise HTTPException(status_code=400, detail=f"Value looks like matter data ({reason})")
+        await chat_store.update_user_memory(row_id, user_id, value, _um.SOURCE_USER, 1.0)
+        rows = await chat_store.load_user_memory(user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("Failed to update memory row", error=short_err(e))
+        raise HTTPException(status_code=500, detail="Failed to update")
+    return {"status": "ok", "rows": _um.rows_for_review(rows)}
+
+
+@app.delete("/pyapi/memory/{row_id}", dependencies=[Depends(require_user_key)])
+async def memory_delete(row_id: int, request: Request):
+    user_id = _memory_user_or_error(request)
+    try:
+        ok = await chat_store.delete_user_memory(row_id, user_id)
+    except Exception as e:
+        log.error("Failed to delete memory row", error=short_err(e))
+        raise HTTPException(status_code=500, detail="Failed to delete")
+    if not ok:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"status": "ok"}
+
+
+@app.delete("/pyapi/memory", dependencies=[Depends(require_user_key)])
+async def memory_delete_all(request: Request):
+    user_id = _memory_user_or_error(request)
+    try:
+        n = await chat_store.delete_user_memory_all(user_id)
+    except Exception as e:
+        log.error("Failed to clear user memory", error=short_err(e))
+        raise HTTPException(status_code=500, detail="Failed to clear")
+    return {"status": "ok", "deleted": n}
 
 
 # --- Entrypoint ---

@@ -56,6 +56,8 @@ class ChatRunnerInputs:
     enable_cache: bool = True                   # /chat disables for uploads
     enable_quality_scoring: bool = True         # 10% sampling
     skip_thread_id_event: bool = False          # caller already emitted it
+    user_id: str = ""                           # verified lawyer id (user memory); "" = off
+    no_memory: bool | None = None               # per-thread: skip memory extraction
 
 
 def _fire_and_forget(coro) -> asyncio.Task:
@@ -361,8 +363,48 @@ async def run_chat_pipeline(
         yield _sse({"type": "thread_id", "data": i.thread_id})
     start = time.perf_counter()
 
+    # --- User memory (docs/user_memory_design.md) ---------------------------
+    # Resolved before the cache so a profile-bearing request never reads or
+    # writes the shared response cache (a cached draft would carry one
+    # lawyer's signature block to the next).
+    from core import user_memory as _um
+    profile_block = ""
+    if _um.enabled() and i.user_id:
+        if i.no_memory is not None and i.thread_id:
+            try:
+                await chat_store.set_thread_no_memory(i.thread_id, bool(i.no_memory))
+            except Exception as e:
+                log.warning("Failed to set thread no_memory", error=str(e)[:200])
+        _cmd = _um.parse_direct_command(i.query)
+        if _cmd is not None:
+            try:
+                _reply = await _um.handle_direct_command(
+                    i.user_id, i.thread_id, _cmd[0], _cmd[1])
+            except Exception as e:
+                log.warning("Direct memory command failed", error=str(e)[:200])
+                _reply = "Sorry, I could not update your profile just now. Please try again."
+            yield _sse({"type": "response", "content": _reply})
+            _mem_turn = 0
+            try:
+                _mem_turn = await chat_store.save_turn(
+                    i.thread_id, i.query, _reply, task="Memory")
+            except Exception as e:
+                log.error("Failed to save memory-command turn", error=str(e))
+            from core.token_tracker import (
+                get_tracker as _gt, start_request as _sr,
+            )
+            _tt = _gt() or _sr()
+            yield _sse({
+                "type": "done", "agents_used": ["Memory"],
+                "token_usage": _tt.to_dict(include_calls=True),
+                "thread_id": i.thread_id, "conversation_turn": _mem_turn,
+                "query_rewritten": False, "effective_query": None,
+            })
+            return
+        profile_block = await _um.load_profile_block(i.user_id)
+
     # --- Cache check (first turn only) -------------------------------------
-    if i.enable_cache and i.is_first_turn:
+    if i.enable_cache and i.is_first_turn and not profile_block:
         cached = response_cache.get(
             i.query,
             language=(i.preferred_language or ""),
@@ -493,6 +535,8 @@ async def run_chat_pipeline(
         preferred_language=i.preferred_language,
         cite_appendix=i.cite_appendix,
         regenerate_of=i.regenerate_of,
+        user_id=i.user_id,
+        user_profile_block=profile_block,
     )
     if integration_context_dict:
         initial_state["integration_context"] = integration_context_dict
@@ -862,6 +906,11 @@ async def run_chat_pipeline(
         except Exception as e:
             log.error("Failed to save chat history",
                       endpoint=i.endpoint_name, error=str(e))
+        # User memory: learn durable facts about the lawyer from this turn.
+        # Off the critical path; the raw user text, never the rewritten
+        # query (which can inline a prior draft).
+        if _um.enabled() and i.user_id:
+            _fire_and_forget(_um.after_turn_extraction(i.user_id, i.thread_id, i.query))
 
     # Compute token usage NOW so it's available for both the cache write
     # and the done event below. Previously this assignment lived AFTER the
@@ -888,6 +937,7 @@ async def run_chat_pipeline(
         i.enable_cache
         and i.is_first_turn
         and final_response
+        and not profile_block
         and not i.file_context
         and not integration_context_dict
         and not turn_is_blocked

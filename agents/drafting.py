@@ -5245,6 +5245,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
     See `docs/drafting_simplification_plan.md` for the full design.
     """
     # --- 1. Read state ---
+    # User memory: make the rendered profile block visible to every
+    # cacheable_system() call made on this task (and the section tasks it
+    # spawns) without threading a parameter through the generators.
+    from core.user_memory import (
+        set_request_profile_block as _set_profile_block,
+        reset_request_profile_block as _reset_profile_block,
+    )
+    _profile_token = _set_profile_block(state.get("user_profile_block") or "")
     agent_queries = state.get("agent_queries", {})
     query = (
         agent_queries.get("Drafting")
@@ -6009,5 +6017,6 @@ async def drafting_node(state: LegalAgentState) -> dict:
         state_update = {"agent_results": {"Drafting": result}}
     finally:
         _AGENT_SEMAPHORE.release()
+        _reset_profile_block(_profile_token)
 
     return state_update

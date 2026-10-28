@@ -386,10 +386,12 @@ out on both days; `scratchpad/live_negative_test.py` in the session notes):
 
 Follow-ups:
 
-- **Claude draft with the flag on** (pending Anthropic credit): one live
+- **Claude draft with the flag on**: only if generation is switched back
+  to Claude (2026-10-28: Gemini 3.8 Flash generates drafts, and that is
+  the path the live runs verified). Before re-enabling Claude, one live
   draft confirming the profile is used and `cache_read_tokens` in the
   `done` event is still non-zero, i.e. the trailer block did not break
-  the cached prefix.
+  the cached prefix. The two-block placement is unit-tested today.
 - **Legislation agent treats a profile sentence as part of the question**
   (observed 2026-10-27): "Our office has moved to ... What is the
   limitation period ..." produced an answer opening with "An office

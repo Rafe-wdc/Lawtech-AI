@@ -2,7 +2,9 @@
 
 Status: BUILT on branch `feat/user-memory` (2026-10-27), behind
 `USER_MEMORY_ENABLED` (default off). Design approved 2026-10-27 with the
-amendments folded in below.
+amendments folded in below. Pre-prod hardening 2026-10-28: fail-closed
+auth, JWT as the only prod identity path (Node confirmed the frontend
+holds an HS256 JWT from login).
 
 Scope:
 
@@ -111,6 +113,15 @@ Extractor output:
   party-role word (client, accused, petitioner, ...). `enrolment_no` is
   exempt from the case-number pattern only (`MAH/1234/2015`).
 - The `user_stated` protection rule above.
+- **Implicit identity lock** (added 2026-10-28 after live negative test
+  b2): from post-turn extraction, an existing `user_stated` row in
+  `advocate_name`, `enrolment_no` or `firm_name` can be neither updated
+  nor deleted, whatever source the model claims. The model's
+  "user_stated" label is its own judgement and a quoted notice fooled it.
+  A name, enrolment number or firm changes only on "remember that" /
+  "forget that" or on the review page. Office, phone, email and
+  designation stay implicitly updatable (the approved "our office has
+  moved" case). A first ADD into an empty locked slot is still allowed.
 - UPDATE with no matching row becomes ADD; DELETE with no match drops.
 
 ## 4. Extraction
@@ -122,8 +133,15 @@ these hold, cheapest first:
 1. flag off, or no verified `user_id`;
 2. the message looks like a pasted document (over 1,500 chars, 8+ line
    breaks, or markers such as "IN THE HON'BLE COURT", "WHEREAS",
-   "VERIFICATION", "PRAYER", "AFFIDAVIT", markdown headings);
-3. no first-person marker. English: I, I'm, I've, I am, my, me, we, our,
+   "VERIFICATION", "PRAYER", "AFFIDAVIT", markdown headings) or like
+   correspondence the lawyer received ("LEGAL NOTICE", "TAKE NOTICE",
+   lines starting `From:` / `To:` / `Sub:` / `Ref:` / `Dated:`, "under
+   instructions from", "Yours faithfully", "Dear Sir", "call upon you",
+   "this is to inform you"), checked on the original text;
+3. no first-person marker **after quoted spans are removed** (anything
+   24+ chars inside "...", "...", «...» or a clearly quoted '...' is
+   replaced by `[quoted material omitted]`; whoever says "I" inside a
+   quotation is not the lawyer). English: I, I'm, I've, I am, my, me, we, our,
    us. Hinglish / Marathi romanised: mera, meri, mere, hamara, hamari,
    hum, main, mujhe, majha, majhi, amcha, amchi, mala, aamhi. Devanagari:
    मैं, मेरा, मेरी, मेरे, मुझे, हम, हमारा, हमारी, हमें, मी, माझ, मला,
@@ -131,15 +149,17 @@ these hold, cheapest first:
 4. the user has memory switched off;
 5. the thread is `no_memory`.
 
-Input: the current profile as JSON, and the **user text only**, capped at
-500 characters, plus a short window around the first first-person marker
+Input: the current profile as JSON, and the **user text only** with
+quoted spans removed, capped at 500 characters, plus a short window around the first first-person marker
 when it lies past the cap (so "I'm Adv. X" at the end of a long request
 still reaches the extractor). The assistant reply, uploads and pasted
 drafts are never passed.
 
 The prompt is `EXTRACTION_PROMPT` in `core/user_memory.py` (the approved
-text, with `designation` added to the slot list and
-`preferred_language` pinned to ISO codes).
+text, with `designation` added to the slot list, `preferred_language`
+pinned to ISO codes, and two exclusions added 2026-10-28: quoted or
+received correspondence, and one-off instructions for the current draft,
+with the b2 notice as a worked `{"ops": []}` example).
 
 ## 5. Injection block
 
@@ -220,10 +240,13 @@ through the normal pipeline; the post-turn extractor picks the fact up as
 
 ## 7. Review API
 
-All routes need the usual `X-API-Key` and a verified `X-User-Id`
-(section 8). 404 when the flag is off; 401 when the id is missing or the
-signature is bad. Error bodies follow the gateway's `{error, message}`
-shape.
+All routes need the usual `X-API-Key` and a verified user identity
+(section 8: `Authorization: Bearer <jwt>`). Status contract agreed with
+Node: **403** when memory is off on this server (flag off, or flag on
+with no verification secret: fail closed); **401** when the access token
+is missing, expired, forged or disagrees with an `X-User-Id` sent beside
+it (the frontend refreshes the token on 401 and retries). Error bodies
+follow the gateway's `{error, message}` shape.
 
 | Route | Body | Returns |
 |---|---|---|
@@ -239,28 +262,47 @@ shape.
 
 ## 8. Identity, flags, cost, guardrails
 
-**User id (decided)**: header `X-User-Id`. Signing is required before
-prod, in this order of preference:
+**User identity (decided 2026-10-28, Node's answers folded in)**: the
+frontend receives an HS256 access token from Node at login (15 min life;
+refresh for 30 days via `POST /v2/api/user/auths/refresh`). That token is
+the only production identity path for memory. The frontend forwards it
+unchanged as `Authorization: Bearer <jwt>`; Python verifies it with
+Node's secret (`USER_MEMORY_JWT_SECRET`), `algorithms=["HS256"]` only
+("none" and RS* are rejected) and `exp` with about 30 s of leeway
+(`USER_MEMORY_JWT_LEEWAY_S`). There is no `sub`, `iss` or `aud` and none
+is checked. The user id is the `userId` claim, Node's numeric DB primary
+key, cast to a string before use (`USER_MEMORY_JWT_CLAIM` can point at
+another claim if that ever changes). No other claim is read: the
+`username` claim never populates the email slot or anything else. The id
+must match `^[A-Za-z0-9_.:@\-]{1,128}$`.
 
-1. If Node already issues a JWT the frontend sends as
-   `Authorization: Bearer <jwt>`, set `USER_MEMORY_JWT_SECRET` to Node's
-   HS256 secret. Python verifies the signature and `exp`, and takes the
-   id from `sub` / `userId` / `user_id` / `uid` / `id` / `_id`. With this
-   set, a bare `X-User-Id` is ignored.
-2. Otherwise set `USER_MEMORY_ID_SECRET`; Node sends
-   `X-User-Sig = hex(HMAC-SHA256(secret, user_id))` beside `X-User-Id`.
-   A missing or wrong signature means memory is off for that request and
-   the review API answers 401.
-3. With neither secret set a bare `X-User-Id` is accepted, with a warning
-   in the log. Dev only.
+**Secret mapping (runbook)**: `USER_MEMORY_JWT_SECRET` in the Python
+`.env` must equal the user-service's `JWT_ACCESS_SECRET` (falling back to
+its `JWT_SECRET` where `JWT_ACCESS_SECRET` is unset). Rotate both
+together. The same block is in `docs/deployment_guide.md`, Step 5.
+
+A bare `X-User-Id` is not an identity on the JWT path. If the frontend
+still sends it, it must equal the JWT claim; a mismatch is treated as a
+bug and the request runs with memory off (401 on the review API).
+
+**Fail closed**: with `USER_MEMORY_ENABLED=1` and no secret configured,
+no user id is ever resolved, so extraction and injection stay off and
+every `/pyapi/memory*` route answers 403. Bare unsigned ids are accepted
+only behind an explicit `USER_MEMORY_ALLOW_UNSIGNED=1`, for local dev.
+A configured secret always wins over that opt-in. The earlier HMAC
+`X-User-Sig` path is kept in code (`USER_MEMORY_ID_SECRET`) but is not
+the production path and is not in the frontend brief.
 
 Flags:
 
 | Env | Default | Meaning |
 |---|---|---|
 | `USER_MEMORY_ENABLED` | `0` | master switch |
-| `USER_MEMORY_ID_SECRET` | unset | HMAC secret for `X-User-Sig` |
-| `USER_MEMORY_JWT_SECRET` | unset | HS256 secret of Node's JWT |
+| `USER_MEMORY_JWT_SECRET` | unset | HS256 secret of Node's login JWT (prod path) |
+| `USER_MEMORY_JWT_CLAIM` | `userId` | claim holding the user id (comma list allowed) |
+| `USER_MEMORY_JWT_LEEWAY_S` | `30` | clock-skew allowance on `exp` / `nbf` |
+| `USER_MEMORY_ALLOW_UNSIGNED` | `0` | local dev only: accept bare `X-User-Id` when no secret is set |
+| `USER_MEMORY_ID_SECRET` | unset | HMAC secret for `X-User-Sig` (kept, not the prod path) |
 | `USER_MEMORY_EXTRACT_TIMEOUT_S` | `20` | ceiling on the extraction call |
 
 Cost: one Flash Lite call of roughly 1,800 input / 100 output tokens per
@@ -274,16 +316,29 @@ mixed profile, which the review page is the remedy for.
 
 ## 9. Frontend brief (short)
 
-1. Send `X-User-Id` (and `X-User-Sig` or the JWT per section 8) on
+1. Forward the existing access token as `Authorization: Bearer <jwt>` on
    `POST /pyapi/chat`, `POST /pyapi/search/stream`, `POST /pyapi/search`
-   and all `/pyapi/memory*` calls.
+   and every `/pyapi/memory*` call. No other identity header is needed;
+   if `X-User-Id` is sent anyway it must be the same id as the `userId`
+   claim. On 401 from a memory route, refresh the token
+   (`POST /v2/api/user/auths/refresh`) and retry once; the token is checked
+   once at the start of a stream, so a 15-minute token never cuts a
+   running stream short.
+   The stream client must support custom request headers: a plain
+   `EventSource` cannot set `Authorization`, so use `fetch` with a
+   ReadableStream reader (or `@microsoft/fetch-event-source`) for the SSE
+   endpoints.
 2. Optional `no_memory=true` form field on `POST /pyapi/chat` (JSON field
    on the search endpoints) for a "private chat" toggle.
 3. A profile page built on section 7: list rows grouped by `label`, mark
    `confirmed: false` as "unconfirmed, tap to confirm", edit / delete,
-   "Clear all", and the memory on/off switch.
+   "Clear all", and the memory on/off switch. Treat 403 as "memory is off
+   on this server" and hide the page.
 4. A memory-command reply arrives as a normal `response` event with
    `agents_used: ["Memory"]` in `done`; no special rendering needed.
+
+Ops: set `USER_MEMORY_ENABLED=1` and `USER_MEMORY_JWT_SECRET` (= the
+user-service's `JWT_ACCESS_SECRET`, fallback `JWT_SECRET`) together.
 
 ## 10. Tests
 
@@ -293,3 +348,42 @@ rendering, direct-command parsing, id verification),
 pipeline with a stubbed extractor, remember / forget),
 `tests/test_user_memory_injection.py` (cacheable_system placement,
 ContextVar propagation, review API via TestClient).
+
+## 11. Verification log and follow-ups
+
+Local live runs with the flag on (Gemini generation; Anthropic credit was
+out on both days; `scratchpad/live_negative_test.py` in the session notes):
+
+- 2026-10-27, unsigned dev path: remember command saved 8 facts; a
+  Section 138 notice draft used the profile for letterhead, From block
+  and signature with no `[Advocate Name]` placeholder; "Our office has
+  moved ..." mid-question updated the address; "Forget my phone number"
+  removed it.
+- 2026-10-28, JWT path (throwaway secret, numeric `userId` claim):
+  bare id / forged token / mismatched `X-User-Id` all 401, good token
+  200. (a) the prompt's Ramesh Yadav example stored exactly
+  advocate_name, enrolment_no, office_address and nothing about the
+  client, FIR or hearing. (b1) a pasted legal notice naming opposing
+  counsel left the profile untouched. (b2) a short QUOTED notice in
+  which opposing counsel wrote "I, Adv. Rakesh Mehta ..." FAILED on the
+  first run: the extractor overwrote the lawyer's name and address and
+  added the other side's firm, phone and email as user_stated. Fixed the
+  same day (quote stripping, correspondence markers, implicit identity
+  lock, prompt exclusions; sections 3 and 4); b2 and a marker-free
+  variant (b3) then left the profile untouched, and (a) still passed.
+
+Follow-ups:
+
+- **Claude draft with the flag on** (pending Anthropic credit): one live
+  draft confirming the profile is used and `cache_read_tokens` in the
+  `done` event is still non-zero, i.e. the trailer block did not break
+  the cached prefix.
+- **Legislation agent treats a profile sentence as part of the question**
+  (observed 2026-10-27): "Our office has moved to ... What is the
+  limitation period ..." produced an answer opening with "An office
+  relocation does not alter ... the limitation period". Harmless but
+  visible. Candidate fix: strip the sentence that the extractor consumed
+  from the query handed to the router, or add a one-line instruction to
+  the Legislation prompt to ignore personal asides. Tracked as
+  https://github.com/Rohitjakkam/Lawtech-AI/issues/141.
+

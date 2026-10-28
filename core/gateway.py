@@ -2815,11 +2815,21 @@ class MemorySettingsUpdate(BaseModel):
 
 def _memory_user_or_error(request: Request) -> str:
     from core import user_memory as _um
+    # Status contract agreed with Node (2026-10-28): 403 = memory is off on
+    # this server (flag off, or flag on with no verification secret: fail
+    # closed); 401 = token missing / expired / invalid (the frontend
+    # refreshes the access token on 401 and retries).
     if not _um.enabled():
-        raise HTTPException(status_code=404, detail="User memory is not enabled")
+        raise HTTPException(status_code=403, detail="User memory is not enabled on this server")
+    if _um.auth_mode() == "unconfigured":
+        raise HTTPException(
+            status_code=403,
+            detail="User memory is enabled but no user-id verification is configured "
+                   "(set USER_MEMORY_JWT_SECRET; USER_MEMORY_ALLOW_UNSIGNED=1 for local dev only)")
     user_id = _um.resolve_user_id(request.headers)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Missing or invalid X-User-Id")
+        raise HTTPException(status_code=401, detail="Missing, expired or invalid access token "
+                            "(Authorization: Bearer <jwt>)")
     return user_id
 
 

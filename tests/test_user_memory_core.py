@@ -251,13 +251,32 @@ def test_resolve_user_id_flag_off(monkeypatch):
     assert um.resolve_user_id({"x-user-id": "u1"}) == ""
 
 
-def test_resolve_user_id_bare_dev_mode(monkeypatch):
+def test_resolve_user_id_fails_closed_when_unconfigured(monkeypatch):
+    """Flag on, no secret, no USER_MEMORY_ALLOW_UNSIGNED: nothing resolves."""
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
     monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
+    monkeypatch.delenv("USER_MEMORY_ALLOW_UNSIGNED", raising=False)
+    assert um.auth_mode() == "unconfigured"
+    assert um.configured() is False
+    assert um.resolve_user_id({"x-user-id": "user_42"}) == ""
+    good = _jwt({"userId": "user_42", "exp": time.time() + 60}, "whatever")
+    assert um.resolve_user_id({"authorization": f"Bearer {good}", "x-user-id": "user_42"}) == ""
+
+
+def test_resolve_user_id_bare_dev_mode_needs_explicit_opt_in(monkeypatch):
+    monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
+    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
+    monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
+    monkeypatch.setenv("USER_MEMORY_ALLOW_UNSIGNED", "1")
+    assert um.auth_mode() == "unsigned" and um.configured() is True
     assert um.resolve_user_id({"x-user-id": "user_42"}) == "user_42"
     assert um.resolve_user_id({"x-user-id": "bad id with spaces"}) == ""
     assert um.resolve_user_id({}) == ""
+    # A secret always wins over the dev opt-in.
+    monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
+    assert um.auth_mode() == "jwt"
+    assert um.resolve_user_id({"x-user-id": "user_42"}) == ""
 
 
 def test_resolve_user_id_hmac(monkeypatch):
@@ -272,18 +291,135 @@ def test_resolve_user_id_hmac(monkeypatch):
 
 
 def test_resolve_user_id_jwt(monkeypatch):
+    """Node's access token: HS256, `userId` = numeric DB PK, exp, no sub/iss/aud."""
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
     monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
     monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
-    good = _jwt({"sub": "abc123", "exp": time.time() + 60}, "jwt-secret")
-    assert um.resolve_user_id({"authorization": f"Bearer {good}"}) == "abc123"
-    expired = _jwt({"sub": "abc123", "exp": time.time() - 60}, "jwt-secret")
+    monkeypatch.delenv("USER_MEMORY_JWT_CLAIM", raising=False)
+    monkeypatch.delenv("USER_MEMORY_JWT_LEEWAY_S", raising=False)
+    good = _jwt({"userId": 4821, "username": "priya@kulkarnilaw.in", "exp": time.time() + 900}, "jwt-secret")
+    assert um.resolve_user_id({"authorization": f"Bearer {good}"}) == "4821"   # cast to str
+    # exp: 30 s leeway, then rejected.
+    recent = _jwt({"userId": 4821, "exp": time.time() - 10}, "jwt-secret")
+    assert um.resolve_user_id({"authorization": f"Bearer {recent}"}) == "4821"
+    expired = _jwt({"userId": 4821, "exp": time.time() - 60}, "jwt-secret")
     assert um.resolve_user_id({"authorization": f"Bearer {expired}"}) == ""
-    forged = _jwt({"sub": "abc123"}, "other-secret")
+    monkeypatch.setenv("USER_MEMORY_JWT_LEEWAY_S", "0")
+    assert um.resolve_user_id({"authorization": f"Bearer {recent}"}) == ""
+    monkeypatch.delenv("USER_MEMORY_JWT_LEEWAY_S")
+    # Signature and alg.
+    forged = _jwt({"userId": 4821}, "other-secret")
     assert um.resolve_user_id({"authorization": f"Bearer {forged}"}) == ""
-    none_alg = _jwt({"sub": "abc123"}, "jwt-secret", alg="none")
+    none_alg = _jwt({"userId": 4821}, "jwt-secret", alg="none")
     assert um.resolve_user_id({"authorization": f"Bearer {none_alg}"}) == ""
-    # With JWT configured, a bare X-User-Id is not accepted.
-    assert um.resolve_user_id({"x-user-id": "abc123"}) == ""
-    mongo = _jwt({"_id": "66f1a2b3c4d5e6f7a8b9c0d1"}, "jwt-secret")
-    assert um.resolve_user_id({"authorization": f"Bearer {mongo}"}) == "66f1a2b3c4d5e6f7a8b9c0d1"
+    # Only userId is read: a token with sub but no userId yields nothing.
+    sub_only = _jwt({"sub": "4821", "exp": time.time() + 60}, "jwt-secret")
+    assert um.resolve_user_id({"authorization": f"Bearer {sub_only}"}) == ""
+    # With JWT configured, a bare X-User-Id is not accepted on its own ...
+    assert um.resolve_user_id({"x-user-id": "4821"}) == ""
+    # ... is ignored when it agrees with the claim, and rejected when it does not.
+    assert um.resolve_user_id({"authorization": f"Bearer {good}", "x-user-id": "4821"}) == "4821"
+    assert um.resolve_user_id({"authorization": f"Bearer {good}", "x-user-id": "4822"}) == ""
+    # HMAC headers are irrelevant on the JWT path.
+    monkeypatch.setenv("USER_MEMORY_ID_SECRET", "s3cret")
+    sig = um.hmac_sign_user_id("4821", "s3cret")
+    assert um.resolve_user_id({"x-user-id": "4821", "x-user-sig": sig}) == ""
+    monkeypatch.delenv("USER_MEMORY_ID_SECRET")
+    # nbf in the future (beyond leeway), missing Bearer prefix, garbage.
+    nbf = _jwt({"userId": 4821, "nbf": time.time() + 120}, "jwt-secret")
+    assert um.resolve_user_id({"authorization": f"Bearer {nbf}"}) == ""
+    assert um.resolve_user_id({"authorization": good}) == ""
+    assert um.resolve_user_id({"authorization": "Bearer not.a.jwt"}) == ""
+
+
+def test_resolve_user_id_jwt_claim_pinned_by_env(monkeypatch):
+    """USER_MEMORY_JWT_CLAIM names the claim Node puts the user id in; the
+    default fallback list is then not consulted."""
+    monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
+    monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
+    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
+    monkeypatch.delenv("USER_MEMORY_JWT_CLAIM", raising=False)
+    assert um.jwt_claims() == ("userId",)
+    monkeypatch.setenv("USER_MEMORY_JWT_CLAIM", "sub")
+    tok = _jwt({"sub": "u-777", "userId": 1, "exp": time.time() + 60}, "jwt-secret")
+    assert um.resolve_user_id({"authorization": f"Bearer {tok}"}) == "u-777"
+    tok = _jwt({"userId": 1, "exp": time.time() + 60}, "jwt-secret")
+    assert um.resolve_user_id({"authorization": f"Bearer {tok}"}) == ""
+    monkeypatch.setenv("USER_MEMORY_JWT_CLAIM", "user.id, userId")
+    assert um.jwt_claims() == ("user.id", "userId")
+    assert um.resolve_user_id({"authorization": f"Bearer {tok}"}) == "1"
+
+
+# --- quoted material and received correspondence (live negative test b2) ---
+
+QUOTED_NOTICE = ('Reply to this notice for me and deny liability for my client Anil Deshmukh: '
+                 '"Under instructions from my client Suresh Patil, I, Adv. Rakesh Mehta of Mehta Law '
+                 'Chambers, 12 Court Lane, Shivajinagar, Pune 411005, phone +91 98765 43210, email '
+                 'rakesh@mehtalaw.in, call upon you to pay Rs 4,50,000 within 15 days." Keep it to one page.')
+
+
+def test_received_correspondence_counts_as_pasted_document():
+    assert um.looks_like_pasted_document(QUOTED_NOTICE)                      # "under instructions from"
+    assert um.looks_like_pasted_document("LEGAL NOTICE\nTo: Mr X\nSir, pay up.")
+    assert um.looks_like_pasted_document("From: Adv. R. Mehta\nTo: Anil\nPlease pay.")
+    assert um.looks_like_pasted_document("Dear Sir, this is to inform you that the cheque bounced.")
+    assert um.looks_like_pasted_document("... failing which. Yours faithfully, Adv. R. Mehta")
+    # The lawyer's own words are not a document.
+    assert not um.looks_like_pasted_document("I'm Adv. Priya Kulkarni, enrolment MAH/1234/2015.")
+    assert not um.looks_like_pasted_document("Draft a notice to the tenant for arrears of rent.")
+    assert not um.looks_like_pasted_document("Our office has moved to Camp, Pune.")
+
+
+def test_strip_quoted_spans_removes_what_the_lawyer_is_quoting():
+    s = um.strip_quoted_spans('Reply to this for me: "I am Adv. Rakesh Mehta of 12 Court Lane, Pune '
+                              'and I demand Rs 4,50,000 from your client." Keep it short.')
+    assert "Rakesh" not in s and "Court Lane" not in s
+    assert s.startswith("Reply to this for me:") and s.endswith("Keep it short.")
+    assert "[quoted material omitted]" in s
+    # Curly quotes and guillemets.
+    assert "Mehta" not in um.strip_quoted_spans("He wrote \u201cI, Adv. Mehta, call upon you\u201d today.")
+    assert "Mehta" not in um.strip_quoted_spans("He wrote \u00abI, Adv. Mehta, call upon you\u00bb today.")
+    # Single quotes only when clearly a quotation; apostrophes survive.
+    assert "Mehta" not in um.strip_quoted_spans("He wrote: 'I, Adv. Mehta of Pune, call upon you to pay' yesterday.")
+    assert um.strip_quoted_spans("I'm Adv. Kulkarni and it's my firm's office") == \
+        "I'm Adv. Kulkarni and it's my firm's office"
+    # Short quoted terms (a defined term, a phrase) are left alone.
+    assert um.strip_quoted_spans('always use "Hon\'ble Court" in my drafts') == \
+        'always use "Hon\'ble Court" in my drafts'
+
+
+def test_extraction_text_never_carries_quoted_spans():
+    out = um.extraction_text('Reply to this for me: "I am Adv. Rakesh Mehta of 12 Court Lane, Pune '
+                             'and I demand payment from your client within 15 days." Keep it short.')
+    assert "Rakesh" not in out and "quoted material omitted" in out
+
+
+def test_implicit_turn_cannot_change_a_confirmed_name_or_enrolment():
+    rows = [
+        {"id": 1, "slot": "advocate_name", "value": "Adv. Priya Kulkarni", "source": "user_stated"},
+        {"id": 2, "slot": "enrolment_no", "value": "MAH/1234/2015", "source": "user_stated"},
+        {"id": 3, "slot": "firm_name", "value": "Kulkarni & Associates", "source": "user_stated"},
+        {"id": 4, "slot": "office_address", "value": "201 Lex Towers, Pune", "source": "user_stated"},
+    ]
+    ops = [
+        {"op": "ADD", "slot": "advocate_name", "value": "Adv. Rakesh Mehta", "source": "user_stated", "confidence": 1.0},
+        {"op": "UPDATE", "slot": "enrolment_no", "value": "MAH/9/2009", "old_value": "MAH/1234/2015", "source": "user_stated", "confidence": 1.0},
+        {"op": "DELETE", "slot": "firm_name", "value": "Kulkarni & Associates", "source": "user_stated", "confidence": 1.0},
+        {"op": "UPDATE", "slot": "office_address", "value": "5th floor, Camp, Pune", "old_value": "201 Lex Towers, Pune", "source": "user_stated", "confidence": 1.0},
+        {"op": "ADD", "slot": "phone", "value": "+91 98230 12345", "source": "user_stated", "confidence": 1.0},
+    ]
+    clean, dropped = um.validate_ops(ops, rows, implicit=True)
+    assert sorted(d.split(":")[1] for d in dropped if d.startswith("implicit_identity_locked")) == \
+        ["advocate_name", "enrolment_no", "firm_name"]
+    assert [(o["op"], o["slot"]) for o in clean] == [("UPDATE", "office_address"), ("ADD", "phone")]
+    # Re-stating the same name is not a change and is not dropped.
+    same = [{"op": "ADD", "slot": "advocate_name", "value": "adv. priya kulkarni", "source": "user_stated", "confidence": 1.0}]
+    assert um.validate_ops(same, rows, implicit=True)[1] == []
+    # Explicit paths (remember / forget / review page) keep the approved behaviour.
+    clean, dropped = um.validate_ops(ops, rows)
+    assert dropped == [] and len(clean) == 5
+    # A first ADD into an empty locked slot is still allowed implicitly (prompt example).
+    clean, dropped = um.validate_ops(
+        [{"op": "ADD", "slot": "advocate_name", "value": "Adv. Priya Kulkarni", "source": "user_stated", "confidence": 1.0}],
+        [], implicit=True)
+    assert dropped == [] and clean[0]["op"] == "ADD"

@@ -99,6 +99,16 @@ POSTGRES_PASSWORD=changeme
 # ES_USER=app_user
 # ES_PASSWORD=changeme
 # RATE_LIMIT_PER_MINUTE=10
+
+# ── User memory (optional; docs/user_memory_design.md) ────────────────────────
+# Off unless both are set. USER_MEMORY_JWT_SECRET MUST equal the user-service's
+# JWT_ACCESS_SECRET (fallback: its JWT_SECRET) so Python can verify the HS256
+# access token the frontend forwards as `Authorization: Bearer`. Rotate both
+# together. With USER_MEMORY_ENABLED=1 and no secret, memory stays off and
+# /pyapi/memory* answers 403 (fail closed). Never set USER_MEMORY_ALLOW_UNSIGNED
+# on a server.
+# USER_MEMORY_ENABLED=1
+# USER_MEMORY_JWT_SECRET=<user-service JWT_ACCESS_SECRET>
 ```
 
 > **Security**: Generate strong keys with:

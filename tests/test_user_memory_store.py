@@ -8,6 +8,7 @@ import os
 os.environ.setdefault("EMBEDDING_SERVICE_URL", "http://127.0.0.1:9")
 
 import asyncio
+import json
 
 import pytest
 
@@ -22,6 +23,8 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
     monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
+    # The pipeline is gated on configured(); these tests use the dev opt-in.
+    monkeypatch.setenv("USER_MEMORY_ALLOW_UNSIGNED", "1")
     return s
 
 
@@ -251,3 +254,51 @@ def test_rows_for_review_marks_unconfirmed_identity(store):
     assert out["advocate_name"]["confirmed"] is False and out["advocate_name"]["injected"] is False
     assert out["courts"]["confirmed"] is False and out["courts"]["injected"] is True
     assert out["advocate_name"]["label"] == "Advocate name"
+
+
+def test_pipeline_is_off_when_unconfigured(store, monkeypatch):
+    """Fail closed: flag on, no secret, no dev opt-in -> no extraction at all."""
+    monkeypatch.delenv("USER_MEMORY_ALLOW_UNSIGNED", raising=False)
+    called = []
+    monkeypatch.setattr(um, "_extractor_llm", lambda: called.append(1) or _FakeLLM("[]"))
+    assert run(um.after_turn_extraction("u1", "t1", "I'm Adv. X, enrolment MAH/1/2001")) == []
+    assert called == []
+    assert run(store.load_user_memory("u1")) == []
+
+
+def test_quoted_notice_turn_never_reaches_the_extractor_with_the_quote(store, monkeypatch):
+    """Live negative test b2 (2026-10-28) as a unit test: the message passes
+    the length / newline gates; the quoted notice must not reach the model,
+    and even if the model returned the other side's details they could not
+    displace confirmed name / enrolment / firm."""
+    seen = {}
+
+    class _SpyLLM:
+        def invoke(self, msgs):
+            seen["prompt"] = msgs[0].content
+            return _FakeLLM(json.dumps({"ops": [
+                {"op": "ADD", "slot": "advocate_name", "value": "Adv. Rakesh Mehta", "source": "user_stated", "confidence": 1.0},
+                {"op": "ADD", "slot": "firm_name", "value": "Mehta Law Chambers", "source": "user_stated", "confidence": 1.0},
+                {"op": "ADD", "slot": "phone", "value": "+91 98765 43210", "source": "user_stated", "confidence": 1.0},
+            ]})).invoke(msgs)
+    monkeypatch.setattr(um, "_extractor_llm", lambda: _SpyLLM())
+    run(store.insert_user_memory("u1", "advocate_name", "Adv. Priya Kulkarni", "user_stated", 1.0))
+    run(store.insert_user_memory("u1", "firm_name", "Kulkarni & Associates", "user_stated", 1.0))
+
+    # No correspondence markers, so only the quote stripping stands between
+    # the model and the other side's details.
+    text = ('Reply to this for me: "I am Adv. Rakesh Mehta of Mehta Law Chambers, 12 Court Lane, '
+            'Pune 411005, phone +91 98765 43210, and I demand payment from your client within 15 days." '
+            'Keep it short.')
+    applied = run(um.after_turn_extraction("u1", "t1", text))
+    assert "Rakesh" not in seen["prompt"].split("## This turn")[1]
+    assert "quoted material omitted" in seen["prompt"]
+    # The spy still answered with the other side's details: name and firm are locked ...
+    assert [(o["op"], o["slot"]) for o in applied] == [("ADD", "phone")]
+    rows = {r["slot"]: r["value"] for r in run(store.load_user_memory("u1"))}
+    assert rows["advocate_name"] == "Adv. Priya Kulkarni" and rows["firm_name"] == "Kulkarni & Associates"
+
+    # With a correspondence marker the extractor is not called at all.
+    seen.clear()
+    assert run(um.after_turn_extraction("u1", "t1", "Reply for me: Under instructions from my client, I, Adv. R. Mehta, call upon you to pay.")) == []
+    assert seen == {}

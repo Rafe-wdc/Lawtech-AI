@@ -18,7 +18,13 @@ What this module owns
 
 Everything is gated on USER_MEMORY_ENABLED (default off). With the flag off
 no table is read, no extraction runs, nothing is injected, and the review
-API answers 404.
+API answers 403 (the status Node's frontend treats as "memory off").
+
+Fail closed: with the flag on, requests must carry a verifiable user id.
+Prod path is Node's HS256 JWT (`USER_MEMORY_JWT_SECRET`, `Authorization:
+Bearer`). With no secret configured no user id is ever resolved, so
+extraction and injection stay off and the review API answers 403, unless
+USER_MEMORY_ALLOW_UNSIGNED=1 explicitly opts local dev into bare X-User-Id.
 """
 
 from __future__ import annotations
@@ -45,6 +51,53 @@ log = get_logger("UserMemory")
 
 def enabled() -> bool:
     return os.getenv("USER_MEMORY_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _truthy(name: str) -> bool:
+    return os.getenv(name, "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def auth_mode() -> str:
+    """How a user id may be proven on this deployment.
+
+    "jwt"          USER_MEMORY_JWT_SECRET set: Node's HS256 JWT as Bearer (prod).
+    "hmac"         USER_MEMORY_ID_SECRET set: X-User-Id + X-User-Sig (kept, not the prod path).
+    "unsigned"     USER_MEMORY_ALLOW_UNSIGNED=1 and no secret: bare X-User-Id (local dev only).
+    "unconfigured" flag on, no secret, no opt-in: fail closed - no id is ever resolved.
+    """
+    if os.getenv("USER_MEMORY_JWT_SECRET", "").strip():
+        return "jwt"
+    if os.getenv("USER_MEMORY_ID_SECRET", "").strip():
+        return "hmac"
+    if _truthy("USER_MEMORY_ALLOW_UNSIGNED"):
+        return "unsigned"
+    return "unconfigured"
+
+
+def configured() -> bool:
+    """Flag on AND a way to prove the user id. Everything that reads or
+    writes a profile is gated on this, not on enabled() alone."""
+    return enabled() and auth_mode() != "unconfigured"
+
+
+def jwt_claims() -> tuple[str, ...]:
+    """Claim(s) holding the user id, in order. Node (2026-10-28): the id is
+    the numeric DB primary key in `userId`; there is no sub / iss / aud.
+    USER_MEMORY_JWT_CLAIM overrides (comma-separated list accepted). No
+    other claim is ever read: in particular the `username` claim never
+    feeds the email slot or anything else in the profile."""
+    raw = os.getenv("USER_MEMORY_JWT_CLAIM", "").strip()
+    if raw:
+        return tuple(c.strip() for c in raw.split(",") if c.strip())
+    return ("userId",)
+
+
+def jwt_leeway_s() -> float:
+    """Clock-skew allowance on exp / nbf (Node asked for ~30 s)."""
+    try:
+        return max(0.0, float(os.getenv("USER_MEMORY_JWT_LEEWAY_S", "30")))
+    except ValueError:
+        return 30.0
 
 
 def _extract_timeout_s() -> float:
@@ -148,15 +201,43 @@ def first_person_span(text: str) -> int:
 
 
 _DOC_MARKERS_RE = re.compile(
+    # Pleadings and court papers.
     r"IN THE (?:HON'?BLE )?(?:COURT|HIGH COURT|SUPREME COURT)|"
     r"\bWHEREAS\b|\bVERIFICATION\b|\bPRAYER\b|\bMOST RESPECTFULLY SHOWETH\b|"
-    r"\bAFFIDAVIT\b|\bDEPONENT\b|\bVAKALATNAMA\b|^\s*#{1,3}\s",
+    r"\bAFFIDAVIT\b|\bDEPONENT\b|\bVAKALATNAMA\b|^\s*#{1,3}\s|"
+    # Correspondence the lawyer RECEIVED (a notice, letter or email pasted in).
+    # Live negative test 2026-10-28: a short quoted notice in which opposing
+    # counsel wrote "I, Adv. ..." passed the old gates and the extractor took
+    # the other side's name, office, phone and email as the lawyer's own.
+    r"\bLEGAL NOTICE\b|\bTAKE NOTICE\b|^\s*(?:From|To|Sub|Subject|Ref|Dated?)\s*:|"
+    r"\bunder (?:the )?instructions? (?:from|of)\b|\byours (?:faithfully|sincerely|truly)\b|"
+    r"\bdear (?:sir|madam)\b|\bcall upon you\b|\bthis is to inform you\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Quoted spans: "...", “...”, «...», and '...' when it is clearly a quotation
+# (opening quote after start / space / colon). Spans under 24 chars are left
+# alone so a quoted phrase in a preference ("Hon'ble Court") survives.
+_QUOTED_SPAN_RE = re.compile(
+    r"\"[^\"\n]{24,}?\"|\u201c[^\u201d\n]{24,}?\u201d|\u00ab[^\u00bb\n]{24,}?\u00bb"
+    r"|(?:(?<=^)|(?<=[\s:(\[]))'[^'\n]{24,}?'(?=[\s.,;:!?)\]]|$)",
+)
+_QUOTED_PLACEHOLDER = " [quoted material omitted] "
+
+
+def strip_quoted_spans(text: str) -> str:
+    """Remove text the lawyer is quoting (a notice, an email, a clause).
+    Whoever says "I" or "my" inside a quotation is not the lawyer, so the
+    extractor never sees it. Independent of the model."""
+    if not text:
+        return text or ""
+    out = _QUOTED_SPAN_RE.sub(_QUOTED_PLACEHOLDER, text)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
 
 def looks_like_pasted_document(text: str) -> bool:
-    """A pasted draft / notice / judgment, not a message about the lawyer."""
+    """A pasted draft / notice / judgment / letter, not a message about the
+    lawyer. Checked on the ORIGINAL text, quotes included."""
     if not text:
         return False
     if len(text) > 1500:
@@ -167,10 +248,11 @@ def looks_like_pasted_document(text: str) -> bool:
 
 
 def extraction_text(text: str) -> str:
-    """The user text handed to the extractor: first 500 chars, plus a short
-    window around the first first-person marker when it lies past the cap
-    (facts about the lawyer often come at the end of a long request)."""
-    text = (text or "").strip()
+    """The user text handed to the extractor: quoted spans removed, then the
+    first 500 chars, plus a short window around the first first-person
+    marker when it lies past the cap (facts about the lawyer often come at
+    the end of a long request)."""
+    text = strip_quoted_spans((text or "").strip())
     if len(text) <= EXTRACT_USER_TEXT_CHARS:
         return text
     head = text[:EXTRACT_USER_TEXT_CHARS]
@@ -253,7 +335,17 @@ def _find_target(op: dict, rows: list[dict]) -> dict | None:
     return None
 
 
-def validate_ops(raw_ops: Any, rows: list[dict]) -> tuple[list[dict], list[str]]:
+# Identity facts that do not change by a passing remark. From an implicit
+# turn (post-turn extraction, as opposed to "remember that", "forget that"
+# or the review page) an existing user_stated row in these slots can be
+# neither updated nor deleted, whatever source the model claims. Office,
+# phone, email, designation stay implicitly updatable ("our office has
+# moved", approved example).
+IMPLICIT_LOCKED_SLOTS = frozenset({"advocate_name", "enrolment_no", "firm_name"})
+
+
+def validate_ops(raw_ops: Any, rows: list[dict], *, implicit: bool = False
+                 ) -> tuple[list[dict], list[str]]:
     """Filter the model's operations down to the ones the server will apply.
 
     Rules (docs/user_memory_design.md section 3, as amended):
@@ -262,6 +354,11 @@ def validate_ops(raw_ops: Any, rows: list[dict]) -> tuple[list[dict], list[str]]
     - The hard-exclusion filter runs on every value.
     - An op may modify (UPDATE / DELETE / ADD-as-UPDATE on a single slot) a
       user_stated row only if the op is itself user_stated.
+    - implicit=True (post-turn extraction): an existing user_stated row in
+      IMPLICIT_LOCKED_SLOTS cannot be modified at all. The model's
+      "user_stated" label is its own judgement, and a quoted notice can
+      fool it; a name or enrolment number changes only on an explicit
+      "remember that" / "forget that" or on the review page.
     Returns (clean_ops, reasons_for_dropped).
     """
     clean: list[dict] = []
@@ -309,6 +406,11 @@ def validate_ops(raw_ops: Any, rows: list[dict]) -> tuple[list[dict], list[str]]
         target = _find_target(cand, rows)
         if target is not None and target.get("source") == SOURCE_USER and source != SOURCE_USER:
             dropped.append(f"protected_user_stated:{slot}")
+            continue
+        if (implicit and target is not None and slot in IMPLICIT_LOCKED_SLOTS
+                and target.get("source") == SOURCE_USER
+                and (op == "DELETE" or _norm(target.get("value")).lower() != value.lower())):
+            dropped.append(f"implicit_identity_locked:{slot}")
             continue
         if op in ("UPDATE", "DELETE") and target is None:
             if op == "DELETE":
@@ -527,7 +629,17 @@ standing preferences. It is NOT a record of the lawyer's cases.
   matter.
 - Amounts: claim values, cheque amounts, fees, compensation, fines.
 - Anything taken from an uploaded document or a pasted draft.
-- Judges' names, opposing counsel's names.
+- Anything inside quotation marks, or that reads like a notice, letter,
+  email or pleading the lawyer RECEIVED or is replying to. "I", "my",
+  "we", "our" inside such text refer to its author (often the opposing
+  counsel), never to the lawyer. A "[quoted material omitted]" marker
+  shows where such text was removed; do not guess what it said.
+- Judges' names, opposing counsel's names, opposing counsel's firm,
+  office, phone or email.
+- One-off instructions for the current draft ("keep it to one page",
+  "make this one formal", "address it to the Collector"). Store a
+  drafting preference only when it is stated as a general rule ("always",
+  "in all my notices", "by default", "from now on").
 - Anything about the current matter's court or forum when it is said
   only for this matter ("file this in Agra ITAT"). Store a court ONLY
   when the lawyer says they practise there regularly or asks to use it
@@ -581,6 +693,13 @@ MAH/1234/2015, office at 201 Lex Towers, Pune."
 
 Turn: "Reply to this legal notice. The notice demands Rs 4,50,000."
 -> {"ops": []}
+
+Turn: "Reply to this notice for me and deny liability for my client Anil
+Deshmukh: "Under instructions from my client Suresh Patil, I, Adv. Rakesh
+Mehta of Mehta Law Chambers, 12 Court Lane, Pune, phone +91 98765 43210,
+call upon you to pay Rs 4,50,000." Keep it to one page."
+-> {"ops": []}   (Rakesh Mehta is the opposing counsel speaking inside the
+   quotation; "keep it to one page" is an instruction for this draft only)
 
 Turn: "Our office has moved to 5th floor, Sadhu Vaswani Chowk, Pune."
 Profile has office_address "201 Lex Towers, Pune".
@@ -684,11 +803,14 @@ async def after_turn_extraction(user_id: str, thread_id: str, user_text: str,
     """Post-turn extraction. Never raises; returns the ops applied.
 
     Gates, cheapest first: flag, user id, conversational ack, pasted
-    document, first-person marker, per-user setting, per-thread no_memory.
+    document (original text), first-person marker (on the text with quoted
+    spans removed), per-user setting, per-thread no_memory.
     """
-    if not enabled() or not user_id or not user_text:
+    if not configured() or not user_id or not user_text:
         return []
-    if conversational or looks_like_pasted_document(user_text) or not first_person_gate(user_text):
+    if conversational or looks_like_pasted_document(user_text):
+        return []
+    if not first_person_gate(strip_quoted_spans(user_text)):
         return []
     try:
         from core.chat_store import chat_store
@@ -698,10 +820,14 @@ async def after_turn_extraction(user_id: str, thread_id: str, user_text: str,
             return []
         rows = await chat_store.load_user_memory(user_id)
         raw = await extract_ops(rows, extraction_text(user_text), "turn")
-        ops, dropped = validate_ops(raw, rows)
+        ops, dropped = validate_ops(raw, rows, implicit=True)
         if dropped:
             log.info("Memory ops dropped by validation", user=user_id[:8], dropped=dropped[:8])
         if not ops:
+            # Logged so a live run can tell "extractor ran, found nothing"
+            # from "a gate skipped the turn" (silent).
+            log.info("Memory extraction found nothing to store", user=user_id[:8],
+                     raw_ops=len(raw) if isinstance(raw, list) else -1)
             return []
         applied = await apply_ops(user_id, thread_id, ops, rows)
         log.info("Memory updated from turn", user=user_id[:8],
@@ -828,6 +954,7 @@ async def handle_direct_command(user_id: str, thread_id: str, kind: str, remaind
 
 _USER_ID_RE = re.compile(r"^[A-Za-z0-9_.:@\-]{1,128}$")
 _warned_bare_id = False
+_warned_unconfigured = False
 
 
 def _b64url_decode(s: str) -> bytes:
@@ -836,25 +963,41 @@ def _b64url_decode(s: str) -> bytes:
 
 
 def _verify_hs256_jwt(token: str, secret: str) -> str:
-    """Return the user id claim of a valid HS256 JWT, else ""."""
+    """Return the user id claim of a valid HS256 JWT, else "".
+
+    Equivalent to jwt.decode(token, secret, algorithms=["HS256"],
+    leeway=30) without a PyJWT dependency: alg pinned to HS256 (so "none"
+    and RS* are rejected), constant-time signature check, exp and nbf
+    honoured when present with jwt_leeway_s() of skew, no iss / aud check
+    (Node issues none), id from jwt_claims() cast to str (Node's userId is
+    a numeric primary key).
+    """
     try:
         h_b64, p_b64, s_b64 = token.split(".")
         header = json.loads(_b64url_decode(h_b64))
-        if str(header.get("alg", "")).upper() != "HS256":
+        if str(header.get("alg", "")) != "HS256":
             return ""
         expected = hmac.new(secret.encode("utf-8"), f"{h_b64}.{p_b64}".encode("ascii"),
                             hashlib.sha256).digest()
         if not hmac.compare_digest(expected, _b64url_decode(s_b64)):
             return ""
         payload = json.loads(_b64url_decode(p_b64))
-        exp = payload.get("exp")
-        if exp is not None and float(exp) < time.time():
+        if not isinstance(payload, dict):
             return ""
-        for claim in ("sub", "userId", "user_id", "uid", "id", "_id"):
+        now = time.time()
+        leeway = jwt_leeway_s()
+        exp = payload.get("exp")
+        if exp is not None and float(exp) + leeway < now:
+            return ""
+        nbf = payload.get("nbf")
+        if nbf is not None and float(nbf) - leeway > now:
+            return ""
+        for claim in jwt_claims():
             v = payload.get(claim)
-            if v:
-                v = str(v)
-                return v if _USER_ID_RE.match(v) else ""
+            if v is None or v == "" or isinstance(v, bool):
+                continue
+            v = str(v)  # numeric PK -> string user_id
+            return v if _USER_ID_RE.match(v) else ""
     except Exception:
         return ""
     return ""
@@ -868,38 +1011,52 @@ def hmac_sign_user_id(user_id: str, secret: str) -> str:
 def resolve_user_id(headers: Mapping[str, str]) -> str:
     """Verified user id for this request, or "" (memory off for the request).
 
-    Order: a valid JWT in Authorization (when USER_MEMORY_JWT_SECRET is set),
-    then X-User-Id + X-User-Sig (when USER_MEMORY_ID_SECRET is set). With
-    neither secret configured a bare X-User-Id is accepted - dev only; prod
-    must set one of the secrets (a bare id is spoofable).
+    Fail closed: "" whenever the flag is off or no auth mode is configured.
+    jwt      (prod)  Authorization: Bearer <HS256 JWT>. A bare X-User-Id is
+                     ignored, except that if it is present it must equal the
+                     JWT claim (a mismatch is a frontend bug and is rejected).
+    hmac             X-User-Id + X-User-Sig = hex(HMAC-SHA256(secret, id)).
+    unsigned (dev)   bare X-User-Id, only with USER_MEMORY_ALLOW_UNSIGNED=1.
     """
-    global _warned_bare_id
+    global _warned_bare_id, _warned_unconfigured
     if not enabled():
         return ""
+    mode = auth_mode()
+    if mode == "unconfigured":
+        if not _warned_unconfigured:
+            _warned_unconfigured = True
+            log.error("USER_MEMORY_ENABLED=1 but no USER_MEMORY_JWT_SECRET / "
+                      "USER_MEMORY_ID_SECRET and USER_MEMORY_ALLOW_UNSIGNED is not set: "
+                      "memory stays off (fail closed)")
+        return ""
     get = lambda k: (headers.get(k) or headers.get(k.lower()) or headers.get(k.title()) or "")  # noqa: E731
-    jwt_secret = os.getenv("USER_MEMORY_JWT_SECRET", "")
-    auth = get("Authorization").strip()
-    if jwt_secret and auth.lower().startswith("bearer "):
-        uid = _verify_hs256_jwt(auth[7:].strip(), jwt_secret)
-        if uid:
-            return uid
     raw = get("X-User-Id").strip()
+    if mode == "jwt":
+        auth = get("Authorization").strip()
+        if not auth.lower().startswith("bearer "):
+            return ""
+        uid = _verify_hs256_jwt(auth[7:].strip(), os.getenv("USER_MEMORY_JWT_SECRET", "").strip())
+        if not uid:
+            return ""
+        if raw and raw != uid:
+            log.warning("X-User-Id does not match the JWT claim; memory off for request",
+                        user=uid[:8])
+            return ""
+        return uid
     if not raw or not _USER_ID_RE.match(raw):
         return ""
-    hmac_secret = os.getenv("USER_MEMORY_ID_SECRET", "")
-    if hmac_secret:
+    if mode == "hmac":
         sig = get("X-User-Sig").strip().lower()
-        if not sig or not hmac.compare_digest(sig, hmac_sign_user_id(raw, hmac_secret)):
+        if not sig or not hmac.compare_digest(
+                sig, hmac_sign_user_id(raw, os.getenv("USER_MEMORY_ID_SECRET", "").strip())):
             log.warning("X-User-Id signature missing or invalid; memory off for request",
                         user=raw[:8])
             return ""
         return raw
-    if jwt_secret:
-        return ""  # signing is configured via JWT; a bare id is not accepted
+    # mode == "unsigned"
     if not _warned_bare_id:
         _warned_bare_id = True
-        log.warning("USER_MEMORY_ENABLED with no USER_MEMORY_ID_SECRET / "
-                    "USER_MEMORY_JWT_SECRET: accepting bare X-User-Id (dev only)")
+        log.warning("USER_MEMORY_ALLOW_UNSIGNED=1: accepting bare X-User-Id (local dev only)")
     return raw
 
 

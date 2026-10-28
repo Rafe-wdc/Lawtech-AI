@@ -7,6 +7,11 @@ import os
 os.environ.setdefault("EMBEDDING_SERVICE_URL", "http://127.0.0.1:9")
 
 import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import time
 
 import pytest
 
@@ -74,8 +79,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(cs, "chat_store", store)
     monkeypatch.setattr(gw, "chat_store", store)
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
-    monkeypatch.setenv("USER_MEMORY_ID_SECRET", "s3cret")
-    monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
+    # Prod path: Node's HS256 JWT forwarded as a Bearer token.
+    monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
+    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
+    monkeypatch.delenv("USER_MEMORY_ALLOW_UNSIGNED", raising=False)
     gw.app.dependency_overrides[gw.require_user_key] = lambda: "test-key"
     try:
         # No `with`: the lifespan (graph compile, ES) must not run for these routes.
@@ -84,8 +91,17 @@ def client(tmp_path, monkeypatch):
         gw.app.dependency_overrides.pop(gw.require_user_key, None)
 
 
+def _jwt(payload, secret="jwt-secret", alg="HS256"):
+    def b64(b):
+        return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    h = b64(json.dumps({"alg": alg, "typ": "JWT"}).encode())
+    p = b64(json.dumps(payload).encode())
+    sig = b64(hmac.new(secret.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest())
+    return f"{h}.{p}.{sig}"
+
+
 def _hdrs(user="user_42"):
-    return {"X-User-Id": user, "X-User-Sig": um.hmac_sign_user_id(user, "s3cret")}
+    return {"Authorization": "Bearer " + _jwt({"userId": user, "exp": time.time() + 300})}
 
 
 def test_memory_routes_round_trip(client):
@@ -135,9 +151,52 @@ def test_memory_routes_round_trip(client):
 
 def test_memory_routes_auth_and_flag(client, monkeypatch):
     c, _ = client
-    # Bad signature -> 401.
-    assert c.get("/pyapi/memory", headers={"X-User-Id": "user_42", "X-User-Sig": "00"}).status_code == 401
+    # Forged / expired / wrong-alg token, bare id, no headers -> 401.
+    forged = "Bearer " + _jwt({"userId": "user_42"}, secret="other")
+    assert c.get("/pyapi/memory", headers={"Authorization": forged}).status_code == 401
+    expired = "Bearer " + _jwt({"userId": "user_42", "exp": time.time() - 120})
+    assert c.get("/pyapi/memory", headers={"Authorization": expired}).status_code == 401
+    none_alg = "Bearer " + _jwt({"userId": "user_42"}, alg="none")
+    assert c.get("/pyapi/memory", headers={"Authorization": none_alg}).status_code == 401
     assert c.get("/pyapi/memory", headers={"X-User-Id": "user_42"}).status_code == 401
     assert c.get("/pyapi/memory").status_code == 401
+    # X-User-Id beside the JWT must agree with the claim.
+    r = c.get("/pyapi/memory", headers={**_hdrs(), "X-User-Id": "user_42"})
+    assert r.status_code == 200
+    r = c.get("/pyapi/memory", headers={**_hdrs(), "X-User-Id": "user_99"})
+    assert r.status_code == 401
+    # Flag off -> 403 ("memory off on this server") even with a valid token.
     monkeypatch.setenv("USER_MEMORY_ENABLED", "0")
-    assert c.get("/pyapi/memory", headers=_hdrs()).status_code == 404
+    assert c.get("/pyapi/memory", headers=_hdrs()).status_code == 403
+    # Numeric userId claim is accepted and becomes the string user id.
+    monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
+    tok = "Bearer " + _jwt({"userId": 4821, "exp": time.time() + 300})
+    assert c.get("/pyapi/memory", headers={"Authorization": tok}).status_code == 200
+
+
+def test_memory_routes_fail_closed_without_a_secret(client, monkeypatch):
+    """Flag on but no secret and no dev opt-in: 403 on every memory route,
+    whatever headers arrive."""
+    c, _ = client
+    monkeypatch.delenv("USER_MEMORY_JWT_SECRET")
+    for hdrs in ({}, {"X-User-Id": "user_42"}, _hdrs()):
+        r = c.get("/pyapi/memory", headers=hdrs)
+        assert r.status_code == 403, (hdrs, r.status_code)
+        assert "USER_MEMORY_JWT_SECRET" in r.json()["message"]
+    assert c.post("/pyapi/memory", json={"slot": "advocate_name", "value": "Adv. A"},
+                  headers={"X-User-Id": "user_42"}).status_code == 403
+    assert c.delete("/pyapi/memory", headers={"X-User-Id": "user_42"}).status_code == 403
+    # Explicit local-dev opt-in restores the bare-id path.
+    monkeypatch.setenv("USER_MEMORY_ALLOW_UNSIGNED", "1")
+    assert c.get("/pyapi/memory", headers={"X-User-Id": "user_42"}).status_code == 200
+    assert c.get("/pyapi/memory").status_code == 401
+
+
+def test_memory_routes_hmac_path_still_works(client, monkeypatch):
+    """Kept for completeness; not the prod path."""
+    c, _ = client
+    monkeypatch.delenv("USER_MEMORY_JWT_SECRET")
+    monkeypatch.setenv("USER_MEMORY_ID_SECRET", "s3cret")
+    sig = um.hmac_sign_user_id("user_42", "s3cret")
+    assert c.get("/pyapi/memory", headers={"X-User-Id": "user_42", "X-User-Sig": sig}).status_code == 200
+    assert c.get("/pyapi/memory", headers={"X-User-Id": "user_42", "X-User-Sig": "00"}).status_code == 401

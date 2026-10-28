@@ -26,7 +26,7 @@ Scope:
 
 | Step | Where | What |
 |---|---|---|
-| Identify the user | `core/gateway.py` (`_resolve_memory_user`) -> `core/user_memory.py::resolve_user_id` | `X-User-Id` header, verified (section 8). Empty or unverifiable -> memory is off for that request. |
+| Identify the user | `core/gateway.py` (`_resolve_memory_user`) -> `core/user_memory.py::resolve_user_id` | `Authorization: Bearer <Node access token>`, verified (section 8). No token -> memory is off for that request; invalid token -> 401. |
 | Per-thread opt-out | form field / JSON field `no_memory` -> `threads.no_memory` | Sticky per thread once set. |
 | Direct command | `core/chat_runner.py` and `/pyapi/search`, before the cache and the graph | "remember that ..." / "forget ..." as the whole message. Graph does not run. Section 6. |
 | Load profile | same place, `load_profile_block(user_id)` | One SELECT; rendered block goes on state as `user_profile_block`. A profile-bearing request never reads or writes the shared response cache. |
@@ -278,31 +278,38 @@ must match `^[A-Za-z0-9_.:@\-]{1,128}$`.
 
 **Secret mapping (runbook)**: `USER_MEMORY_JWT_SECRET` in the Python
 `.env` must equal the user-service's `JWT_ACCESS_SECRET` (falling back to
-its `JWT_SECRET` where `JWT_ACCESS_SECRET` is unset). Rotate both
-together. The same block is in `docs/deployment_guide.md`, Step 5.
+its `JWT_SECRET` where `JWT_ACCESS_SECRET` is unset). Both come from the
+secrets manager (the vault that holds `.env.production`), never from a
+committed file; rotate both together. The same block is in
+`docs/deployment_guide.md` Step 5 and `docs/phase1_provision_runbook.md`.
 
-A bare `X-User-Id` is not an identity on the JWT path. If the frontend
-still sends it, it must equal the JWT claim; a mismatch is treated as a
-bug and the request runs with memory off (401 on the review API).
+There is no other signing mechanism (no `X-User-Sig`, no HMAC). A bare
+`X-User-Id` is not an identity on the JWT path; if the frontend still
+sends it, it must equal the `userId` claim or the request is treated as
+carrying an invalid token.
+
+**Rollout rule on chat / stream / search** (flag on, secret set): a
+request with **no token** runs normally without memory, so old clients
+keep working; a token that is **present but invalid or expired** is a
+**401** before any work starts (the frontend refreshes and retries). With
+the flag off, tokens are ignored on these endpoints.
 
 **Fail closed**: with `USER_MEMORY_ENABLED=1` and no secret configured,
-no user id is ever resolved, so extraction and injection stay off and
-every `/pyapi/memory*` route answers 403. Bare unsigned ids are accepted
-only behind an explicit `USER_MEMORY_ALLOW_UNSIGNED=1`, for local dev.
-A configured secret always wins over that opt-in. The earlier HMAC
-`X-User-Sig` path is kept in code (`USER_MEMORY_ID_SECRET`) but is not
-the production path and is not in the frontend brief.
+no user id is ever resolved, so extraction and injection stay off, chat
+runs without memory, and every `/pyapi/memory*` route answers 403. Bare
+unsigned ids are accepted only behind an explicit
+`USER_MEMORY_ALLOW_UNSIGNED=1`, for local dev. A configured secret always
+wins over that opt-in.
 
 Flags:
 
 | Env | Default | Meaning |
 |---|---|---|
 | `USER_MEMORY_ENABLED` | `0` | master switch |
-| `USER_MEMORY_JWT_SECRET` | unset | HS256 secret of Node's login JWT (prod path) |
+| `USER_MEMORY_JWT_SECRET` | unset | HS256 secret of Node's access token = user-service `JWT_ACCESS_SECRET` (fallback `JWT_SECRET`), from the secrets manager |
 | `USER_MEMORY_JWT_CLAIM` | `userId` | claim holding the user id (comma list allowed) |
 | `USER_MEMORY_JWT_LEEWAY_S` | `30` | clock-skew allowance on `exp` / `nbf` |
 | `USER_MEMORY_ALLOW_UNSIGNED` | `0` | local dev only: accept bare `X-User-Id` when no secret is set |
-| `USER_MEMORY_ID_SECRET` | unset | HMAC secret for `X-User-Sig` (kept, not the prod path) |
 | `USER_MEMORY_EXTRACT_TIMEOUT_S` | `20` | ceiling on the extraction call |
 
 Cost: one Flash Lite call of roughly 1,800 input / 100 output tokens per
@@ -343,7 +350,8 @@ user-service's `JWT_ACCESS_SECRET`, fallback `JWT_SECRET`) together.
 ## 10. Tests
 
 `tests/test_user_memory_core.py` (gates, exclusions, validation rules,
-rendering, direct-command parsing, id verification),
+rendering, direct-command parsing, JWT verification and the
+absent / invalid / unconfigured / off statuses),
 `tests/test_user_memory_store.py` (SQLite store, apply_ops, extraction
 pipeline with a stubbed extractor, remember / forget),
 `tests/test_user_memory_injection.py` (cacheable_system placement,
@@ -371,6 +379,10 @@ out on both days; `scratchpad/live_negative_test.py` in the session notes):
   same day (quote stripping, correspondence markers, implicit identity
   lock, prompt exclusions; sections 3 and 4); b2 and a marker-free
   variant (b3) then left the profile untouched, and (a) still passed.
+- 2026-10-28, rollout rule (JWT-only build): chat and stream with no
+  token ran normally (200, response + done); chat, stream and search with
+  a bad or expired token answered 401 before any work; memory API with
+  no / bad / expired / good token answered 401 / 401 / 401 / 200.
 
 Follow-ups:
 

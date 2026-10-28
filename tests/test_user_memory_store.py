@@ -21,7 +21,6 @@ def store(tmp_path, monkeypatch):
     s = cs._SqliteChatHistoryStore(str(tmp_path / "mem.db"))
     monkeypatch.setattr(cs, "chat_store", s)
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
-    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
     # The pipeline is gated on configured(); these tests use the dev opt-in.
     monkeypatch.setenv("USER_MEMORY_ALLOW_UNSIGNED", "1")

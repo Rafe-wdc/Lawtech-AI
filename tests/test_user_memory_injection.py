@@ -81,7 +81,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
     # Prod path: Node's HS256 JWT forwarded as a Bearer token.
     monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
-    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_ALLOW_UNSIGNED", raising=False)
     gw.app.dependency_overrides[gw.require_user_key] = lambda: "test-key"
     try:
@@ -192,11 +191,35 @@ def test_memory_routes_fail_closed_without_a_secret(client, monkeypatch):
     assert c.get("/pyapi/memory").status_code == 401
 
 
-def test_memory_routes_hmac_path_still_works(client, monkeypatch):
-    """Kept for completeness; not the prod path."""
-    c, _ = client
+def test_chat_and_search_reject_a_bad_token_but_run_without_one(client, monkeypatch):
+    """Rollout rule on the memory-enabled endpoints: a present-but-invalid
+    token is 401 before any work; no token at all is not an error."""
+    import core.gateway as gw
+    from starlette.requests import Request
+
+    def req(headers):
+        scope = {"type": "http", "method": "POST", "path": "/pyapi/chat", "query_string": b"",
+                 "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]}
+        return Request(scope)
+
+    assert gw._resolve_memory_user(req({})) == ""
+    assert gw._resolve_memory_user(req({"X-User-Id": "user_42"})) == ""      # not a credential
+    assert gw._resolve_memory_user(req(_hdrs("user_42"))) == "user_42"
+    from fastapi import HTTPException
+    for bad in ("Bearer nope", "Bearer " + _jwt({"userId": "user_42"}, secret="other"),
+                "Bearer " + _jwt({"userId": "user_42", "exp": time.time() - 120})):
+        with pytest.raises(HTTPException) as ei:
+            gw._resolve_memory_user(req({"Authorization": bad}))
+        assert ei.value.status_code == 401
+    # Flag on but no secret: a token cannot be checked, so chat runs without memory (no 401).
     monkeypatch.delenv("USER_MEMORY_JWT_SECRET")
-    monkeypatch.setenv("USER_MEMORY_ID_SECRET", "s3cret")
-    sig = um.hmac_sign_user_id("user_42", "s3cret")
-    assert c.get("/pyapi/memory", headers={"X-User-Id": "user_42", "X-User-Sig": sig}).status_code == 200
-    assert c.get("/pyapi/memory", headers={"X-User-Id": "user_42", "X-User-Sig": "00"}).status_code == 401
+    assert gw._resolve_memory_user(req(_hdrs("user_42"))) == ""
+
+    # Through the real routes: 401 is raised before the graph is touched.
+    c, _ = client
+    monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
+    gw.app.state.agent_graph = None
+    r = c.post("/pyapi/search", json={"prompt_query": "hello"}, headers={"Authorization": "Bearer nope"})
+    assert r.status_code == 401
+    r = c.post("/pyapi/chat", data={"query": "hello"}, headers={"Authorization": "Bearer nope"})
+    assert r.status_code == 401

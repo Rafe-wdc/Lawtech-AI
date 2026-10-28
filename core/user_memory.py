@@ -20,11 +20,15 @@ Everything is gated on USER_MEMORY_ENABLED (default off). With the flag off
 no table is read, no extraction runs, nothing is injected, and the review
 API answers 403 (the status Node's frontend treats as "memory off").
 
-Fail closed: with the flag on, requests must carry a verifiable user id.
-Prod path is Node's HS256 JWT (`USER_MEMORY_JWT_SECRET`, `Authorization:
-Bearer`). With no secret configured no user id is ever resolved, so
-extraction and injection stay off and the review API answers 403, unless
-USER_MEMORY_ALLOW_UNSIGNED=1 explicitly opts local dev into bare X-User-Id.
+Identity: Node's HS256 access token, forwarded by the frontend as
+`Authorization: Bearer <jwt>` and verified here with `USER_MEMORY_JWT_SECRET`
+(= user-service JWT_ACCESS_SECRET). No other signing mechanism exists.
+Fail closed: with the flag on and no secret, no user id is ever resolved
+(extraction and injection stay off) and the review API answers 403.
+Rollout rule on chat / stream / search: no token -> the request runs
+normally without memory (old clients keep working); a token that is
+present but invalid or expired -> 401. USER_MEMORY_ALLOW_UNSIGNED=1 opts
+local dev into a bare X-User-Id when no secret is set.
 """
 
 from __future__ import annotations
@@ -60,15 +64,12 @@ def _truthy(name: str) -> bool:
 def auth_mode() -> str:
     """How a user id may be proven on this deployment.
 
-    "jwt"          USER_MEMORY_JWT_SECRET set: Node's HS256 JWT as Bearer (prod).
-    "hmac"         USER_MEMORY_ID_SECRET set: X-User-Id + X-User-Sig (kept, not the prod path).
+    "jwt"          USER_MEMORY_JWT_SECRET set: Node's HS256 access token as Bearer (prod).
     "unsigned"     USER_MEMORY_ALLOW_UNSIGNED=1 and no secret: bare X-User-Id (local dev only).
     "unconfigured" flag on, no secret, no opt-in: fail closed - no id is ever resolved.
     """
     if os.getenv("USER_MEMORY_JWT_SECRET", "").strip():
         return "jwt"
-    if os.getenv("USER_MEMORY_ID_SECRET", "").strip():
-        return "hmac"
     if _truthy("USER_MEMORY_ALLOW_UNSIGNED"):
         return "unsigned"
     return "unconfigured"
@@ -1003,61 +1004,61 @@ def _verify_hs256_jwt(token: str, secret: str) -> str:
     return ""
 
 
-def hmac_sign_user_id(user_id: str, secret: str) -> str:
-    """The X-User-Sig value Node must send for a given X-User-Id."""
-    return hmac.new(secret.encode("utf-8"), user_id.encode("utf-8"), hashlib.sha256).hexdigest()
+# Outcomes of verify_bearer(). Only "ok" carries a user id.
+AUTH_OK = "ok"                    # verified token (or dev bare id)
+AUTH_ABSENT = "absent"            # no credential sent: run without memory
+AUTH_INVALID = "invalid"          # token present but forged / expired / malformed -> 401
+AUTH_UNCONFIGURED = "unconfigured"  # flag on, no secret, no dev opt-in: fail closed -> 403
+AUTH_OFF = "off"                  # USER_MEMORY_ENABLED not set -> 403 on memory routes
 
 
-def resolve_user_id(headers: Mapping[str, str]) -> str:
-    """Verified user id for this request, or "" (memory off for the request).
+def verify_bearer(headers: Mapping[str, str]) -> tuple[str, str]:
+    """(user_id, status) for this request's identity headers.
 
-    Fail closed: "" whenever the flag is off or no auth mode is configured.
-    jwt      (prod)  Authorization: Bearer <HS256 JWT>. A bare X-User-Id is
-                     ignored, except that if it is present it must equal the
-                     JWT claim (a mismatch is a frontend bug and is rejected).
-    hmac             X-User-Id + X-User-Sig = hex(HMAC-SHA256(secret, id)).
-    unsigned (dev)   bare X-User-Id, only with USER_MEMORY_ALLOW_UNSIGNED=1.
+    jwt (prod)     Authorization: Bearer <HS256 access token>. If the
+                   frontend also sends X-User-Id it must equal the claim.
+    unsigned (dev) bare X-User-Id, only with USER_MEMORY_ALLOW_UNSIGNED=1.
     """
     global _warned_bare_id, _warned_unconfigured
     if not enabled():
-        return ""
+        return "", AUTH_OFF
     mode = auth_mode()
     if mode == "unconfigured":
         if not _warned_unconfigured:
             _warned_unconfigured = True
-            log.error("USER_MEMORY_ENABLED=1 but no USER_MEMORY_JWT_SECRET / "
-                      "USER_MEMORY_ID_SECRET and USER_MEMORY_ALLOW_UNSIGNED is not set: "
-                      "memory stays off (fail closed)")
-        return ""
+            log.error("USER_MEMORY_ENABLED=1 but USER_MEMORY_JWT_SECRET is not set and "
+                      "USER_MEMORY_ALLOW_UNSIGNED is not set: memory stays off (fail closed)")
+        return "", AUTH_UNCONFIGURED
     get = lambda k: (headers.get(k) or headers.get(k.lower()) or headers.get(k.title()) or "")  # noqa: E731
     raw = get("X-User-Id").strip()
     if mode == "jwt":
         auth = get("Authorization").strip()
+        if not auth:
+            return "", AUTH_ABSENT
         if not auth.lower().startswith("bearer "):
-            return ""
+            return "", AUTH_INVALID
         uid = _verify_hs256_jwt(auth[7:].strip(), os.getenv("USER_MEMORY_JWT_SECRET", "").strip())
         if not uid:
-            return ""
+            return "", AUTH_INVALID
         if raw and raw != uid:
-            log.warning("X-User-Id does not match the JWT claim; memory off for request",
-                        user=uid[:8])
-            return ""
-        return uid
-    if not raw or not _USER_ID_RE.match(raw):
-        return ""
-    if mode == "hmac":
-        sig = get("X-User-Sig").strip().lower()
-        if not sig or not hmac.compare_digest(
-                sig, hmac_sign_user_id(raw, os.getenv("USER_MEMORY_ID_SECRET", "").strip())):
-            log.warning("X-User-Id signature missing or invalid; memory off for request",
-                        user=raw[:8])
-            return ""
-        return raw
-    # mode == "unsigned"
+            log.warning("X-User-Id does not match the JWT userId claim", user=uid[:8])
+            return "", AUTH_INVALID
+        return uid, AUTH_OK
+    # mode == "unsigned" (local dev)
+    if not raw:
+        return "", AUTH_ABSENT
+    if not _USER_ID_RE.match(raw):
+        return "", AUTH_INVALID
     if not _warned_bare_id:
         _warned_bare_id = True
         log.warning("USER_MEMORY_ALLOW_UNSIGNED=1: accepting bare X-User-Id (local dev only)")
-    return raw
+    return raw, AUTH_OK
+
+
+def resolve_user_id(headers: Mapping[str, str]) -> str:
+    """Verified user id for this request, or "" (memory off for the request).
+    See verify_bearer() for the status behind an empty result."""
+    return verify_bearer(headers)[0]
 
 
 def rows_for_review(rows: list[dict]) -> list[dict]:

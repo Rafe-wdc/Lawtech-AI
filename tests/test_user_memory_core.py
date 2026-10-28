@@ -254,7 +254,6 @@ def test_resolve_user_id_flag_off(monkeypatch):
 def test_resolve_user_id_fails_closed_when_unconfigured(monkeypatch):
     """Flag on, no secret, no USER_MEMORY_ALLOW_UNSIGNED: nothing resolves."""
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
-    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_ALLOW_UNSIGNED", raising=False)
     assert um.auth_mode() == "unconfigured"
@@ -266,7 +265,6 @@ def test_resolve_user_id_fails_closed_when_unconfigured(monkeypatch):
 
 def test_resolve_user_id_bare_dev_mode_needs_explicit_opt_in(monkeypatch):
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
-    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
     monkeypatch.setenv("USER_MEMORY_ALLOW_UNSIGNED", "1")
     assert um.auth_mode() == "unsigned" and um.configured() is True
@@ -279,22 +277,10 @@ def test_resolve_user_id_bare_dev_mode_needs_explicit_opt_in(monkeypatch):
     assert um.resolve_user_id({"x-user-id": "user_42"}) == ""
 
 
-def test_resolve_user_id_hmac(monkeypatch):
-    monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
-    monkeypatch.setenv("USER_MEMORY_ID_SECRET", "s3cret")
-    monkeypatch.delenv("USER_MEMORY_JWT_SECRET", raising=False)
-    sig = um.hmac_sign_user_id("user_42", "s3cret")
-    assert um.resolve_user_id({"x-user-id": "user_42", "x-user-sig": sig}) == "user_42"
-    assert um.resolve_user_id({"x-user-id": "user_42", "x-user-sig": sig.upper()}) == "user_42"
-    assert um.resolve_user_id({"x-user-id": "user_42"}) == ""
-    assert um.resolve_user_id({"x-user-id": "user_43", "x-user-sig": sig}) == ""
-
-
 def test_resolve_user_id_jwt(monkeypatch):
     """Node's access token: HS256, `userId` = numeric DB PK, exp, no sub/iss/aud."""
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
     monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
-    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_CLAIM", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_LEEWAY_S", raising=False)
     good = _jwt({"userId": 4821, "username": "priya@kulkarnilaw.in", "exp": time.time() + 900}, "jwt-secret")
@@ -320,11 +306,8 @@ def test_resolve_user_id_jwt(monkeypatch):
     # ... is ignored when it agrees with the claim, and rejected when it does not.
     assert um.resolve_user_id({"authorization": f"Bearer {good}", "x-user-id": "4821"}) == "4821"
     assert um.resolve_user_id({"authorization": f"Bearer {good}", "x-user-id": "4822"}) == ""
-    # HMAC headers are irrelevant on the JWT path.
-    monkeypatch.setenv("USER_MEMORY_ID_SECRET", "s3cret")
-    sig = um.hmac_sign_user_id("4821", "s3cret")
-    assert um.resolve_user_id({"x-user-id": "4821", "x-user-sig": sig}) == ""
-    monkeypatch.delenv("USER_MEMORY_ID_SECRET")
+    # No other signing header exists: X-User-Sig is just an unknown header.
+    assert um.resolve_user_id({"x-user-id": "4821", "x-user-sig": "deadbeef"}) == ""
     # nbf in the future (beyond leeway), missing Bearer prefix, garbage.
     nbf = _jwt({"userId": 4821, "nbf": time.time() + 120}, "jwt-secret")
     assert um.resolve_user_id({"authorization": f"Bearer {nbf}"}) == ""
@@ -337,7 +320,6 @@ def test_resolve_user_id_jwt_claim_pinned_by_env(monkeypatch):
     default fallback list is then not consulted."""
     monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
     monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
-    monkeypatch.delenv("USER_MEMORY_ID_SECRET", raising=False)
     monkeypatch.delenv("USER_MEMORY_JWT_CLAIM", raising=False)
     assert um.jwt_claims() == ("userId",)
     monkeypatch.setenv("USER_MEMORY_JWT_CLAIM", "sub")
@@ -423,3 +405,38 @@ def test_implicit_turn_cannot_change_a_confirmed_name_or_enrolment():
         [{"op": "ADD", "slot": "advocate_name", "value": "Adv. Priya Kulkarni", "source": "user_stated", "confidence": 1.0}],
         [], implicit=True)
     assert dropped == [] and clean[0]["op"] == "ADD"
+
+
+def test_verify_bearer_statuses_absent_vs_invalid(monkeypatch):
+    """Rollout rule: no token -> run without memory; bad token -> 401."""
+    monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
+    monkeypatch.setenv("USER_MEMORY_JWT_SECRET", "jwt-secret")
+    monkeypatch.delenv("USER_MEMORY_JWT_CLAIM", raising=False)
+    monkeypatch.delenv("USER_MEMORY_ALLOW_UNSIGNED", raising=False)
+    good = _jwt({"userId": 4821, "exp": time.time() + 60}, "jwt-secret")
+    assert um.verify_bearer({}) == ("", um.AUTH_ABSENT)
+    assert um.verify_bearer({"x-user-id": "4821"}) == ("", um.AUTH_ABSENT)   # not a credential on the JWT path
+    assert um.verify_bearer({"authorization": f"Bearer {good}"}) == ("4821", um.AUTH_OK)
+    assert um.verify_bearer({"authorization": "Bearer nope"}) == ("", um.AUTH_INVALID)
+    assert um.verify_bearer({"authorization": "Basic abc"}) == ("", um.AUTH_INVALID)
+    expired = _jwt({"userId": 4821, "exp": time.time() - 600}, "jwt-secret")
+    assert um.verify_bearer({"authorization": f"Bearer {expired}"}) == ("", um.AUTH_INVALID)
+    assert um.verify_bearer({"authorization": f"Bearer {good}", "x-user-id": "1"}) == ("", um.AUTH_INVALID)
+    # Flag on, no secret: fail closed whatever is sent.
+    monkeypatch.delenv("USER_MEMORY_JWT_SECRET")
+    assert um.verify_bearer({"authorization": f"Bearer {good}"}) == ("", um.AUTH_UNCONFIGURED)
+    assert um.verify_bearer({}) == ("", um.AUTH_UNCONFIGURED)
+    # Flag off.
+    monkeypatch.setenv("USER_MEMORY_ENABLED", "0")
+    assert um.verify_bearer({"authorization": f"Bearer {good}"}) == ("", um.AUTH_OFF)
+    # Local dev opt-in: bare id ok, malformed id invalid, nothing absent.
+    monkeypatch.setenv("USER_MEMORY_ENABLED", "1")
+    monkeypatch.setenv("USER_MEMORY_ALLOW_UNSIGNED", "1")
+    assert um.verify_bearer({"x-user-id": "dev_1"}) == ("dev_1", um.AUTH_OK)
+    assert um.verify_bearer({"x-user-id": "bad id"}) == ("", um.AUTH_INVALID)
+    assert um.verify_bearer({}) == ("", um.AUTH_ABSENT)
+
+
+def test_no_hmac_signing_mechanism_exists():
+    assert not hasattr(um, "hmac_sign_user_id")
+    assert "hmac" not in (um.auth_mode(), )

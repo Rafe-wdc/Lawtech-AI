@@ -671,14 +671,20 @@ def _build_initial_state(
 
 
 def _resolve_memory_user(request: Request) -> str:
-    """Verified lawyer id for user memory, or "" (flag off / no header /
-    bad signature). See core.user_memory.resolve_user_id."""
+    """Verified lawyer id for user memory on chat / stream / search, or ""
+    (memory off for this request: flag off, no secret, or no token sent -
+    old clients keep working during rollout). A token that is present but
+    forged, expired or malformed is a 401, as agreed with Node.
+    See core.user_memory.verify_bearer."""
     from core import user_memory as _um
     try:
-        return _um.resolve_user_id(request.headers)
+        user_id, status = _um.verify_bearer(request.headers)
     except Exception as e:
         log.warning("User id resolution failed", error=short_err(e))
         return ""
+    if status == _um.AUTH_INVALID:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token")
+    return user_id
 
 
 def _safe_persist_dir(unique_string: str) -> str:
@@ -715,7 +721,7 @@ async def search(data: SearchRequest, request: Request):
 
     # --- User memory (docs/user_memory_design.md) ---
     from core import user_memory as _um
-    _user_id = _um.resolve_user_id(request.headers)
+    _user_id = _resolve_memory_user(request)   # 401 on a bad token
     _profile_block = ""
     if _user_id:
         if data.no_memory is not None:
@@ -2819,15 +2825,15 @@ def _memory_user_or_error(request: Request) -> str:
     # this server (flag off, or flag on with no verification secret: fail
     # closed); 401 = token missing / expired / invalid (the frontend
     # refreshes the access token on 401 and retries).
-    if not _um.enabled():
+    user_id, status = _um.verify_bearer(request.headers)
+    if status == _um.AUTH_OFF:
         raise HTTPException(status_code=403, detail="User memory is not enabled on this server")
-    if _um.auth_mode() == "unconfigured":
+    if status == _um.AUTH_UNCONFIGURED:
         raise HTTPException(
             status_code=403,
-            detail="User memory is enabled but no user-id verification is configured "
-                   "(set USER_MEMORY_JWT_SECRET; USER_MEMORY_ALLOW_UNSIGNED=1 for local dev only)")
-    user_id = _um.resolve_user_id(request.headers)
-    if not user_id:
+            detail="User memory is enabled but USER_MEMORY_JWT_SECRET is not configured "
+                   "(USER_MEMORY_ALLOW_UNSIGNED=1 for local dev only)")
+    if status != _um.AUTH_OK:
         raise HTTPException(status_code=401, detail="Missing, expired or invalid access token "
                             "(Authorization: Bearer <jwt>)")
     return user_id

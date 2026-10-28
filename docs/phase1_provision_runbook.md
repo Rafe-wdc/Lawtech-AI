@@ -18,6 +18,7 @@
 | AWS OpenSearch endpoint + creds | Already in current `.env` |
 | `OPENAI_API_KEY`, `GOOGLE_API_KEY` | Vault |
 | `API_KEYS`, `ADMIN_API_KEY` | Vault (or generate fresh per §4.2) |
+| `USER_MEMORY_JWT_SECRET` (only if user memory is switched on) | Vault: the user-service's `JWT_ACCESS_SECRET` (fallback `JWT_SECRET`), same value, rotated together |
 
 ---
 
@@ -144,6 +145,9 @@ OPENAI_API_KEY="sk-..."
 GOOGLE_API_KEY="AIza..."
 API_KEYS="<paste from vault, or generate fresh>"
 ADMIN_API_KEY="<paste from vault>"
+# User memory (optional): USER_MEMORY_ENABLED=1 plus the user-service's
+# JWT_ACCESS_SECRET from the vault; see docs/user_memory_design.md section 8.
+# USER_MEMORY_JWT_SECRET="<paste user-service JWT_ACCESS_SECRET from vault>"
 ALLOWED_ORIGINS="https://tool.lawttorney.com"
 POSTGRES_URL="postgresql://lawtech:CHANGE_ME@localhost:5432/lawtech"   # gets patched by provision script
 REQUIRE_POSTGRES=true

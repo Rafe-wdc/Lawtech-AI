@@ -650,6 +650,133 @@ def _detect_garbled_pdf(per_page_texts: list[str]) -> dict:
     }
 
 
+# --- Scanner-app OCR layers ------------------------------------------------
+#
+# 2026-10-29: a lawyer uploaded a 3-page handwritten Hindi client statement
+# saved through a phone scanner app (producer iLovePDF). Each page was one
+# full-page JPEG plus an OCR text layer of Devanagari word-salad:
+#
+#     जा ऐ सिर e IR सि मा सवार निवासी चन्युवसी 7 T लागा की चिता BT ATt~y
+#
+# Every garble check above passed it. `_is_garbled_by_script` looks for
+# broken-CMap fingerprints (U+FFFD, the Latin-Extended dump zone, no
+# dominant script) and this layer has none: 72% coherent Devanagari letters,
+# no replacement characters. `_score_text_quality` therefore returned
+# `non_latin`, the layer was kept as the document's content, Vision OCR
+# never ran, and the drafting agent built a placeholder petition from junk
+# "case facts" — while Vision OCR on the same pages reads the handwriting
+# cleanly (names, dates, every ground).
+#
+# The layer is not mojibake; it is a weak OCR engine's honest output on
+# handwriting. What separates it from a usable OCR layer is its SHAPE, not
+# its script. Measured on the incident file against every scanned control
+# we had (an Adobe-Scan Hindi deposition form, five English scanned filings,
+# two more junk pages from other scanner-app uploads), per page:
+#
+#                               junk pages     clean scanned pages
+#     tokens of <= 2 chars      0.60 - 0.71    <= 0.30
+#     single Latin letters      0.15 - 0.18    <= 0.06
+#     tokens per text line      1.7  - 2.5     >= 2.9
+#     Latin share of letters    0.36 - 0.74    0.01 - 1.00   (NOT usable:
+#                                               a bilingual Hindi form
+#                                               scored 0.31)
+#
+# A page is junk when two of the three shape signals fire. Born-digital pages
+# with a low tokens-per-line figure (tables of contents, cause lists) are
+# never judged because the check runs only on pages that are placed raster
+# images (`_page_image_coverage`). The cost of a false positive is one
+# Vision OCR pass over a scan that already had a passable layer — the same
+# path a scan with no layer takes, hash-cached, and at worst quality-neutral.
+# The cost of a false negative is the incident above.
+
+_SCANNER_LAYER_MIN_COVERAGE = 0.75      # page is a placed raster image
+_SCANNER_LAYER_MIN_TOKENS = 60          # below this we cannot tell (stamps, cover pages)
+_SCANNER_LAYER_SHORT_TOKEN_RATIO = 0.45  # junk 0.60-0.71, clean <= 0.30
+_SCANNER_LAYER_SINGLE_LATIN_RATIO = 0.10  # junk 0.15-0.18, clean <= 0.06
+_SCANNER_LAYER_TOKENS_PER_LINE = 2.6    # junk 1.7-2.5, clean >= 2.9
+_SCANNER_LAYER_WHOLE_DOC_PCT = 50.0     # this share of junk pages -> re-OCR the whole file
+
+
+def _score_scanner_layer(text: str) -> dict:
+    """Shape-score one page's text layer: is it a scanner app's junk OCR?
+
+    Returns {"verdict": "junk" | "ok" | "too_short", "score": int,
+    "metrics": {...}}. Script-agnostic: the three signals are about token
+    shape and line fragmentation, which is why the same rule catches
+    Devanagari word-salad and Latin letter-soup alike.
+    """
+    tokens = (text or "").split()
+    if len(tokens) < _SCANNER_LAYER_MIN_TOKENS:
+        return {"verdict": "too_short", "score": 0,
+                "metrics": {"tokens": len(tokens)}}
+
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    short = sum(1 for t in tokens if len(t) <= 2) / len(tokens)
+    single_latin = sum(
+        1 for t in tokens if len(t) == 1 and t.isascii() and t.isalpha()
+    ) / len(tokens)
+    tokens_per_line = len(tokens) / max(1, len(lines))
+
+    score = 0
+    score += int(short >= _SCANNER_LAYER_SHORT_TOKEN_RATIO)
+    score += int(single_latin >= _SCANNER_LAYER_SINGLE_LATIN_RATIO)
+    score += int(tokens_per_line <= _SCANNER_LAYER_TOKENS_PER_LINE)
+
+    return {
+        "verdict": "junk" if score >= 2 else "ok",
+        "score": score,
+        "metrics": {
+            "tokens": len(tokens),
+            "short_token_ratio": round(short, 3),
+            "single_latin_ratio": round(single_latin, 3),
+            "tokens_per_line": round(tokens_per_line, 2),
+        },
+    }
+
+
+def _detect_junk_ocr_layer(
+    per_page_texts: list[str], per_page_coverage: list[float],
+) -> dict:
+    """Find the pages whose text layer is a scanner app's junk OCR.
+
+    Only pages that are placed raster images (coverage >=
+    `_SCANNER_LAYER_MIN_COVERAGE`) and carry enough text to judge are
+    scored. Every junk page is re-read on its own by the upload path
+    (`_vision_ocr_pdf_pages`), so the cost is proportional to the bad pages:
+    a 115-page chargesheet with 18 handwritten pages re-reads 18 pages, not
+    115. When junk pages are at least `_SCANNER_LAYER_WHOLE_DOC_PCT` of the
+    file (the 3-page handwritten statement: 100%) the whole-document Vision
+    OCR path is cheaper and simpler, and `whole_doc` says so.
+
+    Returns {"junk": bool (any junk page), "whole_doc": bool,
+    "junk_pages": [0-indexed], "checked_pages": int, "junk_pct": float,
+    "page_count": int}.
+    """
+    page_count = len(per_page_texts)
+    junk_pages: list[int] = []
+    checked = 0
+    for i, ptext in enumerate(per_page_texts):
+        cov = per_page_coverage[i] if i < len(per_page_coverage) else 0.0
+        if cov < _SCANNER_LAYER_MIN_COVERAGE or not (ptext or "").strip():
+            continue
+        verdict = _score_scanner_layer(ptext)
+        if verdict["verdict"] == "too_short":
+            continue
+        checked += 1
+        if verdict["verdict"] == "junk":
+            junk_pages.append(i)
+
+    junk_pct = (len(junk_pages) / page_count * 100.0) if page_count else 0.0
+    return {
+        "junk": bool(junk_pages),
+        "whole_doc": bool(junk_pages) and junk_pct >= _SCANNER_LAYER_WHOLE_DOC_PCT,
+        "junk_pages": junk_pages,
+        "checked_pages": checked,
+        "junk_pct": round(junk_pct, 1),
+        "page_count": page_count,
+    }
+
+
 def _extract_pdf_text(file_path: str) -> tuple[str, int]:
     """Extract text from PDF with PyMuPDF. Returns (text, page_count)."""
     import fitz
@@ -679,7 +806,55 @@ def _extract_pdf_text_per_page(file_path: str) -> tuple[list[str], int]:
     """Extract text per page (without page-marker headers) for garble scoring.
 
     Mirrors `_extract_pdf_text` but returns the raw per-page list so callers
-    can score each page individually for selective re-OCR.
+    can score each page individually for selective re-OCR. Kept for callers
+    that only want the text; the upload path uses `_extract_pdf_layer_profile`
+    so it also learns which pages are placed raster images.
+    """
+    pages, _coverages, page_count = _extract_pdf_layer_profile(file_path)
+    return pages, page_count
+
+
+def _page_image_coverage(page) -> float:
+    """Share of a page's area covered by placed raster images, 0.0 to 1.0.
+
+    A scanner app (CamScanner, Adobe Scan, iLovePDF, the phone gallery's
+    "save as PDF") writes each page as ONE full-page JPEG and, optionally,
+    an invisible OCR text layer on top. Coverage near 1.0 is therefore the
+    structural tell that whatever text layer exists was produced by that
+    app's OCR engine and is of unknown quality. A born-digital page
+    (Word export, court e-filing, bare Act) sits at 0.0 even when it carries
+    a logo or a small seal. Overlapping images are clipped to the page and
+    the sum is clamped. Never raises: 0.0 on any failure means "treat as
+    born-digital", which is the previous behaviour.
+    """
+    try:
+        import fitz
+
+        area = float(page.rect.width * page.rect.height)
+        if area <= 0:
+            return 0.0
+        covered = 0.0
+        for info in page.get_image_info():
+            bbox = info.get("bbox")
+            if not bbox:
+                continue
+            r = fitz.Rect(*bbox) & page.rect
+            if r.is_empty:
+                continue
+            covered += float(r.width * r.height)
+        return max(0.0, min(covered / area, 1.0))
+    except Exception:
+        return 0.0
+
+
+def _extract_pdf_layer_profile(
+    file_path: str,
+) -> tuple[list[str], list[float], int]:
+    """Per-page text layer AND per-page raster coverage in one pass.
+
+    Returns (per_page_texts, per_page_image_coverage, page_count). The
+    coverage list feeds `_detect_junk_ocr_layer`, which only judges pages
+    that are placed images; see that function for why.
     """
     import fitz
 
@@ -695,11 +870,27 @@ def _extract_pdf_text_per_page(file_path: str) -> tuple[list[str], int]:
         raise ValueError("PDF has no pages")
 
     pages: list[str] = []
+    coverages: list[float] = []
     for page in doc:
         pages.append(page.get_text("text") or "")
+        coverages.append(_page_image_coverage(page))
 
     doc.close()
-    return pages, page_count
+    return pages, coverages, page_count
+
+
+def _pdf_page_count(file_path: str) -> int:
+    """Page count for a stored PDF, 0 when the file cannot be opened."""
+    try:
+        import fitz
+
+        doc = fitz.open(file_path)
+        try:
+            return int(doc.page_count)
+        finally:
+            doc.close()
+    except Exception:
+        return 0
 
 
 def _file_hash(file_path: str) -> str:
@@ -1200,6 +1391,175 @@ def _ocr_result_is_usable(text: str) -> tuple[bool, str]:
     # "clean" and "non_latin" are both acceptable (non_latin = coherent
     # Indic/CJK script, deferred to language-aware downstream handling).
     return True, verdict
+
+
+_OCR_PAGE_HEADER_RE = re.compile(r"^--- Pages \d+-\d+ ---\n?")
+
+
+def _render_pdf_selected_pages(
+    file_path: str, pages: list[int], dpi: int | None = None,
+) -> list[tuple[int, str]]:
+    """Render only `pages` (0-indexed) to base64 JPEG: [(page_index, b64)].
+
+    The per-page sibling of `_render_pdf_pages`, for the selective re-OCR
+    path; out-of-range indexes are skipped."""
+    import base64
+    import fitz
+
+    use_dpi = dpi if dpi is not None else VISION_DPI
+    doc = fitz.open(file_path)
+    out: list[tuple[int, str]] = []
+    try:
+        for i in pages:
+            if i < 0 or i >= doc.page_count:
+                continue
+            pix = doc[i].get_pixmap(dpi=use_dpi)
+            img_bytes = pix.tobytes("jpeg", jpg_quality=85)
+            out.append((i, base64.b64encode(img_bytes).decode("utf-8")))
+    finally:
+        doc.close()
+    return out
+
+
+def _vision_ocr_pdf_pages(
+    file_path: str, pages: list[int],
+    emit: Optional[Callable[[dict], None]] = None,
+    file_name: str = "",
+) -> dict[int, str]:
+    """Vision OCR for a SUBSET of a PDF's pages.
+
+    Used when `_detect_junk_ocr_layer` finds that only some image-backed
+    pages carry a junk text layer (handwritten panchnamas inside a typed
+    chargesheet, a form page in an otherwise clean scan). Each page is
+    rendered and read on its own through the same `_ocr_batch` call and
+    the same low -> high DPI escalation `_vision_ocr_pdf` applies to a
+    whole file, and is cached per (file hash, page) so a re-upload is free.
+
+    Returns {page_index: text}; the text has the batch header stripped so
+    the caller can splice it into its own per-page list, and is "" for a
+    page that produced nothing. Never raises: a page that fails is "" and
+    logged, which the caller reports as an unread page.
+    """
+    import contextvars as _ctxvars
+    from core.clients import get_gemini_vision
+
+    label = file_name or os.path.basename(file_path)
+    wanted = sorted({int(p) for p in pages})
+    results: dict[int, str] = {}
+    if not wanted:
+        return results
+
+    pdf_hash = _file_hash(file_path)
+    todo: list[int] = []
+    for i in wanted:
+        cached = _load_ocr_cache(f"{pdf_hash}_p{i}")
+        if cached:
+            results[i] = cached
+        else:
+            todo.append(i)
+
+    if emit:
+        emit({
+            "type": "file_processing",
+            "stage": "ocr_start",
+            "message": (
+                f"{label}: re-reading {len(wanted)} page(s) whose built-in "
+                f"text is unreliable"
+                + (f" ({len(results)} from cache)" if results else "")
+                + "..."
+            ),
+            "file": label,
+            "pages": len(wanted),
+            "page_numbers": [i + 1 for i in wanted],
+            "dpi": VISION_DPI_LOW,
+        })
+    if not todo:
+        return results
+
+    try:
+        llm = get_gemini_vision(temperature=0.0)
+
+        def _one_page(i: int, dpi: int) -> str:
+            rendered = _render_pdf_selected_pages(file_path, [i], dpi=dpi)
+            if not rendered:
+                return ""
+            raw = _ocr_batch(llm, [rendered[0][1]], i)
+            return _OCR_PAGE_HEADER_RE.sub("", raw or "", count=1).strip()
+
+        def _page_with_escalation(i: int) -> str:
+            low = _one_page(i, VISION_DPI_LOW)
+            low_usable, _ = _ocr_result_is_usable(low)
+            if (low_usable and len(low) >= LOW_DPI_TEXT_PER_PAGE_FLOOR) \
+                    or VISION_DPI_HIGH <= VISION_DPI_LOW:
+                return low
+            high = _one_page(i, VISION_DPI_HIGH)
+            high_usable, _ = _ocr_result_is_usable(high)
+            if high_usable and not low_usable:
+                return high
+            if low_usable and not high_usable:
+                return low
+            return high if len(high) > len(low) else low
+
+        done = 0
+        with log_time(log, "Selective Vision OCR", pages=len(todo)):
+            with ThreadPoolExecutor(max_workers=VISION_MAX_CONCURRENT) as executor:
+                futures = {
+                    executor.submit(
+                        _ctxvars.copy_context().run, _page_with_escalation, i,
+                    ): i
+                    for i in todo
+                }
+                for future in futures:
+                    i = futures[future]
+                    try:
+                        # Two passes at most, each bounded like a single-page
+                        # batch in `_ocr_pdf_at_dpi` (45s + 40s per page).
+                        txt = future.result(timeout=2 * 85)
+                    except Exception as e:
+                        log.warning("Selective OCR page failed",
+                                    file=label, page=i + 1, error=str(e)[:200])
+                        txt = ""
+                    results[i] = txt
+                    usable, _ = _ocr_result_is_usable(txt)
+                    if txt.strip() and usable:
+                        _save_ocr_cache(f"{pdf_hash}_p{i}", txt)
+                    done += 1
+                    if emit:
+                        emit({
+                            "type": "file_processing",
+                            "stage": "ocr_progress",
+                            "message": (
+                                f"{label}: re-read page {i + 1} "
+                                f"({done} of {len(todo)})"
+                            ),
+                            "file": label,
+                            "done": done,
+                            "total": len(todo),
+                            "pages": len(wanted),
+                        })
+    except Exception as e:
+        log.error("Selective Vision OCR failed", file=label, error=str(e)[:200])
+        if emit:
+            emit({
+                "type": "file_processing",
+                "stage": "ocr_failed",
+                "message": f"{label}: OCR failed ({str(e)[:120]})",
+                "file": label,
+            })
+
+    for i in wanted:
+        results.setdefault(i, "")
+    read = sum(1 for i in wanted if results[i].strip())
+    if emit:
+        emit({
+            "type": "file_processing",
+            "stage": "ocr_done",
+            "message": f"{label}: re-read {read} of {len(wanted)} page(s)",
+            "file": label,
+            "pages": len(wanted),
+            "read": read,
+        })
+    return results
 
 
 def _vision_ocr_pdf(
@@ -1820,10 +2180,20 @@ def _image_ocr_telemetry(local_path: str, text: str, quality_reason: str) -> dic
     return fields
 
 
-def unreadable_user_message(filename: str) -> str:
+def unreadable_user_message(filename: str, kind: str = "image") -> str:
     """User-facing text when OCR output was not usable. Plain and actionable —
     no scores, no jargon, and it names the file so a multi-upload turn is
-    unambiguous."""
+    unambiguous. `kind` is "image" (a photo) or "scan" (a scanned PDF); only
+    the advice on how to fix it differs."""
+    if kind == "scan":
+        return (
+            f"I couldn't reliably read the text in \"{filename}\" — the scan is "
+            f"too unclear for accurate recognition, so I've set its contents "
+            f"aside rather than work from text I don't trust. "
+            f"For best results, rescan it at a higher resolution with the pages "
+            f"flat and well lit, then upload again. "
+            f"If you'd rather I work with what I could make out, say \"use it anyway\"."
+        )
     return (
         f"I couldn't reliably read the text in \"{filename}\" — the image is "
         f"too unclear for accurate recognition, so I've set its contents aside "
@@ -1907,11 +2277,27 @@ async def ocr_retry_unreadable_files(
             "file": filename,
         })
 
+        # Scanned PDFs land here too since the PDF branch gained the
+        # readability gate (2026-10-29). They need the PDF OCR path (render
+        # pages, batch, DPI escalation) and its longer budget.
+        _is_pdf = (
+            filename.lower().endswith(".pdf")
+            or (row.get("mime_type") or "").lower() == "application/pdf"
+        )
         try:
-            text = await asyncio.wait_for(
-                asyncio.to_thread(_vision_ocr_image, local_path, filename),
-                timeout=120,
-            )
+            if _is_pdf:
+                _pages = int(row.get("page_count") or 0) or _pdf_page_count(local_path)
+                text = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _vision_ocr_pdf, local_path, max(1, _pages), emit, filename,
+                    ),
+                    timeout=900,
+                )
+            else:
+                text = await asyncio.wait_for(
+                    asyncio.to_thread(_vision_ocr_image, local_path, filename),
+                    timeout=120,
+                )
         except Exception as e:
             log.error("OCR retry failed", file=filename, error=str(e)[:200])
             await _safe_status(thread_id, file_id, "failed", str(e)[:500])
@@ -2409,8 +2795,8 @@ async def process_files(
                 # output format with "--- Page N ---" markers.
                 # Wrapped in wait_for: PyMuPDF can rarely hang on damaged
                 # PDFs; the timeout converts that into a clean per-file fail.
-                per_page_texts, page_count = await asyncio.wait_for(
-                    asyncio.to_thread(_extract_pdf_text_per_page, local_path),
+                per_page_texts, page_coverages, page_count = await asyncio.wait_for(
+                    asyncio.to_thread(_extract_pdf_layer_profile, local_path),
                     timeout=PDF_EXTRACT_TIMEOUT_S,
                 )
                 emit({
@@ -2454,6 +2840,113 @@ async def process_files(
                         text = ""           # discard the unreliable text layer
                         pf.gemini_uri = None
                         pf.gemini_name = None
+
+                # Scanner-app junk OCR layer (2026-10-29). Script-valid but
+                # meaningless text on full-page images — the handwritten
+                # Hindi statement case. Passes both garble checks because
+                # nothing about its encoding is broken; see the comment on
+                # `_score_scanner_layer`. Same remedy as the non-Latin
+                # garble above: drop the layer, invalidate the Gemini URI
+                # (the native PDF reader would see the same junk bytes) and
+                # let the scanned branch below run Vision OCR.
+                if text.strip() and not is_scanned:
+                    _junk = _detect_junk_ocr_layer(per_page_texts, page_coverages)
+                    if _junk["junk"] and _junk["whole_doc"]:
+                        log.warning("Junk OCR text layer on most image-backed pages "
+                                    "- forcing Vision OCR, invalidating Gemini URI",
+                                    file=pf.original_name,
+                                    junk_pages=len(_junk["junk_pages"]),
+                                    checked_pages=_junk["checked_pages"],
+                                    page_count=_junk["page_count"],
+                                    junk_pct=_junk["junk_pct"])
+                        emit({
+                            "type": "file_processing",
+                            "stage": "pdf_layer_rejected",
+                            "scope": "document",
+                            "message": (
+                                f"{pf.original_name}: the file's built-in text is "
+                                f"unreliable, so I'm reading the scanned pages "
+                                f"directly instead..."
+                            ),
+                            "file": pf.original_name,
+                            "junk_pages": len(_junk["junk_pages"]),
+                            "page_count": _junk["page_count"],
+                        })
+                        is_scanned = True
+                        text = ""
+                        pf.gemini_uri = None
+                        pf.gemini_name = None
+                    elif _junk["junk"]:
+                        # A minority of pages: re-read just those and splice
+                        # the OCR text over the junk. The clean pages, the
+                        # text layer and the Gemini URI are kept.
+                        _bad = list(_junk["junk_pages"])
+                        log.warning("Junk OCR text layer on some image-backed pages "
+                                    "- re-reading those pages with Vision OCR",
+                                    file=pf.original_name, junk_pages=len(_bad),
+                                    checked_pages=_junk["checked_pages"],
+                                    page_count=_junk["page_count"],
+                                    junk_pct=_junk["junk_pct"],
+                                    page_numbers=[i + 1 for i in _bad][:40])
+                        emit({
+                            "type": "file_processing",
+                            "stage": "pdf_layer_rejected",
+                            "scope": "pages",
+                            "message": (
+                                f"{pf.original_name}: the built-in text on "
+                                f"{len(_bad)} of {page_count} page(s) is "
+                                f"unreliable, so I'm reading those pages "
+                                f"directly..."
+                            ),
+                            "file": pf.original_name,
+                            "junk_pages": len(_bad),
+                            "page_numbers": [i + 1 for i in _bad],
+                            "page_count": _junk["page_count"],
+                        })
+                        try:
+                            _fixed = await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    _vision_ocr_pdf_pages, local_path, _bad,
+                                    emit, pf.original_name,
+                                ),
+                                timeout=min(900, 90 + 60 * len(_bad)),
+                            )
+                        except asyncio.TimeoutError:
+                            log.error("Selective Vision OCR timed out",
+                                      file=pf.original_name, pages=len(_bad))
+                            _fixed = {}
+                        _unread: list[int] = []
+                        for _i in _bad:
+                            _t = (_fixed.get(_i) or "").strip()
+                            per_page_texts[_i] = _t   # junk never reaches the agents
+                            if not _t:
+                                _unread.append(_i)
+                        text = "\n\n".join(
+                            f"--- Page {i + 1} ---\n{t.strip()}"
+                            for i, t in enumerate(per_page_texts) if t.strip()
+                        )
+                        _ill = sum(count_illegible_markers(per_page_texts[_i])
+                                   for _i in _bad)
+                        log.info("Selective re-OCR spliced into text layer",
+                                 file=pf.original_name, pages=len(_bad),
+                                 unread=len(_unread), illegible_markers=_ill,
+                                 chars=len(text))
+                        if _unread or _ill >= _ILLEGIBLE_WARN_THRESHOLD * len(_bad):
+                            emit({
+                                "type": "file_processing",
+                                "stage": "partial_read_warning",
+                                "message": (
+                                    f"Parts of \"{pf.original_name}\" could not be "
+                                    f"read ({len(_unread)} page(s) unreadable, "
+                                    f"{_ill} illegible passages). My answer will "
+                                    f"be based on the rest — a clearer scan would "
+                                    f"fill the gaps."
+                                ),
+                                "file": pf.original_name,
+                                "unread_pages": [i + 1 for i in _unread],
+                                "illegible_markers": _ill,
+                                "page_count": page_count,
+                            })
 
                 # Detect garbled Latin-script text (broken Identity-H CMap,
                 # noisy embedded OCR, vector-outlined glyphs). Symptoms include
@@ -2566,6 +3059,62 @@ async def process_files(
                         log.error("Vision OCR timed out for scanned/garbled PDF",
                                   file=pf.original_name, page_count=page_count)
                         text = ""
+
+                    # --- Readability gate (post-OCR) ------------------------
+                    # The image branch has had this since the OCR-readability
+                    # work; the PDF branch did not, so a scanned PDF whose
+                    # OCR came back empty or as gibberish went to the agents
+                    # silently and the user saw a confident answer built on
+                    # nothing (2026-10-29: placeholder divorce petition, no
+                    # hint the file was unread). Same contract as images:
+                    # `[illegible]` markers -> partial-read warning; empty or
+                    # garbled output -> withhold the text, mark the file
+                    # unreadable, offer "use it anyway". `force_ocr` is that
+                    # override and accepts whatever came out.
+                    _pdf_unreadable, _pdf_reason = _ocr_output_is_unreadable(text)
+                    _pdf_illegible = count_illegible_markers(text)
+                    log.info("PDF OCR quality", file=pf.original_name,
+                             ocr_chars=len(text or ""), verdict=_pdf_reason,
+                             illegible_markers=_pdf_illegible,
+                             pages=page_count)
+
+                    if (text.strip() and not _pdf_unreadable
+                            and _pdf_illegible
+                            >= _ILLEGIBLE_WARN_THRESHOLD * max(1, page_count)):
+                        log.warning("PDF OCR left illegible markers",
+                                    file=pf.original_name,
+                                    count=_pdf_illegible, pages=page_count)
+                        emit({
+                            "type": "file_processing",
+                            "stage": "partial_read_warning",
+                            "message": (
+                                f"Parts of \"{pf.original_name}\" could not be "
+                                f"read ({_pdf_illegible} passages across "
+                                f"{page_count} page(s)). My answer will be based "
+                                f"on the rest — a clearer scan would fill the gaps."
+                            ),
+                            "file": pf.original_name,
+                            "illegible_markers": _pdf_illegible,
+                            "page_count": page_count,
+                        })
+
+                    if _pdf_unreadable and not force_ocr:
+                        pf.ocr_status = OCR_STATUS_UNREADABLE
+                        log.warning("PDF OCR unusable — withholding text",
+                                    file=pf.original_name, reason=_pdf_reason)
+                        emit({
+                            "type": "file_processing",
+                            "stage": "unreadable_warning",
+                            "message": unreadable_user_message(
+                                pf.original_name, kind="scan"),
+                            "file": pf.original_name,
+                            "reason": _pdf_reason,
+                            "can_force_ocr": True,
+                        })
+                        text = ""   # nothing reaches ChromaDB / the agents
+                    elif _pdf_unreadable and force_ocr:
+                        log.info("Unreadable PDF OCR accepted on user override",
+                                 file=pf.original_name, reason=_pdf_reason)
 
                 # Store large PDFs in ChromaDB for retrieval (even if Gemini has it,
                 # ChromaDB enables targeted chunk retrieval for follow-up questions).

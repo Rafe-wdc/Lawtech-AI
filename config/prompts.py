@@ -1668,9 +1668,37 @@ returning "none".
   - "complaint to police for stolen vehicle" → no court file matches; return "none"
   - "complaint under Section 200 CrPC" → a magistrate-complaint file (court)
 
+## When the query is ambiguous, the FACTS choose the sub-type
+
+Several families contain sub-types that are DIFFERENT documents: a divorce
+petition by mutual consent (Section 13B HMA — a JOINT petition by both
+spouses who have settled) versus a contested divorce on cruelty / desertion /
+adultery (Section 13(1) HMA — one spouse against the other); regular versus
+anticipatory bail; a plaint versus a written statement; a notice versus the
+reply to it. If the query names a section or sub-type that exists in the
+list, follow it. If it does not, or names one no candidate carries, pick the
+sub-type the uploaded facts support. Facts written by one spouse describing
+the other's cruelty, drinking, dowry demands, violence or abandonment are a
+CONTESTED petition under Section 13(1) — never a mutual-consent petition,
+which needs both spouses to agree. When the facts make the family clear,
+prefer the closest candidate in that family over "none".
+
+A section number that no file name carries is NOT a missing family. Sibling
+sections and sub-sections (13A / 13(1)(ia) / 13(1)(ib) of the HMA; 480 / 482
+/ 483 BNSS; 437 / 439 CrPC) are variants of the same document, and the file
+names list only some of them. Never return "none" because the exact number
+in the query is absent from the list — pick the closest template in that
+family and let the facts decide the variant. A request for a petition PLUS an
+application, affidavit or case law is served by the template for the main
+document; the extras are written from it.
+
 ## User query
 
 {query}
+
+## Uploaded facts (excerpt of the user's documents — may be empty)
+
+{source_preview}
 
 ## Candidate file names
 

@@ -1417,8 +1417,28 @@ async def _translate_query_for_es_match(
         return ""
 
 
+# The picker reads only the query and the candidate file names. A bounded
+# excerpt of the uploaded facts is added (2026-10-29) because the query alone
+# cannot separate SUB-TYPES that are different documents: "draft a divorce
+# petition" over a wife's statement of her husband's cruelty picked, or
+# web-synthesised, a Section 13B mutual-consent JOINT petition. 2.5k chars is
+# enough to see whose statement it is and what it alleges; the writer gets the
+# full text later.
+_PICKER_FACTS_PREVIEW_CAP = 2500
+
+
+def _picker_facts_preview(user_facts: str | None) -> str:
+    """Bounded, prompt-ready excerpt of the uploaded facts for the picker."""
+    trimmed = (user_facts or "").strip()
+    if not trimmed:
+        return "(no documents uploaded)"
+    if len(trimmed) > _PICKER_FACTS_PREVIEW_CAP:
+        return trimmed[:_PICKER_FACTS_PREVIEW_CAP] + "\n\n[... truncated ...]"
+    return trimmed
+
+
 async def _pick_reference_source(
-    query: str, file_paths: list[str],
+    query: str, file_paths: list[str], user_facts: str = "",
 ) -> str | None:
     """Single Gemini Flash Lite call. Picks the best-fitting file name from
     the candidate list, or returns None when no candidate fits (caller falls
@@ -1426,6 +1446,9 @@ async def _pick_reference_source(
 
     File paths alone (no previews) — the 2026-06-28 index census confirmed
     corpus filenames are richly descriptive (avg 66.9 chars, 0.8% opaque).
+    `user_facts` (the uploaded documents' text, excerpted) lets the picker
+    choose the right sub-type when the query is ambiguous; see
+    `_picker_facts_preview`.
 
     Falls back to None on any error so traffic never breaks — the worst
     case is a web fallback fire instead of a silent bad pick.
@@ -1438,12 +1461,17 @@ async def _pick_reference_source(
         llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_PickerChoice, include_raw=True)
 
         candidates_block = "\n".join(f"- {p}" for p in file_paths)
+        source_preview = _picker_facts_preview(user_facts)
         prompt = ChatPromptTemplate.from_template(DRAFTING_PICKER_PROMPT)
         chain = prompt | llm
 
         with log_time(log, "Reference picker"):
             raw_and_parsed = await asyncio.wait_for(
-                chain.ainvoke({"query": query, "file_paths": candidates_block}),
+                chain.ainvoke({
+                    "query": query,
+                    "file_paths": candidates_block,
+                    "source_preview": source_preview,
+                }),
                 timeout=15,
             )
         from core.token_tracker import record as _record_tokens
@@ -1506,6 +1534,7 @@ async def _acquire_reference_draft(
     intent=None,
     original_query: str = "",
     niche_key: str = "",
+    user_facts: str = "",
 ) -> tuple[str, str, str, str]:
     """Stage 1 of the simplified drafting pipeline (v1 DraftRetriever pattern).
 
@@ -1605,7 +1634,16 @@ async def _acquire_reference_draft(
     #      That is the difference from RESPONSE_CACHE_ENABLED, which serves a
     #      whole stale draft and hid our own fixes from testers.
     picked = None
-    _cache_key = f"{niche_key}|{_normalise_pick_query(search_query)}"
+    # The pick now depends on the uploaded facts as well as the query, so two
+    # requests with the same wording but different documents (a mutual-consent
+    # settlement vs. a cruelty statement) must not share a cache entry.
+    _facts_fp = ""
+    if (user_facts or "").strip():
+        import hashlib
+        _facts_fp = hashlib.sha1(
+            _picker_facts_preview(user_facts).encode("utf-8", "ignore")
+        ).hexdigest()[:12]
+    _cache_key = f"{niche_key}|{_normalise_pick_query(search_query)}|{_facts_fp}"
 
     if niche_key:
         from config.drafting_niches import NICHE_CANONICAL_TEMPLATE
@@ -1639,7 +1677,9 @@ async def _acquire_reference_draft(
                      niche_key=niche_key or "none", picked=_cached[:90])
 
     if picked is None:
-        picked = await _pick_reference_source(search_query, file_paths)
+        picked = await _pick_reference_source(
+            search_query, file_paths, user_facts=user_facts,
+        )
         if picked:
             if len(_TEMPLATE_PICK_CACHE) >= _TEMPLATE_PICK_CACHE_MAX:
                 _TEMPLATE_PICK_CACHE.clear()
@@ -5645,6 +5685,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         intent=intent_obj,
                         original_query=original_query,
                         niche_key=_early_niche_key,
+                        user_facts=user_facts,
                     ),
                     _gather_relevant_context(query),
                 )

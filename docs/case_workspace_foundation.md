@@ -36,14 +36,16 @@ Created in code by `core/case_store.py` under a transaction advisory lock, versi
 
 ```
 # fast suites (no database)
-EMBEDDING_SERVICE_URL=http://127.0.0.1:9 python -m pytest tests/test_case_jwt_auth.py tests/test_case_auth.py tests/test_case_routes.py -q
+EMBEDDING_SERVICE_URL=http://127.0.0.1:9 python -m pytest tests/test_case_jwt_auth.py tests/test_case_auth.py tests/test_case_routes.py tests/test_case_health.py -q
 
 # Postgres-backed suite (throwaway schema per run)
 docker run --rm -d --name case-pg -e POSTGRES_PASSWORD=t -p 5433:5432 postgres:16-alpine
 TEST_POSTGRES_URL=postgresql://postgres:t@localhost:5433/postgres python -m pytest tests/test_case_store_pg.py -q
 ```
 
-Without `TEST_POSTGRES_URL` the Postgres suite skips locally; with `CI=true` it fails. CI: `.github/workflows/ci-case-workspace.yml` starts a Postgres service and runs all four suites.
+Without `TEST_POSTGRES_URL` the Postgres suite skips locally; with `CI=true` it fails. CI: `.github/workflows/ci-case-workspace.yml` starts a Postgres service and runs all five suites.
+
+`GET /pyapi/health` carries a `case_workspace` entry: `{"status": "off"}` with the flag off; with it on, `ok` plus `schema_version`, `bucket` and `latency_ms`, or `error` (overall health degrades) when the store is unreachable. Slice 3 adds the worker heartbeat age here.
 
 ## Logging rule
 

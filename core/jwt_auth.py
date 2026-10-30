@@ -3,9 +3,10 @@
 Node's user service issues an HS256 access token whose only identity claim is
 the numeric database key in ``userId`` (no ``sub`` / ``iss`` / ``aud``). This
 module verifies that token with the standard library only — no PyJWT — and is
-the single place that logic lives. ``core/user_memory.py`` (feat/user-memory)
-carries an identical private copy today; a follow-up makes it import from here
-so both features verify the same way.
+the single place that logic lives: ``core/user_memory.py`` (feat/user-memory,
+follow-up branch feat/user-memory-shared-jwt) imports ``verify_hs256`` from
+here, so both features verify the same way. Keep this file identical on both
+branches until they are merged, or the merge conflicts.
 
 Guarantees of ``verify_hs256``:
   * ``alg`` is pinned to HS256 — ``none`` and RS*/ES* headers are rejected;

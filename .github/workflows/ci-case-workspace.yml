@@ -48,4 +48,4 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-ci-case.txt
       - run: pip install -r requirements-ci-case.txt
-      - run: python -m pytest tests/test_case_jwt_auth.py tests/test_case_auth.py tests/test_case_routes.py tests/test_case_store_pg.py -q -p no:cacheprovider
+      - run: python -m pytest tests/test_case_jwt_auth.py tests/test_case_auth.py tests/test_case_routes.py tests/test_case_health.py tests/test_case_store_pg.py -q -p no:cacheprovider

@@ -389,3 +389,13 @@ CASE_AUDIT_VIEW_WINDOW_SEC = int(os.getenv("CASE_AUDIT_VIEW_WINDOW_SEC", "900") 
 # Keys are always `cases/{case_id}/...` inside this bucket (no prefix setting).
 CASE_S3_BUCKET = os.getenv("CASE_S3_BUCKET", "lawttorney-cases").strip()
 CASE_S3_REGION = os.getenv("CASE_S3_REGION", "").strip() or S3_REGION
+
+# Slice 2: uploads (presign / complete / download / soft delete)
+CASE_S3_SSE = os.getenv("CASE_S3_SSE", "AES256").strip() or "AES256"          # expected ServerSideEncryption at complete
+CASE_MAX_FILE_MB = float(os.getenv("CASE_MAX_FILE_MB", "1024") or 1024)       # per file (matches the chat upload cap)
+CASE_MAX_DOCS_PER_CASE = int(os.getenv("CASE_MAX_DOCS_PER_CASE", "500") or 500)
+CASE_MAX_BYTES_PER_CASE_GB = float(os.getenv("CASE_MAX_BYTES_PER_CASE_GB", "5") or 5)
+CASE_PRESIGN_TTL_SEC = int(os.getenv("CASE_PRESIGN_TTL_SEC", "900") or 900)
+CASE_DOWNLOAD_TTL_SEC = int(os.getenv("CASE_DOWNLOAD_TTL_SEC", "300") or 300)
+CASE_PURGE_GRACE_DAYS = int(os.getenv("CASE_PURGE_GRACE_DAYS", "7") or 7)     # soft delete -> purge job delay
+CASE_JOB_MAX_ATTEMPTS = int(os.getenv("CASE_JOB_MAX_ATTEMPTS", "4") or 4)     # ingest jobs created at complete

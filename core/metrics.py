@@ -91,6 +91,19 @@ METRICS: dict = {
         ["kind"],   # kind: uploads | chroma | tmp_pdf
     ),
 
+    # --- Case workspace worker (slice 3; workers/case_worker.py) ---
+
+    "case_jobs_total": Counter(
+        "lawtech_case_jobs_total",
+        "Case-workspace queue jobs closed by a worker",
+        ["type", "outcome"],   # type: ingest | purge; outcome: done | duplicate | retry | failed | cancelled | lost | released
+    ),
+    "case_ingest_seconds": Histogram(
+        "lawtech_case_ingest_seconds",
+        "Wall time of one case-document ingest job (download, extraction, sidecar)",
+        buckets=(1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 900),
+    ),
+
     # --- Guardrail Layer ---
 
     "guardrail_blocks_total": Counter(

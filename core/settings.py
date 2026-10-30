@@ -399,3 +399,17 @@ CASE_PRESIGN_TTL_SEC = int(os.getenv("CASE_PRESIGN_TTL_SEC", "900") or 900)
 CASE_DOWNLOAD_TTL_SEC = int(os.getenv("CASE_DOWNLOAD_TTL_SEC", "300") or 300)
 CASE_PURGE_GRACE_DAYS = int(os.getenv("CASE_PURGE_GRACE_DAYS", "7") or 7)     # soft delete -> purge job delay
 CASE_JOB_MAX_ATTEMPTS = int(os.getenv("CASE_JOB_MAX_ATTEMPTS", "4") or 4)     # ingest jobs created at complete
+
+# Slice 3: the queue worker (workers/case_worker.py), ingestion and purge.
+CASE_TMP_ROOT = os.getenv("CASE_TMP_ROOT", "").strip() or str(_PROJECT_ROOT / "case_tmp")   # scratch, per job id
+CASE_JOB_LOCK_TTL_SEC = int(os.getenv("CASE_JOB_LOCK_TTL_SEC", "120") or 120)      # heartbeat every third of it
+CASE_INGEST_TIMEOUT_SEC = int(os.getenv("CASE_INGEST_TIMEOUT_SEC", "900") or 900)  # child process killed after this
+CASE_WORKER_POLL_SEC = float(os.getenv("CASE_WORKER_POLL_SEC", "2") or 2)          # idle sleep between claims
+CASE_WORKER_SHUTDOWN_GRACE_SEC = int(os.getenv("CASE_WORKER_SHUTDOWN_GRACE_SEC", "30") or 30)
+CASE_HOUSEKEEPING_INTERVAL_SEC = int(os.getenv("CASE_HOUSEKEEPING_INTERVAL_SEC", "600") or 600)
+CASE_UPLOAD_EXPIRE_HOURS = int(os.getenv("CASE_UPLOAD_EXPIRE_HOURS", "24") or 24)  # uploading -> expired
+CASE_TMP_SWEEP_AGE_SEC = int(os.getenv("CASE_TMP_SWEEP_AGE_SEC", "3600") or 3600)  # leftover case_tmp dirs
+CASE_RETRY_BACKOFF_SEC = os.getenv("CASE_RETRY_BACKOFF_SEC", "30,120,600").strip() or "30,120,600"
+CASE_CLASSIFY_ON_INGEST = _truthy_env("CASE_CLASSIFY_ON_INGEST", "0")             # Gemini kind classification
+CASE_WORKER_METRICS_PORT = int(os.getenv("CASE_WORKER_METRICS_PORT", "0") or 0)    # 0 = no metrics listener
+CASE_WORKER_STALE_SEC = int(os.getenv("CASE_WORKER_STALE_SEC", "180") or 180)      # health: worker considered gone

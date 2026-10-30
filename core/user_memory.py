@@ -34,16 +34,14 @@ local dev into a bare X-User-Id when no secret is set.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextvars
-import hashlib
-import hmac
 import json
 import os
 import re
 import time
 from typing import Any, Mapping
 
+from core.jwt_auth import USER_ID_RE, verify_hs256
 from core.logger import get_logger, short_err
 
 log = get_logger("UserMemory")
@@ -953,55 +951,24 @@ async def handle_direct_command(user_id: str, thread_id: str, kind: str, remaind
 # User id from headers
 # ---------------------------------------------------------------------------
 
-_USER_ID_RE = re.compile(r"^[A-Za-z0-9_.:@\-]{1,128}$")
+_USER_ID_RE = USER_ID_RE   # one pattern for both JWT and (dev-only) bare ids, shared with the case workspace
 _warned_bare_id = False
 _warned_unconfigured = False
-
-
-def _b64url_decode(s: str) -> bytes:
-    s += "=" * (-len(s) % 4)
-    return base64.urlsafe_b64decode(s.encode("ascii"))
 
 
 def _verify_hs256_jwt(token: str, secret: str) -> str:
     """Return the user id claim of a valid HS256 JWT, else "".
 
-    Equivalent to jwt.decode(token, secret, algorithms=["HS256"],
-    leeway=30) without a PyJWT dependency: alg pinned to HS256 (so "none"
-    and RS* are rejected), constant-time signature check, exp and nbf
-    honoured when present with jwt_leeway_s() of skew, no iss / aud check
-    (Node issues none), id from jwt_claims() cast to str (Node's userId is
-    a numeric primary key).
+    Delegates to ``core.jwt_auth.verify_hs256`` -- the single HS256 verifier
+    in the codebase, shared with the case workspace -- with this feature's
+    claim list (``jwt_claims()``) and clock-skew allowance (``jwt_leeway_s()``).
+    Same guarantees as the private copy it replaces: alg pinned to HS256 (so
+    "none" and RS* are rejected), constant-time signature check, exp and nbf
+    honoured, numeric ``userId`` cast to str, never raises. One difference,
+    strictly safer: an empty secret now always fails instead of verifying
+    tokens signed with an empty key.
     """
-    try:
-        h_b64, p_b64, s_b64 = token.split(".")
-        header = json.loads(_b64url_decode(h_b64))
-        if str(header.get("alg", "")) != "HS256":
-            return ""
-        expected = hmac.new(secret.encode("utf-8"), f"{h_b64}.{p_b64}".encode("ascii"),
-                            hashlib.sha256).digest()
-        if not hmac.compare_digest(expected, _b64url_decode(s_b64)):
-            return ""
-        payload = json.loads(_b64url_decode(p_b64))
-        if not isinstance(payload, dict):
-            return ""
-        now = time.time()
-        leeway = jwt_leeway_s()
-        exp = payload.get("exp")
-        if exp is not None and float(exp) + leeway < now:
-            return ""
-        nbf = payload.get("nbf")
-        if nbf is not None and float(nbf) - leeway > now:
-            return ""
-        for claim in jwt_claims():
-            v = payload.get(claim)
-            if v is None or v == "" or isinstance(v, bool):
-                continue
-            v = str(v)  # numeric PK -> string user_id
-            return v if _USER_ID_RE.match(v) else ""
-    except Exception:
-        return ""
-    return ""
+    return verify_hs256(token, secret, jwt_claims(), jwt_leeway_s())
 
 
 # Outcomes of verify_bearer(). Only "ok" carries a user id.

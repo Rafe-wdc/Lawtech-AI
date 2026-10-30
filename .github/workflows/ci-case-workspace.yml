@@ -17,10 +17,12 @@ on:
       - "tests/test_case_*.py"
       - "tests/case_support.py"
       - "scripts/case_bucket_smoke.py"
+      - "core/file_processor.py"
+      - "core/metrics.py"
       - "requirements-ci-case.txt"
       - ".github/workflows/ci-case-workspace.yml"
   push:
-    branches: ["dev", "feat/case-workspace"]
+    branches: ["dev", "feat/case-workspace", "feat/case-workspace-s2", "feat/case-workspace-s3"]
 
 jobs:
   case-tests:
@@ -49,4 +51,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-ci-case.txt
       - run: pip install -r requirements-ci-case.txt
-      - run: python -m pytest tests/test_case_jwt_auth.py tests/test_case_auth.py tests/test_case_routes.py tests/test_case_health.py tests/test_case_sniff.py tests/test_case_s3.py tests/test_case_documents.py tests/test_case_store_pg.py tests/test_case_store_pg_docs.py -q -p no:cacheprovider
+      - run: >-
+          python -m pytest
+          tests/test_case_jwt_auth.py tests/test_case_auth.py tests/test_case_routes.py tests/test_case_health.py
+          tests/test_case_sniff.py tests/test_case_s3.py tests/test_case_documents.py
+          tests/test_case_extract.py tests/test_case_worker.py
+          tests/test_case_store_pg.py tests/test_case_store_pg_docs.py tests/test_case_store_pg_jobs.py
+          -q -p no:cacheprovider

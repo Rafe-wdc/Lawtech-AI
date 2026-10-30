@@ -2150,7 +2150,7 @@ async def health(request: Request):
     # --- 9. Case workspace (feature-flagged; "off" when CASE_WORKSPACE_ENABLED is unset) ---
     from .case_health import case_workspace_check
     checks["case_workspace"] = await case_workspace_check(probe_timeout_s)
-    if checks["case_workspace"]["status"] == "error" and overall == "healthy":
+    if checks["case_workspace"]["status"] in ("error", "warn") and overall == "healthy":
         overall = "degraded"
 
     uptime_seconds = int(time.time() - _APP_START_TIME)

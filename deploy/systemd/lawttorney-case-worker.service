@@ -1,0 +1,56 @@
+[Unit]
+Description=Lawttorney case workspace worker (ingest + purge queue)
+Documentation=file:///root/Lawtech-AI/docs/case_workspace_foundation.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+# Not pulled in by lawttorney-v2.service on purpose: the API serves cases
+# without a worker (uploads queue up, /pyapi/health shows "warn"), and the
+# worker is only useful with CASE_WORKSPACE_ENABLED=1 in .env - it refuses
+# to start otherwise. Enable it when the flag goes on:
+#   systemctl enable --now lawttorney-case-worker
+# For more throughput run a second instance from a copy of this unit; the
+# queue is claimed with SKIP LOCKED, so instances never share a job.
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Lawtech-AI
+EnvironmentFile=/root/Lawtech-AI/.env
+
+# Extraction runs in a spawned child per job; the parent kills it after
+# CASE_INGEST_TIMEOUT_SEC. Keep BLAS/OpenMP single-threaded like the API.
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=TOKENIZERS_PARALLELISM=false
+
+# Prometheus: the worker is a separate process, so it exposes its own
+# counters on localhost instead of writing into the API's multiproc dir.
+# Scrape 127.0.0.1:9108/metrics (lawtech_case_jobs_total, lawtech_case_ingest_seconds).
+Environment=CASE_WORKER_METRICS_PORT=9108
+
+ExecStart=/root/Lawtech-AI/venv/bin/python -m workers.case_worker
+
+# SIGTERM: stop claiming, give the current job CASE_WORKER_SHUTDOWN_GRACE_SEC
+# (default 30) to finish, then kill its child and release the job back to
+# the queue with the attempt not counted. TimeoutStopSec must exceed that.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=90
+
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# One job at a time; PyMuPDF renders + Vision OCR batches for one document.
+MemoryHigh=3G
+MemoryMax=4G
+LimitNOFILE=16384
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawttorney-case-worker
+
+[Install]
+WantedBy=multi-user.target

@@ -19,10 +19,11 @@ client name, filename or any text a lawyer typed.
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional, Protocol
+from typing import Any, Optional, Protocol, Sequence
 
 from core.logger import get_logger, short_err
 
@@ -158,9 +159,20 @@ _SCHEMA_V2: list[str] = [
         WHERE status IN ('queued','processing','ready','unsupported','duplicate')""",
 ]
 
+_SCHEMA_V3: list[str] = [
+    # Slice 3. purged_at: the purge job ran (objects gone, free text blanked).
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS purged_at TIMESTAMPTZ",
+    "ALTER TABLE case_documents ADD COLUMN IF NOT EXISTS purged_at TIMESTAMPTZ",
+    # Worker rows: a clean stop is distinguishable from a dead worker, and the
+    # job a worker is on is visible from SQL.
+    "ALTER TABLE case_workers ADD COLUMN IF NOT EXISTS stopped_at TIMESTAMPTZ",
+    "ALTER TABLE case_workers ADD COLUMN IF NOT EXISTS current_job_id UUID",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
+    (3, _SCHEMA_V3),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
@@ -250,18 +262,33 @@ DOC_DEDUPE_TARGETS = (DOC_QUEUED, DOC_PROCESSING, DOC_READY, DOC_UNSUPPORTED)
 DOC_COLUMNS = (
     "doc_id", "case_id", "filename", "ext", "declared_mime", "sniffed_mime", "size_bytes",
     "sha256", "sse", "status", "error_code", "duplicate_of", "kind", "kind_confidence",
-    "page_count", "chars_total", "ocr_pages", "extractor", "s3_key", "s3_version_id", "s3_etag",
-    "stored", "created_at", "updated_at", "ready_at",
+    "page_count", "chars_total", "ocr_pages", "extractor", "text_key", "meta_key",
+    "s3_key", "s3_version_id", "s3_etag", "stored", "created_at", "updated_at", "ready_at",
 )
 
 JOB_INGEST = "ingest"
 JOB_PURGE = "purge"
+JOB_QUEUED = "queued"
+JOB_RUNNING = "running"
+JOB_DONE = "done"
+JOB_FAILED = "failed"
+JOB_CANCELLED = "cancelled"
+JOB_COLUMNS = (
+    "job_id", "case_id", "doc_id", "type", "status", "priority", "attempts", "max_attempts", "run_after",
+    "locked_by", "locked_at", "lock_expires_at", "last_error_code", "last_error", "history",
+    "created_at", "updated_at", "finished_at",
+)
 
 ACTION_CASE_DELETE = "case_delete"
 ACTION_DOC_PRESIGN = "doc_presign"
 ACTION_DOC_COMPLETE = "doc_complete"
 ACTION_DOC_DOWNLOAD = "doc_download_url"
 ACTION_DOC_DELETE = "doc_delete"
+# written by the worker, user_id = SYSTEM_USER
+ACTION_DOC_EXPIRE = "doc_expire"
+ACTION_DOC_PURGE = "doc_purge"
+ACTION_CASE_PURGE = "case_purge"
+SYSTEM_USER = "system"
 
 
 class CaseLimitError(Exception):
@@ -271,6 +298,19 @@ class CaseLimitError(Exception):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+def _row_to_job(row: dict) -> dict:
+    out = {k: row.get(k) for k in JOB_COLUMNS}
+    for k in ("job_id", "case_id", "doc_id"):
+        if out.get(k) is not None:
+            out[k] = str(out[k])
+    for k in ("run_after", "locked_at", "lock_expires_at", "created_at", "updated_at", "finished_at"):
+        v = out.get(k)
+        if isinstance(v, datetime) and not v.tzinfo:
+            out[k] = v.replace(tzinfo=timezone.utc)
+    out["history"] = list(out.get("history") or [])
+    return out
 
 
 def _row_to_doc(row: dict) -> dict:
@@ -830,6 +870,369 @@ class CaseStore:
                     d[k] = str(d[k])
             out.append(d)
         return out
+
+
+    # =====================================================================
+    # Slice 3: queue (claim / heartbeat / finish), worker-side document
+    # transitions, housekeeping, worker rows, purge. All sync: the worker is
+    # a plain process. Nothing here is owner-scoped; the worker trusts the
+    # job row and re-checks ``doc.case_id == job.case_id``.
+    # =====================================================================
+
+    # ----------------------------------------------------------------- jobs
+
+    def claim_job_sync(self, worker_id: str, lock_ttl_s: int,
+                       types: Optional[Sequence[str]] = None) -> Optional[dict]:
+        """Claim the next runnable job with ``FOR UPDATE SKIP LOCKED`` (the
+        only place it is used). Runnable: ``queued`` with ``run_after``
+        passed, or ``running`` with an expired lock (dead worker: reclaimed,
+        and the lost attempt is written to ``history``). Every claim counts an
+        attempt, so a crash loop ends in ``failed``."""
+        self.ensure_schema()
+        type_list = list(types) if types else None
+        with self._get_pool().connection() as conn:
+            row = conn.execute(
+                """WITH next AS (
+                       SELECT job_id FROM case_jobs
+                        WHERE ((status = 'queued' AND run_after <= now())
+                            OR (status = 'running' AND lock_expires_at < now()))
+                          AND (%(types)s::text[] IS NULL OR type = ANY(%(types)s::text[]))
+                        ORDER BY priority, run_after
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT 1)
+                   UPDATE case_jobs j
+                      SET status = 'running', locked_by = %(worker)s, locked_at = now(),
+                          lock_expires_at = now() + %(ttl)s * interval '1 second',
+                          attempts = j.attempts + 1, updated_at = now(),
+                          history = CASE WHEN j.status = 'running' THEN
+                              (CASE WHEN jsonb_array_length(j.history) >= 20 THEN j.history - 0 ELSE j.history END)
+                              || jsonb_build_array(jsonb_build_object(
+                                     'attempt', j.attempts, 'worker', j.locked_by,
+                                     'started', j.locked_at, 'ended', now(),
+                                     'outcome', 'lost', 'error_code', 'worker_lost'))
+                              ELSE j.history END
+                     FROM next WHERE j.job_id = next.job_id
+                RETURNING j.*""",
+                {"worker": worker_id, "ttl": int(lock_ttl_s), "types": type_list},
+            ).fetchone()
+            conn.commit()
+        if row is None:
+            return None
+        job = _row_to_job(row)
+        log.info("Job claimed", job=job["job_id"][:8], type=job["type"], case=job["case_id"][:8],
+                 doc=(job["doc_id"] or "")[:8], attempt=job["attempts"], worker=worker_id)
+        return job
+
+    def heartbeat_job_sync(self, job_id: str, worker_id: str, lock_ttl_s: int) -> bool:
+        """Extend the lock. ``False`` means the job is no longer this worker's
+        (reclaimed after a missed heartbeat, or cancelled): stop working on it."""
+        jid = _as_uuid(job_id)
+        if jid is None:
+            return False
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            n = conn.execute(
+                """UPDATE case_jobs SET lock_expires_at = now() + %s * interval '1 second', updated_at = now()
+                    WHERE job_id = %s AND locked_by = %s AND status = 'running'""",
+                (int(lock_ttl_s), jid, worker_id),
+            ).rowcount
+            conn.commit()
+        return n == 1
+
+    def finish_job_sync(self, job_id: str, worker_id: str, outcome: str, *,
+                        error_code: Optional[str] = None, error: Optional[str] = None,
+                        retry_in_s: Optional[int] = None, started_at: Optional[datetime] = None) -> bool:
+        """Close this worker's attempt. ``outcome``: ``done`` | ``failed`` |
+        ``retry`` (back to ``queued`` after ``retry_in_s``) | ``cancelled`` |
+        ``release`` (graceful shutdown: back to ``queued`` now, attempt not
+        counted). Guarded by ``locked_by``: a late finish from a worker whose
+        lock was reclaimed changes nothing and returns ``False``."""
+        jid = _as_uuid(job_id)
+        if jid is None or outcome not in (JOB_DONE, JOB_FAILED, "retry", JOB_CANCELLED, "release"):
+            return False
+        self.ensure_schema()
+        status = {JOB_DONE: JOB_DONE, JOB_FAILED: JOB_FAILED, "retry": JOB_QUEUED,
+                  JOB_CANCELLED: JOB_CANCELLED, "release": JOB_QUEUED}[outcome]
+        finished = status in (JOB_DONE, JOB_FAILED, JOB_CANCELLED)
+        err_text = (error or "")[:200] or None
+        entry = {"worker": worker_id, "started": started_at.isoformat() if started_at else None,
+                 "outcome": outcome, "error_code": error_code}
+        with self._get_pool().connection() as conn:
+            n = conn.execute(
+                """UPDATE case_jobs
+                      SET status = %(status)s,
+                          finished_at = CASE WHEN %(finished)s THEN now() ELSE NULL END,
+                          run_after = CASE WHEN %(status)s = 'queued'
+                                           THEN now() + %(retry)s * interval '1 second' ELSE run_after END,
+                          attempts = CASE WHEN %(outcome)s = 'release' THEN GREATEST(attempts - 1, 0)
+                                          ELSE attempts END,
+                          locked_by = NULL, locked_at = NULL, lock_expires_at = NULL,
+                          last_error_code = %(code)s, last_error = %(err)s, updated_at = now(),
+                          history = (CASE WHEN jsonb_array_length(history) >= 20 THEN history - 0 ELSE history END)
+                                    || jsonb_build_array(%(entry)s::jsonb
+                                         || jsonb_build_object('attempt', attempts, 'ended', now()))
+                    WHERE job_id = %(jid)s AND locked_by = %(worker)s AND status = 'running'""",
+                {"status": status, "finished": finished, "retry": int(retry_in_s or 0), "outcome": outcome,
+                 "code": error_code, "err": err_text, "entry": json.dumps(entry), "jid": jid, "worker": worker_id},
+            ).rowcount
+            conn.commit()
+        if n == 1:
+            log.info("Job finished", job=str(jid)[:8], outcome=outcome, code=error_code or "",
+                     retry_in_s=int(retry_in_s or 0) if outcome == "retry" else 0)
+        else:
+            log.warning("Job finish ignored: lock no longer held", job=str(jid)[:8], outcome=outcome,
+                        worker=worker_id)
+        return n == 1
+
+    def get_job_sync(self, job_id: str) -> Optional[dict]:
+        jid = _as_uuid(job_id)
+        if jid is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            row = conn.execute("SELECT * FROM case_jobs WHERE job_id = %s", (jid,)).fetchone()
+        return _row_to_job(row) if row else None
+
+    # ---------------------------------------------- documents, worker side
+
+    def get_document_for_job_sync(self, doc_id: str, case_id: str) -> Optional[dict]:
+        """The row by ids, whatever its status (the worker decides what a
+        ``deleted`` or already-``ready`` row means for its job)."""
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            row = conn.execute("SELECT * FROM case_documents WHERE doc_id = %s AND case_id = %s",
+                               (did, cid)).fetchone()
+        return _row_to_doc(row) if row else None
+
+    def mark_processing_sync(self, doc_id: str, case_id: str) -> bool:
+        """``queued`` (or ``processing`` after a reclaim) -> ``processing``.
+        ``False`` when the row moved on (deleted, failed, ready): skip the job."""
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None:
+            return False
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            n = conn.execute(
+                """UPDATE case_documents SET status = %s, updated_at = now()
+                    WHERE doc_id = %s AND case_id = %s AND status IN (%s, %s)""",
+                (DOC_PROCESSING, did, cid, DOC_QUEUED, DOC_PROCESSING),
+            ).rowcount
+            conn.commit()
+        return n == 1
+
+    def find_ready_by_sha256_sync(self, case_id: str, sha256: str, exclude_doc_id: str) -> Optional[str]:
+        """The authoritative duplicate check: a ``ready`` sibling in the same
+        case whose worker-computed sha256 equals ours. Client hashes and
+        ETags never count here."""
+        cid, excl = _as_uuid(case_id), _as_uuid(exclude_doc_id)
+        if cid is None or not sha256:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            row = conn.execute(
+                """SELECT doc_id FROM case_documents
+                    WHERE case_id = %s AND sha256 = %s AND status = %s AND doc_id <> %s
+                    ORDER BY ready_at, created_at LIMIT 1""",
+                (cid, sha256.lower(), DOC_READY, excl),
+            ).fetchone()
+        return str(row["doc_id"]) if row else None
+
+    def finish_document_sync(self, doc_id: str, case_id: str, *, status: str, sha256: Optional[str] = None,
+                             error_code: Optional[str] = None, error_detail: Optional[str] = None,
+                             duplicate_of: Optional[str] = None, page_count: Optional[int] = None,
+                             chars_total: Optional[int] = None, ocr_pages: int = 0,
+                             extractor: Optional[str] = None, text_key: Optional[str] = None,
+                             meta_key: Optional[str] = None, kind: str = "",
+                             kind_confidence: float = 0.0) -> Optional[dict]:
+        """``processing`` -> ``ready`` | ``duplicate`` | ``failed`` | ``queued``
+        (transient error, will be retried). Only from ``processing``, so a
+        document deleted mid-job is never resurrected."""
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None or status not in (DOC_READY, DOC_DUPLICATE, DOC_FAILED, DOC_QUEUED):
+            return None
+        dup = _as_uuid(duplicate_of) if duplicate_of else None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            row = conn.execute(
+                """UPDATE case_documents
+                      SET status = %s, sha256 = COALESCE(%s, sha256), error_code = %s, error_detail = %s,
+                          duplicate_of = %s, page_count = %s, chars_total = %s, ocr_pages = %s,
+                          extractor = %s, text_key = %s, meta_key = %s,
+                          kind = %s, kind_confidence = %s,
+                          ready_at = CASE WHEN %s = 'ready' THEN now() ELSE ready_at END,
+                          updated_at = now()
+                    WHERE doc_id = %s AND case_id = %s AND status = %s
+                RETURNING *""",
+                (status, (sha256 or "").lower() or None, error_code, (error_detail or "")[:200] or None,
+                 dup, page_count, chars_total, int(ocr_pages or 0), extractor, text_key, meta_key,
+                 kind or "", float(kind_confidence or 0), status, did, cid, DOC_PROCESSING),
+            ).fetchone()
+            conn.commit()
+        if row is None:
+            return None
+        log.info("Document finished", case=str(cid)[:8], doc=str(did)[:8], status=status,
+                 code=error_code or "", pages=page_count, chars=chars_total, ocr_pages=int(ocr_pages or 0))
+        return _row_to_doc(row)
+
+    # ---------------------------------------------------------- housekeeping
+
+    def expire_stale_uploads_sync(self, older_than_hours: int) -> list[dict]:
+        """``uploading`` rows older than the window -> ``expired`` (they were
+        never counted). Returns their keys so the caller can delete any
+        object a browser PUT but never completed."""
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            rows = conn.execute(
+                """UPDATE case_documents SET status = %s, updated_at = now()
+                    WHERE status = %s AND created_at < now() - %s * interval '1 hour'
+                RETURNING doc_id, case_id, s3_key""",
+                (DOC_EXPIRED, DOC_UPLOADING, int(older_than_hours)),
+            ).fetchall()
+            for r in rows:
+                conn.execute(
+                    "INSERT INTO case_audit (case_id, user_id, action, object_id) VALUES (%s, %s, %s, %s)",
+                    (r["case_id"], SYSTEM_USER, ACTION_DOC_EXPIRE, str(r["doc_id"])),
+                )
+            conn.commit()
+        if rows:
+            log.info("Stale uploads expired", count=len(rows), older_than_hours=int(older_than_hours))
+        return [{"doc_id": str(r["doc_id"]), "case_id": str(r["case_id"]), "s3_key": r["s3_key"]} for r in rows]
+
+    # --------------------------------------------------------------- workers
+
+    def worker_heartbeat_sync(self, worker_id: str, started_at: datetime, current_job_id: Optional[str] = None,
+                              done_delta: int = 0, failed_delta: int = 0) -> None:
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            conn.execute(
+                """INSERT INTO case_workers (worker_id, started_at, last_seen_at, jobs_done, jobs_failed,
+                                             current_job_id)
+                   VALUES (%s, %s, now(), %s, %s, %s)
+                   ON CONFLICT (worker_id) DO UPDATE
+                      SET last_seen_at = now(), stopped_at = NULL,
+                          jobs_done = case_workers.jobs_done + EXCLUDED.jobs_done,
+                          jobs_failed = case_workers.jobs_failed + EXCLUDED.jobs_failed,
+                          current_job_id = EXCLUDED.current_job_id""",
+                (worker_id, started_at, int(done_delta), int(failed_delta), _as_uuid(current_job_id or "")),
+            )
+            conn.commit()
+
+    def worker_stopped_sync(self, worker_id: str) -> None:
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            conn.execute(
+                """UPDATE case_workers SET stopped_at = now(), last_seen_at = now(), current_job_id = NULL
+                    WHERE worker_id = %s""", (worker_id,))
+            conn.commit()
+
+    def prune_workers_sync(self, older_than_days: int = 7) -> int:
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            n = conn.execute("DELETE FROM case_workers WHERE last_seen_at < now() - %s * interval '1 day'",
+                             (int(older_than_days),)).rowcount
+            conn.commit()
+        return int(n)
+
+    def queue_summary_sync(self, stale_after_s: int = 180) -> dict:
+        """For ``/pyapi/health``: live workers, age of the newest heartbeat,
+        queue depth and how long the oldest runnable job has waited."""
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            w = conn.execute(
+                """SELECT COUNT(*) FILTER (WHERE stopped_at IS NULL
+                                             AND last_seen_at > now() - %s * interval '1 second') AS live,
+                          EXTRACT(EPOCH FROM (now() - MAX(last_seen_at) FILTER (WHERE stopped_at IS NULL))) AS age
+                     FROM case_workers""", (int(stale_after_s),)).fetchone()
+            j = conn.execute(
+                """SELECT COUNT(*) FILTER (WHERE status = 'queued') AS queued,
+                          COUNT(*) FILTER (WHERE status = 'running') AS running,
+                          EXTRACT(EPOCH FROM (now() - MIN(run_after) FILTER (WHERE status = 'queued'
+                                                                             AND run_after <= now()))) AS oldest
+                     FROM case_jobs WHERE status IN ('queued', 'running')""").fetchone()
+        return {
+            "workers_live": int(w["live"] or 0),
+            "last_seen_age_s": round(float(w["age"]), 1) if w["age"] is not None else None,
+            "queued": int(j["queued"] or 0), "running": int(j["running"] or 0),
+            "oldest_queued_s": round(float(j["oldest"]), 1) if j["oldest"] is not None else None,
+        }
+
+    # ----------------------------------------------------------------- purge
+
+    def purge_target_sync(self, case_id: str, doc_id: Optional[str]) -> Optional[dict]:
+        """What a purge job may touch. ``None`` unless the row is ``deleted``:
+        a purge never runs against a live case or document."""
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            if doc_id:
+                did = _as_uuid(doc_id)
+                row = conn.execute(
+                    """SELECT doc_id, case_id, status, s3_key, purged_at FROM case_documents
+                        WHERE doc_id = %s AND case_id = %s""", (did, cid)).fetchone()
+                if row is None or row["status"] != DOC_DELETED:
+                    return None
+                return {"case_id": str(cid), "doc_id": str(row["doc_id"]), "s3_key": row["s3_key"],
+                        "purged_at": row["purged_at"]}
+            row = conn.execute("SELECT status, purged_at FROM cases WHERE case_id = %s", (cid,)).fetchone()
+            if row is None or row["status"] != DOC_DELETED:
+                return None
+            return {"case_id": str(cid), "doc_id": None, "s3_key": None, "purged_at": row["purged_at"]}
+
+    def purge_document_row_sync(self, doc_id: str, case_id: str, versions_deleted: int = 0) -> bool:
+        """Blank the one free-text field of a tombstoned document row."""
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None:
+            return False
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            n = conn.execute(
+                """UPDATE case_documents SET filename = '', purged_at = now(), updated_at = now()
+                    WHERE doc_id = %s AND case_id = %s AND status = %s""", (did, cid, DOC_DELETED)).rowcount
+            if n:
+                conn.execute(
+                    "INSERT INTO case_audit (case_id, user_id, action, object_id) VALUES (%s, %s, %s, %s)",
+                    (cid, SYSTEM_USER, ACTION_DOC_PURGE, f"{did}:{int(versions_deleted)}"))
+            conn.commit()
+        return n == 1
+
+    def purge_case_rows_sync(self, case_id: str, versions_deleted: int = 0) -> dict:
+        """Blank title, client_name, case_number, cnr and objective on the
+        tombstoned case and the filename on every tombstoned document."""
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return {"case": 0, "documents": 0}
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            c = conn.execute(
+                """UPDATE cases SET title = '', client_name = '', case_number = '', cnr = '', objective = '',
+                                    purged_at = now(), updated_at = now()
+                    WHERE case_id = %s AND status = %s""", (cid, DOC_DELETED)).rowcount
+            d = 0
+            if c:
+                d = conn.execute(
+                    """UPDATE case_documents SET filename = '', purged_at = now(), updated_at = now()
+                        WHERE case_id = %s AND status = %s""", (cid, DOC_DELETED)).rowcount
+                conn.execute(
+                    "INSERT INTO case_audit (case_id, user_id, action, object_id) VALUES (%s, %s, %s, %s)",
+                    (cid, SYSTEM_USER, ACTION_CASE_PURGE, f"{cid}:{int(versions_deleted)}"))
+            conn.commit()
+        return {"case": int(c), "documents": int(d)}
+
+    def case_document_keys_sync(self, case_id: str) -> list[str]:
+        """Raw keys of every document row of a case (any status), for a
+        case-level purge that must not rely on a listing alone."""
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return []
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            rows = conn.execute("SELECT s3_key FROM case_documents WHERE case_id = %s", (cid,)).fetchall()
+        return [r["s3_key"] for r in rows if r["s3_key"]]
 
 
 # ---------------------------------------------------------------------------

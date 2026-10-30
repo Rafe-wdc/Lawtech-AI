@@ -56,12 +56,12 @@ def test_migration_v1_to_v2_upgrades_a_slice_1_database(schema_name):
     s = CaseStore(URL, schema=name, min_size=1, max_size=2)
     try:
         s.ensure_schema()
-        assert s.schema_version() == MIGRATIONS[-1][0] == 2
+        assert s.schema_version() == MIGRATIONS[-1][0] >= 2
         with psycopg.connect(URL, autocommit=True) as conn:
             cols = _columns(conn, name, "case_documents")
             assert "s3_etag" in cols and "stored" in cols
             n = conn.execute(f'SELECT COUNT(*) FROM "{name}".case_schema_version').fetchone()[0]
-            assert n == 2
+            assert n == len(MIGRATIONS)
             stored = dict(conn.execute(
                 f'SELECT doc_id, stored FROM "{name}".case_documents').fetchall())
             assert stored == {queued: True, uploading: False}

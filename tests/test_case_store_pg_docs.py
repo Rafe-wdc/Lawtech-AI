@@ -44,14 +44,27 @@ def test_migration_v1_to_v2_upgrades_a_slice_1_database(schema_name):
             conn.execute(stmt)
         conn.execute("INSERT INTO case_schema_version (version) VALUES (1)")
         assert "s3_etag" not in _columns(conn, name, "case_documents")
+        assert "stored" not in _columns(conn, name, "case_documents")
+        # rows written by a v1 server: the backfill must mark the accepted one stored
+        cid, queued, uploading = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        conn.execute("INSERT INTO cases (case_id, owner_user_id, title) VALUES (%s, 'o', 't')", (cid,))
+        for did, st in ((queued, "queued"), (uploading, "uploading")):
+            conn.execute(
+                """INSERT INTO case_documents (doc_id, case_id, owner_user_id, filename, ext, size_bytes,
+                                               s3_key, status) VALUES (%s, %s, 'o', 'f.pdf', 'pdf', 1, 'k', %s)""",
+                (did, cid, st))
     s = CaseStore(URL, schema=name, min_size=1, max_size=2)
     try:
         s.ensure_schema()
         assert s.schema_version() == MIGRATIONS[-1][0] == 2
         with psycopg.connect(URL, autocommit=True) as conn:
-            assert "s3_etag" in _columns(conn, name, "case_documents")
+            cols = _columns(conn, name, "case_documents")
+            assert "s3_etag" in cols and "stored" in cols
             n = conn.execute(f'SELECT COUNT(*) FROM "{name}".case_schema_version').fetchone()[0]
             assert n == 2
+            stored = dict(conn.execute(
+                f'SELECT doc_id, stored FROM "{name}".case_documents').fetchall())
+            assert stored == {queued: True, uploading: False}
     finally:
         s.close()
         with psycopg.connect(URL, autocommit=True) as conn:
@@ -59,11 +72,12 @@ def test_migration_v1_to_v2_upgrades_a_slice_1_database(schema_name):
 
 
 def test_document_lifecycle(store):
-    from core.case_store import CaseLimitError, DOC_DUPLICATE, DOC_FAILED, DOC_QUEUED, DOC_UNSUPPORTED
+    from core.case_store import CaseLimitError, DOC_FAILED, DOC_QUEUED, DOC_UNSUPPORTED
     cid = run(store.create_case("owner-1", {"title": "Doc case"}))["case_id"]
     d1 = str(uuid.uuid4())
     doc = run(store.create_document(cid, "owner-1", d1, _doc_fields("a"), max_docs=500, max_bytes=10**9))
     assert doc["status"] == "uploading" and doc["doc_id"] == d1 and doc["case_id"] == cid
+    assert doc["stored"] is False
 
     # caps are enforced under the case lock
     with pytest.raises(CaseLimitError) as e:
@@ -89,6 +103,7 @@ def test_document_lifecycle(store):
     out = run(store.finish_complete(cid, d1, "owner-1", outcome=DOC_QUEUED, sniffed_mime="application/pdf",
                                     sse="AES256", version_id="v1", etag="etag-1", enqueue_job=True, max_attempts=3))
     assert out["status"] == DOC_QUEUED and out["sse"] == "AES256" and out["s3_etag"] == "etag-1"
+    assert out["stored"] is True
     jobs = store.list_jobs_sync(cid, d1)
     assert len(jobs) == 1 and jobs[0]["type"] == "ingest" and jobs[0]["status"] == "queued"
     assert jobs[0]["max_attempts"] == 3
@@ -101,15 +116,24 @@ def test_document_lifecycle(store):
     assert again["status"] == DOC_QUEUED and again["error_code"] is None
     assert len(store.list_jobs_sync(cid, d1)) == 1
 
-    # duplicate by ETag + size
+    # same ETag + size as d1 is a hint only: the row is queued with a job of its own
     d2 = str(uuid.uuid4())
     run(store.create_document(cid, "owner-1", d2, _doc_fields("d"), 500, 10**9))
     assert run(store.find_duplicate(cid, etag="etag-1", size=PDF_SIZE, exclude_doc_id=d2)) == d1
     assert run(store.find_duplicate(cid, etag="etag-1", size=PDF_SIZE + 1, exclude_doc_id=d2)) is None
     assert run(store.find_duplicate(cid, etag="etag-1", size=PDF_SIZE, exclude_doc_id=d1)) is None
-    dup = run(store.finish_complete(cid, d2, "owner-1", outcome=DOC_DUPLICATE, etag="etag-1", duplicate_of=d1))
-    assert dup["status"] == DOC_DUPLICATE and dup["duplicate_of"] == d1
-    assert len(store.list_jobs_sync(cid)) == 1
+    q2 = run(store.finish_complete(cid, d2, "owner-1", outcome=DOC_QUEUED, etag="etag-1", enqueue_job=True))
+    assert q2["status"] == DOC_QUEUED and q2["duplicate_of"] is None and q2["stored"] is True
+    assert len(store.list_jobs_sync(cid)) == 2
+
+    # a complete-time rejection is `failed` and NOT stored: no count, no job
+    d5 = str(uuid.uuid4())
+    run(store.create_document(cid, "owner-1", d5, _doc_fields("g", size=77), 500, 10**9))
+    rej = run(store.finish_complete(cid, d5, "owner-1", outcome=DOC_FAILED, error_code="mime_mismatch"))
+    assert rej["status"] == DOC_FAILED and rej["stored"] is False
+    assert run(store.get_case(cid, "owner-1"))["doc_count"] == 2
+    assert run(store.soft_delete_document(cid, d5, "owner-1", 7))["jobs_cancelled"] == 0
+    assert run(store.get_case(cid, "owner-1"))["doc_count"] == 2              # never counted, never decremented
 
     # client hash hint
     d4 = str(uuid.uuid4())
@@ -123,12 +147,12 @@ def test_document_lifecycle(store):
     run(store.finish_complete(cid, d3, "owner-1", outcome=DOC_UNSUPPORTED, sniffed_mime="audio/mpeg",
                               sse="AES256", etag="e3"))
     rows, total, counts = run(store.list_documents(cid, "owner-1", 10, 0))
-    assert total == 4 and counts == {"queued": 2, "duplicate": 1, "unsupported": 1}
+    assert total == 4 and counts == {"queued": 3, "unsupported": 1}
     assert [r["doc_id"] for r in rows] == [d1, d2, d4, d3]                       # created order
     rows, total, _ = run(store.list_documents(cid, "owner-1", 10, 0, status="unsupported"))
     assert total == 1 and rows[0]["doc_id"] == d3
     st = run(store.case_status(cid, "owner-1"))
-    assert st["doc_count"] == 4 and st["bytes_total"] == PDF_SIZE * 3 + 50 and st["pending"] == 2
+    assert st["doc_count"] == 4 and st["bytes_total"] == PDF_SIZE * 3 + 50 and st["pending"] == 3
 
     # soft delete a queued document: ingest cancelled, counts down, purge scheduled later
     res = run(store.soft_delete_document(cid, d1, "owner-1", purge_after_days=7))
@@ -142,11 +166,11 @@ def test_document_lifecycle(store):
 
     # soft delete the case: everything tombstoned, purge jobs survive, one more scheduled
     res = run(store.soft_delete_case(cid, "owner-1", purge_after_days=7))
-    assert res == {"case_id": cid, "status": "deleted", "documents": 3, "jobs_cancelled": 1}   # d4's ingest
+    assert res == {"case_id": cid, "status": "deleted", "documents": 3, "jobs_cancelled": 2}   # d2 + d4 ingest
     assert run(store.get_case(cid, "owner-1")) is None and run(store.case_status(cid, "owner-1")) is None
     jobs = store.list_jobs_sync(cid)
     purge = [j for j in jobs if j["type"] == "purge"]
-    assert len(purge) == 2 and all(j["status"] == "queued" for j in purge)
+    assert len(purge) == 3 and all(j["status"] == "queued" for j in purge)        # d5, d1, case
     assert any(j["doc_id"] is None for j in purge)
     assert not [j for j in jobs if j["type"] == "ingest" and j["status"] == "queued"]
     assert run(store.soft_delete_case(cid, "owner-1", 7)) is None

@@ -11,9 +11,11 @@ someone else is indistinguishable from one that does not exist (404).
 Uploads never pass through this process: ``presign`` hands the browser a
 presigned PUT for an id-only key, ``complete`` verifies the object with a
 HEAD (size, server-side encryption) and sniffs its first 8 KB, then marks the
-row ``queued`` (plus an ``ingest`` job), ``unsupported`` (audio and video,
-stored for later) or ``duplicate`` (same ETag and size as a stored sibling).
-Rejections mark the row ``failed`` with a code and delete the object.
+row ``queued`` (plus an ``ingest`` job) or ``unsupported`` (audio and video,
+stored for later). Rejections mark the row ``failed`` with a code and delete
+the object. A sibling with the same ETag and size is reported as
+``duplicate_hint`` only: extraction is never skipped on that signal, the
+worker marks ``duplicate`` after confirming the sha256 (decision 30 Oct).
 
 Logging rule: ids, sizes, codes and outcomes only. Never a filename.
 
@@ -37,14 +39,15 @@ from core.case_auth import resolve_case_user
 from core.case_models import (
     CASE_NUMBER_MAX, CNR_MAX, FILENAME_MAX, OBJECTIVE_MAX, SHORT_MAX, SLUG_MAX, TITLE_MAX,
     CaseCreate, CaseDeleteOut, CaseListOut, CaseMetaOut, CaseOut, CaseStatusOut, CaseUpdate,
-    DocumentDeleteOut, DocumentListOut, DocumentOut, DocumentPresignIn, DocumentPresignOut, DownloadOut,
+    DocumentCompleteOut, DocumentDeleteOut, DocumentListOut, DocumentOut, DocumentPresignIn,
+    DocumentPresignOut, DownloadOut,
 )
 from core.case_s3 import get_case_s3, raw_key
 from core.case_sniff import SNIFF_BYTES, SUPPORTED_TYPES, canonical_mime, is_media_ext, matches, sanitise_filename
 from core.case_store import (
     ACTION_CASE_CREATE, ACTION_CASE_DELETE, ACTION_CASE_UPDATE,
     ACTION_DOC_COMPLETE, ACTION_DOC_DELETE, ACTION_DOC_DOWNLOAD, ACTION_DOC_PRESIGN,
-    DOC_DUPLICATE, DOC_FAILED, DOC_QUEUED, DOC_STORED, DOC_UNSUPPORTED, DOC_UPLOADING,
+    DOC_FAILED, DOC_QUEUED, DOC_UNSUPPORTED, DOC_UPLOADING,
     CaseLimitError, CaseStoreProtocol, get_case_store,
 )
 from core.logger import get_logger, get_request_id, short_err
@@ -284,7 +287,7 @@ def build_case_router(limiter=None, limit_value: Optional[Callable[[], str] | st
         await store.record_audit(cid, user_id, ACTION_DOC_PRESIGN, object_id=doc_id, request_id=_req_id(request))
         return {**doc, "upload": upload, "duplicate_hint": hint}
 
-    @router.post("/{case_id}/documents/{doc_id}/complete", response_model=DocumentOut)
+    @router.post("/{case_id}/documents/{doc_id}/complete", response_model=DocumentCompleteOut)
     @_rl
     async def complete_document(
         request: Request,
@@ -298,7 +301,7 @@ def build_case_router(limiter=None, limit_value: Optional[Callable[[], str] | st
         if doc is None:
             raise _not_found("Document")
         if doc["status"] != DOC_UPLOADING:
-            return doc                                     # idempotent: already completed
+            return {**doc, "duplicate_hint": None}         # idempotent: already completed
         cid, did, key = doc["case_id"], doc["doc_id"], doc["s3_key"]
         rid = _req_id(request)
 
@@ -336,20 +339,21 @@ def build_case_router(limiter=None, limit_value: Optional[Callable[[], str] | st
         if not ok:
             await reject("mime_mismatch", 422, head, sniffed)
 
-        outcome, duplicate_of, enqueue = DOC_QUEUED, None, True
+        outcome, enqueue, hint = DOC_QUEUED, True, None
         if is_media_ext(doc["ext"]):
             outcome, enqueue = DOC_UNSUPPORTED, False          # stored; transcription comes later
         else:
-            duplicate_of = await store.find_duplicate(cid, etag=head.etag, size=head.size, exclude_doc_id=did)
-            if duplicate_of:
-                outcome, enqueue = DOC_DUPLICATE, False
+            # Same ETag and size as a stored sibling is a HINT for the UI. The
+            # job is queued regardless: only the worker's sha256 can prove the
+            # bytes are identical (same ETag + size, different bytes is possible).
+            hint = await store.find_duplicate(cid, etag=head.etag, size=head.size, exclude_doc_id=did)
         out = await store.finish_complete(
             cid, did, user_id, outcome=outcome, sniffed_mime=sniffed, sse=head.sse,
-            version_id=head.version_id, etag=head.etag, duplicate_of=duplicate_of,
+            version_id=head.version_id, etag=head.etag,
             enqueue_job=enqueue, max_attempts=_job_max_attempts(),
         )
         await store.record_audit(cid, user_id, ACTION_DOC_COMPLETE, object_id=f"{did}:{outcome}", request_id=rid)
-        return out
+        return {**out, "duplicate_hint": hint}
 
     @router.get("/{case_id}/documents", response_model=DocumentListOut)
     @_rl
@@ -397,7 +401,7 @@ def build_case_router(limiter=None, limit_value: Optional[Callable[[], str] | st
         doc = await store.get_document(case_id, doc_id, user_id)
         if doc is None:
             raise _not_found("Document")
-        if doc["status"] not in DOC_STORED:
+        if not doc.get("stored"):
             raise HTTPException(status_code=409, detail={"code": "not_downloadable", "status": doc["status"]})
         ttl = _download_ttl()
         content_type = canonical_mime(doc["ext"])

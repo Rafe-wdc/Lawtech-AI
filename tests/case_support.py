@@ -24,7 +24,7 @@ from core.auth import require_user_key
 from core.case_routes import build_case_router
 from core.case_s3 import HeadResult, content_disposition, get_case_s3
 from core.case_store import (
-    CASE_EDITABLE, DOC_COLUMNS, DOC_DEDUPE_TARGETS, DOC_RESERVED, DOC_STORED, DOC_UPLOADING,
+    CASE_EDITABLE, DOC_COLUMNS, DOC_DEDUPE_TARGETS, DOC_STORED, DOC_UPLOADING,
     JOB_INGEST, JOB_PURGE, CaseLimitError, get_case_store,
 )
 from core.jwt_auth import mint_hs256
@@ -138,7 +138,8 @@ class FakeCaseStore:
             return None
         if c["status"] != "active":
             raise CaseLimitError("case_not_active")
-        reserved = [d for d in self.documents.values() if d["case_id"] == case_id and d["status"] in DOC_RESERVED]
+        reserved = [d for d in self.documents.values()
+                    if d["case_id"] == case_id and (d["status"] == DOC_UPLOADING or d["stored"])]
         if len(reserved) >= max_docs:
             raise CaseLimitError("case_doc_cap")
         if sum(d["size_bytes"] for d in reserved) + fields["size_bytes"] > max_bytes:
@@ -151,7 +152,8 @@ class FakeCaseStore:
             "declared_mime": fields.get("declared_mime", "") or "", "sniffed_mime": "",
             "size_bytes": int(fields["size_bytes"]), "client_sha256": fields.get("client_sha256"),
             "s3_key": fields["s3_key"], "source": fields.get("source", "lawyer"), "status": DOC_UPLOADING,
-            "kind": "", "kind_confidence": 0, "ocr_pages": 0, "created_at": now, "updated_at": now,
+            "stored": False, "kind": "", "kind_confidence": 0, "ocr_pages": 0,
+            "created_at": now, "updated_at": now,
         })
         self.documents[doc_id] = d
         return self._doc_out(d)
@@ -188,10 +190,10 @@ class FakeCaseStore:
             return None
         if d["status"] != DOC_UPLOADING:
             return self._doc_out(d)
-        d.update(status=outcome, sniffed_mime=sniffed_mime or "", sse=sse or None,
-                 s3_version_id=version_id or None, s3_etag=etag or None, error_code=error_code,
-                 duplicate_of=duplicate_of, updated_at=self._now())
-        if outcome in DOC_STORED:
+        d.update(status=outcome, stored=outcome in DOC_STORED, sniffed_mime=sniffed_mime or "",
+                 sse=sse or None, s3_version_id=version_id or None, s3_etag=etag or None,
+                 error_code=error_code, duplicate_of=duplicate_of, updated_at=self._now())
+        if d["stored"]:
             c = self.cases[case_id]
             c["doc_count"] += 1
             c["bytes_total"] += d["size_bytes"]
@@ -215,7 +217,7 @@ class FakeCaseStore:
             if j["doc_id"] == doc_id and j["status"] == "queued" and j["type"] != JOB_PURGE:
                 j["status"] = "cancelled"
                 cancelled += 1
-        if prev in DOC_STORED:
+        if d["stored"]:
             c = self.cases[case_id]
             c["doc_count"] = max(0, c["doc_count"] - 1)
             c["bytes_total"] = max(0, c["bytes_total"] - d["size_bytes"])
@@ -283,11 +285,13 @@ class FakeCaseS3:
                 "expires_at": datetime.now(timezone.utc) + timedelta(seconds=expires_s)}
 
     def put_object(self, key: str, data: bytes, content_type: str = "application/octet-stream",
-                   sse: Optional[str] = "AES256") -> str:
+                   sse: Optional[str] = "AES256", etag: Optional[str] = None) -> str:
+        """``etag`` may be forced so tests can stage an ETag collision (same
+        ETag and size, different bytes), which real S3 cannot rule out."""
         self._versions += 1
         vid = f"v{self._versions}"
         self.objects[key] = {"data": bytes(data), "content_type": content_type, "sse": sse or "",
-                             "etag": hashlib.md5(bytes(data)).hexdigest(), "version_id": vid}
+                             "etag": etag or hashlib.md5(bytes(data)).hexdigest(), "version_id": vid}
         return vid
 
     def head(self, key: str) -> HeadResult:

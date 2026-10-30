@@ -37,7 +37,7 @@ python scripts/mint_dev_jwt.py --user-id 42 --ttl 3600
 
 ## Schema
 
-Created in code by `core/case_store.py` under a transaction advisory lock, versioned in `case_schema_version`. Version 1 creates `cases`, `case_documents`, `case_jobs`, `case_audit`, `case_workers` and their indexes. Version 2 adds `case_documents.s3_etag` (plus a partial index): S3 computes the ETag, so ETag + size is a trustworthy same-content signal that lets `complete` mark a duplicate immediately, before the worker has a SHA-256. To migrate, append `(3, [statements])` to `MIGRATIONS`; never edit an applied version.
+Created in code by `core/case_store.py` under a transaction advisory lock, versioned in `case_schema_version`. Version 1 creates `cases`, `case_documents`, `case_jobs`, `case_audit`, `case_workers` and their indexes. Version 2 adds `case_documents.s3_etag` (plus a partial index) and `case_documents.stored`. The ETag is a **hint only**: `complete` reports a sibling with the same ETag and size as `duplicate_hint`, and the worker marks `duplicate` after it has hashed the bytes and found a `ready` sibling with the same SHA-256; extraction is never skipped on ETag + size alone (an ETag collision with different bytes is possible). `stored` is set when `complete` accepts the object and drives the caps, `doc_count` / `bytes_total` and download, so an ingest failure (object retained) and a complete-time rejection (object deleted) can both be `failed` without the accounting guessing from status. The migration backfills `stored` from the status of rows written by a version 1 server. To migrate, append `(3, [statements])` to `MIGRATIONS`; never edit an applied version.
 
 ## Endpoints
 
@@ -53,7 +53,7 @@ All under `/pyapi/cases`, all rate-limited with the gateway's per-key limiter.
 | GET | `/{case_id}/status` | polling: `documents` counts by status, `pending`, `doc_count`, `bytes_total` | `case_view` (throttled) |
 | DELETE | `/{case_id}` | soft delete case: tombstone, tombstone documents, cancel queued ingest jobs, schedule purge | `case_delete` |
 | POST | `/{case_id}/documents/presign` | reserve a document row and return a presigned PUT (201) | `doc_presign` |
-| POST | `/{case_id}/documents/{doc_id}/complete` | verify the object and queue it (idempotent) | `doc_complete` (`doc_id:outcome`) |
+| POST | `/{case_id}/documents/{doc_id}/complete` | verify the object and queue it (idempotent); `duplicate_hint` names a stored sibling with the same ETag and size | `doc_complete` (`doc_id:outcome`) |
 | GET | `/{case_id}/documents` | list, `?status=` filter, per-status `counts` | |
 | GET | `/{case_id}/documents/{doc_id}` | detail | |
 | GET | `/{case_id}/documents/{doc_id}/download` | short-lived presigned GET | `doc_download_url` |
@@ -63,7 +63,7 @@ All under `/pyapi/cases`, all rate-limited with the gateway's per-key limiter.
 
 1. **presign**: body `{filename, size_bytes, content_type?, client_sha256?}`. The filename is sanitised (path, control and reserved characters removed, Unicode kept) and the extension decides the type; the server picks the canonical `Content-Type` and signs it. Key: `cases/{case_id}/raw/{doc_id}.{ext}`. The row is `uploading` and already holds a slot against the caps. `duplicate_hint` names an existing document with the same client hash (a warning for the UI, never enforced).
 2. **browser PUT** to `upload.url` with exactly `upload.headers`. Encryption comes from the bucket default.
-3. **complete**: HEAD (exists, size equals the declared size and is within the cap, `ServerSideEncryption` equals `CASE_S3_SSE`), then a ranged GET of the first 8 KB sniffed against the extension. Outcome: `queued` (+ one `ingest` job, enforced unique per document), `unsupported` (audio and video: stored, no job, re-queued when transcription ships) or `duplicate` (same ETag and size as a stored sibling; `duplicate_of` set, no job). Calling complete again returns the row unchanged.
+3. **complete**: HEAD (exists, size equals the declared size and is within the cap, `ServerSideEncryption` equals `CASE_S3_SSE`), then a ranged GET of the first 8 KB sniffed against the extension. Outcome: `queued` (+ one `ingest` job, enforced unique per document) or `unsupported` (audio and video: stored, no job, re-queued when transcription ships). The answer carries `stored: true` and, when a stored sibling has the same ETag and size, `duplicate_hint`; that hint is advisory and the job is queued regardless. Calling complete again returns the row unchanged.
 
 Rejections mark the row `failed` with `error_code`, delete the object (by version id) and answer:
 
@@ -76,11 +76,11 @@ Rejections mark the row `failed` with `error_code`, delete the object (by versio
 | `object_missing` | 409 | complete before the PUT landed |
 | `size_mismatch`, `sse_missing`, `mime_mismatch` | 422 | complete |
 | `storage_error` | 503 | complete, S3 unreachable (row stays `uploading`, retry later) |
-| `not_downloadable` | 409 | download of a row without an object (`uploading`, `failed`, `expired`) |
+| `not_downloadable` | 409 | download of a row that is not `stored` (`uploading`, rejected at complete, `expired`) |
 
 Supported extensions: `pdf docx xlsx csv txt md png jpg webp` (ingested; same set as the chat upload) and `mp3 wav m4a aac ogg opus flac amr mp4 mov mkv webm 3gp avi` (stored as `unsupported`). Images must match exactly (a PNG under `.jpg` is a mismatch); text extensions accept any clean UTF-8/UTF-16 text; executables, legacy `.doc`, zips that are not Word or Excel packages and unknown binaries are mismatches.
 
-Document statuses: `uploading → queued | unsupported | duplicate | failed`, then (slice 3) `queued → processing → ready | failed`, housekeeping `uploading → expired` after 24 h, and `any → deleted` on soft delete.
+Document statuses: `uploading → queued | unsupported | failed`, then (slice 3) `queued → processing → ready | duplicate | failed`, housekeeping `uploading → expired` after 24 h, and `any → deleted` on soft delete. `duplicate` is only ever set by the worker, with `duplicate_of` pointing at the `ready` document whose SHA-256 matched.
 
 ## Tests
 

@@ -176,6 +176,7 @@ class DocumentOut(BaseModel):
     chars_total: Optional[int] = None
     ocr_pages: int = 0
     extractor: Optional[str] = None
+    stored: bool = False                      # object accepted at complete; counted; downloadable
     created_at: datetime
     updated_at: datetime
     ready_at: Optional[datetime] = None
@@ -183,6 +184,13 @@ class DocumentOut(BaseModel):
 
 class DocumentPresignOut(DocumentOut):
     upload: UploadInstructions
+    duplicate_hint: Optional[str] = None      # client sha256 matched a sibling (hint only)
+
+
+class DocumentCompleteOut(DocumentOut):
+    """``complete`` answer. ``duplicate_hint`` names a stored sibling with the
+    same S3 ETag and size; it is advisory. Only the worker marks a document
+    ``duplicate``, after confirming the sha256 of the bytes."""
     duplicate_hint: Optional[str] = None
 
 

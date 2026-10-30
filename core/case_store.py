@@ -142,11 +142,20 @@ _SCHEMA_V1: list[str] = [
 ]
 
 _SCHEMA_V2: list[str] = [
-    # ETag from HEAD at complete. S3 computes it, so (etag, size) is a trustworthy
-    # same-content signal for immediate dedupe before the worker has a sha256.
+    # ETag from HEAD at complete. A HINT only (surfaced as `duplicate_hint`):
+    # a document is marked `duplicate` solely by the worker, after it has
+    # hashed the bytes and found a `ready` sibling with the same sha256.
     "ALTER TABLE case_documents ADD COLUMN IF NOT EXISTS s3_etag TEXT",
     """CREATE INDEX IF NOT EXISTS idx_case_documents_etag
          ON case_documents (case_id, s3_etag) WHERE s3_etag IS NOT NULL""",
+    # `stored`: the object was accepted at complete; the row counts towards
+    # doc_count / bytes_total / the caps and may be downloaded. Explicit rather
+    # than derived from status, because `failed` has two shapes: rejected at
+    # complete (object deleted, never stored) and failed at ingest (slice 3,
+    # object retained, still stored).
+    "ALTER TABLE case_documents ADD COLUMN IF NOT EXISTS stored BOOLEAN NOT NULL DEFAULT FALSE",
+    """UPDATE case_documents SET stored = TRUE
+        WHERE status IN ('queued','processing','ready','unsupported','duplicate')""",
 ]
 
 MIGRATIONS: list[tuple[int, list[str]]] = [
@@ -229,18 +238,20 @@ DOC_UNSUPPORTED = "unsupported"
 DOC_EXPIRED = "expired"
 DOC_DELETED = "deleted"
 
-# The object is in S3; the row counts towards doc_count / bytes_total; download allowed.
+# Statuses a stored object passes through. Accounting (caps, counts, download)
+# reads the explicit ``stored`` column, set when ``complete`` accepts the object;
+# this tuple only says which complete outcomes set it.
 DOC_STORED = (DOC_QUEUED, DOC_PROCESSING, DOC_READY, DOC_UNSUPPORTED, DOC_DUPLICATE)
-# Holds a slot against the per-case caps (in-flight uploads included).
-DOC_RESERVED = (DOC_UPLOADING, *DOC_STORED)
-# What an incoming object can be a duplicate of (never another duplicate).
+# What the duplicate HINT may point at (client hash or ETag): never another
+# duplicate, never a failed or deleted row. The authoritative match the worker
+# uses is narrower: a ``ready`` sibling with the same server-computed sha256.
 DOC_DEDUPE_TARGETS = (DOC_QUEUED, DOC_PROCESSING, DOC_READY, DOC_UNSUPPORTED)
 
 DOC_COLUMNS = (
     "doc_id", "case_id", "filename", "ext", "declared_mime", "sniffed_mime", "size_bytes",
     "sha256", "sse", "status", "error_code", "duplicate_of", "kind", "kind_confidence",
     "page_count", "chars_total", "ocr_pages", "extractor", "s3_key", "s3_version_id", "s3_etag",
-    "created_at", "updated_at", "ready_at",
+    "stored", "created_at", "updated_at", "ready_at",
 )
 
 JOB_INGEST = "ingest"
@@ -267,6 +278,7 @@ def _row_to_doc(row: dict) -> dict:
     for k in ("doc_id", "case_id", "duplicate_of"):
         if out.get(k) is not None:
             out[k] = str(out[k])
+    out["stored"] = bool(out.get("stored"))
     for k in ("created_at", "updated_at", "ready_at"):
         v = out.get(k)
         if isinstance(v, datetime) and not v.tzinfo:
@@ -511,10 +523,11 @@ class CaseStore:
             if case["status"] != "active":
                 conn.rollback()
                 raise CaseLimitError("case_not_active")
+            # in-flight uploads hold a slot too, so a burst of presigns cannot pass the cap
             agg = conn.execute(
                 """SELECT COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS b
-                     FROM case_documents WHERE case_id = %s AND status = ANY(%s)""",
-                (cid, list(DOC_RESERVED)),
+                     FROM case_documents WHERE case_id = %s AND (status = %s OR stored)""",
+                (cid, DOC_UPLOADING),
             ).fetchone()
             if int(agg["n"]) >= int(max_docs):
                 conn.rollback()
@@ -591,8 +604,10 @@ class CaseStore:
 
     def _find_duplicate_sync(self, case_id: str, etag: Optional[str] = None, size: Optional[int] = None,
                              sha256: Optional[str] = None, exclude_doc_id: Optional[str] = None) -> Optional[str]:
-        """Earliest stored document in the case with the same content signal:
-        S3's ETag plus size (trustworthy, server-computed) or a SHA-256."""
+        """Earliest candidate in the case with the same content HINT: S3's ETag
+        plus size, or a SHA-256 (client-declared or worker-computed). Used for
+        ``duplicate_hint`` only; the worker's authoritative check is
+        ``find_ready_by_sha256`` (slice 3)."""
         cid = _as_uuid(case_id)
         if cid is None:
             return None
@@ -627,9 +642,9 @@ class CaseStore:
                               sniffed_mime: str = "", sse: str = "", version_id: str = "", etag: str = "",
                               error_code: Optional[str] = None, duplicate_of: Optional[str] = None,
                               enqueue_job: bool = False, max_attempts: int = 4) -> Optional[dict]:
-        """``uploading`` -> ``outcome`` in one transaction: counts, and the
-        ingest job when asked. Idempotent: a row that already left
-        ``uploading`` is returned unchanged."""
+        """``uploading`` -> ``outcome`` in one transaction: ``stored`` and the
+        counts when the object is accepted, and the ingest job when asked.
+        Idempotent: a row that already left ``uploading`` is returned unchanged."""
         cid, did = _as_uuid(case_id), _as_uuid(doc_id)
         if cid is None or did is None:
             return None
@@ -639,19 +654,19 @@ class CaseStore:
         with self._get_pool().connection() as conn:
             row = conn.execute(
                 """UPDATE case_documents
-                      SET status = %s, sniffed_mime = %s, sse = NULLIF(%s, ''),
+                      SET status = %s, stored = %s, sniffed_mime = %s, sse = NULLIF(%s, ''),
                           s3_version_id = NULLIF(%s, ''), s3_etag = NULLIF(%s, ''),
                           error_code = %s, duplicate_of = %s, updated_at = now()
                     WHERE doc_id = %s AND case_id = %s AND owner_user_id = %s AND status = %s
                 RETURNING *""",
-                (outcome, sniffed_mime or "", sse or "", version_id or "", etag or "",
-                 error_code, dup, did, cid, owner_user_id, DOC_UPLOADING),
+                (outcome, outcome in DOC_STORED, sniffed_mime or "", sse or "", version_id or "",
+                 etag or "", error_code, dup, did, cid, owner_user_id, DOC_UPLOADING),
             ).fetchone()
             if row is None:
                 conn.rollback()
                 already = True
             else:
-                if outcome in DOC_STORED:
+                if row["stored"]:
                     conn.execute(
                         """UPDATE cases SET doc_count = doc_count + 1, bytes_total = bytes_total + %s,
                                             updated_at = now() WHERE case_id = %s""",
@@ -687,13 +702,13 @@ class CaseStore:
         with self._get_pool().connection() as conn:
             row = conn.execute(
                 """WITH old AS (
-                       SELECT doc_id, status AS prev_status, size_bytes FROM case_documents
+                       SELECT doc_id, status AS prev_status, size_bytes, stored FROM case_documents
                         WHERE doc_id = %s AND case_id = %s AND owner_user_id = %s AND status <> 'deleted'
                         FOR UPDATE)
                    UPDATE case_documents d
                       SET status = 'deleted', deleted_at = now(), updated_at = now()
                      FROM old WHERE d.doc_id = old.doc_id
-                RETURNING d.doc_id, old.prev_status, old.size_bytes""",
+                RETURNING d.doc_id, old.prev_status, old.size_bytes, old.stored""",
                 (did, cid, owner_user_id),
             ).fetchone()
             if row is None:
@@ -703,7 +718,7 @@ class CaseStore:
                 """UPDATE case_jobs SET status = 'cancelled', finished_at = now(), updated_at = now()
                     WHERE doc_id = %s AND status = 'queued' AND type <> %s""", (did, JOB_PURGE),
             ).rowcount
-            if row["prev_status"] in DOC_STORED:
+            if row["stored"]:
                 conn.execute(
                     """UPDATE cases SET doc_count = GREATEST(doc_count - 1, 0),
                                         bytes_total = GREATEST(bytes_total - %s, 0), updated_at = now()

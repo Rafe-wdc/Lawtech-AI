@@ -141,7 +141,8 @@ def test_complete_queues_creates_one_job_and_is_idempotent(client, store, s3):
     assert r.status_code == 200, r.text
     doc = r.json()
     assert doc["status"] == "queued" and doc["sniffed_mime"] == "application/pdf" and doc["sse"] == "AES256"
-    assert doc["error_code"] is None and doc["duplicate_of"] is None
+    assert doc["error_code"] is None and doc["duplicate_of"] is None and doc["duplicate_hint"] is None
+    assert doc["stored"] is True
     jobs = store.jobs_for(doc_id=p["doc_id"], type="ingest")
     assert len(jobs) == 1 and jobs[0]["status"] == "queued" and jobs[0]["case_id"] == cid
     case = client.get(f"/pyapi/cases/{cid}", headers=U1).json()
@@ -212,16 +213,39 @@ def test_media_is_stored_as_unsupported_without_a_job(client, store, s3):
     assert client.get(f"/pyapi/cases/{cid}/documents/{p['doc_id']}/download", headers=U1).status_code == 200
 
 
-def test_duplicate_content_is_marked_duplicate_without_a_job(client, store, s3):
+def test_same_content_is_queued_with_a_hint_never_marked_duplicate_at_complete(client, store, s3):
+    """ETag + size is a hint. Only the worker marks `duplicate`, after the sha256 matches."""
     cid = _case(client)
     first = _uploaded_doc(client, s3, cid, "notice.pdf")
     second = _uploaded_doc(client, s3, cid, "notice (copy).pdf")           # same bytes, other name
-    assert second["status"] == "duplicate" and second["duplicate_of"] == first["doc_id"]
-    assert len(store.jobs_for(case_id=cid, type="ingest")) == 1
-    third = _uploaded_doc(client, s3, cid, "annexure.docx", DOCX)         # different content: queued
-    assert third["status"] == "queued" and third["sniffed_mime"].endswith("wordprocessingml.document")
+    assert second["status"] == "queued" and second["duplicate_of"] is None
+    assert second["duplicate_hint"] == first["doc_id"]
+    assert len(store.jobs_for(case_id=cid, type="ingest")) == 2             # both are extracted
+    third = _uploaded_doc(client, s3, cid, "annexure.docx", DOCX)         # different content: no hint
+    assert third["status"] == "queued" and third["duplicate_hint"] is None
+    assert third["sniffed_mime"].endswith("wordprocessingml.document")
     st = client.get(f"/pyapi/cases/{cid}/status", headers=U1).json()
-    assert st["documents"] == {"queued": 2, "duplicate": 1} and st["pending"] == 2 and st["doc_count"] == 3
+    assert st["documents"] == {"queued": 3} and st["pending"] == 3 and st["doc_count"] == 3
+    items = client.get(f"/pyapi/cases/{cid}/documents", headers=U1).json()["items"]
+    assert len(items) == 3 and all(d["stored"] for d in items)
+
+
+def test_same_etag_and_size_but_different_bytes_are_both_queued(client, store, s3):
+    """An ETag collision must never skip extraction: each document gets its own job."""
+    cid = _case(client)
+    a_bytes, b_bytes = PDF + b"A" * 16, PDF + b"B" * 16                     # same length, other content
+    pa = _presign(client, cid, "a.pdf", data=a_bytes).json()
+    s3.put_object(raw_key(cid, pa["doc_id"], "pdf"), a_bytes, "application/pdf", etag="collide")
+    pb = _presign(client, cid, "b.pdf", data=b_bytes).json()
+    s3.put_object(raw_key(cid, pb["doc_id"], "pdf"), b_bytes, "application/pdf", etag="collide")
+    a = _complete(client, cid, pa["doc_id"]).json()
+    b = _complete(client, cid, pb["doc_id"]).json()
+    assert a["status"] == b["status"] == "queued"
+    assert a["duplicate_hint"] is None and b["duplicate_hint"] == a["doc_id"]     # a hint, nothing more
+    assert b["duplicate_of"] is None
+    jobs = store.jobs_for(case_id=cid, type="ingest")
+    assert {j["doc_id"] for j in jobs} == {a["doc_id"], b["doc_id"]}
+    assert all(j["status"] == "queued" for j in jobs)
 
 
 # --- list, detail, status -----------------------------------------------------

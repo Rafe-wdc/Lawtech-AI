@@ -53,7 +53,7 @@ def run(coro):
 
 
 def test_schema_is_created_versioned_and_idempotent(store, schema_name):
-    from core.case_store import SCHEMA_VERSION
+    from core.case_store import MIGRATIONS, SCHEMA_VERSION
     store.ensure_schema()
     store._schema_ok = False          # force a second pass: must be a no-op
     store.ensure_schema()
@@ -65,7 +65,7 @@ def test_schema_is_created_versioned_and_idempotent(store, schema_name):
     assert {"cases", "case_documents", "case_jobs", "case_audit", "case_workers", "case_schema_version"} <= tables
     with psycopg.connect(URL) as conn:
         n = conn.execute("SELECT COUNT(*) FROM %s.case_schema_version" % f'"{schema_name}"').fetchone()[0]
-    assert n == 1
+    assert n == len(MIGRATIONS)
 
 
 def test_create_list_get_update(store):

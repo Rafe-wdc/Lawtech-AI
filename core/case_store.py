@@ -141,8 +141,17 @@ _SCHEMA_V1: list[str] = [
     )""",
 ]
 
+_SCHEMA_V2: list[str] = [
+    # ETag from HEAD at complete. S3 computes it, so (etag, size) is a trustworthy
+    # same-content signal for immediate dedupe before the worker has a sha256.
+    "ALTER TABLE case_documents ADD COLUMN IF NOT EXISTS s3_etag TEXT",
+    """CREATE INDEX IF NOT EXISTS idx_case_documents_etag
+         ON case_documents (case_id, s3_etag) WHERE s3_etag IS NOT NULL""",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, _SCHEMA_V1),
+    (2, _SCHEMA_V2),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
@@ -173,6 +182,20 @@ class CaseStoreProtocol(Protocol):
                            object_id: Optional[str] = None, request_id: Optional[str] = None) -> None: ...
     async def record_view(self, case_id: str, user_id: str, request_id: Optional[str],
                           window_sec: int) -> bool: ...
+    # slice 2
+    async def create_document(self, case_id: str, owner_user_id: str, doc_id: str, fields: dict,
+                              max_docs: int, max_bytes: int) -> Optional[dict]: ...
+    async def get_document(self, case_id: str, doc_id: str, owner_user_id: str) -> Optional[dict]: ...
+    async def list_documents(self, case_id: str, owner_user_id: str, limit: int, offset: int,
+                             status: Optional[str] = None) -> Optional[tuple[list[dict], int, dict]]: ...
+    async def find_duplicate(self, case_id: str, *, etag: Optional[str] = None, size: Optional[int] = None,
+                             sha256: Optional[str] = None, exclude_doc_id: Optional[str] = None) -> Optional[str]: ...
+    async def finish_complete(self, case_id: str, doc_id: str, owner_user_id: str, *, outcome: str,
+                              **kw) -> Optional[dict]: ...
+    async def soft_delete_document(self, case_id: str, doc_id: str, owner_user_id: str,
+                                   purge_after_days: int) -> Optional[dict]: ...
+    async def soft_delete_case(self, case_id: str, owner_user_id: str, purge_after_days: int) -> Optional[dict]: ...
+    async def case_status(self, case_id: str, owner_user_id: str) -> Optional[dict]: ...
 
 
 def _as_uuid(value: str) -> Optional[uuid.UUID]:
@@ -189,6 +212,65 @@ def _row_to_case(row: dict) -> dict:
         v = out.get(k)
         if isinstance(v, datetime):
             out[k] = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Slice 2: documents, soft delete, case status
+# ---------------------------------------------------------------------------
+
+DOC_UPLOADING = "uploading"
+DOC_QUEUED = "queued"
+DOC_PROCESSING = "processing"
+DOC_READY = "ready"
+DOC_FAILED = "failed"
+DOC_DUPLICATE = "duplicate"
+DOC_UNSUPPORTED = "unsupported"
+DOC_EXPIRED = "expired"
+DOC_DELETED = "deleted"
+
+# The object is in S3; the row counts towards doc_count / bytes_total; download allowed.
+DOC_STORED = (DOC_QUEUED, DOC_PROCESSING, DOC_READY, DOC_UNSUPPORTED, DOC_DUPLICATE)
+# Holds a slot against the per-case caps (in-flight uploads included).
+DOC_RESERVED = (DOC_UPLOADING, *DOC_STORED)
+# What an incoming object can be a duplicate of (never another duplicate).
+DOC_DEDUPE_TARGETS = (DOC_QUEUED, DOC_PROCESSING, DOC_READY, DOC_UNSUPPORTED)
+
+DOC_COLUMNS = (
+    "doc_id", "case_id", "filename", "ext", "declared_mime", "sniffed_mime", "size_bytes",
+    "sha256", "sse", "status", "error_code", "duplicate_of", "kind", "kind_confidence",
+    "page_count", "chars_total", "ocr_pages", "extractor", "s3_key", "s3_version_id", "s3_etag",
+    "created_at", "updated_at", "ready_at",
+)
+
+JOB_INGEST = "ingest"
+JOB_PURGE = "purge"
+
+ACTION_CASE_DELETE = "case_delete"
+ACTION_DOC_PRESIGN = "doc_presign"
+ACTION_DOC_COMPLETE = "doc_complete"
+ACTION_DOC_DOWNLOAD = "doc_download_url"
+ACTION_DOC_DELETE = "doc_delete"
+
+
+class CaseLimitError(Exception):
+    """``create_document`` refused the upload: ``case_not_active`` |
+    ``case_doc_cap`` | ``case_bytes_cap``."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _row_to_doc(row: dict) -> dict:
+    out = {k: row.get(k) for k in DOC_COLUMNS}
+    for k in ("doc_id", "case_id", "duplicate_of"):
+        if out.get(k) is not None:
+            out[k] = str(out[k])
+    for k in ("created_at", "updated_at", "ready_at"):
+        v = out.get(k)
+        if isinstance(v, datetime) and not v.tzinfo:
+            out[k] = v.replace(tzinfo=timezone.utc)
     return out
 
 
@@ -405,6 +487,334 @@ class CaseStore:
         except Exception as e:
             log.warning("Audit view write failed", error=short_err(e))
             return False
+
+
+    # ------------------------------------------------------------- documents
+
+    def _create_document_sync(self, case_id: str, owner_user_id: str, doc_id: str, fields: dict,
+                              max_docs: int, max_bytes: int) -> Optional[dict]:
+        """Reserve a document row (status ``uploading``) under the case lock so
+        the per-case caps hold under concurrent presigns."""
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            case = conn.execute(
+                """SELECT status FROM cases
+                    WHERE case_id = %s AND owner_user_id = %s AND status <> 'deleted' FOR UPDATE""",
+                (cid, owner_user_id),
+            ).fetchone()
+            if case is None:
+                conn.rollback()
+                return None
+            if case["status"] != "active":
+                conn.rollback()
+                raise CaseLimitError("case_not_active")
+            agg = conn.execute(
+                """SELECT COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS b
+                     FROM case_documents WHERE case_id = %s AND status = ANY(%s)""",
+                (cid, list(DOC_RESERVED)),
+            ).fetchone()
+            if int(agg["n"]) >= int(max_docs):
+                conn.rollback()
+                raise CaseLimitError("case_doc_cap")
+            if int(agg["b"]) + int(fields["size_bytes"]) > int(max_bytes):
+                conn.rollback()
+                raise CaseLimitError("case_bytes_cap")
+            row = conn.execute(
+                """INSERT INTO case_documents
+                       (doc_id, case_id, owner_user_id, filename, ext, declared_mime, size_bytes,
+                        client_sha256, s3_key, source, status)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+                (did, cid, owner_user_id, fields["filename"], fields["ext"],
+                 fields.get("declared_mime", "") or "", int(fields["size_bytes"]),
+                 fields.get("client_sha256") or None, fields["s3_key"],
+                 fields.get("source", "lawyer") or "lawyer", DOC_UPLOADING),
+            ).fetchone()
+            conn.commit()
+        log.info("Document presigned", case=str(cid)[:8], doc=str(did)[:8], bytes=int(fields["size_bytes"]))
+        return _row_to_doc(row)
+
+    async def create_document(self, case_id: str, owner_user_id: str, doc_id: str, fields: dict,
+                              max_docs: int, max_bytes: int) -> Optional[dict]:
+        return await asyncio.to_thread(self._create_document_sync, case_id, owner_user_id, doc_id,
+                                       fields, max_docs, max_bytes)
+
+    def _get_document_sync(self, case_id: str, doc_id: str, owner_user_id: str) -> Optional[dict]:
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            row = conn.execute(
+                """SELECT * FROM case_documents
+                    WHERE doc_id = %s AND case_id = %s AND owner_user_id = %s AND status <> 'deleted'""",
+                (did, cid, owner_user_id),
+            ).fetchone()
+        return _row_to_doc(row) if row else None
+
+    async def get_document(self, case_id: str, doc_id: str, owner_user_id: str) -> Optional[dict]:
+        return await asyncio.to_thread(self._get_document_sync, case_id, doc_id, owner_user_id)
+
+    def _list_documents_sync(self, case_id: str, owner_user_id: str, limit: int, offset: int,
+                             status: Optional[str] = None) -> Optional[tuple[list[dict], int, dict]]:
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            owned = conn.execute(
+                "SELECT 1 FROM cases WHERE case_id = %s AND owner_user_id = %s AND status <> 'deleted'",
+                (cid, owner_user_id),
+            ).fetchone()
+            if owned is None:
+                return None
+            counts = {r["status"]: int(r["n"]) for r in conn.execute(
+                """SELECT status, COUNT(*) AS n FROM case_documents
+                    WHERE case_id = %s AND status <> 'deleted' GROUP BY status""", (cid,)).fetchall()}
+            where = "case_id = %s AND owner_user_id = %s AND status <> 'deleted'"
+            params: list[Any] = [cid, owner_user_id]
+            if status:
+                where += " AND status = %s"
+                params.append(status)
+            total = conn.execute(f"SELECT COUNT(*) AS n FROM case_documents WHERE {where}", params).fetchone()["n"]
+            rows = conn.execute(
+                f"SELECT * FROM case_documents WHERE {where} ORDER BY created_at, doc_id LIMIT %s OFFSET %s",
+                [*params, int(limit), int(offset)],
+            ).fetchall()
+        return [_row_to_doc(r) for r in rows], int(total), counts
+
+    async def list_documents(self, case_id: str, owner_user_id: str, limit: int = 100, offset: int = 0,
+                             status: Optional[str] = None) -> Optional[tuple[list[dict], int, dict]]:
+        return await asyncio.to_thread(self._list_documents_sync, case_id, owner_user_id, limit, offset, status)
+
+    def _find_duplicate_sync(self, case_id: str, etag: Optional[str] = None, size: Optional[int] = None,
+                             sha256: Optional[str] = None, exclude_doc_id: Optional[str] = None) -> Optional[str]:
+        """Earliest stored document in the case with the same content signal:
+        S3's ETag plus size (trustworthy, server-computed) or a SHA-256."""
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return None
+        self.ensure_schema()
+        excl = _as_uuid(exclude_doc_id) if exclude_doc_id else None
+        with self._get_pool().connection() as conn:
+            if etag and size is not None:
+                row = conn.execute(
+                    """SELECT doc_id FROM case_documents
+                        WHERE case_id = %s AND s3_etag = %s AND size_bytes = %s AND status = ANY(%s)
+                          AND (%s::uuid IS NULL OR doc_id <> %s)
+                        ORDER BY created_at LIMIT 1""",
+                    (cid, etag, int(size), list(DOC_DEDUPE_TARGETS), excl, excl),
+                ).fetchone()
+            elif sha256:
+                row = conn.execute(
+                    """SELECT doc_id FROM case_documents
+                        WHERE case_id = %s AND (sha256 = %s OR client_sha256 = %s) AND status = ANY(%s)
+                          AND (%s::uuid IS NULL OR doc_id <> %s)
+                        ORDER BY created_at LIMIT 1""",
+                    (cid, sha256, sha256, list(DOC_DEDUPE_TARGETS), excl, excl),
+                ).fetchone()
+            else:
+                row = None
+        return str(row["doc_id"]) if row else None
+
+    async def find_duplicate(self, case_id: str, *, etag: Optional[str] = None, size: Optional[int] = None,
+                             sha256: Optional[str] = None, exclude_doc_id: Optional[str] = None) -> Optional[str]:
+        return await asyncio.to_thread(self._find_duplicate_sync, case_id, etag, size, sha256, exclude_doc_id)
+
+    def _finish_complete_sync(self, case_id: str, doc_id: str, owner_user_id: str, *, outcome: str,
+                              sniffed_mime: str = "", sse: str = "", version_id: str = "", etag: str = "",
+                              error_code: Optional[str] = None, duplicate_of: Optional[str] = None,
+                              enqueue_job: bool = False, max_attempts: int = 4) -> Optional[dict]:
+        """``uploading`` -> ``outcome`` in one transaction: counts, and the
+        ingest job when asked. Idempotent: a row that already left
+        ``uploading`` is returned unchanged."""
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None:
+            return None
+        dup = _as_uuid(duplicate_of) if duplicate_of else None
+        self.ensure_schema()
+        already = False
+        with self._get_pool().connection() as conn:
+            row = conn.execute(
+                """UPDATE case_documents
+                      SET status = %s, sniffed_mime = %s, sse = NULLIF(%s, ''),
+                          s3_version_id = NULLIF(%s, ''), s3_etag = NULLIF(%s, ''),
+                          error_code = %s, duplicate_of = %s, updated_at = now()
+                    WHERE doc_id = %s AND case_id = %s AND owner_user_id = %s AND status = %s
+                RETURNING *""",
+                (outcome, sniffed_mime or "", sse or "", version_id or "", etag or "",
+                 error_code, dup, did, cid, owner_user_id, DOC_UPLOADING),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                already = True
+            else:
+                if outcome in DOC_STORED:
+                    conn.execute(
+                        """UPDATE cases SET doc_count = doc_count + 1, bytes_total = bytes_total + %s,
+                                            updated_at = now() WHERE case_id = %s""",
+                        (int(row["size_bytes"]), cid),
+                    )
+                if enqueue_job:
+                    conn.execute(
+                        """INSERT INTO case_jobs (job_id, case_id, doc_id, type, status, max_attempts)
+                           VALUES (%s, %s, %s, %s, 'queued', %s)
+                           ON CONFLICT (doc_id, type) WHERE status IN ('queued','running') DO NOTHING""",
+                        (uuid.uuid4(), cid, did, JOB_INGEST, int(max_attempts)),
+                    )
+                conn.commit()
+        if already:
+            return self._get_document_sync(case_id, doc_id, owner_user_id)
+        log.info("Document completed", case=str(cid)[:8], doc=str(did)[:8], outcome=outcome,
+                 code=error_code or "", job=bool(enqueue_job))
+        return _row_to_doc(row)
+
+    async def finish_complete(self, case_id: str, doc_id: str, owner_user_id: str, *, outcome: str,
+                              **kw) -> Optional[dict]:
+        return await asyncio.to_thread(
+            lambda: self._finish_complete_sync(case_id, doc_id, owner_user_id, outcome=outcome, **kw))
+
+    # ----------------------------------------------------------- soft delete
+
+    def _soft_delete_document_sync(self, case_id: str, doc_id: str, owner_user_id: str,
+                                   purge_after_days: int) -> Optional[dict]:
+        cid, did = _as_uuid(case_id), _as_uuid(doc_id)
+        if cid is None or did is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            row = conn.execute(
+                """WITH old AS (
+                       SELECT doc_id, status AS prev_status, size_bytes FROM case_documents
+                        WHERE doc_id = %s AND case_id = %s AND owner_user_id = %s AND status <> 'deleted'
+                        FOR UPDATE)
+                   UPDATE case_documents d
+                      SET status = 'deleted', deleted_at = now(), updated_at = now()
+                     FROM old WHERE d.doc_id = old.doc_id
+                RETURNING d.doc_id, old.prev_status, old.size_bytes""",
+                (did, cid, owner_user_id),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                return None
+            cancelled = conn.execute(
+                """UPDATE case_jobs SET status = 'cancelled', finished_at = now(), updated_at = now()
+                    WHERE doc_id = %s AND status = 'queued' AND type <> %s""", (did, JOB_PURGE),
+            ).rowcount
+            if row["prev_status"] in DOC_STORED:
+                conn.execute(
+                    """UPDATE cases SET doc_count = GREATEST(doc_count - 1, 0),
+                                        bytes_total = GREATEST(bytes_total - %s, 0), updated_at = now()
+                        WHERE case_id = %s""",
+                    (int(row["size_bytes"]), cid),
+                )
+            conn.execute(
+                """INSERT INTO case_jobs (job_id, case_id, doc_id, type, status, priority, run_after)
+                   VALUES (%s, %s, %s, %s, 'queued', 200, now() + %s * interval '1 day')""",
+                (uuid.uuid4(), cid, did, JOB_PURGE, int(purge_after_days)),
+            )
+            conn.commit()
+        log.info("Document deleted", case=str(cid)[:8], doc=str(did)[:8], jobs_cancelled=int(cancelled))
+        return {"doc_id": str(did), "case_id": str(cid), "status": DOC_DELETED,
+                "prev_status": row["prev_status"], "jobs_cancelled": int(cancelled)}
+
+    async def soft_delete_document(self, case_id: str, doc_id: str, owner_user_id: str,
+                                   purge_after_days: int) -> Optional[dict]:
+        return await asyncio.to_thread(self._soft_delete_document_sync, case_id, doc_id, owner_user_id,
+                                       purge_after_days)
+
+    def _soft_delete_case_sync(self, case_id: str, owner_user_id: str, purge_after_days: int) -> Optional[dict]:
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            case = conn.execute(
+                """SELECT case_id FROM cases
+                    WHERE case_id = %s AND owner_user_id = %s AND status <> 'deleted' FOR UPDATE""",
+                (cid, owner_user_id),
+            ).fetchone()
+            if case is None:
+                conn.rollback()
+                return None
+            docs = conn.execute(
+                """UPDATE case_documents SET status = 'deleted', deleted_at = now(), updated_at = now()
+                    WHERE case_id = %s AND status <> 'deleted'""", (cid,),
+            ).rowcount
+            cancelled = conn.execute(
+                """UPDATE case_jobs SET status = 'cancelled', finished_at = now(), updated_at = now()
+                    WHERE case_id = %s AND status = 'queued' AND type <> %s""", (cid, JOB_PURGE),
+            ).rowcount
+            conn.execute(
+                "UPDATE cases SET status = 'deleted', deleted_at = now(), updated_at = now() WHERE case_id = %s",
+                (cid,),
+            )
+            conn.execute(
+                """INSERT INTO case_jobs (job_id, case_id, doc_id, type, status, priority, run_after)
+                   VALUES (%s, %s, NULL, %s, 'queued', 200, now() + %s * interval '1 day')""",
+                (uuid.uuid4(), cid, JOB_PURGE, int(purge_after_days)),
+            )
+            conn.commit()
+        log.info("Case deleted", case=str(cid)[:8], documents=int(docs), jobs_cancelled=int(cancelled))
+        return {"case_id": str(cid), "status": "deleted", "documents": int(docs), "jobs_cancelled": int(cancelled)}
+
+    async def soft_delete_case(self, case_id: str, owner_user_id: str, purge_after_days: int) -> Optional[dict]:
+        return await asyncio.to_thread(self._soft_delete_case_sync, case_id, owner_user_id, purge_after_days)
+
+    # ---------------------------------------------------------------- status
+
+    def _case_status_sync(self, case_id: str, owner_user_id: str) -> Optional[dict]:
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return None
+        self.ensure_schema()
+        with self._get_pool().connection() as conn:
+            case = conn.execute(
+                """SELECT case_id, status, doc_count, bytes_total, updated_at FROM cases
+                    WHERE case_id = %s AND owner_user_id = %s AND status <> 'deleted'""",
+                (cid, owner_user_id),
+            ).fetchone()
+            if case is None:
+                return None
+            counts = {r["status"]: int(r["n"]) for r in conn.execute(
+                """SELECT status, COUNT(*) AS n FROM case_documents
+                    WHERE case_id = %s AND status <> 'deleted' GROUP BY status""", (cid,)).fetchall()}
+        updated = case["updated_at"]
+        if isinstance(updated, datetime) and not updated.tzinfo:
+            updated = updated.replace(tzinfo=timezone.utc)
+        return {
+            "case_id": str(cid), "status": case["status"], "doc_count": int(case["doc_count"]),
+            "bytes_total": int(case["bytes_total"]), "updated_at": updated, "documents": counts,
+            "pending": sum(counts.get(s, 0) for s in (DOC_UPLOADING, DOC_QUEUED, DOC_PROCESSING)),
+        }
+
+    async def case_status(self, case_id: str, owner_user_id: str) -> Optional[dict]:
+        return await asyncio.to_thread(self._case_status_sync, case_id, owner_user_id)
+
+    def list_jobs_sync(self, case_id: str, doc_id: Optional[str] = None) -> list[dict]:
+        """Queue rows for a case (tests and the slice 3 worker tooling)."""
+        cid = _as_uuid(case_id)
+        if cid is None:
+            return []
+        self.ensure_schema()
+        where, params = "case_id = %s", [cid]
+        if doc_id:
+            where += " AND doc_id = %s"
+            params.append(_as_uuid(doc_id))
+        with self._get_pool().connection() as conn:
+            rows = conn.execute(
+                f"""SELECT job_id, case_id, doc_id, type, status, priority, attempts, max_attempts, run_after
+                      FROM case_jobs WHERE {where} ORDER BY created_at""", params).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("job_id", "case_id", "doc_id"):
+                if d.get(k) is not None:
+                    d[k] = str(d[k])
+            out.append(d)
+        return out
 
 
 # ---------------------------------------------------------------------------

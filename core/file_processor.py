@@ -3585,3 +3585,114 @@ async def process_files(
              chromadb=len(ctx.chromadb_collections))
 
     return ctx
+
+
+# ---------------------------------------------------------------------------
+# Public wrappers for the case workspace worker (docs/case_workspace_foundation.md,
+# decision 12). Additive only: the worker imports these three names and never
+# an underscored helper. They take a `log_name` (the caller passes a document
+# id) so no filename reaches a log line, and they touch nothing but the file
+# they are given: no uploads/, thread_files, Gemini Files or Chroma.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PageText:
+    """One page of a PDF or image. `source` is "layer" (embedded text) or "ocr"."""
+    page: int                       # 1-based
+    text: str
+    source: str = "layer"
+    confidence: float | None = None
+
+
+class OCRUnavailable(RuntimeError):
+    """Vision OCR was required and came back empty for every page it was asked
+    to read: the call failed (credentials, quota, network) rather than the
+    pages being blank. The caller treats it as transient and retries."""
+
+
+def extract_pdf_pages(path: str, log_name: str = "") -> tuple[list[PageText], str]:
+    """Per-page text of a PDF with the chat upload path's layer-vs-OCR policy,
+    minus the thread plumbing.
+
+    1. PyMuPDF text layer and raster coverage per page (`_extract_pdf_layer_profile`).
+    2. Pages whose layer is a scanner app's junk OCR (`_detect_junk_ocr_layer`)
+       and image-backed pages with no layer at all are re-read with Vision OCR
+       one page at a time (`_vision_ocr_pdf_pages`, cached per file hash + page).
+    3. A garbled non-Latin layer (broken CMaps) or junk on most pages sends the
+       whole file to OCR.
+
+    Returns (pages, extractor), extractor in pdf_text | pdf_text+ocr_pages |
+    pdf_ocr. Empty pages are returned with text "" so numbering is complete.
+    Raises ValueError for an encrypted or empty PDF (callers map the message
+    to encrypted_pdf / empty_pdf) and OCRUnavailable when OCR was needed for
+    the whole file, or for three or more pages, and nothing came back.
+    """
+    label = log_name or os.path.basename(path)
+    layer, coverage, page_count = _extract_pdf_layer_profile(path)
+    joined = "\n".join(t for t in layer if t.strip())
+    whole = not joined.strip()
+    targets: set[int] = set()
+    if not whole:
+        profile = _script_profile(joined)
+        garbled, reason = _is_garbled_by_script(profile)
+        if garbled and profile.get("nonlatin_letters", 0) >= 50:
+            log.warning("Garbled non-Latin text layer: whole-document OCR", file=label, reason=reason)
+            whole = True
+    if not whole:
+        junk = _detect_junk_ocr_layer(layer, coverage)
+        if junk["junk"] and junk["whole_doc"]:
+            log.warning("Junk OCR layer on most pages: whole-document OCR", file=label,
+                        junk_pages=len(junk["junk_pages"]), page_count=page_count)
+            whole = True
+        else:
+            targets.update(junk["junk_pages"])
+            targets.update(i for i, (t, c) in enumerate(zip(layer, coverage))
+                           if not (t or "").strip() and c >= _SCANNER_LAYER_MIN_COVERAGE)
+    if whole:
+        targets = set(range(page_count))
+    ocr: dict[int, str] = {}
+    if targets:
+        ocr = _vision_ocr_pdf_pages(path, sorted(targets), emit=None, file_name=label)
+        if (whole or len(targets) >= 3) and not any((ocr.get(i) or "").strip() for i in targets):
+            raise OCRUnavailable(f"OCR returned nothing for {len(targets)} page(s)")
+    pages = [
+        PageText(i + 1, (ocr.get(i) or "").strip(), "ocr") if i in targets
+        else PageText(i + 1, (layer[i] or "").strip(), "layer")
+        for i in range(page_count)
+    ]
+    extractor = "pdf_ocr" if whole else ("pdf_text+ocr_pages" if targets else "pdf_text")
+    log.info("PDF extracted", file=label, pages=page_count, ocr_pages=len(targets), extractor=extractor)
+    return pages, extractor
+
+
+def extract_image_page(path: str, log_name: str = "") -> PageText:
+    """Vision OCR of one image as page 1. Raises when the OCR call itself
+    fails; returns empty text when the model read nothing (`_vision_ocr_image`
+    contract of 2026-08-10)."""
+    text = _vision_ocr_image(path, filename=log_name or os.path.basename(path))
+    return PageText(1, (text or "").strip(), "ocr")
+
+
+def extract_office_text(path: str, ext: str, log_name: str = "") -> str:
+    """Plain text of a DOCX (Krutidev-aware), XLSX (one `### Sheet:` block per
+    worksheet), CSV, TXT or MD file. Row caps and truncation markers are the
+    chat path's (`XLSX_CSV_MAX_ROWS`)."""
+    ext = (ext or "").lower().lstrip(".")
+    if ext == "docx":
+        return _extract_docx_text(path)
+    if ext == "xlsx":
+        return _extract_xlsx_text(path)
+    if ext == "csv":
+        return _extract_csv_text(path)
+    if ext in ("txt", "md"):
+        return _read_text_file(path)
+    raise ValueError(f"extract_office_text: unsupported extension {ext!r}")
+
+
+def _read_text_file(path: str) -> str:
+    raw = Path(path).read_bytes()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig", errors="replace")
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    return raw.decode("utf-8", errors="replace")

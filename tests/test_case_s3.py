@@ -114,3 +114,41 @@ def test_singleton_refuses_an_empty_bucket(monkeypatch):
     inst = case_s3.get_case_s3()
     assert inst.bucket == "lawttorney-cases" and inst.region == "ap-south-1" and inst.sse == "AES256"
     monkeypatch.setattr(case_s3, "_s3", None)
+
+
+# --- slice 3: worker-side download and purge -------------------------------------
+
+def test_download_to_file_streams_and_hashes(s3, tmp_path):
+    import hashlib
+    import io
+    from botocore.response import StreamingBody
+    data = b"%PDF-1.4 hello " * 1000
+    with Stubber(s3.client()) as st:
+        st.add_response("get_object", {"Body": StreamingBody(io.BytesIO(data), len(data)), "ContentLength": len(data)},
+                        {"Bucket": s3.bucket, "Key": "cases/x/raw/y.pdf", "VersionId": "v9"})
+        n, sha = s3.download_to_file("cases/x/raw/y.pdf", str(tmp_path / "y.pdf"), "v9", chunk_size=1024)
+    assert n == len(data) and sha == hashlib.sha256(data).hexdigest()
+    assert (tmp_path / "y.pdf").read_bytes() == data
+
+
+def test_delete_all_versions_removes_versions_and_markers_and_refuses_bad_prefixes(s3):
+    import uuid
+    cid, did = str(uuid.uuid4()), str(uuid.uuid4())
+    prefix = f"cases/{cid}/"
+    raw, txt = f"{prefix}raw/{did}.pdf", f"{prefix}extracted/{did}/text.jsonl"
+    with Stubber(s3.client()) as st:
+        st.add_response("list_object_versions",
+                        {"Versions": [{"Key": raw, "VersionId": "v1"}, {"Key": txt, "VersionId": "v2"}],
+                         "DeleteMarkers": [{"Key": raw, "VersionId": "m1"}]},
+                        {"Bucket": s3.bucket, "Prefix": prefix})
+        st.add_response("delete_objects", {},
+                        {"Bucket": s3.bucket,
+                         "Delete": {"Objects": [{"Key": raw, "VersionId": "v1"}, {"Key": txt, "VersionId": "v2"},
+                                                {"Key": raw, "VersionId": "m1"}], "Quiet": True}})
+        assert s3.delete_all_versions(prefix) == 3
+    for bad in ("", "cases/", f"cases/{cid}", f"cases/{cid}/raw/", "other/x/", f"cases/{cid}/raw/{did}.pdf/evil"):
+        with pytest.raises(ValueError):
+            s3.delete_all_versions(bad)
+    with Stubber(s3.client()) as st:
+        st.add_response("list_object_versions", {}, {"Bucket": s3.bucket, "Prefix": prefix})
+        assert s3.delete_all_versions(prefix) == 0                             # nothing listed, nothing called

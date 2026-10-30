@@ -11,6 +11,8 @@ with ``botocore.stub``.
 """
 from __future__ import annotations
 
+import hashlib
+import re
 import threading
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -51,6 +53,17 @@ def text_key(case_id: str, doc_id: str) -> str:
 
 def meta_key(case_id: str, doc_id: str) -> str:
     return extracted_prefix(case_id, doc_id) + "meta.json"
+
+
+# A purge may only ever address a whole case, one raw object or one
+# extracted/ folder. Anything else is refused before S3 is called.
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_PURGE_PREFIX_RE = re.compile(
+    rf"^cases/{_UUID}/(raw/{_UUID}(\.[a-z0-9]{{1,8}})?|extracted/{_UUID}/)?$")
+
+
+def purge_prefix_ok(prefix: str) -> bool:
+    return bool(_PURGE_PREFIX_RE.match(prefix or ""))
 
 
 def content_disposition(filename: str) -> str:
@@ -178,6 +191,81 @@ class CaseS3:
         r = self.client().put_object(Bucket=self.bucket, Key=key, Body=data,
                                      ContentType=content_type, ServerSideEncryption=self.sse)
         return str(r.get("VersionId", "") or "")
+
+    # ---- worker (slice 3) ----------------------------------------------------
+
+    def get_bytes(self, key: str, version_id: Optional[str] = None) -> bytes:
+        """Whole small object (a sidecar). Raw documents go through
+        ``download_to_file`` so they never sit in memory."""
+        kw = {"Bucket": self.bucket, "Key": key}
+        if version_id:
+            kw["VersionId"] = version_id
+        body = self.client().get_object(**kw)["Body"]
+        try:
+            return body.read()
+        finally:
+            try:
+                body.close()
+            except Exception:
+                pass
+
+    def download_to_file(self, key: str, path: str, version_id: Optional[str] = None,
+                         chunk_size: int = 1 << 20) -> tuple[int, str]:
+        """Stream an object to ``path`` while hashing it. Returns
+        ``(bytes_written, sha256_hex)``; the sha256 is the authoritative
+        content identity the worker de-duplicates on."""
+        kw = {"Bucket": self.bucket, "Key": key}
+        if version_id:
+            kw["VersionId"] = version_id
+        body = self.client().get_object(**kw)["Body"]
+        h, total = hashlib.sha256(), 0
+        try:
+            with open(path, "wb") as f:
+                for part in body.iter_chunks(chunk_size):
+                    if part:
+                        f.write(part)
+                        h.update(part)
+                        total += len(part)
+        finally:
+            try:
+                body.close()
+            except Exception:
+                pass
+        return total, h.hexdigest()
+
+    def list_versions(self, prefix: str) -> list[dict]:
+        """Every object version and delete marker under ``prefix``."""
+        out: list[dict] = []
+        paginator = self.client().get_paginator("list_object_versions")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for v in page.get("Versions") or []:
+                out.append({"key": v["Key"], "version_id": v.get("VersionId") or "null", "is_delete_marker": False})
+            for m in page.get("DeleteMarkers") or []:
+                out.append({"key": m["Key"], "version_id": m.get("VersionId") or "null", "is_delete_marker": True})
+        return out
+
+    def delete_all_versions(self, prefix: str) -> int:
+        """Purge: remove every version and delete marker under ``prefix`` so
+        nothing of the document survives in the versioned bucket. Refuses
+        any prefix that is not a case, a raw object or an extracted/ folder."""
+        if not purge_prefix_ok(prefix):
+            raise ValueError("refusing to purge outside a case prefix")
+        versions = self.list_versions(prefix)
+        deleted = 0
+        for i in range(0, len(versions), 1000):
+            batch = versions[i:i + 1000]
+            resp = self.client().delete_objects(
+                Bucket=self.bucket,
+                Delete={"Objects": [{"Key": v["key"], "VersionId": v["version_id"]} for v in batch],
+                        "Quiet": True},
+            )
+            errors = resp.get("Errors") or []
+            if errors:
+                log.warning("Purge batch had errors", count=len(errors),
+                            code=str(errors[0].get("Code", ""))[:40])
+                raise RuntimeError(f"delete_objects reported {len(errors)} error(s)")
+            deleted += len(batch)
+        return deleted
 
 
 # ---------------------------------------------------------------------------

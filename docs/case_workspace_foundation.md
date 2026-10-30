@@ -15,7 +15,10 @@ The case workspace is a feature-flagged router inside the existing API plus a se
 | `CASE_AUDIT_VIEW_WINDOW_SEC` | `900` | `case_view` is written at most once per user per case per window. |
 | `POSTGRES_URL` | required | The case store is Postgres-only. |
 
-Slice 2 adds `CASE_S3_BUCKET`, `CASE_S3_PREFIX`, `CASE_S3_SSE`, `CASE_MAX_FILE_MB`, `CASE_MAX_DOCS_PER_CASE`, `CASE_MAX_BYTES_PER_CASE_GB`, `CASE_PRESIGN_TTL_SEC`, `CASE_DOWNLOAD_TTL_SEC`. Slice 3 adds the worker settings.
+| `CASE_S3_BUCKET` | `lawttorney-cases` | Separate private bucket for case files (see Bucket below). |
+| `CASE_S3_REGION` | `S3_REGION` (`ap-south-1`) | Region of that bucket. |
+
+Slice 2 adds `CASE_MAX_FILE_MB`, `CASE_MAX_DOCS_PER_CASE`, `CASE_MAX_BYTES_PER_CASE_GB`, `CASE_PRESIGN_TTL_SEC`, `CASE_DOWNLOAD_TTL_SEC`. Slice 3 adds the worker settings.
 
 ## Identity and status contract
 
@@ -46,13 +49,18 @@ Without `TEST_POSTGRES_URL` the Postgres suite skips locally; with `CI=true` it 
 
 Case code logs ids, counts, codes and durations only. Never a title, client name, filename, extracted text or anything a lawyer typed. Helpers that take a name for log lines receive the `doc_id`.
 
-## Bucket setup (slice 2, recorded now from the approved design)
+## Bucket (decision 4, final 30 Oct 2026)
 
-- Private bucket or private `cases/` prefix (pending the `lawttorney` bucket policy review). Block Public Access on; default SSE on; versioning on.
+Case files live in a **separate private bucket**, `lawttorney-cases` (`CASE_S3_BUCKET`, region `CASE_S3_REGION`, default `ap-south-1`). Not a `cases/` prefix in the public `lawttorney` bucket: Block Public Access and versioning are bucket-wide, and the judgment pipelines' credentials must not be able to write or delete client files. Keys are always `cases/{case_id}/...`; there is no prefix setting.
+
+Bucket configuration (created by the admin):
+
+- Block Public Access on (all four settings); versioning on; default encryption SSE-S3 (`AES256`).
 - Lifecycle: abort incomplete multipart uploads after 1 day; expire noncurrent versions after 30 days as a backstop to purge.
 - CORS for the web origins: `PUT`, `GET`, `HEAD`; allowed headers `Content-Type`, `x-amz-server-side-encryption`; expose `ETag`.
-- IAM for the API and worker: `s3:PutObject`, `s3:GetObject`, `s3:GetObjectVersion`, `s3:HeadObject`, `s3:DeleteObject`, `s3:DeleteObjectVersion`, `s3:ListBucket`, `s3:ListBucketVersions` on the case prefix.
-- Explicit deny of `s3:GetObject` / `s3:GetObjectVersion` on `cases/*` to every principal except the API's role, if the shared bucket is used.
+- IAM policy for the API and worker credentials, scoped to `arn:aws:s3:::lawttorney-cases/cases/*` (plus `s3:ListBucket` / `s3:ListBucketVersions` on the bucket with a `cases/` prefix condition): `s3:PutObject`, `s3:GetObject`, `s3:GetObjectVersion`, `s3:DeleteObject`, `s3:DeleteObjectVersion`. No other principal has access.
+
+Slice 2 starts once the bucket exists; `complete` verifies size and `ServerSideEncryption: AES256` on every object.
 
 ## Deletion and purge (slice 2 and 3, from the approved design)
 

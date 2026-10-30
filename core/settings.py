@@ -382,3 +382,10 @@ CASE_JWT_LEEWAY_S = float(os.getenv("CASE_JWT_LEEWAY_S", "30") or 30)
 # case_view audit rows are written at most once per user per case per window,
 # so frontend status polling cannot flood case_audit.
 CASE_AUDIT_VIEW_WINDOW_SEC = int(os.getenv("CASE_AUDIT_VIEW_WINDOW_SEC", "900") or 900)
+# Object storage for case files: a SEPARATE private bucket (decision 4, 30 Oct
+# 2026). Block Public Access, versioning and default SSE-S3 are bucket-wide,
+# and the judgment pipelines' credentials must not be able to write or delete
+# client files, so case files never share the public `lawttorney` bucket.
+# Keys are always `cases/{case_id}/...` inside this bucket (no prefix setting).
+CASE_S3_BUCKET = os.getenv("CASE_S3_BUCKET", "lawttorney-cases").strip()
+CASE_S3_REGION = os.getenv("CASE_S3_REGION", "").strip() or S3_REGION

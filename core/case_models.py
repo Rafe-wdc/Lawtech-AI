@@ -128,3 +128,99 @@ class CaseMetaOut(BaseModel):
     stages: list[Suggestion]
     sides: list[Suggestion]
     limits: dict
+
+
+# --- slice 2: documents, status, soft delete ---------------------------------
+
+FILENAME_MAX = 255
+_SHA256_RE = r"^(?:[a-fA-F0-9]{64})?$"
+
+
+class DocumentPresignIn(BaseModel):
+    """What the browser knows before the upload: name, size, optional MIME and
+    an optional client-side SHA-256 (a hint for duplicate warnings, never
+    trusted; the worker computes the authoritative hash)."""
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(..., min_length=1, max_length=FILENAME_MAX)
+    size_bytes: int = Field(..., ge=1)
+    content_type: str = Field("", max_length=128)
+    client_sha256: str = Field("", pattern=_SHA256_RE)
+
+    _v_text = field_validator("filename", "content_type", mode="before")(_strip)
+
+
+class UploadInstructions(BaseModel):
+    url: str
+    method: str = "PUT"
+    headers: dict[str, str]
+    expires_at: datetime
+
+
+class DocumentOut(BaseModel):
+    doc_id: str
+    case_id: str
+    filename: str
+    ext: str
+    declared_mime: str = ""
+    sniffed_mime: str = ""
+    size_bytes: int
+    sha256: Optional[str] = None
+    sse: Optional[str] = None
+    status: str
+    error_code: Optional[str] = None
+    duplicate_of: Optional[str] = None
+    kind: str = ""
+    kind_confidence: float = 0
+    page_count: Optional[int] = None
+    chars_total: Optional[int] = None
+    ocr_pages: int = 0
+    extractor: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    ready_at: Optional[datetime] = None
+
+
+class DocumentPresignOut(DocumentOut):
+    upload: UploadInstructions
+    duplicate_hint: Optional[str] = None
+
+
+class DocumentListOut(BaseModel):
+    items: list[DocumentOut]
+    total: int
+    limit: int
+    offset: int
+    counts: dict[str, int]
+
+
+class DownloadOut(BaseModel):
+    url: str
+    expires_at: datetime
+    filename: str
+    size_bytes: int
+    content_type: str
+
+
+class DocumentDeleteOut(BaseModel):
+    doc_id: str
+    case_id: str
+    status: str
+    jobs_cancelled: int
+
+
+class CaseDeleteOut(BaseModel):
+    case_id: str
+    status: str
+    documents: int
+    jobs_cancelled: int
+
+
+class CaseStatusOut(BaseModel):
+    case_id: str
+    status: str
+    doc_count: int
+    bytes_total: int
+    documents: dict[str, int]
+    pending: int
+    updated_at: datetime

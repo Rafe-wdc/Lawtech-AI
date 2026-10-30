@@ -2737,3 +2737,15 @@ async def submit_feedback(data: FeedbackRequest, request: Request):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=HOST, port=PORT)
+
+# --- Case workspace (feature-flagged; docs/case_workspace_foundation.md) ---
+# Mounted only when CASE_WORKSPACE_ENABLED=1 so that, with the flag off, every
+# /pyapi/cases path is a plain 404. The router takes the gateway's limiter so
+# case routes share the same per-key rate limit as the rest of the API.
+from .settings import CASE_WORKSPACE_ENABLED as _CASE_WORKSPACE_ENABLED  # noqa: E402
+
+if _CASE_WORKSPACE_ENABLED:
+    from .case_routes import build_case_router  # noqa: E402
+    app.include_router(build_case_router(limiter=limiter, limit_value=_get_limit_for_request))
+    log.info("Case workspace router mounted", prefix="/pyapi/cases")
+

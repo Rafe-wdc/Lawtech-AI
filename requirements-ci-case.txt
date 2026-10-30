@@ -1,0 +1,9 @@
+# Minimal install for .github/workflows/ci-case-workspace.yml.
+# Pinned to the same floors as requirements.txt; nothing here is new to the project.
+fastapi>=0.100.0
+pydantic>=2.12.0
+psycopg[binary,pool]>=3.3.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
+slowapi>=0.1.9
+pytest>=8.0

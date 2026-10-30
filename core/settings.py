@@ -366,3 +366,19 @@ LOG_DIR = str(_PROJECT_ROOT / "logs")
 # Default INFO to keep prod log volume manageable — dev workstations
 # that want verbose output should set LOG_LEVEL=DEBUG in .env explicitly.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# --- Case workspace (docs/case_workspace_foundation.md) ---
+# Feature-flagged router + worker. Off by default: with the flag off the
+# /pyapi/cases router is not mounted at all.
+def _truthy_env(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+CASE_WORKSPACE_ENABLED = _truthy_env("CASE_WORKSPACE_ENABLED", "0")
+# Owner identity = Node's HS256 access token (claim userId). No unsigned mode.
+# Falls back to the user-memory secret so one secret serves both features.
+CASE_JWT_SECRET = os.getenv("CASE_JWT_SECRET", "").strip() or os.getenv("USER_MEMORY_JWT_SECRET", "").strip()
+CASE_JWT_CLAIM = os.getenv("CASE_JWT_CLAIM", "userId").strip() or "userId"
+CASE_JWT_LEEWAY_S = float(os.getenv("CASE_JWT_LEEWAY_S", "30") or 30)
+# case_view audit rows are written at most once per user per case per window,
+# so frontend status polling cannot flood case_audit.
+CASE_AUDIT_VIEW_WINDOW_SEC = int(os.getenv("CASE_AUDIT_VIEW_WINDOW_SEC", "900") or 900)

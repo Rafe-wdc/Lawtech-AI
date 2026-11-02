@@ -884,7 +884,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
                                 budget_remaining=f"{remaining:.1f}s")
                     fallback_result = await web_search_fallback(
                         query, "Newacts", NEWACTS_SYSTEM_PROMPT,
-                        user_language=_user_language, intent=_intent)
+                        user_language=_user_language, intent=_intent,
+                        file_context_prefix=_file_prefix)
                     fallback_result.retry_attempted = True
                     return {
                         "agent_results": {"Newacts": fallback_result},
@@ -973,7 +974,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 from core.agent_fallback import web_search_fallback
                 fallback_result = await web_search_fallback(
                     query, "Newacts", NEWACTS_SYSTEM_PROMPT,
-                    user_language=_user_language, intent=_intent)
+                    user_language=_user_language, intent=_intent,
+                    file_context_prefix=_file_prefix)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Newacts": fallback_result}}
 
@@ -1047,7 +1049,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
             from core.agent_fallback import web_search_fallback
             fallback_result = await web_search_fallback(
                 query, "Newacts", NEWACTS_SYSTEM_PROMPT,
-                user_language=_user_language, intent=_intent)
+                user_language=_user_language, intent=_intent,
+                file_context_prefix=_file_prefix)
             fallback_result.tokens_consumed += tokens
             return {
                 "agent_results": {"Newacts": fallback_result},
@@ -1083,7 +1086,8 @@ async def newacts_node(state: LegalAgentState) -> dict:
                 from core.agent_fallback import web_search_fallback
                 fallback_result = await web_search_fallback(
                     query, "Newacts", NEWACTS_SYSTEM_PROMPT,
-                    user_language=_user_language, intent=_intent)
+                    user_language=_user_language, intent=_intent,
+                    file_context_prefix=_file_prefix)
                 fallback_result.tokens_consumed += tokens
                 return {
                     "agent_results": {"Newacts": fallback_result},

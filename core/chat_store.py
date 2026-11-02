@@ -1727,12 +1727,17 @@ class _PostgresChatHistoryStore:
             with self._pool_init_lock:
                 if self._pool is None:
                     from psycopg_pool import ConnectionPool
+                    # check: test each connection before handing it out.
+                    # Idle connections closed by the server or network were
+                    # handed out dead ("the connection is closed"), failing
+                    # the upload and then the history load (dev 2026-11-02).
                     p = ConnectionPool(
                         conninfo=self._postgres_url,
                         min_size=2,
                         max_size=10,
                         open=True,
                         timeout=10.0,
+                        check=ConnectionPool.check_connection,
                     )
                     self._pool = p
                     log.info("PostgreSQL chat-store pool initialised")

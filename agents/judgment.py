@@ -526,7 +526,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
             fallback_result = await web_search_fallback(
                 query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
                 original_query=original_query,
-                user_language=_user_language, intent=_intent)
+                user_language=_user_language, intent=_intent,
+                file_context_prefix=_file_prefix)
             fallback_result.fallback_used = True
             return {"agent_results": {"Judgment": fallback_result}}
 
@@ -620,7 +621,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 fallback_result = await web_search_fallback(
                     query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
                     original_query=original_query,
-                    user_language=_user_language, intent=_intent)
+                    user_language=_user_language, intent=_intent,
+                    file_context_prefix=_file_prefix)
                 fallback_result.retry_attempted = True
                 return {"agent_results": {"Judgment": fallback_result}}
 
@@ -679,7 +681,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
             fallback_result = await web_search_fallback(
                 query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
                 original_query=original_query,
-                user_language=_user_language, intent=_intent)
+                user_language=_user_language, intent=_intent,
+                file_context_prefix=_file_prefix)
             fallback_result.retry_attempted = True
             return {"agent_results": {"Judgment": fallback_result}}
 
@@ -727,7 +730,8 @@ async def judgment_node(state: LegalAgentState) -> dict:
             from core.agent_fallback import web_search_fallback
             fallback_result = await web_search_fallback(
                 query, "Judgment", JUDGMENT_SYSTEM_PROMPT,
-                user_language=_user_language, intent=_intent)
+                user_language=_user_language, intent=_intent,
+                file_context_prefix=_file_prefix)
             fallback_result.tokens_consumed += tokens
             return {"agent_results": {"Judgment": fallback_result}}
 

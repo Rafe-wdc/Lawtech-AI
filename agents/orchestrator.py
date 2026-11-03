@@ -756,6 +756,27 @@ Agents: {agents}
 
 Return JSON object like: {{"Judgment": "...", "Legislation": "..."}}"""
 
+# Inserted before "User Query:" only when the user attached documents and
+# core.case_focus produced a focus line. Without it the search agents saw the
+# question alone: an NDPS anticipatory-bail application asked "case laws based
+# on the attached FIR" came back with IPC 406/420 cheating cases (prod
+# 2026-11-01). No attachment: the prompt above is sent unchanged.
+AGENT_QUERY_REWRITE_FILE_ADDENDUM = """ATTACHED DOCUMENTS: the user uploaded documents with this question. Their case focus (statute and sections, offence, key facts, stage, relief):
+{case_focus}
+
+8. When the question refers to the attached documents or to the user's own matter ("attached FIR", "this document", "my case", "based on the file", "on these facts"), build every search agent's query (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment, Tribunal_Judgment, Scenario, Constitution) around the case focus: carry its statute and section numbers, the offence, the facts that decide the legal test (e.g. substance and quantity), the stage and the relief asked about. Never replace the document's statute or offence with a different one.
+   - Newacts: give section numbers only for BNS/IPC, BNSS/CrPC and BSA/IEA provisions; name any other statute by its act name, without its section numbers.
+   - Drafting: write its query from the user's request only; the drafter reads the documents itself.
+9. When the question is about a different legal topic than the attached documents, ignore the case focus.
+
+"""
+
+# Agents whose search query the case focus can sharpen.
+_CASE_FOCUS_AGENTS = frozenset({
+    "Judgment", "SCI_Judgment", "Newacts", "Legislation", "GST_Judgment",
+    "Tribunal_Judgment", "Scenario", "Constitution",
+})
+
 
 class AgentQueries(BaseModel):
     queries: dict[str, str] = Field(
@@ -1244,7 +1265,8 @@ def _resolve_user_language(state: LegalAgentState) -> str:
     return detected
 
 
-def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]:
+def _rewrite_queries_for_agents(query: str, agents: list[str],
+                                case_focus: str = "") -> dict[str, str]:
     """Generate per-agent optimized queries using LLM.
 
     For single-agent plans, returns empty dict (agent uses original query).
@@ -1272,6 +1294,10 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
     In this case we rewrite ONLY for the non-Drafting agents; Drafting is
     NOT emitted in the returned dict, so drafting_node's own fallback to
     state["query"] preserves the raw prompt verbatim (invariant intact).
+
+    `case_focus` is the one-line summary of the user's attached documents
+    (core.case_focus). When set, the rewriter builds the search agents'
+    queries around it; when empty, the prompt is unchanged.
     """
     if len(agents) <= 1:
         return {}
@@ -1290,16 +1316,24 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
                 query_chars=len(query),
                 citation_agents=citation_agents,
             )
-            return _run_rewrite_llm(query, citation_agents)
+            return _run_rewrite_llm(query, citation_agents, case_focus)
 
         log.debug("Skipping per-agent query rewrite — query already standalone-length",
                   query_chars=len(query), agents=agents)
         return {}
 
-    return _run_rewrite_llm(query, agents)
+    return _run_rewrite_llm(query, agents, case_focus)
 
 
-def _run_rewrite_llm(query: str, agents: list[str]) -> dict[str, str]:
+def _rewrite_prompt_template(case_focus: str) -> str:
+    if not case_focus:
+        return AGENT_QUERY_REWRITE_PROMPT
+    return AGENT_QUERY_REWRITE_PROMPT.replace(
+        "User Query: {query}", AGENT_QUERY_REWRITE_FILE_ADDENDUM + "User Query: {query}", 1,
+    )
+
+
+def _run_rewrite_llm(query: str, agents: list[str], case_focus: str = "") -> dict[str, str]:
     """Invoke the LLM query rewriter for the given agent list.
 
     Returns {} on any failure — callers fall back to state["query"] in that
@@ -1308,13 +1342,16 @@ def _run_rewrite_llm(query: str, agents: list[str]) -> dict[str, str]:
     try:
         with log_time(log, "Per-agent query rewriting"):
             llm = get_gemini_flash(temperature=0.1)
-            prompt = ChatPromptTemplate.from_template(AGENT_QUERY_REWRITE_PROMPT)
+            prompt = ChatPromptTemplate.from_template(_rewrite_prompt_template(case_focus))
             chain = prompt | llm
 
-            response = chain.invoke({
+            _vars = {
                 "query": query,
                 "agents": ", ".join(agents),
-            })
+            }
+            if case_focus:
+                _vars["case_focus"] = case_focus
+            response = chain.invoke(_vars)
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "rewrite_per_agent_queries", response)
 
@@ -1689,6 +1726,14 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     _orig_lower = _original_query.lower()
 
     fc = FileContextData.from_state(state)
+
+    # Case focus of the attached documents, for the per-agent search queries
+    # (Step 4). Started now so it runs alongside classification.
+    _case_focus_task = None
+    if (fc and fc.has_content and not is_greeting
+            and not state.get("conversational_followup")):
+        from core.case_focus import extract_case_focus
+        _case_focus_task = asyncio.create_task(asyncio.to_thread(extract_case_focus, fc))
 
     # Intent extractor result (Phase 1, telemetry-only). Stays None on the
     # short-circuit paths (greeting / skip-normalize) and on extractor
@@ -2210,11 +2255,22 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
 
     # Step 4: Per-agent query rewriting (only for multi-agent plans)
     agent_queries = {}
+    case_focus = ""
+    if _case_focus_task is not None:
+        if len(tasks_planned) > 1 and _CASE_FOCUS_AGENTS.intersection(tasks_planned):
+            try:
+                case_focus = await asyncio.wait_for(_case_focus_task, timeout=15)
+            except asyncio.TimeoutError:
+                log.warning("Case focus extraction timed out; agents search with the question only")
+            if case_focus:
+                log.info("Case focus for search queries", focus=case_focus[:300])
+        else:
+            _case_focus_task.cancel()
     if len(tasks_planned) > 1:
         progress("orchestrator", f"Preparing search queries for {len(tasks_planned)} agents...", found=len(tasks_planned), step="plan")
         try:
             agent_queries = await asyncio.wait_for(
-                asyncio.to_thread(_rewrite_queries_for_agents, query, tasks_planned),
+                asyncio.to_thread(_rewrite_queries_for_agents, query, tasks_planned, case_focus),
                 timeout=15,
             )
         except asyncio.TimeoutError:

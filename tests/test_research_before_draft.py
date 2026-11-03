@@ -97,7 +97,7 @@ def _plan(monkeypatch, query, classifier, intent):
     monkeypatch.setenv("DYNAMIC_ORCHESTRATOR", "0")
     monkeypatch.setattr(orch, "_classify_and_plan", lambda *a, **k: classifier)
     monkeypatch.setattr(orch, "_extract_user_intent", lambda *a, **k: (query, intent))
-    monkeypatch.setattr(orch, "_rewrite_queries_for_agents", lambda q, agents: {a: q for a in agents})
+    monkeypatch.setattr(orch, "_rewrite_queries_for_agents", lambda q, agents, case_focus="": {a: q for a in agents})
     state = {"query": query, "original_query": query, "user_language": "en",
              "chat_history": [], "messages": []}
     out = asyncio.run(orch.orchestrator_plan_node(state))
@@ -180,7 +180,7 @@ def test_plan_research_only_survives_an_intent_failure(monkeypatch):
     monkeypatch.setenv("DYNAMIC_ORCHESTRATOR", "0")
     monkeypatch.setattr(orch, "_classify_and_plan", lambda *a, **k: ("Scenario", ["Scenario", "Legislation"]))
     monkeypatch.setattr(orch, "_extract_user_intent", _boom)
-    monkeypatch.setattr(orch, "_rewrite_queries_for_agents", lambda q, agents: {a: q for a in agents})
+    monkeypatch.setattr(orch, "_rewrite_queries_for_agents", lambda q, agents, case_focus="": {a: q for a in agents})
     out = asyncio.run(orch.orchestrator_plan_node(
         {"query": EVICTION, "original_query": EVICTION, "user_language": "en", "chat_history": [], "messages": []}))
     assert out["task"] == "Scenario" and "Drafting" not in out["tasks_planned"]

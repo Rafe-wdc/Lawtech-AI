@@ -1552,7 +1552,7 @@ class TestAcquireReferenceDraftTranslatesRegionalQuery:
             ]}}
         mock_es.search = _fake_search
 
-        async def _fake_picker(query, file_paths):
+        async def _fake_picker(query, file_paths, **kwargs):
             seen_picker_query.append(query)
             return None  # Reject → skip fetch, go to web
 
@@ -1594,7 +1594,7 @@ class TestAcquireReferenceDraftTranslatesRegionalQuery:
             ]}}
         mock_es.search = _fake_search
 
-        async def _fake_picker(query, file_paths):
+        async def _fake_picker(query, file_paths, **kwargs):
             seen_picker_query.append(query)
             return None
 

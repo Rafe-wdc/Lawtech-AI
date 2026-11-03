@@ -1316,6 +1316,27 @@ def safe_upload_name(original: str) -> str:
     return f"{stem}{ext}"
 
 
+UPLOAD_FAILED_MESSAGE = (
+    "We could not read the file(s) you attached, so we have not answered yet: "
+    "an answer without your document would not be about your case. "
+    "Please upload the file again and resend your question."
+)
+
+
+async def _batch_has_saved_files(thread_id: str, batch_id: str) -> bool:
+    """True when at least one file of this upload batch reached thread_files.
+
+    A failed lookup counts as none saved: answering without the user's
+    document is the outcome this guard exists to prevent.
+    """
+    try:
+        records = await chat_store.load_thread_files(thread_id)
+    except Exception as e:
+        log.warning("Saved-file check failed after upload error", error=short_err(e))
+        return False
+    return any((r.get("batch_id") or "") == batch_id for r in records or [])
+
+
 @app.post("/pyapi/chat", dependencies=[Depends(require_user_key)])
 @limiter.limit(_get_limit_for_request)
 async def chat_with_files(
@@ -1638,6 +1659,7 @@ async def chat_with_files(
         # Process files before invoking the pipeline (they need to be staged
         # into ChromaDB + Gemini Files API, which is /chat-specific).
         file_context_dict = None
+        _upload_failed = False
         # Start the per-request token tracker BEFORE process_files runs so
         # the Vision OCR calls inside file_processor.py accumulate under a
         # "FileProcessor" bucket. chat_runner.run_chat_pipeline reuses this
@@ -1721,6 +1743,7 @@ async def chat_with_files(
                              new_file_count=len(fc.file_names),
                              elapsed_s=round(time.time() - _fp_start, 1))
                 except asyncio.TimeoutError:
+                    _upload_failed = True
                     log.error("File processing exceeded total budget",
                               budget_s=_FILE_PROC_TOTAL_TIMEOUT,
                               elapsed_s=round(time.time() - _fp_start, 1),
@@ -1733,6 +1756,7 @@ async def chat_with_files(
                         except (asyncio.CancelledError, Exception):
                             pass
                 except Exception as e:
+                    _upload_failed = True
                     log.error("File processing failed", error=short_err(e))
                     from core.redact import redact_brands
                     _fp_msg = redact_brands(f"File processing failed: {short_err(e)}")
@@ -1744,6 +1768,31 @@ async def chat_with_files(
                             await _fp_task
                         except (asyncio.CancelledError, Exception):
                             pass
+
+                # The memory node restores files of this upload that were
+                # saved before the failure. With none saved, the pipeline
+                # would answer as if nothing was attached (prod 2026-11-02,
+                # thread 9e29f471: "case laws based on the attached FIR"
+                # answered with no file on record; dev the same day: upload
+                # failed on "the connection is closed"). Stop and say so.
+                if _upload_failed and not await _batch_has_saved_files(thread_id, _batch_id):
+                    log.error("Upload failed with no file saved; not answering without it",
+                              thread_id=thread_id[:12], file_count=len(file_tuples))
+                    from core.token_tracker import get_tracker as _get_tracker
+                    _tracker = _get_tracker()
+                    _done = {
+                        "type": "done",
+                        "agents_used": [],
+                        "token_usage": _tracker.to_dict() if _tracker else {},
+                        "thread_id": thread_id,
+                        "conversation_turn": 0,
+                        "query_rewritten": False,
+                        "effective_query": None,
+                        "upload_failed": True,
+                    }
+                    yield f"data: {json.dumps({'type': 'error', 'data': UPLOAD_FAILED_MESSAGE})}\n\n"
+                    yield f"data: {json.dumps(_done)}\n\n"
+                    return
 
             elif force_ocr:
                 # "Use it anyway" with no new attachment — the common shape,

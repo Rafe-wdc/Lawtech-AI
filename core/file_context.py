@@ -23,8 +23,9 @@ Design notes:
   scope — this helper doesn't do MMR retrieval.
 - The block is prefix-only (goes into the SYSTEM prompt, not the user
   message) so the agent's downstream retrieval query is unaffected —
-  this ships Phase A of Gap #1. Search-query enrichment (letting the
-  file content influence ES queries) is a separate Phase B if needed.
+  this ships Phase A of Gap #1. Search-query enrichment (Phase B) is
+  core.case_focus: a one-line focus of the files that the orchestrator's
+  per-agent query rewriter folds into each search query.
 - Failure modes (Chroma pool exhaustion, missing collection, empty
   text) degrade to empty string — the agent's normal query flow
   proceeds unchanged, no exception surfaces.

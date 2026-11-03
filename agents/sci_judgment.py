@@ -658,6 +658,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
                     SCI_JUDGMENT_SYSTEM_PROMPT,
                     user_language=user_language,
                     intent=state.get("user_intent"),
+                    file_context_prefix=_file_prefix,
                 )
                 if fb.content:
                     log.info("SCI web fallback produced answer",

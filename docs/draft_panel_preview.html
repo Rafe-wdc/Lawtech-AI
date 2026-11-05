@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft Panel Preview</title>
+<!--
+  Reference renderer for the draft side panel. The frontend contract is
+  docs/draft_panel_frontend_contract.md; this page is its visual spec.
+  Open it in a browser. "Load JSON" renders any artifact file.
+-->
+<style>
+  :root {
+    --ink: #1a1a1a; --muted: #6b6b6b; --paper: #ffffff; --desk: #e9e7e3;
+    --rule: #d6d3cd; --blank-bg: #fff3c4; --blank-ink: #7a5a00; --accent: #1f4e8c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --desk: #1d1e20; --muted: #9a9a9a; --rule: #3a3b3e; --accent: #8ab4f8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--desk); font-family: system-ui, sans-serif; color: var(--ink); }
+  .bar { position: sticky; top: 0; z-index: 2; display: flex; gap: 12px; align-items: center;
+         padding: 10px 16px; background: var(--desk); border-bottom: 1px solid var(--rule); color: var(--muted); font-size: 14px; }
+  .bar strong { color: var(--accent); }
+  .bar label { margin-left: auto; cursor: pointer; text-decoration: underline; }
+  .bar input { display: none; }
+
+  /* The page: A4 at screen scale. Margins come from artifact.page.margins_cm. */
+  .page { background: var(--paper); color: #1a1a1a; width: 210mm; min-height: 297mm; margin: 24px auto;
+          box-shadow: 0 1px 6px rgba(0,0,0,.18); font-family: "Times New Roman", Times, serif; }
+  @media (max-width: 230mm) { .page { width: auto; margin: 12px 16px; min-height: 0; } }
+
+  .page p { margin: 0 0 .6em; }
+  .b-title { font-weight: 700; margin: 0 0 .3em !important; }
+  .b-heading { font-weight: 700; margin: 1.1em 0 .6em !important; }
+  .b-heading.u, .b-title.u { text-decoration: underline; }
+  .al-left { text-align: left; } .al-center { text-align: center; }
+  .al-right { text-align: right; } .al-justify { text-align: justify; }
+
+  /* Row: left stack and right label on one line group, right side bottom-aligned. */
+  .b-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 2em; margin: .5em 0 .8em; }
+  .b-row .l { flex: 1 1 auto; } .b-row .r { flex: 0 0 auto; text-align: right; white-space: nowrap; }
+
+  /* Numbered paragraph with a hanging number: the number sits in the gutter, wrapped lines align with the text. */
+  .b-para { display: grid; grid-template-columns: 2.6em 1fr; margin: 0 0 .7em; text-align: justify; }
+  .b-para .n { text-align: left; }
+  .b-para .sub { grid-column: 2; display: grid; grid-template-columns: 2.2em 1fr; margin-top: .3em; }
+
+  .b-sign { margin: 1.6em 0 .6em; }
+  .b-table { border-collapse: collapse; width: 100%; margin: .6em 0 1em; }
+  .b-table td, .b-table th { border: 1px solid #555; padding: 4px 6px; vertical-align: top; text-align: left; }
+  .b-pagebreak { border: 0; border-top: 1px dashed #b5b0a6; margin: 1.6em -1cm; }
+
+  .blank { background: var(--blank-bg); color: var(--blank-ink); border-radius: 3px; padding: 0 3px; font-style: italic; }
+  .section { position: relative; border-radius: 4px; }
+  .section:hover { outline: 1px dashed #9db6d8; outline-offset: 6px; }
+  .section::before { content: attr(data-heading); position: absolute; left: -3.6cm; top: 0; width: 3.2cm;
+                     font: 11px system-ui, sans-serif; color: #9a958c; text-align: right; }
+  @media (max-width: 230mm) { .section::before { display: none; } }
+</style>
+</head>
+<body>
+<div class="bar"><span>Draft panel preview</span><strong id="meta"></strong>
+  <label>Load JSON<input type="file" id="file" accept=".json,application/json"></label></div>
+<div id="out"></div>
+
+<script id="sample" type="application/json">{
+ "schema_version": 1,
+ "artifact_id": "art_7f3c2a9e",
+ "version": 1,
+ "title": "Bail Application under Section 483 BNSS",
+ "doc_type": "bail_application_regular",
+ "language": "en",
+ "page": {
+  "size": "A4",
+  "margins_cm": {
+   "top": 2.5,
+   "bottom": 2.5,
+   "left": 4.0,
+   "right": 2.5
+  },
+  "font": "Times New Roman",
+  "font_size_pt": 14,
+  "line_spacing": 1.5
+ },
+ "sections": [
+  {
+   "id": "s1",
+   "heading": "Cause title",
+   "blocks": [
+    {
+     "id": "s1.b1",
+     "type": "title",
+     "text": "IN THE HIGH COURT OF JUDICATURE AT BOMBAY",
+     "align": "center",
+     "bold": true,
+     "underline": false
+    },
+    {
+     "id": "s1.b2",
+     "type": "title",
+     "text": "CRIMINAL APPELLATE JURISDICTION",
+     "align": "center",
+     "bold": true,
+     "underline": false
+    },
+    {
+     "id": "s1.b3",
+     "type": "title",
+     "text": "BAIL APPLICATION NO. [[number]] OF 2026",
+     "align": "center",
+     "bold": true,
+     "underline": false
+    },
+    {
+     "id": "s1.b4",
+     "type": "text",
+     "text": "In the matter of an application for regular bail under Section 483 of the Bharatiya Nagarik Suraksha Sanhita, 2023, in C.R. No. 214 of 2026 registered at Kothrud Police Station, Pune.",
+     "align": "justify",
+     "indent_cm": 0
+    },
+    {
+     "id": "s1.b5",
+     "type": "row",
+     "left": [
+      "Rahul Suresh Deshpande",
+      "Age: 34 years, Occupation: Business",
+      "R/at: Flat 12, Shanti Apartments, Kothrud, Pune 411038"
+     ],
+     "right": [
+      "...Applicant"
+     ]
+    },
+    {
+     "id": "s1.b6",
+     "type": "title",
+     "text": "Versus",
+     "align": "center",
+     "bold": false,
+     "underline": false
+    },
+    {
+     "id": "s1.b7",
+     "type": "row",
+     "left": [
+      "The State of Maharashtra",
+      "(through Kothrud Police Station, Pune)"
+     ],
+     "right": [
+      "...Respondent"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "heading": "Facts",
+   "blocks": [
+    {
+     "id": "s2.b1",
+     "type": "text",
+     "text": "TO,\nTHE HON'BLE THE CHIEF JUSTICE AND HIS COMPANION JUDGES OF THE HIGH COURT OF JUDICATURE AT BOMBAY.",
+     "align": "left",
+     "indent_cm": 0
+    },
+    {
+     "id": "s2.b2",
+     "type": "text",
+     "text": "THE HUMBLE APPLICATION OF THE APPLICANT ABOVENAMED **MOST RESPECTFULLY SHEWETH**:",
+     "align": "left",
+     "indent_cm": 0
+    },
+    {
+     "id": "s2.b3",
+     "type": "heading",
+     "text": "FACTS OF THE CASE",
+     "level": 1,
+     "align": "center",
+     "underline": true
+    },
+    {
+     "id": "s2.b4",
+     "type": "para",
+     "number": 1,
+     "label": null,
+     "text": "The Applicant is a law-abiding citizen and a permanent resident of Pune, carrying on a business of electrical supplies for the last eight years. He has no criminal antecedents.",
+     "sub": []
+    },
+    {
+     "id": "s2.b5",
+     "type": "para",
+     "number": 2,
+     "label": null,
+     "text": "On 12 March 2026 the Respondent registered C.R. No. 214 of 2026 against the Applicant for offences punishable under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023, on a complaint by a former business associate arising out of an unpaid invoice of Rs. 4,80,000.",
+     "sub": []
+    },
+    {
+     "id": "s2.b6",
+     "type": "para",
+     "number": 3,
+     "label": null,
+     "text": "The Applicant was arrested on 15 March 2026 and has been in judicial custody since 18 March 2026. The investigation is complete and the charge-sheet was filed on [[date of charge-sheet]].",
+     "sub": []
+    }
+   ]
+  },
+  {
+   "id": "s3",
+   "heading": "Grounds",
+   "blocks": [
+    {
+     "id": "s3.b1",
+     "type": "heading",
+     "text": "GROUNDS",
+     "level": 1,
+     "align": "center",
+     "underline": true
+    },
+    {
+     "id": "s3.b2",
+     "type": "para",
+     "number": null,
+     "label": "A.",
+     "text": "BECAUSE the dispute is purely civil and commercial in nature, arising out of a failed business transaction, and no dishonest intention at the inception of the transaction is alleged.",
+     "sub": []
+    },
+    {
+     "id": "s3.b3",
+     "type": "para",
+     "number": null,
+     "label": "B.",
+     "text": "BECAUSE the investigation is complete, the charge-sheet has been filed, and the Applicant's continued custody serves no purpose.",
+     "sub": []
+    },
+    {
+     "id": "s3.b4",
+     "type": "para",
+     "number": null,
+     "label": "C.",
+     "text": "BECAUSE the Applicant undertakes to abide by any condition this Hon'ble Court may impose, including:",
+     "sub": [
+      {
+       "marker": "(a)",
+       "text": "reporting to the investigating officer on such days as directed;"
+      },
+      {
+       "marker": "(b)",
+       "text": "not leaving the jurisdiction of the trial court without permission;"
+      },
+      {
+       "marker": "(c)",
+       "text": "not contacting or influencing any prosecution witness."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "s4",
+   "heading": "Prayer",
+   "blocks": [
+    {
+     "id": "s4.b1",
+     "type": "heading",
+     "text": "PRAYER",
+     "level": 1,
+     "align": "center",
+     "underline": true
+    },
+    {
+     "id": "s4.b2",
+     "type": "text",
+     "text": "It is therefore most respectfully prayed that this Hon'ble Court may be pleased to:",
+     "align": "justify",
+     "indent_cm": 0
+    },
+    {
+     "id": "s4.b3",
+     "type": "para",
+     "number": null,
+     "label": "(a)",
+     "text": "release the Applicant on bail in C.R. No. 214 of 2026 registered at Kothrud Police Station, Pune, on such terms and conditions as this Hon'ble Court deems fit; and",
+     "sub": []
+    },
+    {
+     "id": "s4.b4",
+     "type": "para",
+     "number": null,
+     "label": "(b)",
+     "text": "pass any other order this Hon'ble Court deems fit in the interest of justice.",
+     "sub": []
+    },
+    {
+     "id": "s4.b5",
+     "type": "text",
+     "text": "AND FOR THIS ACT OF KINDNESS THE APPLICANT SHALL, AS IN DUTY BOUND, EVER PRAY.",
+     "align": "center",
+     "indent_cm": 0
+    },
+    {
+     "id": "s4.b6",
+     "type": "row",
+     "left": [
+      "Place: Mumbai",
+      "Date: [[date]]"
+     ],
+     "right": [
+      "Advocate for the Applicant",
+      "[[advocate name]]"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "s5",
+   "heading": "Verification",
+   "blocks": [
+    {
+     "id": "s5.b1",
+     "type": "page_break"
+    },
+    {
+     "id": "s5.b2",
+     "type": "heading",
+     "text": "VERIFICATION",
+     "level": 1,
+     "align": "center",
+     "underline": true
+    },
+    {
+     "id": "s5.b3",
+     "type": "text",
+     "text": "I, Rahul Suresh Deshpande, the Applicant abovenamed, do hereby state on solemn affirmation that what is stated in paragraphs 1 to 3 above is true to my own knowledge, and that the grounds and prayer are stated on legal advice, which I believe to be true.",
+     "align": "justify",
+     "indent_cm": 0
+    },
+    {
+     "id": "s5.b4",
+     "type": "text",
+     "text": "Solemnly affirmed at Mumbai on this [[day]] day of [[month]], 2026.",
+     "align": "left",
+     "indent_cm": 0
+    },
+    {
+     "id": "s5.b5",
+     "type": "signature",
+     "lines": [
+      "Applicant"
+     ],
+     "align": "right"
+    }
+   ]
+  }
+ ]
+}</script>
+<script>
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// Inline: **bold**, *italic*, __underline__, [[blank]], and "\n" as a line break.
+function inline(s) {
+  return esc(s)
+    .replace(/\[\[([^\[\]\n]{1,80})\]\]/g, '<span class="blank">[$1]</span>')
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/__([^_]+)__/g, "<u>$1</u>")
+    .replace(/\*([^*]+)\*/g, "<i>$1</i>")
+    .replace(/\n/g, "<br>");
+}
+
+const RENDER = {
+  title:   b => `<p class="b-title al-${b.align}${b.underline ? " u" : ""}"${b.bold ? "" : ' style="font-weight:400"'}>${inline(b.text)}</p>`,
+  heading: b => `<p class="b-heading al-${b.align}${b.underline ? " u" : ""}">${inline(b.text)}</p>`,
+  text:    b => `<p class="al-${b.align}" style="padding-left:${b.indent_cm || 0}cm">${inline(b.text)}</p>`,
+  row:     b => `<div class="b-row"><div class="l">${b.left.map(inline).join("<br>")}</div><div class="r">${b.right.map(inline).join("<br>")}</div></div>`,
+  para:    b => `<div class="b-para"><span class="n">${esc(b.label || (b.number ? b.number + "." : ""))}</span><span>${inline(b.text)}</span>${
+                  (b.sub || []).map(s => `<div class="sub"><span>${esc(s.marker)}</span><span>${inline(s.text)}</span></div>`).join("")}</div>`,
+  signature: b => `<p class="b-sign al-${b.align}">${b.lines.map(inline).join("<br>")}</p>`,
+  table:   b => `<table class="b-table">${b.header && b.header.length ? `<tr>${b.header.map(h => `<th>${inline(h)}</th>`).join("")}</tr>` : ""}${
+                  b.rows.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</table>`,
+  page_break: () => `<hr class="b-pagebreak">`,
+};
+
+function render(a) {
+  const p = a.page || {}, m = p.margins_cm || {top: 2.5, bottom: 2.5, left: 4, right: 2.5};
+  document.getElementById("meta").textContent = `${a.title} · v${a.version}`;
+  document.getElementById("out").innerHTML =
+    `<div class="page" style="padding:${m.top}cm ${m.right}cm ${m.bottom}cm ${m.left}cm;` +
+    `font-size:${p.font_size_pt || 14}pt;line-height:${p.line_spacing || 1.5}">` +
+    a.sections.map(s => `<div class="section" id="${esc(s.id)}" data-heading="${esc(s.heading)}">${
+      s.blocks.map(b => (RENDER[b.type] || (() => ""))(b)).join("")}</div>`).join("") +
+    `</div>`;
+}
+
+render(JSON.parse(document.getElementById("sample").textContent));
+document.getElementById("file").addEventListener("change", e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => render(JSON.parse(t))).catch(err => alert("Not a valid artifact: " + err));
+});
+</script>
+</body>
+</html>

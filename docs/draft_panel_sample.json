@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "artifact_id": "art_7f3c2a9e",
+  "version": 1,
+  "title": "Bail Application under Section 483 BNSS",
+  "doc_type": "bail_application_regular",
+  "language": "en",
+  "page": {
+    "size": "A4",
+    "margins_cm": {"top": 2.5, "bottom": 2.5, "left": 4.0, "right": 2.5},
+    "font": "Times New Roman",
+    "font_size_pt": 14,
+    "line_spacing": 1.5
+  },
+  "sections": [
+    {
+      "id": "s1",
+      "heading": "Cause title",
+      "blocks": [
+        {"id": "s1.b1", "type": "title", "text": "IN THE HIGH COURT OF JUDICATURE AT BOMBAY", "align": "center", "bold": true, "underline": false},
+        {"id": "s1.b2", "type": "title", "text": "CRIMINAL APPELLATE JURISDICTION", "align": "center", "bold": true, "underline": false},
+        {"id": "s1.b3", "type": "title", "text": "BAIL APPLICATION NO. [[number]] OF 2026", "align": "center", "bold": true, "underline": false},
+        {"id": "s1.b4", "type": "text", "text": "In the matter of an application for regular bail under Section 483 of the Bharatiya Nagarik Suraksha Sanhita, 2023, in C.R. No. 214 of 2026 registered at Kothrud Police Station, Pune.", "align": "justify", "indent_cm": 0},
+        {"id": "s1.b5", "type": "row", "left": ["Rahul Suresh Deshpande", "Age: 34 years, Occupation: Business", "R/at: Flat 12, Shanti Apartments, Kothrud, Pune 411038"], "right": ["...Applicant"]},
+        {"id": "s1.b6", "type": "title", "text": "Versus", "align": "center", "bold": false, "underline": false},
+        {"id": "s1.b7", "type": "row", "left": ["The State of Maharashtra", "(through Kothrud Police Station, Pune)"], "right": ["...Respondent"]}
+      ]
+    },
+    {
+      "id": "s2",
+      "heading": "Facts",
+      "blocks": [
+        {"id": "s2.b1", "type": "text", "text": "TO,\nTHE HON'BLE THE CHIEF JUSTICE AND HIS COMPANION JUDGES OF THE HIGH COURT OF JUDICATURE AT BOMBAY.", "align": "left", "indent_cm": 0},
+        {"id": "s2.b2", "type": "text", "text": "THE HUMBLE APPLICATION OF THE APPLICANT ABOVENAMED **MOST RESPECTFULLY SHEWETH**:", "align": "left", "indent_cm": 0},
+        {"id": "s2.b3", "type": "heading", "text": "FACTS OF THE CASE", "level": 1, "align": "center", "underline": true},
+        {"id": "s2.b4", "type": "para", "number": 1, "label": null, "text": "The Applicant is a law-abiding citizen and a permanent resident of Pune, carrying on a business of electrical supplies for the last eight years. He has no criminal antecedents.", "sub": []},
+        {"id": "s2.b5", "type": "para", "number": 2, "label": null, "text": "On 12 March 2026 the Respondent registered C.R. No. 214 of 2026 against the Applicant for offences punishable under Sections 318(4) and 316(2) of the Bharatiya Nyaya Sanhita, 2023, on a complaint by a former business associate arising out of an unpaid invoice of Rs. 4,80,000.", "sub": []},
+        {"id": "s2.b6", "type": "para", "number": 3, "label": null, "text": "The Applicant was arrested on 15 March 2026 and has been in judicial custody since 18 March 2026. The investigation is complete and the charge-sheet was filed on [[date of charge-sheet]].", "sub": []}
+      ]
+    },
+    {
+      "id": "s3",
+      "heading": "Grounds",
+      "blocks": [
+        {"id": "s3.b1", "type": "heading", "text": "GROUNDS", "level": 1, "align": "center", "underline": true},
+        {"id": "s3.b2", "type": "para", "number": null, "label": "A.", "text": "BECAUSE the dispute is purely civil and commercial in nature, arising out of a failed business transaction, and no dishonest intention at the inception of the transaction is alleged.", "sub": []},
+        {"id": "s3.b3", "type": "para", "number": null, "label": "B.", "text": "BECAUSE the investigation is complete, the charge-sheet has been filed, and the Applicant's continued custody serves no purpose.", "sub": []},
+        {"id": "s3.b4", "type": "para", "number": null, "label": "C.", "text": "BECAUSE the Applicant undertakes to abide by any condition this Hon'ble Court may impose, including:", "sub": [
+          {"marker": "(a)", "text": "reporting to the investigating officer on such days as directed;"},
+          {"marker": "(b)", "text": "not leaving the jurisdiction of the trial court without permission;"},
+          {"marker": "(c)", "text": "not contacting or influencing any prosecution witness."}
+        ]}
+      ]
+    },
+    {
+      "id": "s4",
+      "heading": "Prayer",
+      "blocks": [
+        {"id": "s4.b1", "type": "heading", "text": "PRAYER", "level": 1, "align": "center", "underline": true},
+        {"id": "s4.b2", "type": "text", "text": "It is therefore most respectfully prayed that this Hon'ble Court may be pleased to:", "align": "justify", "indent_cm": 0},
+        {"id": "s4.b3", "type": "para", "number": null, "label": "(a)", "text": "release the Applicant on bail in C.R. No. 214 of 2026 registered at Kothrud Police Station, Pune, on such terms and conditions as this Hon'ble Court deems fit; and", "sub": []},
+        {"id": "s4.b4", "type": "para", "number": null, "label": "(b)", "text": "pass any other order this Hon'ble Court deems fit in the interest of justice.", "sub": []},
+        {"id": "s4.b5", "type": "text", "text": "AND FOR THIS ACT OF KINDNESS THE APPLICANT SHALL, AS IN DUTY BOUND, EVER PRAY.", "align": "center", "indent_cm": 0},
+        {"id": "s4.b6", "type": "row", "left": ["Place: Mumbai", "Date: [[date]]"], "right": ["Advocate for the Applicant", "[[advocate name]]"]}
+      ]
+    },
+    {
+      "id": "s5",
+      "heading": "Verification",
+      "blocks": [
+        {"id": "s5.b1", "type": "page_break"},
+        {"id": "s5.b2", "type": "heading", "text": "VERIFICATION", "level": 1, "align": "center", "underline": true},
+        {"id": "s5.b3", "type": "text", "text": "I, Rahul Suresh Deshpande, the Applicant abovenamed, do hereby state on solemn affirmation that what is stated in paragraphs 1 to 3 above is true to my own knowledge, and that the grounds and prayer are stated on legal advice, which I believe to be true.", "align": "justify", "indent_cm": 0},
+        {"id": "s5.b4", "type": "text", "text": "Solemnly affirmed at Mumbai on this [[day]] day of [[month]], 2026.", "align": "left", "indent_cm": 0},
+        {"id": "s5.b5", "type": "signature", "lines": ["Applicant"], "align": "right"}
+      ]
+    }
+  ]
+}

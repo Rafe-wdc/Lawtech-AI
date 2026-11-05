@@ -573,6 +573,13 @@ def _rejoin_blankline_fragments(text: str) -> tuple[str, int]:
                 and not _LABEL_LINE_RE.match(first_line)
                 and not (first_line.upper() == first_line and any(c.isalpha() for c in first_line))
                 and not _INDIC_RE.search(last_line + first_line)
+                # A short Title Case line is a new cause-title line (a party's
+                # name), not the tail of a sentence: dev box 2026-10-06 joined
+                # "... Bharatiya Nyaya Sanhita, 2023" / blank / "Mr. Rahul
+                # Deshpande". Same exemption _unwrap_hard_wrapped_lines has.
+                # An open "[..." on the previous line still joins.
+                and not (len(first_line) < 40 and _is_title_case(first_line)
+                         and not open_bracket)
             ):
                 out[-1] = ps + " " + cs
                 joins += 1
@@ -4140,6 +4147,16 @@ def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_
     return missing
 
 
+def _emit_draft_stream(event: dict) -> None:
+    """Send a raw drafting event on the request stream. A no-op outside a
+    streaming context (batch endpoint, tests) and on any error."""
+    try:
+        from langgraph.config import get_stream_writer
+        get_stream_writer()(event)
+    except Exception:
+        pass
+
+
 def _parallel_sections_enabled() -> bool:
     """Sections after the opening pair are drafted concurrently unless
     DRAFTING_PARALLEL_SECTIONS=0 (switch back without a deploy)."""
@@ -4255,7 +4272,18 @@ async def _generate_sectionwise(
                 _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
                 break
 
-    def _assemble(position_start: int, pair: list, pair_text: str, failure) -> None:
+    def _preview(position_start: int, pair: list, pair_text: str) -> None:
+        # Draft side panel: one batch's text as soon as it is written. A raw
+        # event; core.chat_runner turns it into artifact_section only when
+        # DRAFT_ARTIFACT_EVENTS=1. The finished draft replaces it.
+        if pair_text.strip():
+            _emit_draft_stream({
+                "type": "draft_section", "index": position_start,
+                "headings": [s.heading for s in pair], "text": pair_text.strip(),
+            })
+
+    def _assemble(position_start: int, pair: list, pair_text: str, failure,
+                  preview: bool = True) -> None:
         """Append one finished batch in document order: drop sections it
         re-emitted that already exist (rule 1 of the pair prompt does not
         hold on its own; see _drop_reemitted_sections), else record it as
@@ -4272,6 +4300,8 @@ async def _generate_sectionwise(
                 )
         if pair_text.strip():
             completed.append(pair_text.strip())
+            if preview:
+                _preview(position_start, pair, pair_text)
         else:
             failed_pairs.append(failure or {
                 "position_start": position_start,
@@ -4524,6 +4554,17 @@ async def _generate_sectionwise(
     # numbers restart in each parallel section and are continued by
     # validate_draft's renumbering pass.
     parallel = _parallel_sections_enabled() and total > 2
+    # Draft side panel: announce the batches about to be written, so the
+    # panel can lay out placeholders. Indexes are each batch's first section
+    # position and match the draft_section events below.
+    if parallel:
+        _batches = [(1, sections[:2])] + [(p, [s]) for p, s in enumerate(sections[2:], start=3)]
+    else:
+        _batches = [(k + 1, sections[k:k + 2]) for k in range(0, total, 2)]
+    _emit_draft_stream({
+        "type": "draft_plan",
+        "sections": [{"index": p, "headings": [s.heading for s in b]} for p, b in _batches],
+    })
     if not parallel:
         i = 0
         while i < total:
@@ -4558,11 +4599,14 @@ async def _generate_sectionwise(
                                 section=sec.heading[:40], error=short_err(e))
                     t, f = "", {"position_start": pos, "headings": [sec.heading],
                                 "reason": short_err(e)}
+                # Preview as each section finishes (out of order) rather
+                # than all at once after the slowest one.
+                _preview(pos, [sec], t)
                 return pos, sec, t, f
 
         results = await asyncio.gather(*[_one(p, sec) for p, sec in rest])
         for pos, sec, t, f in sorted(results, key=lambda r: r[0]):
-            _assemble(pos, [sec], t, f)
+            _assemble(pos, [sec], t, f, preview=False)
 
     draft = "\n\n".join(completed)
 

@@ -889,6 +889,15 @@ WEB_FALLBACK_AGENT_HINTS: dict[str, str] = {
         "GST provision at issue (CGST / SGST / IGST section), and the "
         "holding. DO NOT emit any URL."
     ),
+    "Tribunal_Judgment": (
+        "## AGENT CONTEXT — Tribunal order lookup\n"
+        "The user is asking about orders of an Indian tribunal or "
+        "quasi-judicial commission (TDSAT, CESTAT, CAT, CIC, NGT, NCDRC, "
+        "APTEL, NCLT/NCLAT, ITAT, etc.). Structure with the tribunal, "
+        "party names, year, the provision at issue, and the holding. Note "
+        "that tribunal orders bind only the tribunal and the parties. DO "
+        "NOT emit any URL."
+    ),
     "Newacts": (
         "## AGENT CONTEXT — New criminal codes (BNS / BNSS / BSA)\n"
         "The user is asking about a provision under BNS, BNSS, BSA, or "
@@ -1121,6 +1130,18 @@ Given the user's query and the recent conversation summary, produce:
        Downstream: critic checks response is within ±25% of this target.
 
    include_citations — default TRUE. Set FALSE only if user said "no citations".
+   no_unsupplied_law — TRUE iff the user explicitly forbids adding
+       statutory provisions, rules, notifications, case law or legal
+       requirements they did not supply ("do not introduce invented
+       statutory provisions, case law, rules ... or legal requirements",
+       "without inventing any statutory provision"). FALSE by default, and
+       FALSE when the user only asks that citations be real or accurate
+       ("don't cite fake judgments", "no hallucinated cases", "be
+       accurate in law") — that asks for real law, not for no law.
+   unresolved_marker — the exact marker the user told you to use for
+       unresolved details, verbatim without quotes ("Flag any unresolved
+       detail with 'TO BE CONFIRMED BEFORE EXECUTION'" →
+       TO BE CONFIRMED BEFORE EXECUTION). Empty string otherwise.
    include_examples  — TRUE iff user asked for examples / illustrations.
    include_case_law  — TRUE iff the user EXPLICITLY asked for case laws /
        precedents / judgments / rulings / "cases on" / "leading cases" /
@@ -1363,6 +1384,38 @@ Given the user's query and the recent conversation summary, produce:
        Be CONSERVATIVE: when in doubt between "draft" and "explain", pick
        "explain". When in doubt between "analyze" and "lookup", pick "lookup".
 
+   research_before_draft — sequencing of research and drafting. Set ONLY on
+       an EXPLICIT instruction; default "none".
+       "research_only"      the user asks to research / analyse / discuss the
+                            law or how to state the facts BEFORE drafting, or
+                            says not to draft yet, and does NOT ask for the
+                            document in this same response: "before drafting
+                            I want to research the legal aspect, how should I
+                            state the facts", "first analyse the law, then I
+                            will ask for the plaint", "don't draft yet".
+       "research_and_draft" the user asks for BOTH a research / analysis
+                            output AND the document in this same response:
+                            "review the material and discuss the matter in
+                            depth, then DRAFT THE LEGAL NOTICE", numbered
+                            outputs listing an analysis and the document,
+                            "give me both: first the analysis, then the
+                            notice".
+       "none"               everything else. In particular "none" for:
+                            a plain draft request; "draft X with detailed
+                            legal reasoning", "draft X with case laws /
+                            citations / grounds" — reasoning or authorities
+                            INSIDE the draft are part of the draft, not a
+                            separate research output; and "draft X after
+                            researching Y" / "analyse the notice and draft a
+                            reply" — there the research is how the draft is
+                            made, not something the user wants to read.
+                            research_and_draft needs an analysis the user
+                            wants to RECEIVE as its own deliverable, before
+                            or beside the document ("first discuss / explain
+                            ... then draft", "give me both", "(a) a research
+                            note and (b) the petition", numbered outputs
+                            naming the analysis).
+
    wants_statute_text — TRUE iff the user wants statutory text / a specific
        section / specific act provisions surfaced. Triggers (any language):
          - explicit section / article / rule / order references: "section 138",
@@ -1412,6 +1465,35 @@ Given the user's query and the recent conversation summary, produce:
        credit (ITC) disputes, GST valuation rulings, HSN classification, or
        state-level GST appellate decisions. FALSE for generic statutory
        questions about GST that don't reference rulings.
+
+   wants_tribunal_rulings — TRUE iff the user asks for orders / decisions /
+       rulings / precedents of an Indian tribunal or quasi-judicial
+       commission: TDSAT, CESTAT (or CEGAT), CAT, CIC (RTI second appeals),
+       NGT, NCDRC / consumer commissions, APTEL, CERC, Company Law Board,
+       IPAB, Authority for Advance Rulings, Copyright Board — by name, or as
+       "tribunal orders / tribunal judgments" on a topic. Also TRUE when the
+       user asks for precedents on a dispute that is decided by such a
+       tribunal (telecom / broadcasting carriage fee disputes, CENVAT or
+       service-tax appeals, RTI exemptions, environmental clearance). FALSE
+       for a question about how to approach a tribunal or what its
+       jurisdiction is with no request for its orders, and FALSE for GST
+       AAR / AAAR rulings (those are wants_gst_rulings).
+
+   draft_edit_scope — only when the previous turn produced a DRAFT (see the
+       previous-turn intent: task_intent "draft") and the current query asks
+       to change that document; "none" otherwise.
+       "partial" — change, add or remove SPECIFIC parts and keep the rest:
+           "change paragraph 3 to say the rent was due from February",
+           "remove the second ground", "add a paragraph on limitation after
+           the facts", "make the prayer also ask for costs", "correct the
+           date in para 5 to 12.03.2024", "rewrite the facts section".
+       "whole" — the change runs through the whole document: "translate it
+           to Hindi", "shorten it", "make it more formal", "convert to bullet
+           points", "replace the petitioner's name everywhere".
+       "none" — not a change to the earlier draft, including a request for a
+           DIFFERENT new document ("now draft the reply notice") or a
+           question about the draft ("is paragraph 4 legally sound?").
+       Same rule in any language or script.
 
    named_acts — list of specific Indian acts / codes / statutes the user
        references by name in the query. Each entry should be the canonical
@@ -1586,9 +1668,37 @@ returning "none".
   - "complaint to police for stolen vehicle" → no court file matches; return "none"
   - "complaint under Section 200 CrPC" → a magistrate-complaint file (court)
 
+## When the query is ambiguous, the FACTS choose the sub-type
+
+Several families contain sub-types that are DIFFERENT documents: a divorce
+petition by mutual consent (Section 13B HMA — a JOINT petition by both
+spouses who have settled) versus a contested divorce on cruelty / desertion /
+adultery (Section 13(1) HMA — one spouse against the other); regular versus
+anticipatory bail; a plaint versus a written statement; a notice versus the
+reply to it. If the query names a section or sub-type that exists in the
+list, follow it. If it does not, or names one no candidate carries, pick the
+sub-type the uploaded facts support. Facts written by one spouse describing
+the other's cruelty, drinking, dowry demands, violence or abandonment are a
+CONTESTED petition under Section 13(1) — never a mutual-consent petition,
+which needs both spouses to agree. When the facts make the family clear,
+prefer the closest candidate in that family over "none".
+
+A section number that no file name carries is NOT a missing family. Sibling
+sections and sub-sections (13A / 13(1)(ia) / 13(1)(ib) of the HMA; 480 / 482
+/ 483 BNSS; 437 / 439 CrPC) are variants of the same document, and the file
+names list only some of them. Never return "none" because the exact number
+in the query is absent from the list — pick the closest template in that
+family and let the facts decide the variant. A request for a petition PLUS an
+application, affidavit or case law is served by the template for the main
+document; the extras are written from it.
+
 ## User query
 
 {query}
+
+## Uploaded facts (excerpt of the user's documents — may be empty)
+
+{source_preview}
 
 ## Candidate file names
 
@@ -2269,6 +2379,10 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
      lines (court name in bold) and do NOT print the planner's label ("Court
      Heading, Cause Title, and Description of Parties") as a heading. A filed
      pleading never carries that label (advocate mark-up, 2026-09-13).
+   - The sign-off block (Place, Date, signature of the party, name of the
+     Advocate) goes IMMEDIATELY after the last prayer clause and before the
+     Verification. Never open a Verification section with it and never push
+     it below the list of documents (testers' report, 2026-10-05).
    - The judge has already adapted each heading to the user's matter and rendered it in the user's target language. Use the heading exactly as given.
    - Format each heading as `## ` followed by the heading text. Sub-headings inside a section use `### `.
 
@@ -2449,8 +2563,13 @@ You are NOT drafting from scratch. You are NOT producing a diff. You are NOT ret
 5. If a value the directive references is NOT present in the EXISTING DRAFT or the NEW UPLOADED SOURCES, use a clearly-bracketed placeholder (e.g. `[Advocate's Address]`, `[Bank Reference Number]`) — never invent it.
 
 6. Output ONLY the complete modified document. No preamble ("Here is the modified draft:"). No postscript ("This has been updated per your request."). No meta-commentary. No diff notation. No `~~strikethrough~~` marking what changed. Just the final document.
+"""
 
-## USER INTENT DIRECTIVES
+# The per-request inputs, sent as the user message AFTER the fixed rules
+# above (2026-10-19). They used to sit in the middle of the system prompt,
+# ahead of ~5,800 tokens of appended rules, so neither Claude's prompt
+# cache nor Gemini's implicit cache could reuse those rules.
+DRAFTING_MODIFICATION_INPUTS = """## USER INTENT DIRECTIVES
 {intent_directives_block}
 
 ## EXISTING DRAFT
@@ -2481,6 +2600,54 @@ DRAFTING_MODIFICATION_PROMPT += (
     + "\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
 )
+
+
+# --- Drafting follow-up: targeted edit (core/draft_edit.py) ---
+# The user asked to change specific parts of a draft from an earlier turn.
+# The model returns edit operations on numbered blocks; code applies them, so
+# every block it does not name reaches the user unchanged. Fixed rules here
+# (cached system prompt); the numbered draft and the instruction go in
+# DRAFTING_TARGETED_EDIT_INPUTS. Used with .format() and no arguments, like
+# DRAFTING_MODIFICATION_PROMPT, so literal braces must be doubled.
+DRAFTING_TARGETED_EDIT_PROMPT = """You are editing an EXISTING Indian-law legal draft. The user has asked for a change to SPECIFIC parts of it. You do NOT return the document. You return a list of edit operations on its numbered blocks; the system applies them and keeps every other block exactly as it is.
+
+## The draft
+The draft is given as blocks, each under an id such as [B7]. A block is a paragraph, a heading, a table, or a list.
+
+## Operations
+- `replace` — `block` = the id, `text` = the complete new text of that block.
+- `insert_after` / `insert_before` — `block` = the neighbouring id, `text` = the complete new block.
+- `delete` — `block` = the id, `text` empty.
+
+## Rules
+1. Change ONLY what the instruction asks for. Do not touch any other block, not even to improve it. The fewer operations, the better — usually one to three.
+2. A `replace` text is the WHOLE block after the change, not a fragment and not a diff. Keep the block's own formatting: its paragraph number, bold, list markers, indentation, and language.
+3. New paragraphs follow the draft's style: same numbering format ("7." / "**7.**" / "(g)"), same tone, same language and script. Number an inserted paragraph as if it sat at that position; the system renumbers the rest of the series.
+4. Keep every party name, court, case number, date, amount and statutory reference exactly as the draft has them, unless the instruction changes that value. Never replace a real value with a [placeholder]. If the instruction needs a value that is neither in the draft nor in the instruction, use a clearly bracketed placeholder such as [Date of Agreement] — never invent one.
+5. If the user changes a value that appears in several blocks (a date, an amount, a name), edit every block where it appears.
+6. Paragraph references in the instruction ("paragraph 5", "the second ground", "the prayer") mean the numbering and headings visible in the draft, not block ids. Find the block that holds it.
+7. Set `whole_document` to true, with no edits, ONLY when the change genuinely runs through the entire document — translate it, shorten or expand all of it, change the tone or format throughout. A change to one or a few parts is never whole_document.
+8. If the instruction refers to a part that does not exist in the draft, add it in the place a lawyer would expect it (for example a missing verification clause after the prayer).
+"""
+
+DRAFTING_TARGETED_EDIT_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_JURISDICTION_GUARDRAILS
+    + "\n" + INDIAN_LEGAL_CITATION_FORMAT
+    + "\n" + INDIAN_LEGAL_LANGUAGE_REGISTER
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
+
+DRAFTING_TARGETED_EDIT_INPUTS = """## USER INTENT DIRECTIVES
+{intent_directives_block}
+
+## EXISTING DRAFT (numbered blocks)
+{numbered_draft}
+
+## USER INSTRUCTION
+{user_directive}
+
+Return the edit operations now.
+"""
 
 
 # --- Drafting Pipeline: Citation Injection (with real DB results) ---
@@ -3293,6 +3460,73 @@ GST_JUDGMENT_SYSTEM_PROMPT += (
 )
 
 
+TRIBUNAL_JUDGMENT_SYSTEM_PROMPT = """You are an expert legal research assistant specializing in orders of Indian tribunals and quasi-judicial commissions.
+You have access to a database of about 46,000 tribunal orders.
+
+## What's in the database
+
+Tribunals covered (code — name):
+- CESTAT — Customs, Excise and Service Tax Appellate Tribunal (includes orders of its predecessor CEGAT)
+- CAT — Central Administrative Tribunal (service matters of central government employees)
+- CIC — Central Information Commission (RTI second appeals and complaints)
+- NGT — National Green Tribunal (environment)
+- CDRC — Consumer Disputes Redressal Commissions (mostly NCDRC)
+- APTEL — Appellate Tribunal for Electricity
+- CLB — Company Law Board (now NCLT / NCLAT)
+- CERC — Central Electricity Regulatory Commission
+- IPAB — Intellectual Property Appellate Board
+- AAR — Authority for Advance Rulings (income tax / customs)
+- CB — Copyright Board
+- TDSAT — Telecom Disputes Settlement and Appellate Tribunal (telecom, broadcasting / cable TV, cyber appeals, AERA appeals)
+
+Each record carries the tribunal, case number, date, bench members, parties, the full text of the order, and a PDF link.
+
+## Your Available Tools
+
+1. **tribunal_search_by_topic** — Search by legal issue. Pass `tribunal` (a code above) whenever the user names a tribunal or the issue clearly belongs to one (carriage fee / interconnection / cable TV → TDSAT; CENVAT / service tax / customs valuation → CESTAT; RTI → CIC; environmental clearance → NGT).
+2. **tribunal_search_by_keyword** — Exact words: section, rule, regulation or notification numbers.
+3. **tribunal_search_by_case_number** — Case / petition / appeal number, full or partial.
+4. **tribunal_search_by_party_name** — Party name (company, department, person).
+5. **tribunal_search_by_member** — Orders by a member or chairperson, optionally narrowed to an issue.
+6. **tribunal_get_case_details** — Read an order in full by its DB ID.
+
+## MANDATORY WORKFLOW
+
+**You MUST complete ALL steps before writing your final response.**
+
+### Step A: Search (at least 1 search tool call)
+- Each search returns metadata + a short excerpt but NOT the full text. If a tribunal-scoped search returns nothing useful, retry without the tribunal filter or with different terms.
+
+### Step B: Read the top orders (tribunal_get_case_details)
+- Call **tribunal_get_case_details** on the 2-3 most relevant orders. Without this you only have metadata and CANNOT say what the tribunal held.
+
+### Step C: Compose the response
+- For each order: the issue, what the tribunal held, and why.
+- Cite each order with the tribunal, title, case number and date, and give its PDF link.
+- When orders of the same tribunal point different ways, say so and give the dates — the later view, or a larger bench, usually prevails.
+
+## Response Guidelines
+
+1. **Name the tribunal** for every order you cite.
+2. **Always provide the PDF link** when available.
+3. **Precedential weight**: a tribunal order binds that tribunal's own benches and the parties; it does not bind High Courts or the Supreme Court, and an appeal may lie to the High Court or Supreme Court. Say so when the user relies on an order as precedent.
+4. **Summarize the holding from the text**, not from the title or keywords.
+5. Use markdown headings and bullet points.
+
+## CRITICAL RULES
+- You MUST call at least one search tool for EVERY query.
+- You MUST call tribunal_get_case_details on the top 2-3 results BEFORE composing your answer.
+- Never fabricate parties, case numbers, dates, members or holdings. Only cite orders that appear in your tool results.
+- Call these "orders" or "decisions" of the tribunal, and the decision-makers "members" or "the bench" — not "judges" of a court.
+- If the database has nothing on point, say that plainly for the tribunal searched instead of citing loosely related orders.
+"""
+
+TRIBUNAL_JUDGMENT_SYSTEM_PROMPT += (
+    "\n\n" + INDIAN_LEGAL_AUTHORIZED_SOURCES
+    + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
+)
+
+
 # --- Memory Agent Prompts ---
 
 QUERY_REWRITE_PROMPT = """You are a legal query rewriting assistant. Rewrite the user's latest query into a standalone, self-contained query.
@@ -3798,6 +4032,11 @@ structured plan that decides in one shot:
    prayer clause") — the drafting agent handles both new drafts AND
    directive-driven modifications of prior drafts.
    NOT Drafting:
+   - The user asks to research / analyse the law or how to state the facts
+     BEFORE drafting, or not to draft yet ("before drafting I want to
+     research...", "don't draft yet") and does not ask for the document in
+     this response → **Scenario**, even with a production verb and a document
+     noun (intent.research_before_draft = "research_only").
    - Tactical outputs (arguments, cross-examination questions, strategy,
      defences, briefs of advice) → **Scenario**, even if the user says "draft".
    - Questions ABOUT documents (format, essential elements, requirements,
@@ -3822,6 +4061,16 @@ structured plan that decides in one shot:
    Arnesh Kumar, Hussainara Khatoon, etc.).
 8. **GST_Judgment** — GST AAR / AAAR / advance ruling / classification appeal
    under GST / GST ITC dispute / HSN code ruling / state GST appellate order.
+8A. **Tribunal_Judgment** — orders / decisions of an Indian tribunal or
+   commission: TDSAT, CESTAT / CEGAT, CAT, CIC, NGT, NCDRC, APTEL, CERC,
+   Company Law Board, IPAB, AAR (income tax / customs), Copyright Board —
+   named, or "tribunal orders" on a topic (carriage fee disputes, CENVAT
+   credit, RTI exemptions, environmental clearance). GST AAR / AAAR stays
+   GST_Judgment. Requires a request for the tribunal's ORDERS / DECISIONS /
+   RULINGS / what it HELD. A question ABOUT a tribunal — its jurisdiction,
+   powers, composition, limitation, how to file or appeal — is NOT
+   Tribunal_Judgment: route it to Legal_Concepts (or Legislation when it
+   names the statute).
 9. **Judgment** — the user names a specific case OR asks for court decisions
    / precedents from High Courts or unspecified courts.
 10. **Maxim** — a Latin legal maxim or doctrine (res judicata, audi alteram
@@ -3853,6 +4102,9 @@ structured plan that decides in one shot:
   judgments (verbatim): add BOTH **Judgment** AND **SCI_Judgment**. Skip
   SCI_Judgment if the user scoped to "High Court only"; skip Judgment if
   they scoped to "Supreme Court only" or named a specific SC case.
+  EXCEPTION: when the task is **Tribunal_Judgment**, do NOT add Judgment or
+  SCI_Judgment unless the user ALSO asks for High Court / Supreme Court
+  judgments in so many words.
 - Asks for statutory text alongside another primary: add **Legislation**
   (or **Newacts** if it's one of the 6 codes — never both).
 - Invokes a fundamental right alongside another primary: add **Constitution**.
@@ -3865,6 +4117,11 @@ When the user's query bundles multiple distinct asks in one turn (e.g. draft
 a suit + explain a scenario + cite case laws), include ALL relevant agents
 up to the 4-cap. Do NOT collapse to just the drafting agent — the classifier's
 job is to honour the full request.
+NOT multi-intent: research that is only how the draft gets made ("draft X
+after researching Y", "analyse the notice and draft a reply", "draft X with
+case laws") — that is plain **Drafting** with intent.research_before_draft =
+"none". Multi-intent needs an analysis the user wants to RECEIVE as its own
+output.
 
 ## PART 3 — Structured intent (populate `intent` field)
 
@@ -3883,6 +4140,12 @@ Extract the same fields as the legacy USER_INTENT_EXTRACTION_PROMPT:
 - **response_depth** — "brief" / "standard" / "detailed"
 - **target_word_count** — integer if user named one (10-5000), null otherwise
 - **include_citations** — default True, False iff user said "no citations"
+- **no_unsupplied_law** — True iff the user explicitly forbids adding
+  statutory provisions, rules, notifications, case law or legal
+  requirements they did not supply. False by default, and False when the
+  user only asks that citations be real ("don't cite fake judgments")
+- **unresolved_marker** — the exact marker the user named for unresolved
+  details ("TO BE CONFIRMED BEFORE EXECUTION"), verbatim; "" otherwise
 - **include_examples** — True iff user asked for examples
 - **include_case_law** — True iff user explicitly asked for case laws /
   precedents / judgments. FALSE by default — do NOT set True merely
@@ -3893,9 +4156,29 @@ Extract the same fields as the legacy USER_INTENT_EXTRACTION_PROMPT:
   legal_notice, office_application, agreement, etc.) or "none"
 - **task_intent** — "draft", "explain", "lookup", "analyze_scenario",
   "compare", "list", etc.
+- **research_before_draft** — "none" (default) / "research_only" /
+  "research_and_draft". "research_only" ONLY when the user explicitly asks to
+  research / analyse the law or how to state the facts BEFORE drafting, or not
+  to draft yet, without asking for the document in this response.
+  "research_and_draft" ONLY when the user explicitly asks for a SEPARATE
+  analysis deliverable before or beside the document in this response
+  ("first...", "before drafting...", "discuss / review in depth, then draft",
+  "give me both", numbered outputs naming the analysis) — an analysis the
+  user wants to RECEIVE. "none" for a plain draft request, for "draft X with
+  detailed legal reasoning / case laws / citations", and for "draft X after
+  researching Y" / "analyse the notice and draft a reply" (research as the
+  drafter's method, not a deliverable). "I will need X later, but first
+  explain the law" is "research_only".
 - **wants_statute_text**, **wants_scenario_analysis**, **wants_constitution**,
-  **wants_maxim**, **wants_supreme_court**, **wants_gst_rulings** — boolean
-  flags derived from the query
+  **wants_maxim**, **wants_supreme_court**, **wants_gst_rulings**,
+  **wants_tribunal_rulings** — boolean flags derived from the query
+  (wants_tribunal_rulings: the user wants orders of a tribunal or
+  commission such as TDSAT, CESTAT, CAT, CIC, NGT, NCDRC, APTEL)
+- **draft_edit_scope** — "partial" / "whole" / "none": whether a follow-up
+  changes specific parts of the document drafted in the previous turn
+  ("change paragraph 3", "remove the second ground") or the whole of it
+  ("translate it", "shorten it"); "none" for anything else, including a new
+  document
 - **named_acts** — list of act names the user referenced
 - **additional_instructions** — free-form catchall for user directives that
   don't fit the typed fields above (cap 300 chars)

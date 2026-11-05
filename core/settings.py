@@ -206,6 +206,8 @@ ES_INDICES = {
     "newacts": "newacts_v1",
     "sci_judgments": "supreme_court_judgement",
     "gst_judgments": "gst_judgements",
+    # Alias over tribunal_judgements_v1 (scripts/tribunal/tribunal_index.py)
+    "tribunal_judgments": "tribunal_judgements",
     "constitution": "constitution",
     "maxims": "legal_maxims",
 }
@@ -222,6 +224,17 @@ EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "")
 # --- ChromaDB (PDF uploads only) ---
 CHROMA_STORE_ROOT = str(_PROJECT_ROOT / "chroma_store")
 
+# --- Request time budget ---
+# Outer timeout for one chat request (SSE stream and the batch endpoint), and
+# the deadline every nested call is clamped to (15 s kept for the final
+# response / sources / done events). Raised from 300 s on 2026-10-16: drafting
+# runs on Claude Sonnet 5 (~80 output tokens/s), and a long section pair alone
+# needs 55-90 s, so a 7-section writ petition did not fit in 300 s - sections
+# were cut off, handed to Gemini with too little time, or lost. nginx allows
+# 600 s; the frontend / Node proxy must allow at least this much.
+CHAT_REQUEST_TIMEOUT_S = int(os.getenv("CHAT_REQUEST_TIMEOUT_S", "480"))
+CHAT_REQUEST_DEADLINE_S = CHAT_REQUEST_TIMEOUT_S - 15
+
 # --- File Upload Storage ---
 UPLOADS_ROOT = str(_PROJECT_ROOT / "uploads")
 MAX_FILES_PER_REQUEST = 30          # max files per single message
@@ -236,12 +249,20 @@ GEMINI_URI_EXPIRY_BUFFER_HOURS = 2  # re-upload if Gemini URI expires within thi
 #   max_docs_per_session   documents per chat
 #   max_pages_per_session  pages per chat; one document may use all of it.
 #                          PDF and Word count their pages, other files 1 each.
+#   max_mb_per_session     total upload size per chat, in MB (1 MB = 1024*1024
+#                          bytes); one document may use all of it. Every file
+#                          type counts, at the size it was uploaded.
 # A plan name that contains a configured name ("First Justice Plan Yearly")
 # gets that plan's limits. Any other plan, and a request without a plan, is
 # accepted with no plan limits (the global MAX_FILES_* caps still apply).
 PLAN_UPLOAD_LIMITS = {
-    "First Justice Plan": {"max_docs_per_session": 2, "max_pages_per_session": 60},   # 499
-    "Basic": {"max_docs_per_session": 5, "max_pages_per_session": 150},               # 999
+    # 499: 2 documents, 60 pages and 40 MB per chat (i.e. 30 pages / 20 MB each,
+    # or one document using the whole of either budget).
+    "First Justice Plan": {"max_docs_per_session": 2, "max_pages_per_session": 60,
+                           "max_mb_per_session": 40},
+    # 999: 5 documents, 150 pages and 100 MB per chat.
+    "Basic": {"max_docs_per_session": 5, "max_pages_per_session": 150,
+              "max_mb_per_session": 100},
 }
 
 # --- In-app file GC (Gap #4, 2026-09-02) ---

@@ -990,6 +990,7 @@
   .citation-icon.judgment    { background: rgba(220,38,38,0.12); }
   .citation-icon.sci_judgment { background: rgba(200,146,12,0.15); }
   .citation-icon.gst_judgment { background: rgba(8,145,178,0.15); }
+  .citation-icon.tribunal_judgment { background: rgba(124,58,237,0.15); }
   .citation-icon.legislation  { background: rgba(37,99,235,0.12); }
   .citation-icon.newacts      { background: rgba(22,163,74,0.12); }
   .citation-icon.drafting     { background: rgba(124,58,237,0.12); }
@@ -2425,6 +2426,7 @@ async function sendChatStream(query, threadId) {
               guardrail: '\u{1F6E1}', memory: '\u{1F9E0}', orchestrator: '\u{1F4CB}',
               legislation: '\u{1F4DC}', judgment: '\u2696\uFE0F', sci_judgment: '\u{1F3DB}',
               gst_judgment: '\u{1F9FE}',
+              tribunal_judgment: '\u{1F3DB}',
               newacts: '\u{1F4D6}', drafting: '\u270F\uFE0F', scenario: '\u{1F50D}',
               constitution: '\u{1F3DB}', maxim: '\u{1F4DA}', legal_concepts: '\u{1F4A1}',
               document: '\u{1F4C4}', non_legal: '\u{1F4AC}',
@@ -3066,6 +3068,7 @@ const SOURCE_ICONS = {
   judgment:       { icon: '\u2696\uFE0F', label: 'Court Judgment' },
   sci_judgment:   { icon: '\u2696\uFE0F', label: 'Supreme Court Judgment' },
   gst_judgment:   { icon: '\uD83E\uDDFE', label: 'GST AAAR Order' },
+  tribunal_judgment: { icon: '\uD83C\uDFDB', label: 'Tribunal Order' },
   legislation:    { icon: '\uD83D\uDCDC', label: 'Legislation' },
   newacts:        { icon: '\uD83D\uDCCB', label: 'Act / Code' },
   drafting:       { icon: '\u270F\uFE0F', label: 'Legal Template' },

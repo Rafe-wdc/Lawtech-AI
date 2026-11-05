@@ -759,7 +759,10 @@ violations specific to Indian drafting practice:
 
   placeholder_marker — surviving `[CITE: ...]` brackets, "(citation
     needed)", "{{section number}}", "<insert party>", "TBD", "FILL IN".
-    The drafting prompt forbids these; if they survive, MAJOR.
+    The drafting prompt forbids these; if they survive, MAJOR. A marker
+    the USER QUERY itself names for unresolved items (e.g. "TO BE
+    CONFIRMED BEFORE EXECUTION") is the requested output, not a
+    placeholder defect — never flag it.
 
   orphan_citation_tail — sentences ending with "as held in.", "the
     Supreme Court in.", "the Hon'ble Court in." — the LLM started a
@@ -930,7 +933,8 @@ violations specific to Indian drafting practice:
     to you below. Also flag as MAJOR every bracketed placeholder like
     "[citation to be verified]", "[verify]", "[TBD]", "[citation
     needed]", "[to be confirmed]" or similar — even if the surrounding
-    prose is otherwise fine. Also flag citation drift: same party names
+    prose is otherwise fine (but not a marker the USER QUERY itself asked
+    for, e.g. "TO BE CONFIRMED BEFORE EXECUTION"). Also flag citation drift: same party names
     but different volume / page / court abbreviation / year from the
     retrieved-source record. If a case appears in the response but no
     entry in the retrieved-sources block contains those party names,
@@ -1653,6 +1657,40 @@ def _source_language_mismatch(
     return False
 
 
+_INPUTS_MARKER = "\n## Inputs\n"
+
+
+def _is_anthropic_llm(llm) -> bool:
+    """True for ChatAnthropic, bare or as the primary of .with_fallbacks()."""
+    inner = getattr(llm, "runnable", llm)
+    return type(inner).__name__ == "ChatAnthropic"
+
+
+def _prompt_for(template: str, llm) -> ChatPromptTemplate:
+    """The critic/refiner prompt, with its fixed instructions cached on Claude.
+
+    CRITIQUE_PROMPT is ~16k tokens of fixed instructions followed by the
+    per-request inputs (from "## Inputs" on); REFINE_PROMPT is ~2k + inputs.
+    Sent as one human message they were billed at full input price on every
+    call (two critiques per draft). On Claude the fixed part goes in a
+    system block with cache_control, so repeat calls within 5 minutes read
+    it at 0.1x. Gemini (and any template without the marker) gets the
+    original single message, unchanged.
+    """
+    if llm is None or not _is_anthropic_llm(llm) or _INPUTS_MARKER not in template:
+        return ChatPromptTemplate.from_template(template)
+    cut = template.index(_INPUTS_MARKER)
+    # The fixed part is sent as literal text, not a template: undo the
+    # {{ }} escaping it carries for from_template.
+    fixed = template[:cut].replace("{{", "{").replace("}}", "}")
+    from langchain_core.messages import SystemMessage
+    return ChatPromptTemplate.from_messages([
+        SystemMessage(content=[{"type": "text", "text": fixed,
+                                "cache_control": {"type": "ephemeral"}}]),
+        ("human", template[cut + 1:]),
+    ])
+
+
 def _format_violations(violations: list[Violation]) -> str:
     """Render the violation list for the refiner prompt."""
     if not violations:
@@ -1783,7 +1821,7 @@ async def _critique(
                 temperature=0.0, max_output_tokens=4096, thinking_budget=0,
             )).with_structured_output(Critique, include_raw=True)
             intent_json = intent.model_dump_json(indent=2)
-            prompt = ChatPromptTemplate.from_template(CRITIQUE_PROMPT)
+            prompt = _prompt_for(CRITIQUE_PROMPT, critic_llm)
             chain = prompt | llm
             # Bound the critic call. Without this, a hung Gemini Flash
             # blocks the caller's drafting semaphore slot until gunicorn
@@ -1807,7 +1845,9 @@ async def _critique(
                         ),
                     },
                 ),
-                local_timeout=45,
+                # 45s -> 90s (2026-10-16): Claude critiques of long drafts
+                # ran past 45s and the review was skipped.
+                local_timeout=90,
             )
         _record_tokens("SelfRefine", "critique", raw_and_parsed.get("raw"))
         result: Critique = raw_and_parsed["parsed"]
@@ -1947,7 +1987,7 @@ async def _refine(
             if _lang != "en":
                 from core.language import localize_prompt as _localize
                 language_directive = _localize("", _lang, intent).strip()
-            prompt = ChatPromptTemplate.from_template(REFINE_PROMPT)
+            prompt = _prompt_for(REFINE_PROMPT, refiner_llm)
             chain = prompt | llm
             # Bound the refiner too — same reasoning as the critic above,
             # with deadline-aware clamping.
@@ -1968,7 +2008,9 @@ async def _refine(
                         ),
                     },
                 ),
-                local_timeout=60,
+                # 60s -> 180s (2026-10-16): a Claude refine re-emits the
+                # whole draft at ~80 tokens/s; a 48k-char writ took 115 s.
+                local_timeout=180,
             )
         _record_tokens("SelfRefine", "refine", result)
         record_gemini_flash_success()

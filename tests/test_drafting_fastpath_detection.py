@@ -199,19 +199,21 @@ class TestDirectiveRegex:
 
 
 class TestEnvFlag:
-    """The fast-path is behind DRAFTING_FOLLOWUP_FAST_PATH=1 by default off."""
+    """The fast path is on by default; DRAFTING_FOLLOWUP_FAST_PATH=0 turns it off.
 
-    def test_disabled_by_default(self, monkeypatch):
+    It was opt-in during rollout and the flag never reached the servers'
+    .env, so dev and prod kept regenerating whole drafts (2026-10-19)."""
+
+    def test_enabled_by_default(self, monkeypatch):
         monkeypatch.delenv("DRAFTING_FOLLOWUP_FAST_PATH", raising=False)
-        assert _fast_path_enabled() is False
-
-    def test_enabled_with_env_flag_1(self, monkeypatch):
-        monkeypatch.setenv("DRAFTING_FOLLOWUP_FAST_PATH", "1")
         assert _fast_path_enabled() is True
 
-    @pytest.mark.parametrize("val", ["0", "false", "yes", "true", ""])
-    def test_any_non_1_value_disables(self, monkeypatch, val):
-        # Deliberately strict: only "1" enables it. This avoids accidental
-        # enablement from truthy-looking values in env misconfig.
+    @pytest.mark.parametrize("val", ["1", "true", "yes", "on", ""])
+    def test_other_values_leave_it_on(self, monkeypatch, val):
+        monkeypatch.setenv("DRAFTING_FOLLOWUP_FAST_PATH", val)
+        assert _fast_path_enabled() is True
+
+    @pytest.mark.parametrize("val", ["0", "false", "off", "no", " FALSE ", "Off"])
+    def test_explicit_off_values_disable(self, monkeypatch, val):
         monkeypatch.setenv("DRAFTING_FOLLOWUP_FAST_PATH", val)
         assert _fast_path_enabled() is False

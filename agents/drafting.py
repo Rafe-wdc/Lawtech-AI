@@ -77,9 +77,21 @@ from core.self_refine import self_refine
 log = get_logger("Drafting")
 
 
-# Limit concurrent Drafting executions per worker process (avoids Gemini
-# rate limits and gives the orchestrator a back-pressure signal).
-_AGENT_SEMAPHORE = asyncio.Semaphore(3)
+# Limit concurrent Drafting executions per worker process (back-pressure
+# for the orchestrator). 3 -> 10 (2026-10-16): the limit dated from Gemini
+# rate limits, when a draft held its slot ~1-2 min. A complete Claude draft
+# holds it ~5 min, so the 4th concurrent user queued for minutes, and the
+# wait counts against the same 480 s request deadline. Claude's limits are
+# far higher and drafting mostly waits on the network. Tune with
+# DRAFTING_MAX_CONCURRENT.
+def _drafting_max_concurrent() -> int:
+    try:
+        return max(1, int(os.getenv("DRAFTING_MAX_CONCURRENT", "10")))
+    except ValueError:
+        return 10
+
+
+_AGENT_SEMAPHORE = asyncio.Semaphore(_drafting_max_concurrent())
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +185,8 @@ If any rule in the default drafting system prompt below CONTRADICTS this MODE OV
 # Detection is verb-based (surface signal) plus a length ceiling. Gated on
 # `previous_artifact_kind == "draft"` and a non-trivial `previous_artifact_content`
 # so it can NEVER fire on Turn 1 or on threads whose previous turn was not
-# drafting. Behind `DRAFTING_FOLLOWUP_FAST_PATH=1` env flag — off by default
-# during initial rollout so the first prod week only validates the WRITE side
-# of Level 1.
+# drafting. On by default since 2026-10-19 (it was off during the initial
+# rollout); `DRAFTING_FOLLOWUP_FAST_PATH=0` in .env turns it off.
 # ---------------------------------------------------------------------------
 
 # Directive verbs that indicate "modify the prior draft" intent. Deliberately
@@ -258,10 +269,16 @@ _INLINED_PRIOR_DRAFT_MARKER = "PRIOR DRAFT (the text the user wants to modify"
 
 
 def _fast_path_enabled() -> bool:
-    """Env-flag gate. Off by default; ops flips DRAFTING_FOLLOWUP_FAST_PATH=1
-    once Level 1's write path has been validated on real prod data.
+    """Follow-up edits of a draft skip the full pipeline (targeted edit or one
+    whole-document rewrite).
+
+    On unless DRAFTING_FOLLOWUP_FAST_PATH is explicitly 0 / false / off / no.
+    It was opt-in during rollout, and the flag never reached the servers'
+    .env: on 2026-10-19 both dev and prod re-ran the full pipeline for
+    "change paragraph 2" (~60k tokens). The env var remains the kill switch.
     """
-    return os.getenv("DRAFTING_FOLLOWUP_FAST_PATH", "0") == "1"
+    value = os.getenv("DRAFTING_FOLLOWUP_FAST_PATH", "1").strip().lower()
+    return value not in ("0", "false", "off", "no")
 
 
 def _is_drafting_followup_directive(
@@ -299,6 +316,44 @@ def _is_drafting_followup_directive(
         return False
     # Accept condition: query matches a directive verb.
     return bool(_DIRECTIVE_VERBS_RE.search(query))
+
+
+# An edit instruction can quote the new wording of a paragraph, so the
+# intent-detected path allows a longer query than the verb regex does.
+_FOLLOWUP_EDIT_MAX_QUERY_CHARS = 2000
+
+
+def _followup_edit_scope(
+    user_intent,
+    query: str,
+    previous_artifact_kind: str,
+    previous_artifact_content: str,
+    new_upload_this_turn: bool,
+) -> str | None:
+    """'partial', 'whole' or None (not an edit of the prior draft).
+
+    The typed intent decides (UserIntent.draft_edit_scope, filled by the
+    intent extractor in any wording or language). The verb regex is the
+    fallback when the intent is missing or unsure, and only ever yields
+    'whole' — the behaviour the fast path had before targeted edits."""
+    if (
+        previous_artifact_kind != "draft"
+        or len(previous_artifact_content or "") < _FOLLOWUP_DIRECTIVE_MIN_PRIOR_CHARS
+        or _DRAFT_INCOMPLETE_BANNER_MARKER in (previous_artifact_content or "")[:400]
+        or not (query or "").strip()
+        or new_upload_this_turn
+    ):
+        return None
+    scope = "none"
+    if user_intent is not None and getattr(user_intent, "confidence", 0) >= 0.5:
+        scope = getattr(user_intent, "draft_edit_scope", "none") or "none"
+    if scope in ("partial", "whole") and len(query) <= _FOLLOWUP_EDIT_MAX_QUERY_CHARS:
+        return scope
+    if _is_drafting_followup_directive(
+        query, previous_artifact_kind, previous_artifact_content, new_upload_this_turn,
+    ):
+        return "whole"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -847,6 +902,116 @@ def _drop_duplicate_valuation_block(text: str) -> tuple[str, int]:
     return out, 1
 
 
+# --- sign-off block placement -------------------------------------------
+# Testers' report 2026-10-05 on the medical-negligence plaint: "Date, Place,
+# Name of Advocate missing in draft". Six live runs: the block (Place / Date /
+# plaintiff signature / advocate) was never absent, but in 2 of 6 drafts the
+# writer put it in the wrong place - opening the "VERIFICATION AND AFFIDAVIT"
+# section with it, or after the list of documents at the very end - so a
+# reader looking below the prayer sees nothing. The planner gives the sign-off
+# no section of its own, so the writer attaches it to whichever closing
+# section it is writing. A filed plaint / petition signs after the last
+# prayer clause and before the verification (Order VI Rules 14 and 15 CPC).
+_SIGNOFF_START_RE = re.compile(r"(?im)^[ \t]*\**place[ \t]*:")
+_SIGNOFF_LINE_RE = re.compile(r"^(?:\d{1,3}[.)]|[-*+]\s|#)")  # numbered / bulleted items and headings end the block
+_PRAYER_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*(?:prayer|reliefs?\b)")
+_VERIFICATION_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*verification")
+_DOCUMENTS_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*(?:list of documents|documents (?:relied|produced|filed|annexed)|schedule of documents|annexures?)")
+_AFFIDAVIT_HEADING_RE = re.compile(r"(?i)^#{1,4}[ \t]+\**[ \t]*affidavit")
+_HEADING_LINE_RE = re.compile(r"^#{1,4}[ \t]+\S")
+_SIGNOFF_PLACEHOLDER = (
+    "Place: [Place]\n\nDate: [Date]\n\n[Name of Plaintiff]\nPlaintiff\n\n"
+    "Through\n\n[Name of Advocate]\nAdvocate for the Plaintiff"
+)
+
+
+def _relocate_signoff_block(text: str) -> tuple[str, str]:
+    """Keep the sign-off block directly after the prayer.
+
+    Returns (text, status) with status one of: "" (no change), "moved",
+    "inserted". Acts only on drafts that carry both a PRAYER and a
+    VERIFICATION heading in English. The affidavit's own deponent block and a
+    verification's own trailing place / date are never touched: the block is
+    moved only when it OPENS a verification section or CLOSES a documents
+    section, which are the two misplacements observed."""
+    lines = text.split("\n")
+    heads = [i for i, ln in enumerate(lines) if _HEADING_LINE_RE.match(ln)]
+    prayer = next((i for i in heads if _PRAYER_HEADING_RE.match(lines[i])), None)
+    if prayer is None or not any(_VERIFICATION_HEADING_RE.match(lines[i]) for i in heads if i > prayer):
+        return text, ""
+    prayer_end = next((i for i in heads if i > prayer), len(lines))  # next heading after PRAYER
+
+    def section_of(i):
+        return max((h for h in heads if h < i), default=None)
+
+    def block_bounds(start):
+        """Block = Place: line through the last short line before a heading,
+        a rule, a list item or prose. Signature lines are short; the prose,
+        numbered paragraphs and document lists around them are not."""
+        end, j = start, start
+        while j < len(lines):
+            s = lines[j].strip()
+            if j > start and (_HEADING_LINE_RE.match(lines[j]) or s == "---"):
+                break
+            if s == "":
+                j += 1
+                continue
+            if _SIGNOFF_LINE_RE.match(s) or len(s) > 70:
+                break
+            end = j
+            j += 1
+        return start, end
+
+    for m_i in (i for i, ln in enumerate(lines) if i > prayer and _SIGNOFF_START_RE.match(ln)):
+        sec = section_of(m_i)
+        if sec is None:
+            continue
+        if sec == prayer:
+            return text, ""                       # already where it belongs
+        start, end = block_bounds(m_i)
+        if end - start > 16:
+            return text, ""
+        head = lines[sec]
+        if _VERIFICATION_HEADING_RE.match(head):
+            # misplaced only when the block OPENS the section
+            opening = all(not lines[k].strip() for k in range(sec + 1, start))
+            if not opening:
+                return text, ""
+        elif _DOCUMENTS_HEADING_RE.match(head):
+            # misplaced only when the block CLOSES the section
+            k = end + 1
+            while k < len(lines) and not lines[k].strip():
+                k += 1
+            if k < len(lines) and not (_HEADING_LINE_RE.match(lines[k]) or lines[k].strip() == "---"):
+                return text, ""
+        elif _AFFIDAVIT_HEADING_RE.match(head):
+            return text, ""                       # the affidavit's own place / date
+        else:
+            return text, ""
+        block = lines[start:end + 1]
+        # strip trailing blanks inside the block
+        while block and not block[-1].strip():
+            block.pop()
+        del lines[start:end + 1]
+        # drop blank run left behind
+        while start < len(lines) and start > 0 and not lines[start].strip() and not lines[start - 1].strip():
+            del lines[start]
+        if start < prayer_end:
+            prayer_end -= (end - start + 1)
+        insert_at = prayer_end
+        while insert_at > prayer + 1 and not lines[insert_at - 1].strip():
+            insert_at -= 1
+        lines[insert_at:insert_at] = [""] + block + [""]
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)), "moved"
+
+    # no sign-off block anywhere below the prayer: insert a standard one
+    insert_at = prayer_end
+    while insert_at > prayer + 1 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    lines[insert_at:insert_at] = [""] + _SIGNOFF_PLACEHOLDER.split("\n") + [""]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)), "inserted"
+
+
 def validate_draft(
     full_draft: str,
     stance=None,  # kept for signature compatibility; unused
@@ -1124,6 +1289,10 @@ def validate_draft(
     cleaned, _bolded = _bold_court_caption(cleaned)
     cleaned, _valuation = _drop_duplicate_valuation_block(cleaned)
     cleaned, _doubled = _dedupe_caption_words(cleaned)
+    # Sign-off block after the prayer (testers' report 2026-10-05).
+    cleaned, _signoff = _relocate_signoff_block(cleaned)
+    if _signoff:
+        warnings.append(f"Layout: sign-off block {_signoff} to follow the prayer.")
     if _labels or _bolded or _valuation or _doubled:
         warnings.append(
             f"Layout: removed {_labels} planner label heading(s); caption bolded: {bool(_bolded)}; "
@@ -1255,8 +1424,28 @@ async def _translate_query_for_es_match(
         return ""
 
 
+# The picker reads only the query and the candidate file names. A bounded
+# excerpt of the uploaded facts is added (2026-10-29) because the query alone
+# cannot separate SUB-TYPES that are different documents: "draft a divorce
+# petition" over a wife's statement of her husband's cruelty picked, or
+# web-synthesised, a Section 13B mutual-consent JOINT petition. 2.5k chars is
+# enough to see whose statement it is and what it alleges; the writer gets the
+# full text later.
+_PICKER_FACTS_PREVIEW_CAP = 2500
+
+
+def _picker_facts_preview(user_facts: str | None) -> str:
+    """Bounded, prompt-ready excerpt of the uploaded facts for the picker."""
+    trimmed = (user_facts or "").strip()
+    if not trimmed:
+        return "(no documents uploaded)"
+    if len(trimmed) > _PICKER_FACTS_PREVIEW_CAP:
+        return trimmed[:_PICKER_FACTS_PREVIEW_CAP] + "\n\n[... truncated ...]"
+    return trimmed
+
+
 async def _pick_reference_source(
-    query: str, file_paths: list[str],
+    query: str, file_paths: list[str], user_facts: str = "",
 ) -> str | None:
     """Single Gemini Flash Lite call. Picks the best-fitting file name from
     the candidate list, or returns None when no candidate fits (caller falls
@@ -1264,6 +1453,9 @@ async def _pick_reference_source(
 
     File paths alone (no previews) — the 2026-06-28 index census confirmed
     corpus filenames are richly descriptive (avg 66.9 chars, 0.8% opaque).
+    `user_facts` (the uploaded documents' text, excerpted) lets the picker
+    choose the right sub-type when the query is ambiguous; see
+    `_picker_facts_preview`.
 
     Falls back to None on any error so traffic never breaks — the worst
     case is a web fallback fire instead of a silent bad pick.
@@ -1276,12 +1468,17 @@ async def _pick_reference_source(
         llm = get_gemini_flash_lite(temperature=0.0).with_structured_output(_PickerChoice, include_raw=True)
 
         candidates_block = "\n".join(f"- {p}" for p in file_paths)
+        source_preview = _picker_facts_preview(user_facts)
         prompt = ChatPromptTemplate.from_template(DRAFTING_PICKER_PROMPT)
         chain = prompt | llm
 
         with log_time(log, "Reference picker"):
             raw_and_parsed = await asyncio.wait_for(
-                chain.ainvoke({"query": query, "file_paths": candidates_block}),
+                chain.ainvoke({
+                    "query": query,
+                    "file_paths": candidates_block,
+                    "source_preview": source_preview,
+                }),
                 timeout=15,
             )
         from core.token_tracker import record as _record_tokens
@@ -1344,6 +1541,7 @@ async def _acquire_reference_draft(
     intent=None,
     original_query: str = "",
     niche_key: str = "",
+    user_facts: str = "",
 ) -> tuple[str, str, str, str]:
     """Stage 1 of the simplified drafting pipeline (v1 DraftRetriever pattern).
 
@@ -1443,7 +1641,16 @@ async def _acquire_reference_draft(
     #      That is the difference from RESPONSE_CACHE_ENABLED, which serves a
     #      whole stale draft and hid our own fixes from testers.
     picked = None
-    _cache_key = f"{niche_key}|{_normalise_pick_query(search_query)}"
+    # The pick now depends on the uploaded facts as well as the query, so two
+    # requests with the same wording but different documents (a mutual-consent
+    # settlement vs. a cruelty statement) must not share a cache entry.
+    _facts_fp = ""
+    if (user_facts or "").strip():
+        import hashlib
+        _facts_fp = hashlib.sha1(
+            _picker_facts_preview(user_facts).encode("utf-8", "ignore")
+        ).hexdigest()[:12]
+    _cache_key = f"{niche_key}|{_normalise_pick_query(search_query)}|{_facts_fp}"
 
     if niche_key:
         from config.drafting_niches import NICHE_CANONICAL_TEMPLATE
@@ -1477,7 +1684,9 @@ async def _acquire_reference_draft(
                      niche_key=niche_key or "none", picked=_cached[:90])
 
     if picked is None:
-        picked = await _pick_reference_source(search_query, file_paths)
+        picked = await _pick_reference_source(
+            search_query, file_paths, user_facts=user_facts,
+        )
         if picked:
             if len(_TEMPLATE_PICK_CACHE) >= _TEMPLATE_PICK_CACHE_MAX:
                 _TEMPLATE_PICK_CACHE.clear()
@@ -2978,7 +3187,14 @@ async def _generate_section_pair(
     # and lets the `draft_incomplete` flag tell the user when a section was
     # lost. Lower it if outage-time completeness matters more than provider
     # consistency day to day.
-    _SECTION_PAIR_LOCAL_TIMEOUT = 60
+    # 2026-10-16: 60s -> 120s. The figures above were measured on Gemini.
+    # Drafting has run on Claude Sonnet 5 since 2026-09-07; it writes ~80
+    # output tokens/s, so a long section pair (4-7k tokens: Grounds,
+    # Statement of Facts) needs 55-90s and was routinely cut off at 60s and
+    # handed to Gemini with whatever was left of the pair budget - often too
+    # little, so the section was lost ("2 of 2 section(s) could not be
+    # generated", writ petition, 2026-10-16).
+    _SECTION_PAIR_LOCAL_TIMEOUT = 120
 
     if len(sections_to_write) == 1:
         section_label = f"section {section_position_start}"
@@ -3247,7 +3463,9 @@ _OFF_TARGET_RETRY_MIN_BUDGET_S = 150
 # "N of M sections could not be generated". Healthy pairs run 9-56s
 # (p90 32s), so 90s leaves room for one slow call plus one failover and
 # still bounds the damage a hung provider can do to the rest of the draft.
-PAIR_TOTAL_BUDGET_S = 90
+# 2026-10-16: 90s -> 150s with the per-call timeout at 120s (Claude Sonnet 5
+# needs 55-90s for a long pair): one full Claude call plus a 30s failover.
+PAIR_TOTAL_BUDGET_S = 150
 
 # Do not start another attempt for this pair with less than this much of
 # its budget left — the call would be clamped to a few seconds and fail.
@@ -3411,7 +3629,9 @@ def _retrieve_source_for_pair(
 # adaptive single-pass band (PR 2) is one critique + one refine ≈ 5s + 32s;
 # the language gate and the deterministic guards are cheap unless they
 # regenerate, which the reserve does not attempt to fund.
-SELF_REFINE_RESERVE_S = 45.0
+# 2026-10-16: 45s -> 100s; on Claude a critique runs 25-45s and a refine
+# 30-60s (the old 45s/60s call limits timed both out on a writ petition).
+SELF_REFINE_RESERVE_S = 100.0
 LANG_GATE_RESERVE_S = 20.0
 
 # p90 wall time of ONE section-pair call (two sections). Constant for now,
@@ -3419,7 +3639,9 @@ LANG_GATE_RESERVE_S = 20.0
 # calibration comment in _generate_section_pair (124 calls: p90 32s); the
 # margin covers the odd failover. Wire to telemetry once the
 # `Section pair gen` timings are aggregated.
-OBSERVED_PAIR_TIME_P90_S = 45.0
+# 2026-10-16: 45s -> 75s. Those timings were Gemini's; on Claude Sonnet 5
+# measured pairs ran 19-90s (writ petition, same prompt on prod/dev/local).
+OBSERVED_PAIR_TIME_P90_S = 75.0
 
 
 def _fit_plan_to_budget(
@@ -3766,6 +3988,13 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
     def _is_section_heading(raw_first_line: str, head: str) -> bool:
         if not head:
             return False
+        # Never a section, in any heading style: a reference line ("Subject:
+        # Legal notice demanding ..." was taken for a repeat of the "LEGAL
+        # NOTICE" title on dev 2026-10-19 and the whole body went with it) or
+        # a bracketed placeholder ("[Advocate Name]", printed in the From
+        # block and again in the signature).
+        if _REFERENCE_LINE_RE.match(head) or _PLACEHOLDER_LINE_RE.match(head):
+            return False
         if raw_first_line.lstrip().startswith("#"):
             return True
         return len(head.split()) >= 2
@@ -3782,6 +4011,7 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
         return False
 
     seen: list[str] = []
+    seen_len: dict[str, int] = {}
     kept, dropped = [], []
     # The supporting affidavit restates the court caption and case number
     # BEFORE its own heading. Audit 2026-09-11 reproduced both being
@@ -3793,13 +4023,49 @@ def _collapse_repeated_sections(text: str) -> tuple[str, list[str]]:
         first = block.lstrip().split("\n", 1)[0]
         is_head = _is_section_heading(first, head)
         in_affidavit = _aff_idx is not None and idx >= max(0, _aff_idx - 8)
-        if is_head and not in_affidavit and any(_same(head, h) for h in seen):
-            dropped.append(head)
-            continue
+        match = next((h for h in seen if _same(head, h)), None) if is_head and not in_affidavit else None
+        if match is not None:
+            # Only a genuine duplicate is dropped. A signature block is not a
+            # section even when the signer's name was printed in the From
+            # block, and a block far larger than the section it supposedly
+            # repeats is the document's body behind a wrong match.
+            if not head.startswith(("prayer", "verif")) and _is_signoff_block(block):
+                log.info("Repeated-section match ignored: signature block", heading=head[:60])
+            elif len(block) > _REPEAT_MAX_GROWTH * seen_len[match] + _REPEAT_SLACK_CHARS:
+                log.warning(
+                    "Repeated-section match ignored: the block is far larger than the section it repeats",
+                    heading=head[:60], matched=match[:60],
+                    block_chars=len(block), original_chars=seen_len[match],
+                )
+            else:
+                dropped.append(head)
+                continue
         if is_head:
             seen.append(head)
+            seen_len.setdefault(head, len(block))
         kept.append(block)
     return "".join(kept), dropped
+
+
+# Reference lines at the top of a notice or letter are not sections.
+_REFERENCE_LINE_RE = re.compile(r"^(?:subject|sub|re|ref|reference|kind attention|attn)\b\s*[:.\-]?", re.I)
+# A heading that is only a bracketed blank: "**[Advocate Name]**".
+_PLACEHOLDER_LINE_RE = re.compile(r"^\[[^\]]*\]\s*:?$")
+# A dropped repeat may be at most this many times the size of the section it
+# repeats, plus a fixed allowance for a short original.
+_REPEAT_MAX_GROWTH = 3
+_REPEAT_SLACK_CHARS = 500
+# Lines that make a block a signature / sign-off rather than a section.
+_SIGNOFF_MARKER_RE = re.compile(
+    r"(?im)^[ \t*_]*(?:advocate\b|counsel for\b|\(?signature\)?|yours faithfully|"
+    r"yours sincerely|sd/-|through\b|place[ \t]*:|date[ \t]*:|enrol(?:l)?ment no)"
+)
+
+
+def _is_signoff_block(block: str) -> bool:
+    """A short block whose lines after the name are sign-off lines."""
+    lines = [ln for ln in block.strip().splitlines()[1:] if ln.strip()]
+    return 0 < len(lines) <= 8 and bool(_SIGNOFF_MARKER_RE.search("\n".join(lines)))
 
 
 def _missing_planned_sections(draft: str, sections: list["_Section"]) -> list["_Section"]:
@@ -3889,6 +4155,28 @@ def _emit_draft_stream(event: dict) -> None:
         get_stream_writer()(event)
     except Exception:
         pass
+
+
+def _parallel_sections_enabled() -> bool:
+    """Sections after the opening pair are drafted concurrently unless
+    DRAFTING_PARALLEL_SECTIONS=0 (switch back without a deploy)."""
+    return os.getenv("DRAFTING_PARALLEL_SECTIONS", "1") != "0"
+
+
+def _parallel_sections_max() -> int:
+    try:
+        return max(1, int(os.getenv("DRAFTING_PARALLEL_MAX", "4")))
+    except ValueError:
+        return 4
+
+
+def _parallel_plan_time_s(n_sections: int, pair_p90_s: float) -> float:
+    """Wall time the parallel schedule needs: the opening pair, then the
+    remaining sections in waves of DRAFTING_PARALLEL_MAX, each wave about
+    one pair's p90 (a single long section on Claude runs 45-90 s)."""
+    rest = max(0, n_sections - 2)
+    waves = -(-rest // _parallel_sections_max())
+    return pair_p90_s * (1 + waves)
 
 
 async def _generate_sectionwise(
@@ -3984,23 +4272,50 @@ async def _generate_sectionwise(
                 _pair_budget = _PAIR_USER_FACTS_BUDGET_INDIC
                 break
 
-    # Draft side panel: announce the plan, then each pair's text as it is
-    # written, so the panel can fill in while drafting runs. These are raw
-    # events; core.chat_runner turns them into artifact_start /
-    # artifact_section only when DRAFT_ARTIFACT_EVENTS=1 and ignores them
-    # otherwise. The finished draft (after clean-up and review) still arrives
-    # separately and replaces these previews.
-    _emit_draft_stream({
-        "type": "draft_plan",
-        "sections": [{"index": k + 1, "headings": [s.heading for s in sections[k:k + 2]]}
-                     for k in range(0, total, 2)],
-    })
+    def _preview(position_start: int, pair: list, pair_text: str) -> None:
+        # Draft side panel: one batch's text as soon as it is written. A raw
+        # event; core.chat_runner turns it into artifact_section only when
+        # DRAFT_ARTIFACT_EVENTS=1. The finished draft replaces it.
+        if pair_text.strip():
+            _emit_draft_stream({
+                "type": "draft_section", "index": position_start,
+                "headings": [s.heading for s in pair], "text": pair_text.strip(),
+            })
 
-    i = 0
-    while i < total:
-        pair = sections[i:i + 2]
-        position_start = i + 1
+    def _assemble(position_start: int, pair: list, pair_text: str, failure,
+                  preview: bool = True) -> None:
+        """Append one finished batch in document order: drop sections it
+        re-emitted that already exist (rule 1 of the pair prompt does not
+        hold on its own; see _drop_reemitted_sections), else record it as
+        failed."""
+        if pair_text.strip():
+            _already = [h for h, _ in _split_heading_blocks("\n\n".join(completed)) if h]
+            pair_text, _reemitted = _drop_reemitted_sections(
+                pair_text, [sec.heading for sec in pair], _already,
+            )
+            if _reemitted:
+                log.warning(
+                    "Section pair re-emitted already-drafted sections; dropped",
+                    position_start=position_start, dropped=_reemitted,
+                )
+        if pair_text.strip():
+            completed.append(pair_text.strip())
+            if preview:
+                _preview(position_start, pair, pair_text)
+        else:
+            failed_pairs.append(failure or {
+                "position_start": position_start,
+                "headings": [s.heading for s in pair],
+                "reason": "empty_after_dedup",
+            })
 
+    async def _write_batch(pair: list, position_start: int, prior_text: str):
+        """Write one batch (one or two sections) seeing `prior_text`.
+
+        Returns (text, None) on success or ("", failure) when both attempts
+        failed. Shared by the sequential and the parallel schedule; the
+        re-emission drop and the ordered assembly happen in the caller.
+        """
         for offset, sec in enumerate(pair):
             position = position_start + offset
             progress_emit(
@@ -4009,8 +4324,6 @@ async def _generate_sectionwise(
                 substep=True,
                 step=f"section:{position}",
             )
-
-        prior_text = "\n\n".join(completed)
 
         pair_user_facts = user_facts
         if chunking_enabled:
@@ -4222,33 +4535,78 @@ async def _generate_sectionwise(
                 break
 
         if pair_text.strip():
-            # Drop sections this pair re-emitted that already exist in the
-            # document so far (rule 1 of the pair prompt does not hold on
-            # its own). See _drop_reemitted_sections.
-            _already = [h for h, _ in _split_heading_blocks("\n\n".join(completed)) if h]
-            pair_text, _reemitted = _drop_reemitted_sections(
-                pair_text, [sec.heading for sec in pair], _already,
-            )
-            if _reemitted:
-                log.warning(
-                    "Section pair re-emitted already-drafted sections; dropped",
-                    position_start=position_start, dropped=_reemitted,
-                )
-        if pair_text.strip():
-            completed.append(pair_text.strip())
-            _emit_draft_stream({
-                "type": "draft_section", "index": position_start,
-                "headings": [s.heading for s in pair], "text": pair_text.strip(),
-            })
-        else:
-            # Both attempts produced empty content OR both raised.
-            failed_pairs.append({
-                "position_start": position_start,
-                "headings": [s.heading for s in pair],
-                "reason": short_err(_pair_err) if _pair_err else "empty_content",
-            })
+            return pair_text.strip(), None
+        return "", {
+            "position_start": position_start,
+            "headings": [s.heading for s in pair],
+            "reason": short_err(_pair_err) if _pair_err else "empty_content",
+        }
 
-        i += 2
+    # --- Schedule -----------------------------------------------------------
+    # Sequential (the original): pairs in order, each seeing everything before
+    # it. Parallel (default since 2026-10-16): the first pair (cause title +
+    # opening facts) is written first; every remaining section is then
+    # written as its own call, up to DRAFTING_PARALLEL_MAX at a time, each
+    # seeing that opening. Claude Sonnet 5 writes ~80-115 output tokens/s, so
+    # a 7-section petition written strictly in sequence took ~8 minutes and
+    # its longest pair overran the per-call limit; in parallel the wall time
+    # is roughly the first pair plus the slowest single section. Paragraph
+    # numbers restart in each parallel section and are continued by
+    # validate_draft's renumbering pass.
+    parallel = _parallel_sections_enabled() and total > 2
+    # Draft side panel: announce the batches about to be written, so the
+    # panel can lay out placeholders. Indexes are each batch's first section
+    # position and match the draft_section events below.
+    if parallel:
+        _batches = [(1, sections[:2])] + [(p, [s]) for p, s in enumerate(sections[2:], start=3)]
+    else:
+        _batches = [(k + 1, sections[k:k + 2]) for k in range(0, total, 2)]
+    _emit_draft_stream({
+        "type": "draft_plan",
+        "sections": [{"index": p, "headings": [s.heading for s in b]} for p, b in _batches],
+    })
+    if not parallel:
+        i = 0
+        while i < total:
+            pair = sections[i:i + 2]
+            # Assemble as we go so each pair sees the cleaned document so far.
+            prior_text = "\n\n".join(completed)
+            text, fail = await _write_batch(pair, i + 1, prior_text)
+            _assemble(i + 1, pair, text, fail)
+            i += 2
+    else:
+        head = sections[:2]
+        text, fail = await _write_batch(head, 1, "")
+        _assemble(1, head, text, fail)
+        opening = "\n\n".join(completed)
+        rest = list(enumerate(sections[2:], start=3))
+        progress_emit(
+            "drafting",
+            f"Drafting sections 3-{total} in parallel...",
+            substep=True, step="sections:parallel",
+        )
+        log.info("Section drafting: parallel schedule",
+                 total=total, parallel_sections=len(rest),
+                 max_concurrent=_parallel_sections_max())
+        sem = asyncio.Semaphore(_parallel_sections_max())
+
+        async def _one(pos: int, sec):
+            async with sem:
+                try:
+                    t, f = await _write_batch([sec], pos, opening)
+                except Exception as e:      # one section never sinks the rest
+                    log.warning("Parallel section raised", position=pos,
+                                section=sec.heading[:40], error=short_err(e))
+                    t, f = "", {"position_start": pos, "headings": [sec.heading],
+                                "reason": short_err(e)}
+                # Preview as each section finishes (out of order) rather
+                # than all at once after the slowest one.
+                _preview(pos, [sec], t)
+                return pos, sec, t, f
+
+        results = await asyncio.gather(*[_one(p, sec) for p, sec in rest])
+        for pos, sec, t, f in sorted(results, key=lambda r: r[0]):
+            _assemble(pos, [sec], t, f, preview=False)
 
     draft = "\n\n".join(completed)
 
@@ -4449,7 +4807,7 @@ async def _generate_draft_modification(
     detects an empty result and routes through the full pipeline instead,
     so the fast-path is always a strict improvement over today.
     """
-    from config.prompts import DRAFTING_MODIFICATION_PROMPT
+    from config.prompts import DRAFTING_MODIFICATION_PROMPT, DRAFTING_MODIFICATION_INPUTS
     from core.language import _format_intent_directives, localize_prompt
     from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -4462,17 +4820,18 @@ async def _generate_draft_modification(
         else "(no new files uploaded this turn — modify the EXISTING DRAFT alone)"
     )
 
-    # Order matters: format() FIRST (fills our known placeholders on the raw
-    # template), localize_prompt() SECOND (appends language + intent directive
-    # blocks that may contain literal { characters we don't want format() to
-    # see). Swapping the order can throw KeyError on the localized text.
-    system_prompt = DRAFTING_MODIFICATION_PROMPT.format(
+    # Fixed rules in the (cached) system prompt; the draft, directive and
+    # language block in the user message after it, so the rules are an
+    # identical prefix on every call. format() with no arguments only undoes
+    # the {{ }} escaping. The language block is appended unformatted — it may
+    # contain literal { characters.
+    system_prompt = DRAFTING_MODIFICATION_PROMPT.format()
+    user_message = DRAFTING_MODIFICATION_INPUTS.format(
         existing_draft=prior_draft,
         user_directive=user_directive.strip(),
         intent_directives_block=intent_directives_block,
         new_source_documents=new_source_block,
-    )
-    system_prompt = localize_prompt(system_prompt, user_language, user_intent)
+    ) + localize_prompt("", user_language, user_intent)
 
     llm = get_drafting_llm(
         max_output_tokens=24000,
@@ -4490,7 +4849,7 @@ async def _generate_draft_modification(
             response = await asyncio.to_thread(
                 llm.invoke,
                 [SystemMessage(content=cacheable_system(system_prompt)),
-                 HumanMessage(content="Produce the complete modified draft now.")],
+                 HumanMessage(content=user_message)],
             )
     except Exception as e:
         log.error("Draft modification LLM call failed",
@@ -4516,6 +4875,99 @@ async def _generate_draft_modification(
         prior_len=len(prior_draft), modified_len=len(text),
     )
     return text
+
+
+async def _generate_targeted_edit(
+    *,
+    user_directive: str,
+    prior_draft: str,
+    user_intent,
+    user_language: str,
+    progress_emit,
+) -> tuple[str, dict] | None:
+    """Change only the blocks of the prior draft the user asked about.
+
+    One call returns edit operations (core.draft_edit.DraftEditPlan) instead of
+    a document; core.draft_edit applies them, so untouched paragraphs are
+    byte-identical and output tokens scale with the change, not the draft.
+    Returns (draft, meta), or None when the caller should rewrite the whole
+    document instead: the call failed, the plan does not apply, or the model
+    judged the change document-wide.
+    """
+    from config.prompts import DRAFTING_TARGETED_EDIT_PROMPT, DRAFTING_TARGETED_EDIT_INPUTS
+    from core.draft_edit import DraftEditPlan, EditError, apply_edits, render_numbered, split_blocks
+    from core.language import _format_intent_directives, localize_prompt
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    split = split_blocks(prior_draft)
+    intent_directives_block = (
+        _format_intent_directives(user_intent) if user_intent is not None else ""
+    ) or "(no explicit user directives)"
+    user_message = DRAFTING_TARGETED_EDIT_INPUTS.format(
+        intent_directives_block=intent_directives_block,
+        numbered_draft=render_numbered(split),
+        user_directive=user_directive.strip(),
+    ) + localize_prompt("", user_language, user_intent)
+
+    # Thinking off: Claude does not honour forced structured output with it
+    # on (see get_drafting_llm). The plan is small, so 8k output is ample.
+    llm = get_drafting_llm(max_output_tokens=8192, thinking=False).with_structured_output(
+        DraftEditPlan, include_raw=True,
+    )
+    progress_emit("drafting", "Editing the requested parts of your draft...", step="modify")
+
+    try:
+        with log_time(log, "Draft targeted edit"):
+            out = await asyncio.to_thread(
+                llm.invoke,
+                [SystemMessage(content=cacheable_system(DRAFTING_TARGETED_EDIT_PROMPT.format())),
+                 HumanMessage(content=user_message)],
+            )
+    except Exception as e:
+        log.error("Targeted edit LLM call failed", error=short_err(e), exc_info=True)
+        return None
+
+    from core.token_tracker import record as _record_tokens
+    _record_tokens("Drafting", "targeted_edit", out.get("raw"))
+
+    plan = out.get("parsed")
+    if plan is None:
+        log.warning("Targeted edit returned no parseable plan",
+                    error=short_err(out.get("parsing_error")) if out.get("parsing_error") else "none")
+        return None
+    if plan.whole_document:
+        log.info("Targeted edit: model judged the change document-wide")
+        return None
+    try:
+        result = apply_edits(prior_draft, plan)
+    except EditError as e:
+        log.warning("Targeted edit plan could not be applied", error=str(e),
+                    edits=len(plan.edits))
+        return None
+
+    log.info(
+        "Targeted edit applied",
+        blocks=len(split.blocks), changed=result.changed_blocks,
+        inserted=result.inserted, prior_len=len(prior_draft), new_len=len(result.text),
+    )
+    return result.text, {
+        "edit_ops": len(plan.edits),
+        "edited_blocks": result.changed_blocks,
+        "inserted_blocks": result.inserted,
+        "total_blocks": len(split.blocks),
+    }
+
+
+_STATUTORY_ANCHORS_RE = re.compile(
+    r"^\*\*[^\n]*\banchors\b[^\n]*\*\*\n(?:- [^\n]*\n?)*\n?", re.MULTILINE,
+)
+
+
+def _strip_statutory_anchors(overlay: str) -> str:
+    """Drop the `**Mandatory statutory anchors:**` and `**Doctrinal
+    anchors ...:**` bullet blocks from a niche overlay, keeping its
+    structural skeleton and do-not list."""
+    return _STATUTORY_ANCHORS_RE.sub("", overlay or "")
 
 
 async def _generate_draft(
@@ -4564,6 +5016,18 @@ async def _generate_draft(
             "Niche selection failed; proceeding with base prompt only",
             error=short_err(e),
         )
+
+    # The user forbade adding law they did not supply (typed intent). The
+    # directive in USER DIRECTIVES says so, but a prompt rule alone was not
+    # enough: with the overlay's "mandatory statutory anchors" and retrieved
+    # Punjab construction-workers Rules still in front of it, the writer cited
+    # Rule 17 / Rule 203 anyway (A/B 2026-10-21). Do not hand it that material.
+    if getattr(user_intent, "no_unsupplied_law", False):
+        niche_overlay = _strip_statutory_anchors(niche_overlay)
+        gathered_context = None
+        log.info("Drafting: user forbade unsupplied law; overlay anchors and "
+                 "retrieved legal context withheld",
+                 overlay_chars=len(niche_overlay))
 
     # Preflight: Gemini 2.5 Pro caps input at 1,048,576 tokens. English
     # text tokenises at ~4 chars/token so the raw-char ceiling is ~4M
@@ -4705,9 +5169,15 @@ async def _generate_draft(
         _rem = _plan_remaining()
         if _rem is not None:
             _budget_left = _rem - SELF_REFINE_RESERVE_S - LANG_GATE_RESERVE_S
-            _fitted, _feasible, _action = _fit_plan_to_budget(
-                strategy.sections, _budget_left,
-            )
+            _n = len(strategy.sections)
+            if (_parallel_sections_enabled() and _n > 2
+                    and _parallel_plan_time_s(_n, OBSERVED_PAIR_TIME_P90_S) <= _budget_left):
+                # The parallel schedule fits the whole plan; no trimming.
+                _fitted, _feasible, _action = list(strategy.sections), _n, "kept"
+            else:
+                _fitted, _feasible, _action = _fit_plan_to_budget(
+                    strategy.sections, _budget_left,
+                )
             if _action == "kept":
                 log.info(
                     "Plan fits budget",
@@ -5050,7 +5520,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
         # Reads previous_artifact_kind + previous_artifact_content populated
         # by memory_node from Level 1's SQLite storage.
         #
-        # Guarded on DRAFTING_FOLLOWUP_FAST_PATH=1 (off during initial rollout).
+        # On by default; DRAFTING_FOLLOWUP_FAST_PATH=0 turns it off.
         # Uses `original_query` — the raw user directive — so per-agent
         # rewriting or memory rewriter expansion can't hide "in Marathi" from
         # detection. On empty fast-path output falls through to the existing
@@ -5058,12 +5528,51 @@ async def drafting_node(state: LegalAgentState) -> dict:
         _prev_kind = state.get("previous_artifact_kind", "") or ""
         _prev_content = state.get("previous_artifact_content", "") or ""
         _new_upload_this_turn = bool(fc and fc.has_content)
-        if (
-            _fast_path_enabled()
-            and _is_drafting_followup_directive(
-                original_query, _prev_kind, _prev_content, _new_upload_this_turn,
+        _edit_scope = (
+            _followup_edit_scope(
+                intent_obj, original_query, _prev_kind, _prev_content,
+                _new_upload_this_turn,
             )
-        ):
+            if _fast_path_enabled() else None
+        )
+        if _edit_scope == "partial":
+            # Change only the blocks the user named; everything else is
+            # copied through untouched. A plan that cannot be applied, or a
+            # model that says the change is document-wide, falls through to
+            # the whole-document rewrite below.
+            log.info(
+                "Fast path: targeted edit of the prior draft",
+                directive_preview=original_query[:80],
+                prior_len=len(_prev_content),
+            )
+            edited = await _generate_targeted_edit(
+                user_directive=original_query,
+                prior_draft=_prev_content,
+                user_intent=intent_obj,
+                user_language=user_language,
+                progress_emit=progress,
+            )
+            if edited is not None:
+                edited_text, edit_meta = edited
+                edited_text, edit_warnings = validate_draft(edited_text)
+                return {"agent_results": {"Drafting": AgentResult(
+                    agent_name="Drafting",
+                    content=edited_text,
+                    sources=[SourceMetadata(
+                        source_type="drafting",
+                        title="Edited from your previous draft",
+                        content=[_prev_content[:300]],
+                        file_name="<prior_turn:targeted_edit>",
+                        agent_name="Drafting",
+                        template_type="prior_turn_targeted_edit",
+                    )],
+                    tokens_consumed=0,
+                    meta={"reference_kind": "prior_turn", "edit_mode": "targeted",
+                          **edit_meta,
+                          **({"draft_warnings": edit_warnings} if edit_warnings else {})},
+                )}}
+            _edit_scope = "whole"
+        if _edit_scope == "whole":
             log.info(
                 "Fast path: drafting follow-up directive detected",
                 directive_preview=original_query[:80],
@@ -5103,9 +5612,9 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     tokens_consumed=0,
                     meta=(
                         {"draft_warnings": fast_warnings,
-                         "reference_kind": "prior_turn"}
+                         "reference_kind": "prior_turn", "edit_mode": "whole"}
                         if fast_warnings
-                        else {"reference_kind": "prior_turn"}
+                        else {"reference_kind": "prior_turn", "edit_mode": "whole"}
                     ),
                 )
                 return {"agent_results": {"Drafting": _fast_result}}
@@ -5220,6 +5729,7 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         intent=intent_obj,
                         original_query=original_query,
                         niche_key=_early_niche_key,
+                        user_facts=user_facts,
                     ),
                     _gather_relevant_context(query),
                 )
@@ -5387,8 +5897,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
                     draft,
                     user_query=query,
                     intent=intent_obj,
-                    critic_llm=get_drafting_llm(max_output_tokens=8192),
-                    refiner_llm=get_drafting_llm(max_output_tokens=24000),
+                    # Thinking off: the critic's structured output fails
+                    # with it on (see get_drafting_llm).
+                    critic_llm=get_drafting_llm(max_output_tokens=8192, thinking=False),
+                    refiner_llm=get_drafting_llm(max_output_tokens=24000, thinking=False),
+                    # One critique+rewrite round, then the closing critique.
+                    # A Claude rewrite of a 46k-char petition takes ~118 s;
+                    # two rounds took the request to 459 s of 465 (2026-10-16).
+                    max_iterations=1,
                     source_languages=source_langs,
                     source_registry=_registry,
                     # A finished draft has no business getting materially

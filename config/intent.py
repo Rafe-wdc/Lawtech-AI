@@ -251,6 +251,25 @@ class UserIntent(BaseModel):
                     "False if the user explicitly says 'no citations' / "
                     "'without references'.",
     )
+    no_unsupplied_law: bool = Field(
+        False,
+        description="True iff the user explicitly forbids adding statutory "
+                    "provisions, rules, notifications, case law or legal "
+                    "requirements they did not supply ('do not introduce "
+                    "invented statutory provisions ... or legal "
+                    "requirements'). FALSE when the user only asks that "
+                    "citations be real or accurate ('don't cite fake "
+                    "judgments', 'no hallucinated cases', 'be accurate'): "
+                    "that asks for real law, not for no law.",
+    )
+    unresolved_marker: str = Field(
+        "",
+        max_length=80,
+        description="The exact marker the user told you to use for "
+                    "unresolved / unconfirmed details, copied verbatim "
+                    "without quotes (e.g. 'TO BE CONFIRMED BEFORE "
+                    "EXECUTION'). Empty when the user named none.",
+    )
     include_examples: bool = Field(
         False,
         description="True iff user explicitly asked for examples / illustrations / "
@@ -316,6 +335,25 @@ class UserIntent(BaseModel):
                     "user attaches a file and asks any question that's not a "
                     "draft request, prefer 'ask_about_file'.",
     )
+    research_before_draft: Literal["none", "research_only", "research_and_draft"] = Field(
+        "none",
+        description="Sequencing of research and drafting, set ONLY on an "
+                    "explicit instruction. 'research_only': the user asks to "
+                    "research / analyse / discuss the law or how to frame the "
+                    "facts BEFORE drafting, or says not to draft yet, and does "
+                    "not ask for the document in this same response ('before "
+                    "drafting I want to research...', 'first analyse the law', "
+                    "'don't draft yet'). 'research_and_draft': the user asks "
+                    "for BOTH a research / analysis output and the document in "
+                    "this same response ('review and discuss first, then draft "
+                    "the notice'; numbered outputs listing an analysis and the "
+                    "document) - an analysis the user wants to RECEIVE. "
+                    "'none': everything else, including a plain draft "
+                    "request, 'draft X with detailed legal reasoning / case "
+                    "laws' (reasoning inside the draft), and 'draft X after "
+                    "researching Y' / 'analyse the notice and draft a reply' "
+                    "(research as the drafter's method, not a deliverable).",
+    )
 
     # — Content corpus directives. Each is TRUE iff the user explicitly asked
     #   for that kind of supporting content alongside the primary task.
@@ -370,6 +408,27 @@ class UserIntent(BaseModel):
                     "rulings (AAR/AAAR), GST classification appeals, GST "
                     "ITC disputes, GST valuation rulings, HSN classification. "
                     "Drives GST_Judgment routing.",
+    )
+    wants_tribunal_rulings: bool = Field(
+        False,
+        description="TRUE iff the user wants orders / decisions of an Indian "
+                    "tribunal or commission (TDSAT, CESTAT/CEGAT, CAT, CIC, "
+                    "NGT, NCDRC, APTEL, CERC, Company Law Board, IPAB, AAR, "
+                    "Copyright Board), named or as 'tribunal orders' on a "
+                    "topic those tribunals decide. FALSE for GST AAR/AAAR "
+                    "(wants_gst_rulings). Drives Tribunal_Judgment routing.",
+    )
+    draft_edit_scope: Literal["none", "partial", "whole"] = Field(
+        "none",
+        description="How a follow-up changes a document the assistant drafted "
+                    "earlier in this conversation. 'partial': change, add or "
+                    "remove SPECIFIC parts (a paragraph, clause, ground, the "
+                    "prayer, a date or amount in one place). 'whole': a change "
+                    "that applies across the whole document (translate, "
+                    "shorten / expand overall, change tone or format "
+                    "throughout, rename a party everywhere). 'none': not an "
+                    "edit of an earlier draft, including a request for a NEW "
+                    "document. Drives the drafting agent's edit path.",
     )
 
     named_acts: list[str] = Field(
@@ -468,7 +527,7 @@ def default_intent() -> UserIntent:
 TASK_TYPES = (
     "Drafting", "Judgment", "Legislation", "Constitution",
     "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-    "SCI_Judgment", "GST_Judgment", "Document",
+    "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
     "Non_legal", "Other",
 )
 
@@ -492,7 +551,7 @@ class DynamicPlan(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "GST_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="Primary task type.")
 

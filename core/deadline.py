@@ -123,6 +123,31 @@ def deadline_scope(seconds: float):
         _deadline.reset(token)
 
 
+# While a bounded call runs, a heartbeat goes to the SSE stream this often.
+# A Claude section pair can take 60-120 s with nothing else sent, and proxies
+# with an idle limit below that (nginx 60 s default, Cloudflare 100 s) drop
+# the connection mid-draft. The stream turns it into an SSE comment line.
+HEARTBEAT_EVERY_S = 15.0
+
+
+def _stream_writer_or_none():
+    """The LangGraph stream writer when running inside a streamed graph."""
+    try:
+        from langgraph.config import get_stream_writer
+        return get_stream_writer()
+    except Exception:
+        return None
+
+
+async def _heartbeat(writer, every: float) -> None:
+    while True:
+        await asyncio.sleep(every)
+        try:
+            writer({"type": "heartbeat"})
+        except Exception:
+            return
+
+
 async def bounded_wait_for(
     coro: Awaitable[T],
     *,
@@ -150,4 +175,11 @@ async def bounded_wait_for(
         raise asyncio.TimeoutError(
             "Request deadline exceeded before wait_for could start"
         )
-    return await asyncio.wait_for(coro, timeout=effective)
+    writer = _stream_writer_or_none()
+    if writer is None:
+        return await asyncio.wait_for(coro, timeout=effective)
+    beat = asyncio.create_task(_heartbeat(writer, HEARTBEAT_EVERY_S))
+    try:
+        return await asyncio.wait_for(coro, timeout=effective)
+    finally:
+        beat.cancel()

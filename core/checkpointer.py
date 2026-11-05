@@ -80,6 +80,8 @@ async def create_checkpointer():
             min_size=2,
             open=False,
             kwargs={"autocommit": True, "prepare_threshold": 0},
+            # Same dead-idle-connection guard as the chat-store pool.
+            check=AsyncConnectionPool.check_connection,
         )
         await pool.open(wait=True, timeout=10.0)
 

@@ -173,6 +173,55 @@ def _apply_argument_override(query: str, task: str, tasks_planned: list[str], in
     return task, tasks_planned, intent, changed
 
 
+# Agents that do the research half of a research-before-draft request: the
+# analysis agents plus the statute agents the planner may have chosen.
+_RESEARCH_AGENTS = ("Scenario", "Legal_Concepts", "Legislation", "Newacts")
+
+
+def _research_mode(intent) -> str:
+    return (getattr(intent, "research_before_draft", "none") or "none") if intent is not None else "none"
+
+
+def _apply_research_first_override(task: str, tasks_planned: list[str], intent):
+    """Honour an explicit research-before-draft instruction. Pure.
+
+    Returns (task, tasks_planned, intent, changed). The classifier's rule
+    "production verb + document noun -> Drafting" fires on "I need to prepare
+    a draft of suit ... (before drafting I want to research the legal aspect,
+    how should I state the facts)" (prod 2026-10-25): the plan became
+    ['Drafting'] alone, the strip removed the research agents, and a full
+    plaint shipped in place of the research.
+
+    research_only      -> Scenario primary, Drafting out of the plan, the
+                          planner's research agents kept; task_intent set to
+                          "analyze" so no later rule (multi-intent, drafting
+                          reconciliation, draft-from-file) re-adds Drafting.
+    research_and_draft -> Drafting primary, Scenario guaranteed in the plan;
+                          the cite-appendix strip keeps the research agents
+                          and synthesis puts the research first.
+    """
+    mode = _research_mode(intent)
+    if mode == "research_only":
+        before = (task, list(tasks_planned))
+        if getattr(intent, "task_intent", None) == "draft":
+            intent = intent.model_copy(update={"task_intent": "analyze"})
+        if task == "Drafting":
+            task = "Scenario"
+        tasks_planned = [a for a in tasks_planned if a != "Drafting"]
+        if task == "Scenario" and "Scenario" not in tasks_planned:
+            tasks_planned = ["Scenario"] + tasks_planned
+        if not tasks_planned:
+            tasks_planned = [task]
+        return task, tasks_planned, intent, (task, tasks_planned) != before
+    if mode == "research_and_draft":
+        before = (task, list(tasks_planned))
+        task = "Drafting"
+        rest = [a for a in tasks_planned if a not in ("Drafting", "Scenario")]
+        tasks_planned = (["Drafting", "Scenario"] + rest)[:4]
+        return task, tasks_planned, intent, (task, tasks_planned) != before
+    return task, tasks_planned, intent, False
+
+
 def _wants_drafting(intent: UserIntent | None) -> bool:
     """True iff the user wants the AI to PRODUCE a legal document.
 
@@ -191,7 +240,7 @@ class IdentifyTaskSchema(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "GST_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="The primary legal task type")
 
@@ -201,12 +250,12 @@ class ClassifyAndPlan(BaseModel):
     task: Literal[
         "Drafting", "Judgment", "Legislation", "Constitution",
         "Scenario", "Maxim", "Newacts", "Legal_Concepts",
-        "SCI_Judgment", "GST_Judgment", "Document",
+        "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Document",
         "Non_legal", "Other",
     ] = Field(..., description="The primary legal task type")
     agents: list[str] = Field(
         ...,
-        description="List of agent names to invoke (1-3): Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document",
+        description="List of agent names to invoke (1-3): Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Tribunal_Judgment, Document",
     )
     reasoning: str = Field(..., description="Brief reasoning for task type and agent selection")
 
@@ -253,6 +302,8 @@ def _classify_task_from_intent(intent: UserIntent | None) -> str | None:
         return "SCI_Judgment"
     if intent.wants_gst_rulings:
         return "GST_Judgment"
+    if intent.wants_tribunal_rulings:
+        return "Tribunal_Judgment"
     if intent.wants_constitution:
         return "Constitution"
     if intent.wants_maxim:
@@ -269,7 +320,7 @@ def _classify_task_from_intent(intent: UserIntent | None) -> str | None:
 class AgentPlan(BaseModel):
     agents: list[str] = Field(
         ...,
-        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Document",
+        description="List of agent names to invoke: Legislation, Judgment, Newacts, Drafting, Scenario, Constitution, Maxim, Legal_Concepts, SCI_Judgment, GST_Judgment, Tribunal_Judgment, Document",
     )
     reasoning: str = Field(..., description="Brief reasoning for agent selection")
 
@@ -364,6 +415,11 @@ doubt, do NOT pick Drafting.
    application, affidavit, legal notice, agreement, contract, deed, MOU, will,
    divorce petition, reply, rejoinder, etc.).
    NOT Drafting:
+   - The user asks to research / analyse the law or how to state the facts
+     BEFORE drafting, or not to draft yet ("before drafting I want to
+     research...", "first analyse the law", "don't draft yet") and does not
+     ask for the document in this response → **Scenario**, even with a
+     production verb and a document noun.
    - Tactical outputs (arguments, cross-examination questions, strategy,
      defences, briefs of advice) → **Scenario**, even if the user says "draft".
    - Questions ABOUT documents (format, essential elements, requirements,
@@ -402,6 +458,17 @@ doubt, do NOT pick Drafting.
    Arnesh Kumar, Hussainara Khatoon, etc.).
 8. **GST_Judgment** — GST AAR / AAAR / advance ruling / classification appeal
    under GST / GST ITC dispute / HSN code ruling / state GST appellate order.
+8A. **Tribunal_Judgment** — orders / decisions of an Indian tribunal or
+   commission: TDSAT, CESTAT / CEGAT, CAT, CIC, NGT, NCDRC, APTEL, CERC,
+   Company Law Board, IPAB, AAR (income tax / customs), Copyright Board —
+   named, or "tribunal orders" on a topic (carriage fee disputes, CENVAT
+   credit, RTI exemptions, environmental clearance). GST AAR / AAAR stays
+   GST_Judgment. Requires a request for the tribunal's ORDERS / DECISIONS /
+   RULINGS / what it HELD. A question ABOUT a tribunal — its jurisdiction,
+   powers, composition, limitation, how to file or appeal ("What is the
+   jurisdiction of the NGT?", "How do I file a complaint before TDSAT?") —
+   is NOT Tribunal_Judgment: route it to Legal_Concepts (or Legislation
+   when it names the statute).
 9. **Judgment** — the user names a specific case OR asks for court decisions
    / precedents from High Courts or unspecified courts.
 10. **Maxim** — a Latin legal maxim or doctrine (res judicata, audi alteram
@@ -437,6 +504,10 @@ doubt, do NOT pick Drafting.
   judgments (verbatim): add BOTH **Judgment** AND **SCI_Judgment**. Skip
   SCI_Judgment if the user scoped to "High Court only"; skip Judgment if
   they scoped to "Supreme Court only" or named a specific SC case.
+  EXCEPTION: when the task is **Tribunal_Judgment**, the orders / rulings
+  asked for are the tribunal's — do NOT add Judgment or SCI_Judgment. Add
+  them only if the user ALSO asks for High Court / Supreme Court judgments
+  in so many words ("TDSAT orders and Supreme Court rulings on ...").
 - Asks for statutory text alongside another primary: add **Legislation**
   (or **Newacts** if it's one of the 6 codes — never both).
 - Invokes a fundamental right alongside another primary: add **Constitution**.
@@ -547,6 +618,8 @@ def _select_citation_agents(
         agents.append("SCI_Judgment")
     if intent is not None and intent.wants_gst_rulings:
         agents.append("GST_Judgment")
+    if intent is not None and intent.wants_tribunal_rulings:
+        agents.append("Tribunal_Judgment")
     # Corpus-aware statute pick. Newacts indexes BNS/IPC, BNSS/CrPC,
     # BSA/IEA; Legislation indexes everything else. Prefer Newacts when
     # the planner already routed there.
@@ -588,7 +661,16 @@ def _detect_multi_intent(intent: UserIntent | None, task: str) -> list[str]:
     if task == "Legal_Concepts":
         return []
     extra: list[str] = []
-    if intent.include_case_law:
+    # A question about a tribunal's orders is answered from the tribunal
+    # index. The HC and SC agents have nothing on, say, a TDSAT petition,
+    # fall back to the web, and show "searching the web" while the tribunal
+    # agent answers (dev, 2026-10-16). The SC agent still joins when the user
+    # names the Supreme Court (wants_supreme_court, below). Keyed on the
+    # primary task, not on wants_tribunal_rulings: "case laws on medical
+    # negligence" also wants consumer-commission orders, and still needs the
+    # HC and SC precedents.
+    tribunal_scoped = task == "Tribunal_Judgment"
+    if intent.include_case_law and not tribunal_scoped:
         # Fan out to BOTH High Court (Judgment) AND Supreme Court (SCI_Judgment)
         # when case law is requested, regardless of whether the user explicitly
         # named the apex court.
@@ -623,6 +705,8 @@ def _detect_multi_intent(intent: UserIntent | None, task: str) -> list[str]:
         extra.append("SCI_Judgment")
     if intent.wants_gst_rulings and task != "GST_Judgment":
         extra.append("GST_Judgment")
+    if intent.wants_tribunal_rulings and task != "Tribunal_Judgment":
+        extra.append("Tribunal_Judgment")
     if intent.task_intent == "draft" and task != "Drafting":
         extra.append("Drafting")
     return extra
@@ -645,6 +729,7 @@ Each agent has a different database and purpose:
 - Legal_Concepts: General legal explanation. Query should be the legal concept to explain.
 - SCI_Judgment: Searches Supreme Court database. Query should focus on: SC-specific case names, constitutional questions, landmark rulings.
 - GST_Judgment: Searches GST AAAR (Appellate Authority for Advance Ruling) order database. Query should focus on: GST issue (classification / ITC / valuation / exemption), HSN code, GST section/notification, applicant name, state. Do NOT include unrelated tax topics (income tax, customs).
+- Tribunal_Judgment: Searches orders of Indian tribunals and commissions (TDSAT, CESTAT/CEGAT, CAT, CIC, NGT, NCDRC, APTEL, CERC, CLB, IPAB, AAR, Copyright Board). Query should focus on: the tribunal named (keep its name or abbreviation exactly), the issue, the statute / regulation and section, party names written as case parties. Do NOT add High Court or Supreme Court wording.
 
 Rules:
 1. Each rewritten query must be self-contained and optimized for that agent's search database.
@@ -655,7 +740,7 @@ Rules:
 6. Return valid JSON object mapping agent name to rewritten query.
 7. LANGUAGE HANDLING — two-tier by backend. Do NOT blindly force English.
 
-   ENGLISH-INDEXED AGENTS (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment) — translate the SURROUNDING NARRATIVE to English for retrieval efficiency, but PRESERVE VERBATIM every noun that carries retrieval signal: party names (both transliterated Latin form AND the original non-Latin form when present), section numbers, act names, dates, monetary amounts, and any explicit COUNT / SCOPE directive ("5 judgments", "top 3 cases", "landmark rulings only", "High Court only"). The rewritten query is an English sentence that CARRIES the native / original nouns, not a translation that DROPS them.
+   ENGLISH-INDEXED AGENTS (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment, Tribunal_Judgment) — translate the SURROUNDING NARRATIVE to English for retrieval efficiency, but PRESERVE VERBATIM every noun that carries retrieval signal: party names (both transliterated Latin form AND the original non-Latin form when present), section numbers, act names, dates, monetary amounts, and any explicit COUNT / SCOPE directive ("5 judgments", "top 3 cases", "landmark rulings only", "High Court only"). The rewritten query is an English sentence that CARRIES the native / original nouns, not a translation that DROPS them.
    Example — input "मुझे BNSS की धारा 480 पर 5 सुप्रीम कोर्ट के जजमेंट दो":
      SCI_Judgment: "Section 480 BNSS anticipatory bail Supreme Court cases (5 landmark judgments requested)"
      Newacts:      "Section 480 BNSS anticipatory bail"
@@ -670,6 +755,27 @@ User Query: {query}
 Agents: {agents}
 
 Return JSON object like: {{"Judgment": "...", "Legislation": "..."}}"""
+
+# Inserted before "User Query:" only when the user attached documents and
+# core.case_focus produced a focus line. Without it the search agents saw the
+# question alone: an NDPS anticipatory-bail application asked "case laws based
+# on the attached FIR" came back with IPC 406/420 cheating cases (prod
+# 2026-11-01). No attachment: the prompt above is sent unchanged.
+AGENT_QUERY_REWRITE_FILE_ADDENDUM = """ATTACHED DOCUMENTS: the user uploaded documents with this question. Their case focus (statute and sections, offence, key facts, stage, relief):
+{case_focus}
+
+8. When the question refers to the attached documents or to the user's own matter ("attached FIR", "this document", "my case", "based on the file", "on these facts"), build every search agent's query (Judgment, SCI_Judgment, Newacts, Legislation, GST_Judgment, Tribunal_Judgment, Scenario, Constitution) around the case focus: carry its statute and section numbers, the offence, the facts that decide the legal test (e.g. substance and quantity), the stage and the relief asked about. Never replace the document's statute or offence with a different one.
+   - Newacts: give section numbers only for BNS/IPC, BNSS/CrPC and BSA/IEA provisions; name any other statute by its act name, without its section numbers.
+   - Drafting: write its query from the user's request only; the drafter reads the documents itself.
+9. When the question is about a different legal topic than the attached documents, ignore the case focus.
+
+"""
+
+# Agents whose search query the case focus can sharpen.
+_CASE_FOCUS_AGENTS = frozenset({
+    "Judgment", "SCI_Judgment", "Newacts", "Legislation", "GST_Judgment",
+    "Tribunal_Judgment", "Scenario", "Constitution",
+})
 
 
 class AgentQueries(BaseModel):
@@ -756,7 +862,9 @@ def _extract_user_intent(
                     f"- language_explicit: {getattr(previous_intent, 'language_explicit', False)}\n"
                     f"- strict_language: {getattr(previous_intent, 'strict_language', False)}\n"
                     f"- response_depth: {getattr(previous_intent, 'response_depth', 'standard')}\n"
-                    f"- legal_artifact: {_artifact or 'unspecified'}"
+                    f"- legal_artifact: {_artifact or 'unspecified'}\n"
+                    # draft_edit_scope reads this: an edit needs a prior draft.
+                    f"- task_intent: {getattr(previous_intent, 'task_intent', 'other')}"
                 )
             raw_and_parsed = chain.invoke({
                 # Both inputs flow into an LLM call, so they MUST be wrapped
@@ -877,7 +985,8 @@ def _dynamic_plan(
                     f"- language_explicit: {getattr(previous_intent, 'language_explicit', False)}\n"
                     f"- strict_language: {getattr(previous_intent, 'strict_language', False)}\n"
                     f"- response_depth: {getattr(previous_intent, 'response_depth', 'standard')}\n"
-                    f"- legal_artifact: {_artifact or 'unspecified'}"
+                    f"- legal_artifact: {_artifact or 'unspecified'}\n"
+                    f"- task_intent: {getattr(previous_intent, 'task_intent', 'other')}"
                 )
             raw_and_parsed = chain.invoke({
                 "query":                wrap_untrusted(query),
@@ -1156,7 +1265,8 @@ def _resolve_user_language(state: LegalAgentState) -> str:
     return detected
 
 
-def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]:
+def _rewrite_queries_for_agents(query: str, agents: list[str],
+                                case_focus: str = "") -> dict[str, str]:
     """Generate per-agent optimized queries using LLM.
 
     For single-agent plans, returns empty dict (agent uses original query).
@@ -1184,6 +1294,10 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
     In this case we rewrite ONLY for the non-Drafting agents; Drafting is
     NOT emitted in the returned dict, so drafting_node's own fallback to
     state["query"] preserves the raw prompt verbatim (invariant intact).
+
+    `case_focus` is the one-line summary of the user's attached documents
+    (core.case_focus). When set, the rewriter builds the search agents'
+    queries around it; when empty, the prompt is unchanged.
     """
     if len(agents) <= 1:
         return {}
@@ -1202,16 +1316,24 @@ def _rewrite_queries_for_agents(query: str, agents: list[str]) -> dict[str, str]
                 query_chars=len(query),
                 citation_agents=citation_agents,
             )
-            return _run_rewrite_llm(query, citation_agents)
+            return _run_rewrite_llm(query, citation_agents, case_focus)
 
         log.debug("Skipping per-agent query rewrite — query already standalone-length",
                   query_chars=len(query), agents=agents)
         return {}
 
-    return _run_rewrite_llm(query, agents)
+    return _run_rewrite_llm(query, agents, case_focus)
 
 
-def _run_rewrite_llm(query: str, agents: list[str]) -> dict[str, str]:
+def _rewrite_prompt_template(case_focus: str) -> str:
+    if not case_focus:
+        return AGENT_QUERY_REWRITE_PROMPT
+    return AGENT_QUERY_REWRITE_PROMPT.replace(
+        "User Query: {query}", AGENT_QUERY_REWRITE_FILE_ADDENDUM + "User Query: {query}", 1,
+    )
+
+
+def _run_rewrite_llm(query: str, agents: list[str], case_focus: str = "") -> dict[str, str]:
     """Invoke the LLM query rewriter for the given agent list.
 
     Returns {} on any failure — callers fall back to state["query"] in that
@@ -1220,13 +1342,16 @@ def _run_rewrite_llm(query: str, agents: list[str]) -> dict[str, str]:
     try:
         with log_time(log, "Per-agent query rewriting"):
             llm = get_gemini_flash(temperature=0.1)
-            prompt = ChatPromptTemplate.from_template(AGENT_QUERY_REWRITE_PROMPT)
+            prompt = ChatPromptTemplate.from_template(_rewrite_prompt_template(case_focus))
             chain = prompt | llm
 
-            response = chain.invoke({
+            _vars = {
                 "query": query,
                 "agents": ", ".join(agents),
-            })
+            }
+            if case_focus:
+                _vars["case_focus"] = case_focus
+            response = chain.invoke(_vars)
         from core.token_tracker import record as _record_tokens
         _record_tokens("Orchestrator", "rewrite_per_agent_queries", response)
 
@@ -1299,6 +1424,12 @@ def _validate_and_enrich_plan(
         if len(tasks_planned) < 3:
             tasks_planned.append("GST_Judgment")
             log.info("Plan enriched: wants_gst_rulings → GST_Judgment",
+                     plan=tasks_planned)
+
+    if intent.wants_tribunal_rulings and "Tribunal_Judgment" not in tasks_planned:
+        if len(tasks_planned) < 3:
+            tasks_planned.append("Tribunal_Judgment")
+            log.info("Plan enriched: wants_tribunal_rulings → Tribunal_Judgment",
                      plan=tasks_planned)
 
     # Break #6 (pipeline_investigation.md): the extractor populates 6 wants_*
@@ -1396,7 +1527,7 @@ _REVIEW_REDRAFT_VERBS_RE = re.compile(
     re.IGNORECASE,
 )
 
-_CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment")
+_CITATION_AGENTS_TO_STRIP_ON_REVIEW = ("SCI_Judgment", "Judgment", "GST_Judgment", "Tribunal_Judgment")
 
 # Agents that _select_citation_agents auto-adds as the drafting appendix.
 # When cite_appendix is OFF, these are the ONLY agents that should be
@@ -1411,8 +1542,21 @@ _CITATIONS_ONLY_PREFIX = (
     "Issues / matter: "
 )
 
+# research_and_draft scopes, appended to each side's query (see plan node).
+_RESEARCH_ONLY_SCOPE = (
+    "\n\n[SCOPE: RESEARCH SECTION ONLY. Another agent writes the document the user "
+    "asked for and it is placed after your section. Do NOT draft, outline or restate "
+    "the document. Write the legal research the user asked for: applicable law, "
+    "issues, risks, missing documents, forum, and how to state the facts.]"
+)
+_DOCUMENT_ONLY_SCOPE = (
+    "\n\n[SCOPE: DOCUMENT ONLY. The legal research and analysis the user asked for "
+    "are written separately and placed before your document. Write only the "
+    "document itself; no research notes, strategy, risk lists or forum analysis.]"
+)
+
 _CITATION_APPENDIX_AGENTS = frozenset({
-    "Judgment", "SCI_Judgment", "GST_Judgment", "Newacts", "Legislation",
+    "Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment", "Newacts", "Legislation",
 })
 
 
@@ -1583,6 +1727,14 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
 
     fc = FileContextData.from_state(state)
 
+    # Case focus of the attached documents, for the per-agent search queries
+    # (Step 4). Started now so it runs alongside classification.
+    _case_focus_task = None
+    if (fc and fc.has_content and not is_greeting
+            and not state.get("conversational_followup")):
+        from core.case_focus import extract_case_focus
+        _case_focus_task = asyncio.create_task(asyncio.to_thread(extract_case_focus, fc))
+
     # Intent extractor result (Phase 1, telemetry-only). Stays None on the
     # short-circuit paths (greeting / skip-normalize) and on extractor
     # failures. Populated only inside the parallel-gather path below when
@@ -1600,9 +1752,14 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     # at the `if dynamic_plan is not None` tail (present since 6ece09a).
     dynamic_plan = None
     # --- Short-circuit: greeting resolved ---
-    if is_greeting:
-        log.info("Greeting detected, short-circuiting classification",
-                 original=_original_query[:60])
+    # Cost audit 2026-10-08: acknowledgements ("thank you", "ok") were
+    # already forced to Non_legal AFTER classification and intent extraction
+    # had run, so every one paid the two planner calls (about $0.007, 93% of
+    # the request). Take the greeting short-circuit for them too.
+    if is_greeting or state.get("conversational_followup"):
+        log.info("Greeting / acknowledgement detected, short-circuiting classification",
+                 original=_original_query[:60],
+                 conversational_followup=bool(state.get("conversational_followup")))
         task = "Non_legal"
         tasks_planned = ["Non_legal"]
         response_instructions = ""
@@ -1899,6 +2056,17 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
     if _arg_changed:
         log.warning("Argument request: routing corrected away from Drafting",
                     query=_original_query[:80], before=_prev, after=(task, tasks_planned))
+    # Explicit research-before-draft instruction outranks the classifier's
+    # production-verb + document-noun rule. Same position as the argument
+    # override: before every consumer that can re-add Drafting.
+    _prev = (task, list(tasks_planned))
+    task, tasks_planned, extracted_intent, _rbd_changed = _apply_research_first_override(
+        task, tasks_planned, extracted_intent,
+    )
+    if _rbd_changed:
+        log.info("Research-before-draft: routing adjusted",
+                 mode=_research_mode(extracted_intent),
+                 before=_prev, after=(task, tasks_planned))
     if task not in ("Non_legal", "Document"):
         extra = _detect_multi_intent(extracted_intent, task)
         for agent in extra:
@@ -2017,6 +2185,10 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
                 "Scenario", "Constitution", "Maxim", "Legal_Concepts",
             })
             _strip_set = _CITATION_APPENDIX_AGENTS | _CONTENT_AGENTS_REDUNDANT_WITH_DRAFTING
+            if _research_mode(extracted_intent) == "research_and_draft":
+                # The user asked for the research as its own output: those
+                # agents are the first half of the response, not redundant.
+                _strip_set = _strip_set - set(_RESEARCH_AGENTS)
             _kept = [t for t in tasks_planned if t not in _strip_set]
             _stripped = [t for t in tasks_planned if t in _strip_set]
             tasks_planned = _kept[:4]
@@ -2083,11 +2255,22 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
 
     # Step 4: Per-agent query rewriting (only for multi-agent plans)
     agent_queries = {}
+    case_focus = ""
+    if _case_focus_task is not None:
+        if len(tasks_planned) > 1 and _CASE_FOCUS_AGENTS.intersection(tasks_planned):
+            try:
+                case_focus = await asyncio.wait_for(_case_focus_task, timeout=15)
+            except asyncio.TimeoutError:
+                log.warning("Case focus extraction timed out; agents search with the question only")
+            if case_focus:
+                log.info("Case focus for search queries", focus=case_focus[:300])
+        else:
+            _case_focus_task.cancel()
     if len(tasks_planned) > 1:
         progress("orchestrator", f"Preparing search queries for {len(tasks_planned)} agents...", found=len(tasks_planned), step="plan")
         try:
             agent_queries = await asyncio.wait_for(
-                asyncio.to_thread(_rewrite_queries_for_agents, query, tasks_planned),
+                asyncio.to_thread(_rewrite_queries_for_agents, query, tasks_planned, case_focus),
                 timeout=15,
             )
         except asyncio.TimeoutError:
@@ -2098,9 +2281,23 @@ async def orchestrator_plan_node(state: LegalAgentState) -> dict:
         # happens whenever the rewrite fails), they write a second pleading
         # that the appendix then carried verbatim (advocate report, 2026-09-11).
         if task == "Drafting":
-            for _ca in [a for a in tasks_planned if a in _CITATION_APPENDIX_AGENTS]:
+            # In research_and_draft mode the statute agents write part of the
+            # research section, so they keep their research query.
+            _research_agents = (set(_RESEARCH_AGENTS)
+                                if _research_mode(extracted_intent) == "research_and_draft" else set())
+            for _ca in [a for a in tasks_planned if a in _CITATION_APPENDIX_AGENTS and a not in _research_agents]:
                 _base = agent_queries.get(_ca) or query
                 agent_queries[_ca] = _CITATIONS_ONLY_PREFIX + _base[:1500]
+            # research_and_draft: each side writes only its part. The USER
+            # DIRECTIVES line alone did not hold - asked for "analysis, then
+            # the notice", the research agent also wrote the notice and the
+            # drafter also wrote the analysis (local A/B 2026-10-26). Appended
+            # after the user's text so the drafter's template search still
+            # leads with it.
+            if _research_agents:
+                agent_queries["Drafting"] = (agent_queries.get("Drafting") or query) + _DOCUMENT_ONLY_SCOPE
+                for _ra in [a for a in tasks_planned if a in _research_agents]:
+                    agent_queries[_ra] = (agent_queries.get(_ra) or query) + _RESEARCH_ONLY_SCOPE
 
     # NOTE: Previously this block concatenated 30K chars of PDF text into
     # agent_queries["Drafting"] so the drafting agent would receive the
@@ -2256,7 +2453,7 @@ def _build_source_registry(agent_results: dict[str, AgentResult]) -> SourceRegis
             record = None
             if st == "sci_judgment":
                 record = source_from_sci(meta)
-            elif st in ("judgment", "gst_judgment"):
+            elif st in ("judgment", "gst_judgment", "tribunal_judgment"):
                 record = source_from_hc(meta)
             elif st in ("legislation", "newacts", "constitution", "maxim"):
                 record = source_from_legislation(meta)
@@ -2496,6 +2693,14 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     if "Drafting" in valid_results:
         drafting_result = valid_results.pop("Drafting")
 
+        # research_and_draft: the user asked for the research as its own
+        # output, before the document. The research agents' content leads,
+        # the draft follows; neither goes into the citation appendix.
+        research_results = {}
+        if _research_mode(state.get("user_intent")) == "research_and_draft":
+            research_results = {k: valid_results.pop(k) for k in _RESEARCH_AGENTS
+                                if k in valid_results and (valid_results[k].content or "").strip()}
+
         # Restrict citation_results to CITATION-SHAPED agents only. The plan
         # phase already separates content agents (Scenario, Constitution,
         # Maxim, Legal_Concepts) from citation agents (Judgment, SCI_Judgment,
@@ -2510,7 +2715,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         # negligence and partition drafting prompts (draft_len roughly
         # doubled → back to primary-draft-only length).
         _CITATION_SHAPED_AGENTS = {
-            "Judgment", "SCI_Judgment", "GST_Judgment",
+            "Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment",
             "Legislation", "Newacts", "Document",
         }
         _discarded_content = [
@@ -2567,6 +2772,15 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 enriched, user_query=state.get("original_query") or query)
             if citations_text.strip():
                 enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
+            if research_results:
+                research = "\n\n".join(r.content.strip() for r in research_results.values())
+                for r in research_results.values():
+                    total_tokens += r.tokens_consumed
+                    all_serialized_sources.extend(_serialize_sources(r))
+                enriched = ("## Part 1 — Legal Research and Framing of Facts\n\n" + research
+                            + "\n\n---\n\n## Part 2 — Draft\n\n" + enriched)
+                log.info("Research-and-draft synthesis: research placed before the draft",
+                         research_agents=list(research_results.keys()), research_len=len(research))
 
             log.info("Draft synthesis completed (append-only)",
                      enriched_len=len(enriched),
@@ -2614,6 +2828,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         "Constitution":   "Constitution",
         "Maxim":          "Maxim",
         "GST_Judgment":   "GST_Judgment",
+        "Tribunal_Judgment": "Tribunal_Judgment",
         "Legal_Concepts": "Legal_Concepts",
         "Other":          "Scenario",   # fallback per planner contract
     }
@@ -2627,6 +2842,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         "Scenario":     "## Additional Analysis",
         "Document":     "## From Your Uploaded Document",
         "GST_Judgment": "## Related GST/AAAR Authority",
+        "Tribunal_Judgment": "## Related Tribunal Orders",
     }
 
     primary_task_state = state.get("task")
@@ -3516,24 +3732,27 @@ _SUPPORTING_CITATIONS_MAX = 5
 # own text discussed may be listed. A Supreme Court supporter that searched
 # two party names and the year 1980 appended 140 unrelated judgments under
 # "Related Supreme Court Authority" (prod, 2026-09-22).
-_RAW_HIT_SOURCE_AGENTS = frozenset({"SCI_Judgment", "GST_Judgment"})
+_RAW_HIT_SOURCE_AGENTS = frozenset({"SCI_Judgment", "GST_Judgment", "Tribunal_Judgment"})
 
 
 def _serialize_sources(result: AgentResult) -> list[dict]:
     """Serialize an agent result's sources into dicts.
 
     A ReAct agent's sources are every hit of every search it ran, so only the
-    ones its own answer discusses are listed (at most the first
-    `_SUPPORTING_CITATIONS_MAX` when it discussed none by name). The sources
-    panel otherwise showed unrelated namesakes ("Kapil Kumar v. Kudrat Ali"
-    under CBI v. Kapil Wadhawan, report 2026-09-29).
+    ones its own answer discusses are listed, and none when it discusses
+    none of them. The sources panel otherwise showed unrelated namesakes
+    ("Kapil Kumar v. Kudrat Ali" under CBI v. Kapil Wadhawan, report
+    2026-09-29). An earlier fallback listed the first five hits when none
+    was discussed; that is exactly the namesake case (five "Standard
+    Chartered Bank" judgments under Standard Chartered Bank v. V. Noble
+    Kumar, report 2026-10-07), so it is gone.
     """
     if not result.sources:
         return []
 
     sources = result.sources
     if getattr(result, "agent_name", "") in _RAW_HIT_SOURCE_AGENTS:
-        sources = _discussed_sources(result) or sources[:_SUPPORTING_CITATIONS_MAX]
+        sources = _discussed_sources(result)
 
     serialized = []
     for s in sources:

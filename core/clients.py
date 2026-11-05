@@ -550,8 +550,12 @@ def get_gemini_vision(temperature: float = 0.0,
 @lru_cache(maxsize=8)
 def get_drafting_llm(max_output_tokens: int = 65535,
                      thinking_budget: int | None = None,
-                     thinking_level: str | None = None):
+                     thinking_level: str | None = None,
+                     thinking: bool = True):
     """Legal drafting — the highest-stakes output in the product.
+
+    `thinking=False` turns Claude's adaptive thinking off (self-refine critic
+    and refiner); it has no effect on a Gemini model.
 
     Uses settings.GEMINI_MODELS["generation"] (default
     `anthropic:claude-sonnet-5`). Override with GENERATION_MODEL env var.
@@ -582,13 +586,23 @@ def get_drafting_llm(max_output_tokens: int = 65535,
             **_thinking_kwargs(fb, thinking_budget, thinking_level),
         )
 
+    _sampling = _provider_kwargs(provider, 0.4)
+    if provider == "anthropic" and not thinking:
+        # Self-refine critic and refiner (measured 2026-10-16 on a 48k-char
+        # writ petition). The critic uses with_structured_output, i.e. forced
+        # tool calling, which Claude does not honour while thinking is on: it
+        # ran ~89 s and then raised OutputParserException, so every
+        # Claude-drafted document shipped unreviewed. Thinking off: 17.5 s
+        # with real findings. The refiner re-emits the whole draft: 136 s and
+        # 19k chars dropped with thinking, 115 s and length kept without.
+        _sampling = {"thinking": {"type": "disabled"}}
     try:
         primary = init_chat_model(
             model_id if ":" in model_id else f"google_genai:{model_id}",
             **_output_tokens_kwarg(provider, max_output_tokens),
             max_retries=1,
             timeout=180,
-            **_provider_kwargs(provider, 0.4),
+            **_sampling,
             **_thinking_kwargs(model_id, thinking_budget, thinking_level),
         )
     except Exception as _e:

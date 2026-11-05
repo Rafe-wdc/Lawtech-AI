@@ -66,6 +66,7 @@ from agents.constitution_maxim import constitution_node, maxim_node, legal_conce
 from agents.document import document_node
 from agents.sci_judgment import sci_judgment_node
 from agents.gst_judgment import gst_judgment_node
+from agents.tribunal_judgment import tribunal_judgment_node
 from agents.non_legal import non_legal_node
 
 
@@ -83,6 +84,7 @@ AGENT_NODE_MAP = {
     "Legal_Concepts": "legal_concepts",
     "SCI_Judgment": "sci_judgment",
     "GST_Judgment": "gst_judgment",
+    "Tribunal_Judgment": "tribunal_judgment",
     "Document": "document",
     "Non_legal": "non_legal",
 }
@@ -254,6 +256,7 @@ def build_graph() -> StateGraph:
     graph.add_node("document", _wrap("document", document_node))
     graph.add_node("sci_judgment", _wrap("sci_judgment", sci_judgment_node))
     graph.add_node("gst_judgment", _wrap("gst_judgment", gst_judgment_node))
+    graph.add_node("tribunal_judgment", _wrap("tribunal_judgment", tribunal_judgment_node))
     graph.add_node("non_legal", _wrap("non_legal", non_legal_node))
 
     # --- Add Edges ---
@@ -285,7 +288,7 @@ def build_graph() -> StateGraph:
     domain_agents = [
         "legislation", "judgment", "newacts", "drafting",
         "scenario", "constitution", "maxim", "legal_concepts",
-        "document", "sci_judgment", "gst_judgment", "non_legal",
+        "document", "sci_judgment", "gst_judgment", "tribunal_judgment", "non_legal",
     ]
     for agent_name in domain_agents:
         graph.add_edge(agent_name, "orchestrator_synthesize")

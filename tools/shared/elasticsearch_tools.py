@@ -795,38 +795,23 @@ def search_newacts(
         filters.append({"terms": {"section_number.keyword": section_numbers}})
 
     if hybrid_search and query:
-        embeddings = get_retriever_embeddings()
-        query_vector = embeddings.embed_query(query)
-
+        # The index's `embedding` field is not a knn_vector, so the
+        # script_score/cosineSimilarity query that used to be built here
+        # failed on every call. BM25 runs in OpenSearch; the vector ranking
+        # is done in process and fused (tools/shared/newacts_vector.py).
+        from .newacts_vector import hybrid_hits
         should_clauses = [{"match": {"page_content": query}}]
         if act_name and act_name in ACTS_PATHS:
             should_clauses.append({"term": {"source.keyword": ACTS_PATHS[act_name]}})
-
-        es_query = {
-            "size": 20,
-            "query": {
-                "script_score": {
-                    "query": {
-                        "bool": {
-                            "should": should_clauses,
-                            "filter": filters,
-                        }
-                    },
-                    "script": {
-                        "source": """
-                            double bm25 = _score;
-                            double vector_score = cosineSimilarity(params.query_vector, 'embedding');
-                            return bm25 + (100 * vector_score);
-                        """,
-                        "params": {"query_vector": query_vector},
-                    },
-                }
-            },
-            "sort": [
-                {"_score": {"order": "desc"}},
-                {"section_number.keyword": {"order": "asc"}},
-            ],
+        bm25_body = {
+            "size": 50,
+            "query": {"bool": {"should": should_clauses, "filter": filters,
+                               "minimum_should_match": 1}},
         }
+        hits = hybrid_hits(bm25_body, query,
+                           source=ACTS_PATHS.get(act_name or ""),
+                           sections=section_numbers)
+        es_query = None
     else:
         es_query = {
             "query": {
@@ -839,8 +824,9 @@ def search_newacts(
             "sort": [{"section_number.keyword": {"order": "asc"}}],
         }
 
-    response = _es_search(index=ES_INDICES["newacts"], body=es_query)
-    hits = response["hits"]["hits"]
+    if es_query is not None:
+        response = _es_search(index=ES_INDICES["newacts"], body=es_query)
+        hits = response["hits"]["hits"]
 
     return {
         "hits": [

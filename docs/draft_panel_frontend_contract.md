@@ -115,8 +115,8 @@ without the panel ignore them and keep using `token` / `response`.
 
 | Event | When | Payload |
 |---|---|---|
-| `artifact_start` | Drafting begins and the section plan is known | `artifact_id`, `version`, `sections: [{id, heading}]` (no blocks yet). Ids are `p1`, `p3`, … : the writer drafts two planned sections at a time, and each preview section is one such pair |
-| `artifact_section` | Each pair finishes | `artifact_id`, `status: "preview"`, `section: {id, heading, blocks}` with an id from `artifact_start` |
+| `artifact_start` | Drafting begins and the section plan is known | `artifact_id`, `version`, `sections: [{id, heading}]` (no blocks yet). Each preview section is one batch the writer drafts in one go, and its id is `p` + the position of the batch's first planned section. The first batch is always the first two sections (`p1`); after that the batches are single sections (`p3`, `p4`, `p5`, …) written in parallel, or pairs (`p3`, `p5`, …) when the server runs the sequential schedule. Treat ids as opaque |
+| `artifact_section` | Each batch finishes | `artifact_id`, `status: "preview"`, `section: {id, heading, blocks}` with an id from `artifact_start` |
 | `artifact_done` | The draft is final (after clean-up and review) | `artifact_id`, `version`, `artifact` (complete, authoritative) |
 | `artifact_patch` | An edit changed part of an existing draft | `artifact_id`, `base_version`, `version`, `sections: [ ... ]` (only the changed sections, complete) |
 
@@ -139,11 +139,12 @@ Example stream for a new draft:
 ```
 data: {"type":"thread_id", ...}
 data: {"type":"agents_planned","agents":["Drafting"]}
-data: {"type":"artifact_start","artifact_id":"art_7f3c2a9e","version":1,"sections":[{"id":"p1","heading":"CAUSE TITLE / STATEMENT OF FACTS"},{"id":"p3","heading":"GROUNDS / PRAYER"},{"id":"p5","heading":"VERIFICATION"}]}
+data: {"type":"artifact_start","artifact_id":"art_7f3c2a9e","version":1,"sections":[{"id":"p1","heading":"CAUSE TITLE / STATEMENT OF FACTS"},{"id":"p3","heading":"GROUNDS"},{"id":"p4","heading":"PRAYER"},{"id":"p5","heading":"VERIFICATION"}]}
 data: {"type":"drafting_progress", ...}
 data: {"type":"artifact_section","artifact_id":"art_7f3c2a9e","status":"preview","section":{"id":"p1","heading":"CAUSE TITLE / STATEMENT OF FACTS","blocks":[ ... ]}}
+data: {"type":"artifact_section", ... "section":{"id":"p5", ...}}    <- finished before p3 and p4
 data: {"type":"artifact_section", ... "section":{"id":"p3", ...}}
-...
+data: {"type":"artifact_section", ... "section":{"id":"p4", ...}}
 data: {"type":"artifact_done","artifact_id":"art_7f3c2a9e","version":1,"artifact":{ ... }}
 data: {"type":"response","content":"<markdown version>"}
 data: {"type":"done", ...}
@@ -307,6 +308,11 @@ rather than failing on them. If a released mobile build fails on unknown
 events, the flag must stay off on that server until users have an updated
 build. Nothing else changes for an old build: `response` still carries the
 whole draft as Markdown, so the chat keeps working.
+
+The stream also carries keep-alive lines, `: ping`, during long model calls
+(already live on dev, independent of this flag). A line starting with `:` is
+an SSE comment: skip it. Standard SSE libraries do; a hand-written reader
+that expects every line to start with `data:` must too.
 
 **Showing the draft.** Two ways, pick one:
 

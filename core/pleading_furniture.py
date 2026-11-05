@@ -39,7 +39,7 @@ _KINDS = {
 }
 NON_DRAFTING_TASKS = frozenset({
     "Scenario", "Legal_Concepts", "Newacts", "Legislation", "Constitution", "Maxim",
-    "Judgment", "SCI_Judgment", "GST_Judgment",
+    "Judgment", "SCI_Judgment", "GST_Judgment", "Tribunal_Judgment",
 })
 
 

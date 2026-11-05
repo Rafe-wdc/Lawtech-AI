@@ -579,6 +579,57 @@ def _format_intent_directives(intent) -> str:
             "the Defendant/Respondent' — so the two perspectives are not "
             "blended into a single narrative."
         )
+    # The user's own rules on law and unknowns outrank every default of the
+    # prompt this block is appended to (niche-overlay statutory anchors,
+    # retrieved legal context, the bracket-placeholder rule). Emitted only
+    # when the user said so: carried in every prompt it made ordinary drafts
+    # cite less law (A/B 2026-10-21, lease deed 13 -> 7 statutory refs).
+    if getattr(intent, "no_unsupplied_law", False):
+        parts.append(
+            "USER LEGAL-MATERIAL RULE (outranks every other rule in this "
+            "prompt, the NICHE OVERLAY's statutory anchors and any RELEVANT "
+            "LEGAL CONTEXT): the user forbids adding statutory provisions, rules, "
+            "notifications, case law or legal requirements they did not "
+            "supply. Cite no statute, rule, notification or judgment that the "
+            "USER QUERY or uploaded documents do not name; where a legal hook "
+            "is needed, write 'in accordance with applicable law'. Supply no "
+            "commercial or technical term the user did not give: no rates, "
+            "percentages, periods, penalties, liquidated damages, retention "
+            "money, defect-liability periods, interest, or material grades "
+            "and standards. Where the document needs one, write the clause "
+            "and mark the value as unresolved."
+        )
+    # Research-before-draft sequencing. Every agent of the plan receives this
+    # block (Scenario, Legal_Concepts, the statute agents, Drafting), so the
+    # wording tells each its own part. Emitted only on the user's explicit
+    # instruction; absent, the prompts are unchanged.
+    rbd = getattr(intent, "research_before_draft", "none") or "none"
+    if rbd == "research_only":
+        parts.append(
+            "USER SEQUENCING: research first, no draft in this response. The "
+            "user asked to research the law and how to state the facts BEFORE "
+            "any drafting. Do NOT draft the document. Answer the legal "
+            "questions the user raised, explain how to state the facts and "
+            "what each fact must establish, flag gaps and risks, and end by "
+            "offering to draft the document next."
+        )
+    elif rbd == "research_and_draft":
+        parts.append(
+            "USER SEQUENCING: research section first, then the document. The "
+            "response has two parts written by different agents: a research "
+            "section (legal analysis, risks, missing documents, forum, how to "
+            "state the facts) placed before the document, and the document "
+            "itself. If you are writing the document, write ONLY the document. "
+            "If you are writing the research, write ONLY the research and do "
+            "not draft the document."
+        )
+    marker = (getattr(intent, "unresolved_marker", "") or "").strip()
+    if marker:
+        parts.append(
+            f"USER MARKER: mark every unresolved detail with exactly "
+            f"\"{marker}\" instead of a bracketed [Field] placeholder. The "
+            f"ban on 'to be confirmed' wording does not apply to this marker."
+        )
     extra = getattr(intent, "additional_instructions", "") or ""
     if extra.strip():
         # Already capped at 300 chars at extraction; safe to inject verbatim.

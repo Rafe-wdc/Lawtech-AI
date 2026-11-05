@@ -201,6 +201,14 @@ async def lifespan(app: FastAPI):
     # depending on the prod-daily-cleanup.yml cron. Task lives for the
     # lifetime of the app; cancelled cleanly on shutdown below.
     from .settings import FILE_GC_ENABLED
+    # Load the new-codes embedding matrix off the request path, so the first
+    # topic query can already use vector ranking (tools/shared/newacts_vector).
+    try:
+        from tools.shared.newacts_vector import warm_in_background
+        warm_in_background()
+    except Exception as _warm_err:
+        log.warning("Newacts embedding warm-up not started", error=str(_warm_err)[:160])
+
     _gc_task = None
     if FILE_GC_ENABLED:
         from .file_gc import start_gc_loop
@@ -424,7 +432,10 @@ async def metrics_middleware(request: Request, call_next):
 # Sized so N_workers × MAX_INFLIGHT_PER_WORKER ≥ target concurrency × 1.2
 # (e.g. 6 × 10 = 60 capacity for a 50-stream target). Tune via env.
 
-_MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT_PER_WORKER", "10"))
+# 10 -> 20 (2026-10-16): drafting may now hold 10 requests per worker
+# (DRAFTING_MAX_CONCURRENT) for ~5 min each; at 10 that left no slots for
+# every other call, thread lists and feedback included.
+_MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT_PER_WORKER", "20"))
 _inflight_sem = asyncio.Semaphore(_MAX_INFLIGHT)
 _INFLIGHT_EXCLUDE_PATHS = {
     "/", "/pyapi/health", "/pyapi/health/detailed",
@@ -792,14 +803,16 @@ async def search(data: SearchRequest, request: Request):
         # calls clamp their local timeouts to the remaining budget instead
         # of blindly using 45s + 60s + ... and blowing the outer envelope.
         from core.deadline import deadline_scope
-        with log_time(log, "Full graph execution"), deadline_scope(seconds=285):
+        from core.settings import CHAT_REQUEST_DEADLINE_S, CHAT_REQUEST_TIMEOUT_S
+        with log_time(log, "Full graph execution"), deadline_scope(seconds=CHAT_REQUEST_DEADLINE_S):
             final_state = await asyncio.wait_for(
                 agent_graph.ainvoke(initial_state, config=config),
-                timeout=300,  # 5 minute hard timeout
+                timeout=CHAT_REQUEST_TIMEOUT_S,
             )
     except asyncio.TimeoutError:
         _graph_error = "timeout"
-        log.error("Agent graph execution timed out after 300s", query=data.prompt_query[:100])
+        log.error("Agent graph execution timed out",
+                  timeout_s=CHAT_REQUEST_TIMEOUT_S, query=data.prompt_query[:100])
         raise HTTPException(status_code=504, detail="Request timed out. Please try a simpler query.")
     except Exception as e:
         _graph_error = short_err(e)
@@ -1025,6 +1038,7 @@ _NODE_STATUS = {
     "document": "Searching uploaded documents...",
     "sci_judgment": "Searching Supreme Court judgments...",
     "gst_judgment": "Searching GST AAAR orders...",
+    "tribunal_judgment": "Searching tribunal orders...",
     "orchestrator_synthesize": "Injecting citations into draft...",
     "guardrail_output": "Finalizing...",
     "blocked_response": "Query blocked.",
@@ -1118,6 +1132,38 @@ def _match_plan(plan: str) -> str | None:
         if name.casefold() in key:
             return name
     return None
+
+
+def _fmt_mb(n_bytes: int) -> str:
+    """Bytes as MB for a user-facing message: "40 MB", "12.5 MB"."""
+    mb = n_bytes / (1024 * 1024)
+    return f"{mb:.0f} MB" if abs(mb - round(mb)) < 0.05 else f"{mb:.1f} MB"
+
+
+def _plan_counts_upload(filename: str) -> bool:
+    """Whether a file will be accepted at all, so it uses the plan's size
+    budget. A file rejected for its type (.exe, legacy .doc) uses none."""
+    from .file_processor import ALLOWED_EXTENSIONS
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in ALLOWED_EXTENSIONS and ext != ".doc"
+
+
+def _plan_size_detail(plan: str, uploads: list[tuple[str, int]],
+                      max_bytes: int, existing_bytes: int) -> str:
+    """Message for an upload that overruns the plan's size budget per chat."""
+    total = sum(size for _, size in uploads)
+    what = (f"{uploads[0][0]} is {_fmt_mb(total)}" if len(uploads) == 1
+            else f"These documents are {_fmt_mb(total)} in total")
+    return (f"{what}. Your plan ({plan}) allows up to {_fmt_mb(max_bytes)} of "
+            f"documents per chat{_left_clause(_fmt_mb(max(0, max_bytes - existing_bytes)), existing_bytes)}.")
+
+
+def _left_clause(left: str, already_used: int) -> str:
+    """", and this chat has <left> left" — only when the chat has already used
+    part of the budget. On a chat that has used nothing the remainder equals
+    the limit just stated, and repeating it reads as noise (lawyer feedback,
+    2026-10-09: "60 pages per chat, and this chat has 60 pages left")."""
+    return f", and this chat has {left} left" if already_used > 0 else ""
 
 
 def _pdf_page_count(path: str) -> int:
@@ -1270,6 +1316,27 @@ def safe_upload_name(original: str) -> str:
     return f"{stem}{ext}"
 
 
+UPLOAD_FAILED_MESSAGE = (
+    "We could not read the file(s) you attached, so we have not answered yet: "
+    "an answer without your document would not be about your case. "
+    "Please upload the file again and resend your question."
+)
+
+
+async def _batch_has_saved_files(thread_id: str, batch_id: str) -> bool:
+    """True when at least one file of this upload batch reached thread_files.
+
+    A failed lookup counts as none saved: answering without the user's
+    document is the outcome this guard exists to prevent.
+    """
+    try:
+        records = await chat_store.load_thread_files(thread_id)
+    except Exception as e:
+        log.warning("Saved-file check failed after upload error", error=short_err(e))
+        return False
+    return any((r.get("batch_id") or "") == batch_id for r in records or [])
+
+
 @app.post("/pyapi/chat", dependencies=[Depends(require_user_key)])
 @limiter.limit(_get_limit_for_request)
 async def chat_with_files(
@@ -1376,6 +1443,37 @@ async def chat_with_files(
                            "Start a new chat to upload more documents.",
                 )
 
+        # Size budget per chat thread for the plan, the same shape as the
+        # page budget: the bytes already uploaded to this thread plus the
+        # files attached now must fit `max_mb_per_session`, and one document
+        # may use all of it. A budget that is already used up, and one the
+        # declared sizes overrun, are rejected before any body is read; the
+        # read loop below enforces it again on the bytes actually received.
+        _plan_max_bytes = None
+        _existing_bytes = 0
+        if plan_limits is not None and plan_limits.get("max_mb_per_session") and _new_docs:
+            _plan_max_bytes = int(plan_limits["max_mb_per_session"]) * 1024 * 1024
+            if globalThreadId:
+                _existing_bytes = await chat_store.get_thread_upload_bytes(thread_id)
+            if _existing_bytes >= _plan_max_bytes:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Your plan ({plan}) allows up to {_fmt_mb(_plan_max_bytes)} "
+                           f"of documents per chat, and this chat has already used "
+                           f"{_fmt_mb(_existing_bytes)}. Start a new chat to upload "
+                           "more documents.",
+                )
+            _declared = [(f.filename, getattr(f, "size", None)) for f in files
+                         if f.filename and _plan_counts_upload(f.filename)]
+            if _declared and all(sz is not None for _, sz in _declared):
+                if _existing_bytes + sum(sz for _, sz in _declared) > _plan_max_bytes:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=_plan_size_detail(plan, _declared, _plan_max_bytes,
+                                                 _existing_bytes),
+                    )
+        _plan_new_bytes = 0   # bytes accepted from this request so far
+
         # Per-file size cap (in bytes) used by the pre-read + chunked-read
         # checks below. Duplicated from validate_upload so we reject BEFORE
         # any body allocation. validate_upload still runs after as a
@@ -1443,6 +1541,7 @@ async def chat_with_files(
             tmp_path = tmp.name
             total_bytes = 0
             exceeded_cap = False
+            exceeded_plan = False
             try:
                 try:
                     f.file.seek(0)
@@ -1456,9 +1555,34 @@ async def chat_with_files(
                     if total_bytes > _size_cap_bytes:
                         exceeded_cap = True
                         break
+                    if (_plan_max_bytes is not None and
+                            _existing_bytes + _plan_new_bytes + total_bytes > _plan_max_bytes):
+                        exceeded_plan = True
+                        break
                     tmp.write(chunk)
             finally:
                 tmp.close()
+
+            if exceeded_plan:
+                # The declared sizes were missing or understated. Nothing from
+                # this request is kept: the plan budget covers the request as
+                # a whole, the same as the page budget.
+                for _p in temp_paths + [tmp_path]:
+                    try:
+                        os.unlink(_p)
+                    except OSError:
+                        pass
+                log.warning("Upload rejected mid-read (plan size budget)",
+                            file=original_name, plan=plan,
+                            existing_mb=round(_existing_bytes / (1024 * 1024), 1),
+                            cap_mb=plan_limits["max_mb_per_session"])
+                _left = _fmt_mb(max(0, _plan_max_bytes - _existing_bytes))
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"These documents are larger than your plan allows. Your plan "
+                           f"({plan}) allows up to {_fmt_mb(_plan_max_bytes)} of documents "
+                           f"per chat{_left_clause(_left, _existing_bytes)}.",
+                )
 
             if exceeded_cap:
                 # Clean up the partial temp file, do NOT append to file_tuples.
@@ -1508,6 +1632,7 @@ async def chat_with_files(
                 page_counts[tmp_path] = _pages
                 upload_pages.append((original_name, _pages))
 
+            _plan_new_bytes += total_bytes
             file_tuples.append((tmp_path, filename, total_bytes))
 
         # Page budget: pages already used in this chat plus the new files.
@@ -1527,13 +1652,14 @@ async def chat_with_files(
                 raise HTTPException(
                     status_code=403,
                     detail=f"{_what}. Your plan ({plan}) allows up to {_max_pages} "
-                           f"pages per chat, and this chat has {_left} pages left.",
+                           f"pages per chat{_left_clause(f'{_left} pages', _existing_pages)}.",
                 )
 
     async def event_generator():
         # Process files before invoking the pipeline (they need to be staged
         # into ChromaDB + Gemini Files API, which is /chat-specific).
         file_context_dict = None
+        _upload_failed = False
         # Start the per-request token tracker BEFORE process_files runs so
         # the Vision OCR calls inside file_processor.py accumulate under a
         # "FileProcessor" bucket. chat_runner.run_chat_pipeline reuses this
@@ -1617,6 +1743,7 @@ async def chat_with_files(
                              new_file_count=len(fc.file_names),
                              elapsed_s=round(time.time() - _fp_start, 1))
                 except asyncio.TimeoutError:
+                    _upload_failed = True
                     log.error("File processing exceeded total budget",
                               budget_s=_FILE_PROC_TOTAL_TIMEOUT,
                               elapsed_s=round(time.time() - _fp_start, 1),
@@ -1629,6 +1756,7 @@ async def chat_with_files(
                         except (asyncio.CancelledError, Exception):
                             pass
                 except Exception as e:
+                    _upload_failed = True
                     log.error("File processing failed", error=short_err(e))
                     from core.redact import redact_brands
                     _fp_msg = redact_brands(f"File processing failed: {short_err(e)}")
@@ -1640,6 +1768,31 @@ async def chat_with_files(
                             await _fp_task
                         except (asyncio.CancelledError, Exception):
                             pass
+
+                # The memory node restores files of this upload that were
+                # saved before the failure. With none saved, the pipeline
+                # would answer as if nothing was attached (prod 2026-11-02,
+                # thread 9e29f471: "case laws based on the attached FIR"
+                # answered with no file on record; dev the same day: upload
+                # failed on "the connection is closed"). Stop and say so.
+                if _upload_failed and not await _batch_has_saved_files(thread_id, _batch_id):
+                    log.error("Upload failed with no file saved; not answering without it",
+                              thread_id=thread_id[:12], file_count=len(file_tuples))
+                    from core.token_tracker import get_tracker as _get_tracker
+                    _tracker = _get_tracker()
+                    _done = {
+                        "type": "done",
+                        "agents_used": [],
+                        "token_usage": _tracker.to_dict() if _tracker else {},
+                        "thread_id": thread_id,
+                        "conversation_turn": 0,
+                        "query_rewritten": False,
+                        "effective_query": None,
+                        "upload_failed": True,
+                    }
+                    yield f"data: {json.dumps({'type': 'error', 'data': UPLOAD_FAILED_MESSAGE})}\n\n"
+                    yield f"data: {json.dumps(_done)}\n\n"
+                    return
 
             elif force_ocr:
                 # "Use it anyway" with no new attachment — the common shape,

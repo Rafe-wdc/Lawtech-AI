@@ -130,7 +130,9 @@ async def scenario_node(state: LegalAgentState) -> dict:
             # Missing this record was a live tracker gap: Scenario's usage was
             # silently dropped, forcing `repair_zero_total` to backfill from
             # `AgentResult.tokens_consumed` and leaving `by_agent` blank.
-            from core.token_tracker import record_genai
+            from core.token_tracker import record_genai, record_grounding, grounding_queries_of
+            record_grounding("Scenario", "web_grounded", grounding_queries_of(response),
+                             MODELS.get("scenario_web_grounded", ""))
             record_genai("Scenario", "web_grounded", response,
                          MODELS["scenario_web_grounded"])
 

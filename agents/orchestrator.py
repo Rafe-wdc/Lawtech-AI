@@ -2390,6 +2390,50 @@ _STOP_WORDS = frozenset((
 _CLIP_MARKER_RE = re.compile(r"[ \t]*\[\.\.\. truncated for (?:merge|synthesis)\][ \t]*\r?\n?")
 
 
+# A citation agent that FAILED is not an agent that found nothing. Until
+# 2026-11 synthesis dropped errored agents with a log line and nothing else;
+# the merge model, seeing only High Court and statute sources for a query
+# that asked for Supreme Court judgments, wrote that "no verified Supreme
+# Court judgments from that window are present in the authoritative record"
+# (prod, 2026-10-27; the index held 54; the SCI agent had timed out).
+_CITATION_AGENT_LABELS = {
+    "SCI_Judgment": "Supreme Court",
+    "Judgment": "High Court",
+    "GST_Judgment": "GST appellate",
+    "Tribunal_Judgment": "tribunal",
+}
+
+
+def _missing_sources_note(errored: dict) -> str:
+    """Appended to the merge / synthesis input: which citation searches
+    failed, and that the gap is a failure, not a finding."""
+    lines = []
+    for name, err in (errored or {}).items():
+        label = _CITATION_AGENT_LABELS.get(name)
+        if label:
+            lines.append(f"- {label} judgments ({name}): the search failed before "
+                         f"returning results ({str(err or 'error')[:120]}).")
+    if not lines:
+        return ""
+    return ("\n\n### SOURCES THAT COULD NOT BE RETRIEVED THIS RUN:\n" + "\n".join(lines)
+            + "\nTheir judgments are missing from the input above because the search did "
+            "not complete, NOT because none exist. Do not write that no such judgments "
+            "exist, were found, or are in the database. State in one sentence that the "
+            "search could not be completed in this run and that the user should retry "
+            "for those authorities.")
+
+
+def _missing_sources_banner(errored: dict) -> str:
+    """One line above the answer, on every return path, naming the courts
+    whose search failed. Empty when no citation agent failed."""
+    courts = [_CITATION_AGENT_LABELS[n] for n in (errored or {}) if n in _CITATION_AGENT_LABELS]
+    if not courts:
+        return ""
+    return ("> ⚠ The " + " and ".join(courts) + " judgment search could not be completed "
+            "in this run, so those authorities are missing below. Please retry the query "
+            "for them.\n\n")
+
+
 def _audit_intent(intent, user_language: str):
     """The critic and refiner must audit under the language the answer was
     actually written in (the resolved user_language), not the extractor's
@@ -2657,7 +2701,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             cleaned = await append_judgments_cited(
                 cleaned, user_query=state.get("original_query") or query)
             return {
-                "final_response": cleaned,
+                "final_response": _missing_sources_banner(errored) + cleaned,
                 "source_metadata": _serialize_sources(result),
                 "tokens_consumed": result.tokens_consumed,
                 # Persist rather than discard — see the pass-through note below.
@@ -2669,7 +2713,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                  tokens=result.tokens_consumed,
                  registry_size=len(source_registry))
         return_dict = {
-            "final_response": await _enforce_response_language(
+            "final_response": _missing_sources_banner(errored) + await _enforce_response_language(
                 result.content, state, source_registry),
             "source_metadata": _serialize_sources(result),
             "tokens_consumed": result.tokens_consumed,
@@ -2788,7 +2832,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                      total_tokens=total_tokens)
 
             return {
-                "final_response": enriched,
+                "final_response": _missing_sources_banner(errored) + enriched,
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
             }
@@ -2915,7 +2959,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                      task=primary_task_state, primary_agent=primary_agent_name,
                      final_len=len(primary), total_tokens=total_tokens)
             return {
-                "final_response": await _enforce_response_language(
+                "final_response": _missing_sources_banner(errored) + await _enforce_response_language(
                     primary, state, source_registry),
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
@@ -3023,7 +3067,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                      had_previous_turn=bool(_prev_answer),
                      final_len=len(final_response), total_tokens=total_tokens)
             return {
-                "final_response": final_response,
+                "final_response": _missing_sources_banner(errored) + final_response,
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
             }
@@ -3067,6 +3111,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 if len(content) > _MAX_AGENT_CONTENT:
                     content = content[:_MAX_AGENT_CONTENT] + "\n\n[... truncated for merge]"
                 merge_input += f"\n\n### SUPPORTING AGENT ({name}):\n{content}"
+            merge_input += _missing_sources_note(errored)
 
             llm = get_gemini_flash_full(
                 temperature=0.2,
@@ -3127,7 +3172,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                             error=short_err(_refine_err))
 
             return {
-                "final_response": merged,
+                "final_response": _missing_sources_banner(errored) + merged,
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
             }
@@ -3146,7 +3191,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 appendix_parts.append(f"\n\n---\n\n{heading}\n\n{result.content.strip()}")
             final_response = primary + "".join(appendix_parts)
             return {
-                "final_response": final_response,
+                "final_response": _missing_sources_banner(errored) + final_response,
                 "source_metadata": all_serialized_sources,
                 "tokens_consumed": total_tokens,
             }
@@ -3169,6 +3214,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         agent_results_text += f"\n\n### {name.upper()} AGENT RESULTS:\n{content}"
         total_tokens += result.tokens_consumed
         all_serialized_sources.extend(_serialize_sources(result))
+    agent_results_text += _missing_sources_note(errored)
 
     # Pick prompt template: table-mode if user asked for a comparison table,
     # else the general synthesis prompt. SYNTHESIS_TABLE_PROMPT constrains output
@@ -3276,7 +3322,7 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         synthesized = "\n\n---\n\n".join(parts)
 
     return {
-        "final_response": synthesized,
+        "final_response": _missing_sources_banner(errored) + synthesized,
         "source_metadata": all_serialized_sources,
         "tokens_consumed": total_tokens,
     }

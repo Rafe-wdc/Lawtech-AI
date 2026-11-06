@@ -10,7 +10,9 @@ other paragraph came back word for word, and 4 of 7 sections were untouched.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import sqlite3
 
 import pytest
 
@@ -289,6 +291,69 @@ def test_saving_on_an_old_version_is_refused(store):
     with pytest.raises(mod.StaleVersion) as e:
         asyncio.run(s.save(a, thread_id="t1", source=mod.SOURCE_USER, base_version=1))
     assert e.value.latest == 2
+
+
+class _DictRowPostgres:
+    """The Postgres chat store as on dev: pooled connections hand out dict rows
+    unless a cursor asks for another row factory, because the chat store sets
+    dict_row per connection and never resets it. Backed by SQLite."""
+
+    def __init__(self, path):
+        self._db = sqlite3.connect(path, check_same_thread=False)
+
+    def _get_pool(self):
+        return self
+
+    @contextlib.contextmanager
+    def connection(self):
+        yield self
+
+    def cursor(self, row_factory=None):
+        return _Cursor(self._db.cursor(), row_factory)
+
+    def commit(self):
+        self._db.commit()
+
+
+class _Cursor:
+    def __init__(self, cur, row_factory):
+        from psycopg.rows import tuple_row
+        self._cur, self._as_dict = cur, row_factory is not tuple_row
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._cur.close()
+
+    def execute(self, sql, params=()):
+        self._cur.execute(sql.replace("%s", "?"), params)
+
+    def _row(self, r):
+        if r is None or not self._as_dict:
+            return r
+        return {d[0]: v for d, v in zip(self._cur.description, r)}
+
+    def fetchone(self):
+        return self._row(self._cur.fetchone())
+
+    def fetchall(self):
+        return [self._row(r) for r in self._cur.fetchall()]
+
+
+def test_postgres_store_reads_rows_by_position_on_dict_row_connections(tmp_path, monkeypatch):
+    # dev 2026-11-05: every save failed with KeyError 0, so no draft was stored
+    # and the panel's PUT got 404 "Draft not found".
+    from core import artifact_store as mod
+    s = mod._Store()
+    pg = _DictRowPostgres(str(tmp_path / "pg.db"))
+    monkeypatch.setattr(s, "_backend", lambda: (pg, True))
+    a = _art()
+    assert asyncio.run(s.save(a, thread_id="t1", source=mod.SOURCE_DRAFT)).version == 1
+    assert asyncio.run(s.save(a, thread_id="t1", source=mod.SOURCE_USER, base_version=1)).version == 2
+    assert asyncio.run(s.get("art_test")).version == 2
+    assert [v["version"] for v in asyncio.run(s.versions("art_test"))] == [1, 2]
+    assert asyncio.run(s.thread_of("art_test")) == "t1"
 
 
 # --- chat follow-up, end to end ------------------------------------------------------

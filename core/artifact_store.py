@@ -64,8 +64,12 @@ class _Store:
         """Run fn(cursor, ph) in one transaction. `ph` is the placeholder."""
         store, is_pg = self._backend()
         if is_pg:
+            from psycopg.rows import tuple_row
             with store._get_pool().connection() as conn:
-                with conn.cursor() as cur:
+                # Pooled connections can carry the chat store's dict_row (it
+                # sets it per connection and never resets it); rows here are
+                # read by position.
+                with conn.cursor(row_factory=tuple_row) as cur:
                     self._ensure(cur)
                     out = fn(cur, "%s")
                 conn.commit()

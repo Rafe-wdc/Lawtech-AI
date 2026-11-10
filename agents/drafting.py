@@ -1812,6 +1812,59 @@ that this these those is are was were be been being to from into it its
 _SCI_QUERY_MAX_WORDS = 14
 
 
+# "Cite Supreme Court case laws on false affidavits and polluting the stream
+# of justice" — the clause that says WHAT case law the user wants. The first
+# fourteen words of a drafting instruction are the document, the court and
+# the parties, so the search used to ask the Supreme Court index about
+# "reply behalf defendant plaintiff temporary injunction Order 39" and the
+# writer, handed injunction cases under a heading promising authority on
+# false affidavits, cited the false-affidavit case from memory and got the
+# respondent and the reporter citation wrong (lawyer report, 2026-11-06).
+_CASE_LAW_ASK_RE = re.compile(
+    r"\b(?:case[- ]?laws?|judg?e?ments?|precedents?|rulings?|authorities|"
+    r"decisions?|citations?|judicial pronouncements?)\b"
+    r"(?:\s+(?:of|from)\s+(?:the\s+)?(?:hon'?ble\s+)?(?:supreme\s+court|sc|high\s+court|hc|apex\s+court)"
+    r"(?:\s+of\s+india)?)?"
+    r"\s+(?:on|regarding|about|relating\s+to|concerning|pertaining\s+to|"
+    r"in\s+support\s+of|with\s+respect\s+to|w\.?r\.?t\.?|as\s+to|for)\s+"
+    r"(?P<topic>[^.;\n]{6,220})",
+    re.IGNORECASE,
+)
+
+
+# A special Act named in the instruction is almost always what the case law
+# is about ("notice under Section 138 of the Negotiable Instruments Act ...
+# judgments regarding deemed service" wants NI Act service cases). The
+# general codes are not: the offence section in a bail application says what
+# the client is charged with, not what the bail precedents should be about.
+# Measured: "deemed service statutory notice" alone returned Air India
+# Statutory Corporation and Bharati Vidyapeeth (Deemed University); with
+# "Section 138 Negotiable Instruments Act" appended it returned the NI Act
+# notice cases. "bail ... custody long period" with "Section 318(4) BNS"
+# appended returned cheating cases instead of bail cases.
+_STATUTE_MENTION_RE = re.compile(
+    r"\b(?:[Ss]ections?|[Ss]\.|[Ss]s\.|[Uu]/[Ss]\.?)\s*(?P<sec>\d+[A-Z]?(?:\(\w+\))*)"
+    r"(?:\s*(?:,|and|&)\s*\d+[A-Z]?(?:\(\w+\))*)*"
+    r"\s*(?:of\s+)?(?:the\s+)?"
+    r"(?P<act>(?:[A-Z][\w'.]*\s+){0,5}Act\b(?:,?\s*\d{4})?)",
+)
+_GENERAL_CODES_RE = re.compile(
+    r"\b(?:BNS|BNSS|BSA|IPC|CrPC|Cr\.P\.C|CPC|C\.P\.C|IEA|Nyaya\s+Sanhita|"
+    r"Nagarik\s+Suraksha|Sakshya|Penal\s+Code|Criminal\s+Procedure|"
+    r"Civil\s+Procedure|Evidence\s+Act)\b", re.IGNORECASE)
+
+
+def _statute_anchor(query: str) -> str:
+    """"Section 138 Negotiable Instruments Act" when the instruction names a
+    special Act; "" for the general codes or no statute."""
+    for m in _STATUTE_MENTION_RE.finditer(query or ""):
+        act = re.sub(r",?\s*\d{4}$", "", m.group("act")).strip()
+        if _GENERAL_CODES_RE.search(act):
+            continue
+        return f"Section {m.group('sec')} {act}"
+    return ""
+
+
 def _topical_query(query: str) -> str:
     """Shorten a drafting instruction into a topical query for SCI search.
 
@@ -1819,9 +1872,23 @@ def _topical_query(query: str) -> str:
     hits or a clean empty. Keeps ordering so the phrase still reads naturally
     to a semantic search, and falls back to a plain truncation when filtering
     removes too much.
+
+    When the instruction says what case law it wants ("cite case laws on X"),
+    X is the query (plus the special Act the instruction is under, when the
+    ask itself names none); the document, court and party words are not.
     """
     if not query:
         return query
+    ask = _CASE_LAW_ASK_RE.search(query)
+    if ask:
+        topic = re.findall(r"[\w()\-/.]+", ask.group("topic"))
+        topic = [w for w in topic if w.lower() not in _DRAFTING_STOPWORDS]
+        if len(topic) >= 2:
+            anchor = ("" if re.search(r"\b(?:Act|Section|Article|Order|Rule)\b",
+                                      ask.group("topic"), re.IGNORECASE)
+                      else _statute_anchor(query))
+            words = topic[:_SCI_QUERY_MAX_WORDS]
+            return " ".join(words + ([anchor] if anchor else []))
     words = re.findall(r"[\w()\-/.]+", query)
     kept = [w for w in words if w.lower() not in _DRAFTING_STOPWORDS]
     if len(kept) < 4:

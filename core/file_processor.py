@@ -688,6 +688,41 @@ def _detect_garbled_pdf(per_page_texts: list[str]) -> dict:
 # Vision OCR pass over a scan that already had a passable layer — the same
 # path a scan with no layer takes, hash-cached, and at worst quality-neutral.
 # The cost of a false negative is the incident above.
+#
+# 2026-11-10: a second shape. A scanned TYPED Gujarati document carried a
+# layer in which an English-only OCR engine had read the Gujarati letters as
+# Latin soup with digits and punctuation glued in. Illustrative tokens of
+# the same shape (invented, not from the file):
+#
+#     Kvobta-rr  u27,83,  Pmmeka ) )4(  zuvkqoR,  hn..37.tKOOM  q58-2
+#
+# Its tokens are long, so the shape signals above stay quiet (one of three on
+# any page), and the Latin garble check calls every page "too short" because
+# fewer than 50 tokens are pure letters. The layer went to the drafter as the
+# case facts; the draft was a cheque-dishonour complaint built on placeholders
+# and two invented cheque particulars. What separates this layer is CONTENT,
+# not shape: almost nothing in it is a word. Measured on the 231
+# image-backed, Latin-dominant pages of 79 local PDFs:
+#
+#                                  this file     junk elsewhere  clean text
+#     word-like tokens (below)     0.11 - 0.22   <= 0.25         >= 0.40 *
+#     English / Roman-Hindi        0.01 - 0.04   <= 0.05
+#       function words
+#
+#     * when function words are under 0.06. Every kept page between 0.28 and
+#       0.40 was itself part-junk: handwritten Hindi chargesheet pages read
+#       as Latin around a few printed English labels.
+#
+# A word-like token is, after splitting on "/" and trimming edge punctuation,
+# two or more ASCII letters with a vowel and no lower-to-upper case flip
+# inside ("zuvkqoR"). A Latin-dominant page (>= 60% of its letters ASCII) is
+# junk when BOTH ratios are under their limits, whatever the shape score
+# says. Devanagari layers never reach this rule; the bilingual deposition
+# form above does (its letters are mostly Latin) and stays on its real
+# English words. Across the 79 files the rule
+# changed four: this one (6 of 6 pages), a Hindi notice read as symbol soup
+# (2 of 2), eight more handwritten pages of that chargesheet, and one
+# broken-font Marathi FIR page. No clean page was flagged.
 
 _SCANNER_LAYER_MIN_COVERAGE = 0.75      # page is a placed raster image
 _SCANNER_LAYER_MIN_TOKENS = 60          # below this we cannot tell (stamps, cover pages)
@@ -695,19 +730,68 @@ _SCANNER_LAYER_SHORT_TOKEN_RATIO = 0.45  # junk 0.60-0.71, clean <= 0.30
 _SCANNER_LAYER_SINGLE_LATIN_RATIO = 0.10  # junk 0.15-0.18, clean <= 0.06
 _SCANNER_LAYER_TOKENS_PER_LINE = 2.6    # junk 1.7-2.5, clean >= 2.9
 _SCANNER_LAYER_WHOLE_DOC_PCT = 50.0     # this share of junk pages -> re-OCR the whole file
+# Content rule for Latin-dominant layers (2026-11-10, see above).
+_SCANNER_LAYER_LATIN_DOMINANT = 0.60    # share of letters that are ASCII
+_SCANNER_LAYER_MAX_WORDLIKE = 0.28      # junk <= 0.25, real >= 0.32
+_SCANNER_LAYER_MAX_FUNCTION_WORDS = 0.06  # junk 0.00-0.04, real >= 0.08
+_SCANNER_EDGE_PUNCT = ".,;:!?()[]{}<>'\"`~-—–_/\\|*&%$#@^+=“”‘’"
+_SCANNER_VOWEL_RE = re.compile(r"[aeiouyAEIOUY]")
+_SCANNER_CASE_FLIP_RE = re.compile(r"[a-z][A-Z]")
+# Small and closed on purpose: the commonest English function words plus the
+# Roman-Hindi ones a transliterated statement or chat print-out would carry.
+_SCANNER_FUNCTION_WORDS = frozenset("""
+the of and to in a an is are was were be been by for on with as at or from
+that this which it its under said shall has have had not no his her he she
+they their them we our us you your any all such into upon if than then there
+these those who whom whose being do does did per vide sir
+ki ka ke hai se me mein ko aur nahi ne par bhi tha thi
+""".split())
+
+
+def _latin_content_metrics(tokens: list[str], text: str) -> dict:
+    """Latin share of letters, word-like token ratio and function-word ratio.
+
+    Tokens are split on "/" first, so slash-joined real words ("and/or",
+    "S/o", "UPI/412345678901/RAMESH" in a scanned statement) are judged one
+    by one rather than as a single non-word.
+    """
+    letters = [c for c in text if c.isalpha()]
+    latin_share = (sum(1 for c in letters if c.isascii()) / len(letters)) if letters else 0.0
+    parts = [p for tok in tokens for p in tok.split("/") if p]
+    n = len(parts) or 1
+    wordlike = function = 0
+    for tok in parts:
+        t = tok.strip(_SCANNER_EDGE_PUNCT)
+        if t.lower() in _SCANNER_FUNCTION_WORDS:
+            function += 1
+        if (len(t) >= 2 and t.isascii() and t.isalpha()
+                and _SCANNER_VOWEL_RE.search(t)
+                and not _SCANNER_CASE_FLIP_RE.search(t)):
+            wordlike += 1
+    return {
+        "latin_share": latin_share,
+        "wordlike_ratio": wordlike / n,
+        "function_word_ratio": function / n,
+    }
 
 
 def _score_scanner_layer(text: str) -> dict:
-    """Shape-score one page's text layer: is it a scanner app's junk OCR?
+    """Score one page's text layer: is it a scanner app's junk OCR?
 
     Returns {"verdict": "junk" | "ok" | "too_short", "score": int,
-    "metrics": {...}}. Script-agnostic: the three signals are about token
-    shape and line fragmentation, which is why the same rule catches
-    Devanagari word-salad and Latin letter-soup alike.
+    "rule": "shape" | "latin_content" | None, "metrics": {...}}.
+
+    Two independent rules; either one makes the page junk:
+      - shape (script-agnostic): two of the three token-shape and
+        line-fragmentation signals fire. Catches Devanagari word-salad and
+        short-token Latin soup from handwriting.
+      - latin_content: a Latin-dominant layer in which almost no token is a
+        word and function words are all but absent. Catches long-token soup,
+        such as typed Gujarati read by an English-only OCR engine.
     """
     tokens = (text or "").split()
     if len(tokens) < _SCANNER_LAYER_MIN_TOKENS:
-        return {"verdict": "too_short", "score": 0,
+        return {"verdict": "too_short", "score": 0, "rule": None,
                 "metrics": {"tokens": len(tokens)}}
 
     lines = [ln for ln in text.splitlines() if ln.strip()]
@@ -722,14 +806,26 @@ def _score_scanner_layer(text: str) -> dict:
     score += int(single_latin >= _SCANNER_LAYER_SINGLE_LATIN_RATIO)
     score += int(tokens_per_line <= _SCANNER_LAYER_TOKENS_PER_LINE)
 
+    content = _latin_content_metrics(tokens, text)
+    latin_junk = (
+        content["latin_share"] >= _SCANNER_LAYER_LATIN_DOMINANT
+        and content["wordlike_ratio"] < _SCANNER_LAYER_MAX_WORDLIKE
+        and content["function_word_ratio"] < _SCANNER_LAYER_MAX_FUNCTION_WORDS
+    )
+
+    rule = "shape" if score >= 2 else ("latin_content" if latin_junk else None)
     return {
-        "verdict": "junk" if score >= 2 else "ok",
+        "verdict": "junk" if rule else "ok",
         "score": score,
+        "rule": rule,
         "metrics": {
             "tokens": len(tokens),
             "short_token_ratio": round(short, 3),
             "single_latin_ratio": round(single_latin, 3),
             "tokens_per_line": round(tokens_per_line, 2),
+            "latin_share": round(content["latin_share"], 3),
+            "wordlike_ratio": round(content["wordlike_ratio"], 3),
+            "function_word_ratio": round(content["function_word_ratio"], 3),
         },
     }
 

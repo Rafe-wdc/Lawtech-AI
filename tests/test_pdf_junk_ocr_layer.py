@@ -651,5 +651,176 @@ class TestMessages:
         assert "use it anyway" in unreadable_user_message("a.pdf", kind="scan")
 
 
+# ---------------------------------------------------------------------------
+# 2026-11-10: typed Gujarati read as Latin soup (the content rule)
+# ---------------------------------------------------------------------------
+#
+# A scanned typed Gujarati document carried a layer in which an English-only
+# OCR engine had read the Gujarati letters as long Latin tokens with digits
+# and punctuation glued in. The shape rule saw one signal of three on every
+# page and the Latin garble check called every page "too short", so the
+# drafter received the soup as the case facts and wrote a cheque-dishonour
+# complaint on placeholders. The generator below has that file's measured
+# statistical profile (word-like tokens 0.10-0.22, function words <= 0.05,
+# short tokens ~0.13, ~2.2 tokens per line). Every token is invented; no
+# client text is used.
+
+_SOUP_SHORT = ["t", "Q", "38", ",", "&", "k7", "(L)", "3-9", "is", "W,"]
+_SOUP_PSEUDO = ["Pmmeka", "Bovira", "Tulen", "Kvobta", "ganemo", "Wesuda", "Hirota", "nupal"]
+
+
+def synthetic_typed_gujarati_soup(seed: int = 11, lines: int = 45) -> str:
+    rng = random.Random(seed)
+    lower, upper, digits, punct = "bcdfghjklmnpqrstvwxzaeiou", "RQAEZLSKW", "0123456789", ".,-);('"
+
+    def tok() -> str:
+        r = rng.random()
+        if r < 0.15:
+            return rng.choice(_SOUP_SHORT)
+        if r < 0.29:
+            return rng.choice(_SOUP_PSEUDO)
+        out = []
+        for _ in range(rng.randint(4, 10)):
+            q = rng.random()
+            out.append(rng.choice(digits) if q < 0.40 else rng.choice(lower) if q < 0.75
+                       else rng.choice(upper) if q < 0.87 else rng.choice(punct))
+        return "".join(out)
+
+    return "\n".join(" ".join(tok() for _ in range(rng.choice([1, 2, 2, 3, 3])))
+                     for _ in range(lines))
+
+
+def brochure_layer() -> str:
+    """Real English with almost no function words: bullet points."""
+    items = ["Course Duration: 2 months", "On-Demand Content", "Practical Assignments",
+             "Recent Updates", "Profiling Call", "Lifetime Community Membership",
+             "Personal Brand Building Suite", "Profile Access by Corporates",
+             "Live Session By Industry Expert", "Certificate of Completion"]
+    return "\n".join(" • ".join(items[i:i + 2]) for i in range(0, len(items), 2)) * 3
+
+
+def cause_list_layer() -> str:
+    """A scanned cause list: case numbers, party names, counsel."""
+    rows = []
+    for i in range(1, 16):
+        rows.append(f"Item {i} CRL.A. {300 + i}/2024 State v. Ramesh Kumar")
+        rows.append(f"Mr. A.K. Sharma Adv. for Appellant Listed for Hearing")
+    return "\n".join(rows)
+
+
+def statement_layer() -> str:
+    """A scanned bank statement: UPI narrations joined by slashes."""
+    rows = []
+    for i in range(1, 31):
+        rows.append(f"0{1 + i % 9}/04/2024 UPI/4123456789{i:02d}/RAMESH KUMAR/PAYMENT "
+                    f"{1000 + 37 * i}.00 {45000 - 120 * i}.50 CR")
+    return "\n".join(rows)
+
+
+def roman_hindi_layer() -> str:
+    """A printed chat in Roman Hindi: the function-word list covers it."""
+    rows = ["mai kal aapke ghar aaunga aur paise de dunga",
+            "tum ne pichle mahine bhi yahi kaha tha",
+            "paise nahi mile to mai police me shikayat karunga",
+            "bhai thoda samay de do mai sab chuka dunga",
+            "ye aakhri baar hai uske baad kuch nahi suna jayega"]
+    return "\n".join(rows * 4)
+
+
+class TestTypedGujaratiLatinSoup:
+
+    @pytest.mark.parametrize("seed", [11, 12, 13])
+    def test_long_token_soup_is_junk_by_content(self, seed):
+        res = _score_scanner_layer(synthetic_typed_gujarati_soup(seed))
+        assert res["verdict"] == "junk", res
+        assert res["rule"] == "latin_content"
+        m = res["metrics"]
+        assert m["latin_share"] >= 0.6
+        assert m["wordlike_ratio"] < 0.28
+        assert m["function_word_ratio"] < 0.06
+
+    @pytest.mark.parametrize("seed", [11, 12, 13])
+    def test_shape_rule_alone_misses_it(self, seed):
+        """Why the content rule exists: long tokens keep the shape score
+        at one signal, the incident file's figure on every page."""
+        res = _score_scanner_layer(synthetic_typed_gujarati_soup(seed))
+        assert res["score"] < 2
+        assert res["metrics"]["short_token_ratio"] < 0.45
+        assert res["metrics"]["single_latin_ratio"] < 0.10
+
+    def test_existing_garble_checks_miss_it(self):
+        pages = [synthetic_typed_gujarati_soup(s) for s in (11, 12, 13)]
+        assert _detect_garbled_pdf(pages)["garbled"] is False
+        for p in pages:
+            assert _score_text_quality(p)["verdict"] != "garbled"
+
+    @pytest.mark.parametrize("layer", [
+        clean_english_layer, brochure_layer, cause_list_layer,
+        statement_layer, roman_hindi_layer,
+    ])
+    def test_real_latin_text_is_kept(self, layer):
+        res = _score_scanner_layer(layer())
+        assert res["verdict"] == "ok", (layer.__name__, res)
+        assert res["rule"] is None
+
+    def test_slash_joined_words_count_as_words(self):
+        """A UPI narration is three tokens of which two are words, not one
+        non-word; without the split this statement would read as junk."""
+        m = _score_scanner_layer(statement_layer())["metrics"]
+        assert m["wordlike_ratio"] >= 0.28
+
+    def test_non_latin_layers_never_reach_the_content_rule(self):
+        """Clean Hindi has almost no Latin letters, so the rule cannot apply."""
+        res = _score_scanner_layer(clean_hindi_layer())
+        assert res["verdict"] == "ok", res
+        assert res["metrics"]["latin_share"] < 0.6
+
+    def test_bilingual_form_is_kept_on_its_real_words(self):
+        """The deposition form is Latin-dominant by letter count, so the rule
+        does look at it; its English labels are real words, so it stays."""
+        res = _score_scanner_layer(bilingual_form_layer())
+        assert res["verdict"] == "ok", res
+        assert res["metrics"]["latin_share"] >= 0.6
+        assert res["metrics"]["wordlike_ratio"] >= 0.28
+
+    def test_short_soup_is_not_judged(self):
+        res = _score_scanner_layer(synthetic_typed_gujarati_soup(11, lines=10))
+        assert res["verdict"] == "too_short"
+        assert res["rule"] is None
+
+    def test_six_scanned_pages_go_to_whole_document_ocr(self):
+        pages = [synthetic_typed_gujarati_soup(s) for s in range(11, 17)]
+        res = _detect_junk_ocr_layer(pages, [1.0] * 6)
+        assert res["junk_pages"] == [0, 1, 2, 3, 4, 5]
+        assert res["whole_doc"] is True
+
+    def test_born_digital_soup_is_never_judged(self):
+        pages = [synthetic_typed_gujarati_soup(s) for s in range(11, 14)]
+        res = _detect_junk_ocr_layer(pages, [0.0] * 3)
+        assert res["junk"] is False and res["checked_pages"] == 0
+
+    def test_real_scanner_pdf_is_detected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "complaint.pdf")
+            _make_scanner_pdf_pages(p, [synthetic_typed_gujarati_soup(s).splitlines()
+                                        for s in (11, 12, 13)])
+            texts, cov, n = _extract_pdf_layer_profile(p)
+            res = _detect_junk_ocr_layer(texts, cov)
+            assert n == 3
+            assert res["junk"] is True and res["whole_doc"] is True
+
+    def test_upload_reads_the_pages_instead_of_the_soup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "complaint.pdf")
+            _make_scanner_pdf_pages(p, [synthetic_typed_gujarati_soup(s).splitlines()
+                                        for s in (11, 12, 13)])
+            good = "ફરિયાદી રમેશભાઈ નાથાભાઈ પટેલ, આરોપી દિનેશભાઈ ... " * 20
+            events, stored, ocr_calls, fc = _run_pdf(p, good)
+            rejected = [e for e in events if e.get("stage") == "pdf_layer_rejected"]
+            assert rejected and rejected[0]["scope"] == "document"
+            assert ocr_calls == [("whole", 3)]
+            assert stored and stored[0] == good
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

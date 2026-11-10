@@ -50,6 +50,7 @@ def sanitize_output(text: str) -> str:
     text = _fix_unclosed_code_blocks(text)
     text = _fix_long_lines(text)
     text = _fix_repeated_blocks(text)
+    text = _strip_stray_cjk(text)
 
     cleaned_len = len(text)
     if original_len - cleaned_len > 500:
@@ -295,3 +296,58 @@ def _fix_repeated_blocks(text: str) -> str:
                  cleaned_lines=len(cleaned))
 
     return "\n".join(cleaned)
+
+
+# ---------------------------------------------------------------------------
+# Stray CJK glyphs
+# ---------------------------------------------------------------------------
+
+# Seen 2026-11-06 in a lawyer's draft: "In *Sci尊敬 / Chandra Shashi v. …*" —
+# two Chinese characters dropped into an English sentence by the generation
+# model. Gemini Flash models are reported to emit stray CJK tokens mid-output
+# (Google AI developer forum, several threads 2025-26). Nothing retrieved for
+# the request contained the glyphs (the Supreme Court corpus holds no "尊敬"
+# at all; its only CJK is OCR debris in 7 pre-2013 scans) and no prompt asked
+# for them, so they are a decoding glitch, not content.
+#
+# An Indian-law answer never legitimately mixes CJK script into otherwise
+# non-CJK text, so CJK runs are removed unless the text as a whole is written
+# in a CJK language (user asked in that script). Indic scripts (Devanagari,
+# Bengali, Tamil, Telugu, …) are outside these ranges and never affected.
+_CJK_RUN_RE = re.compile(
+    "( ?)["
+    "\u3040-\u30ff"      # Hiragana, Katakana
+    "\u3400-\u4dbf"      # CJK Unified Ideographs Extension A
+    "\u4e00-\u9fff"      # CJK Unified Ideographs
+    "\uac00-\ud7af"      # Hangul syllables
+    "\uf900-\ufaff"      # CJK Compatibility Ideographs
+    "]+( ?)"
+)
+_ANY_LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
+# Below this share of all letters the text is NOT a CJK-language answer, so
+# any CJK in it -- two glyphs or a whole sentence that flipped language -- is
+# the glitch. A real Chinese / Japanese / Korean answer is almost entirely
+# CJK and sits far above it.
+_CJK_LANGUAGE_SHARE = 0.5
+
+
+def _strip_stray_cjk(text: str) -> str:
+    """Remove CJK glyphs that a non-CJK response cannot have meant to contain."""
+    matches = list(_CJK_RUN_RE.finditer(text))
+    if not matches:
+        return text
+    glyphs = sum(len(m.group(0).strip(" ")) for m in matches)
+    letters = len(_ANY_LETTER_RE.findall(text))
+    if letters and glyphs / letters > _CJK_LANGUAGE_SHARE:
+        return text  # genuinely CJK-language content, not a glitch
+
+    def _repl(m: re.Match) -> str:
+        before, after = m.group(1), m.group(2)
+        # "Sci尊敬 /" -> "Sci /", "word 尊敬 word" -> "word word"
+        return " " if (before and after) else (before or after)
+
+    cleaned = _CJK_RUN_RE.sub(_repl, text)
+    log.warning("Stray CJK glyphs removed from non-CJK response",
+                runs=len(matches), glyphs=glyphs,
+                sample=matches[0].group(0).strip(" ")[:12])
+    return cleaned

@@ -200,7 +200,7 @@ def test_cited_only_answer_says_the_judgment_is_absent():
     assert "do not present any PDF as its judgment" in directive
     import inspect
     src = inspect.getsource(sj.sci_judgment_node)
-    assert 'agent.ainvoke({"messages": [("user", react_query)]})' in src
+    assert '{"messages": [("user", react_query)]}' in src   # handed to the agent (streamed since the timeout salvage)
     assert "answer = _cited_only_notice(*_cited_only) + answer" in src
     # the directive stays out of the fallback topic search
     assert 'search_by_topic.invoke, {"query": query}' in src
@@ -289,4 +289,4 @@ def test_node_checks_judgements_index_before_answering_not_found():
 def test_no_forced_topic_search_when_the_judgment_text_was_supplied():
     import inspect
     src = inspect.getsource(sj.sci_judgment_node)
-    assert "if not tools_used and not _in_hc_index:" in src
+    assert "if not tools_used and not _in_hc_index and not timed_out:" in src

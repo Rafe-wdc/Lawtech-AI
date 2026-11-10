@@ -29,6 +29,15 @@ from core.progress import progress
 from config.prompts import SCI_JUDGMENT_SYSTEM_PROMPT
 from tools.shared import AGENT_TOOLS, search_by_topic
 
+# The ReAct loop's wall. Prod 2026-10-21..27: 1,072 runs, 99 over 60 s, 28
+# hit it. A run that hits it used to return content="" with an error, which
+# synthesis dropped with a log line — the answer then presented the other
+# agents' High Court cases as the whole result and told a lawyer that no
+# Supreme Court judgments existed for a window where the index held 54.
+# Now the searches completed before the wall are returned (see
+# `_salvage_after_timeout`). Overridable so a probe can force a short run.
+SCI_REACT_TIMEOUT_S = float(os.getenv("SCI_REACT_TIMEOUT_S") or 90)
+
 log = get_logger("SCI_Judgment")
 
 
@@ -364,6 +373,32 @@ def _cited_only_notice(petitioner: str, respondent: str) -> str:
     )
 
 
+def _salvage_after_timeout(sources: list, timeout_s: float) -> str:
+    """The agent's answer when the wall was hit: what was retrieved, and a
+    plain statement that the research stopped early — never a finding."""
+    head = ("**Supreme Court research was cut short.** The search reached its "
+            f"time limit ({int(timeout_s)} s) before the analysis could be written. ")
+    if not sources:
+        return head + ("No judgment had been retrieved by then. This is a temporary "
+                       "limit, not a finding that no Supreme Court judgment exists; "
+                       "retry the query.")
+    lines = []
+    for src in sources[:10]:
+        bits = [f"**{src.parties or src.title}**"]
+        if src.case_no:
+            bits.append(src.case_no)
+        if src.judgment_date:
+            bits.append(f"decided {src.judgment_date}")
+        line = "- " + ", ".join(bits)
+        if src.doc_link and src.doc_link != "N/A":
+            line += f" ([Judgment PDF]({src.doc_link}))"
+        lines.append(line)
+    return head + ("The judgments retrieved before the limit are listed below; the "
+                   "analysis of each could not be completed in this run, and the list "
+                   "is not exhaustive. Retry the query for the full analysis.\n\n"
+                   + "\n".join(lines))
+
+
 async def sci_judgment_node(state: LegalAgentState) -> dict:
     """Search Supreme Court of India judgments using ReAct agent.
 
@@ -445,11 +480,30 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         if _in_hc_index:
             react_query = query + _hc_index_directive(_in_hc_index)
         progress("sci_judgment", "Running multi-step research (ReAct agent)...", step="react")
+        # The trajectory is streamed, state by state, so that when the wall
+        # is hit the searches already completed are still in hand.
+        _seen: dict = {"messages": []}
+
+        async def _run_react() -> None:
+            async for _st in agent.astream(
+                {"messages": [("user", react_query)]}, stream_mode="values",
+            ):
+                _seen["messages"] = list(_st.get("messages") or [])
+
+        timed_out = False
         with log_time(log, "ReAct agent execution"):
-            result = await asyncio.wait_for(
-                agent.ainvoke({"messages": [("user", react_query)]}),
-                timeout=90,
-            )
+            try:
+                await asyncio.wait_for(_run_react(), timeout=SCI_REACT_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                timed_out = True
+                from core.metrics import record_agent_error
+                # Still counted as a timeout on the prod dashboard.
+                record_agent_error("SCI_Judgment", TimeoutError(
+                    f"ReAct agent exceeded {SCI_REACT_TIMEOUT_S:.0f} s"))
+                log.warning("ReAct agent timed out — returning the searches completed so far",
+                            timeout_s=SCI_REACT_TIMEOUT_S,
+                            messages_seen=len(_seen["messages"]))
+        result = _seen
 
         # Extract final AI message content and tools used
         messages = result.get("messages", [])
@@ -501,7 +555,7 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         # it without a search is correct, and the forced topic search only
         # added unrelated sources (and its retry is rejected by Gemini: a
         # request ending on an assistant turn returns 400).
-        if not tools_used and not _in_hc_index:
+        if not tools_used and not _in_hc_index and not timed_out:
             log.warning("ReAct agent returned 0 tool calls, forcing semantic search fallback",
                         query=query[:100])
             try:
@@ -636,6 +690,12 @@ async def sci_judgment_node(state: LegalAgentState) -> dict:
         progress("sci_judgment", "Generating response...", step="generate")
         log.info("Sources parsed from tool messages",
                  source_count=len(sources))
+
+        if timed_out:
+            answer = _salvage_after_timeout(sources, SCI_REACT_TIMEOUT_S)
+            progress("sci_judgment",
+                     f"Search cut short at the time limit; returning {len(sources)} judgment(s) found so far",
+                     found=len(sources), step="results")
 
         # Web-search last-resort. The SC corpus is broad but not
         # exhaustive; when the ReAct trajectory returns empty content

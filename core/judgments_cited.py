@@ -20,8 +20,19 @@ After the draft is final, a deterministic pass with no LLM call:
   3. appends one bullet per case — with the PDF link when found, or
      "not verified in Lawttorney database" when not.
 
-The draft itself is never modified. Any lookup failure leaves the draft
-exactly as it was; a single case that errors is reported as not verified.
+A citation the writer got PARTLY right is corrected in the draft (2026-11-06:
+a lawyer's reply cited "Chandra Shashi v. Muni Lal Goyal, (1998) 2 SCC 393";
+the only Supreme Court judgment by that petitioner is Chandra Shashi v. Anil
+Kumar Verma, decided 14-11-1994, and it is the "stream of justice" authority
+the sentence relied on — the respondent and the reporter citation were
+invented). The correction is written back only when ALL of these hold:
+the petitioner matches exactly one judgment in the Supreme Court index, the
+cited respondent or year does not match it, and the sentences citing it share
+a distinctive phrase with that judgment's text. Otherwise the citation stays
+as written and is reported as not verified.
+
+Any lookup failure leaves the draft exactly as it was; a single case that
+errors is reported as not verified.
 """
 
 from __future__ import annotations
@@ -99,6 +110,13 @@ class CitedCase:
     # Pre-Delivery Defects:**"), not a sentence citing a case. Reported only
     # when the lookup confirms a real judgment by those parties.
     label: bool = False
+    # Exact text of the citation in the draft ("X v. Y" and the reporter tail
+    # after it) so a verified correction can be written back, and the
+    # surrounding sentences so the correction can be checked against the
+    # judgment's own text.
+    raw_name: str = ""
+    raw_tail: str = ""
+    context: str = ""
 
     @property
     def display(self) -> str:
@@ -298,6 +316,9 @@ def extract_cited_cases(text: str, own_parties_text: str = "") -> list[CitedCase
         tail = _CITATION_TAIL_RE.match(text[m.end():m.end() + 80])
         citation = re.sub(r"\s+", " ", tail.group("cit")).strip() if tail else ""
         label = not citation and _is_label(text, m.start(), m.end())
+        raw_name = m.group(0)
+        raw_tail = tail.group(0) if tail else ""
+        context = text[max(0, m.start() - 250):m.end() + 450]
         # Same case mentioned again, possibly with a stray sentence word in
         # front ("Again Jacob Mathew v. ...") or a shorter name. A citing
         # sentence anywhere makes it a citation, even if a label came first.
@@ -306,10 +327,14 @@ def extract_cited_cases(text: str, own_parties_text: str = "") -> list[CitedCase
         if dup is not None:
             if not label and out[dup].label:
                 out[dup] = CitedCase(out[dup].petitioner, out[dup].respondent,
-                                     out[dup].citation or citation, label=False)
+                                     out[dup].citation or citation, label=False,
+                                     raw_name=out[dup].raw_name,
+                                     raw_tail=out[dup].raw_tail or raw_tail,
+                                     context=out[dup].context or context)
             continue
         seen.append((ta, tb))
-        out.append(CitedCase(a, b, citation, label=label))
+        out.append(CitedCase(a, b, citation, label=label, raw_name=raw_name,
+                             raw_tail=raw_tail, context=context))
         if len(out) >= MAX_CASES:
             break
     return out
@@ -324,6 +349,14 @@ class FoundJudgment:
     court: str
     date: str
     pdf_url: str | None
+    # Set when the judgment was found under a different name or year from the
+    # one cited: the verified parties, written back into the draft.
+    petitioner: str = ""
+    respondent: str = ""
+
+    @property
+    def corrected(self) -> bool:
+        return bool(self.petitioner and self.respondent)
 
 
 def _parties_match(case: CitedCase, pet_text: str, resp_text: str) -> bool:
@@ -350,15 +383,16 @@ def _year_ok(case: CitedCase, hit_year: int | None) -> bool:
 _CANDIDATES = 20
 
 
+def _any_form(field: str, text: str, **opts) -> dict:
+    return {"bool": {"minimum_should_match": 1, "should": [
+        {"match": {field: {"query": q, **opts}}} for q in _query_forms(text)]}}
+
+
 def _party_query(case: CitedCase, pet_field: str, resp_field: str) -> dict:
     should = [
         {"match_phrase": {pet_field: {"query": case.petitioner, "boost": 5}}},
         {"match_phrase": {resp_field: {"query": case.respondent, "boost": 3}}},
     ]
-    def _any_form(field: str, text: str, **opts) -> dict:
-        return {"bool": {"minimum_should_match": 1, "should": [
-            {"match": {field: {"query": q, **opts}}} for q in _query_forms(text)]}}
-
     return {"bool": {
         "must": [
             _any_form(pet_field, case.petitioner, operator="and"),
@@ -368,29 +402,180 @@ def _party_query(case: CitedCase, pet_field: str, resp_field: str) -> dict:
     }}
 
 
+_SCI_SOURCE = ["parties", "judgment_date", "pdf_links"]
+
+
+def _sci_parts(src: dict) -> tuple[str, str] | None:
+    parts = re.split(r"\s+(?:VS\.?|V\.|VERSUS)\s+", src.get("parties") or "",
+                     maxsplit=1, flags=re.I)
+    return (parts[0], parts[1]) if len(parts) == 2 else None
+
+
+def _sci_year(src: dict) -> int | None:
+    m = re.search(r"(\d{4})$", src.get("judgment_date") or "")
+    return int(m.group(1)) if m else None
+
+
+def _sci_pdf(src: dict) -> str | None:
+    links = src.get("pdf_links") or []
+    return links[0].get("url") if links and isinstance(links[0], dict) else None
+
+
 def _lookup_sci(es, case: CitedCase) -> FoundJudgment | None:
     from core.settings import ES_INDICES
     body = {
         "size": _CANDIDATES,
-        "_source": ["parties", "judgment_date", "pdf_links"],
+        "_source": _SCI_SOURCE,
         "query": _party_query(case, "parties", "parties"),
     }
     res = es.search(index=ES_INDICES["sci_judgments"], body=body,
                     request_timeout=PER_QUERY_TIMEOUT_S)
     for hit in res["hits"]["hits"]:
         src = hit["_source"]
-        parts = re.split(r"\s+(?:VS\.?|V\.|VERSUS)\s+", src.get("parties") or "",
-                         maxsplit=1, flags=re.I)
-        if len(parts) != 2 or not _parties_match(case, parts[0], parts[1]):
+        parts = _sci_parts(src)
+        if parts is None or not _parties_match(case, *parts):
             continue
-        date = src.get("judgment_date") or ""
-        m = re.search(r"(\d{4})$", date)
-        if not _year_ok(case, int(m.group(1)) if m else None):
+        if not _year_ok(case, _sci_year(src)):
             continue
-        links = src.get("pdf_links") or []
-        url = links[0].get("url") if links and isinstance(links[0], dict) else None
-        return FoundJudgment("Supreme Court of India", date, url)
+        return FoundJudgment("Supreme Court of India", src.get("judgment_date") or "",
+                             _sci_pdf(src))
     return None
+
+
+# ---------------------------------------------------------------------------
+# Repair: the petitioner is right, the respondent or the year is not
+# ---------------------------------------------------------------------------
+
+# Words that say nothing about WHICH judgment a sentence is describing.
+_BOILERPLATE = {
+    "the", "and", "that", "this", "which", "with", "from", "their", "there",
+    "have", "has", "been", "also", "shall", "such", "would", "could", "under",
+    "upon", "into", "than", "then", "when", "where", "while", "these", "those",
+    "supreme", "court", "courts", "india", "held", "holding", "observed",
+    "observation", "observations", "ruled", "ruling", "laid", "down", "judgment",
+    "judgments", "case", "cases", "law", "laws", "section", "sections", "act",
+    "article", "bench", "hon", "ble", "honourable", "learned", "apex", "lordships",
+    "principle", "principles", "settled", "position", "following", "relied",
+    "reliance", "placed", "reiterated", "affirmed", "applied", "followed",
+    "petitioner", "respondent", "plaintiff", "defendant", "applicant", "appellant",
+}
+_MAX_CONTEXT_WORDS = 40
+# The candidate must be this close to the top of the whole Supreme Court
+# index for the sentences that cite it. Measured on the lawyer's sentence:
+# Chandra Shashi ranked 15th of 47,000 for its own "stream of justice"
+# paragraph and outside the top 50 for a bail paragraph and for an
+# unclean-hands paragraph that cited it by mistake; Jacob Mathew ranked 6th
+# for a Bolam-test paragraph. Phrase matching was tried first and was too
+# loose: three-word phrases such as "granted bail noting" matched inside a
+# 40-page judgment on an unrelated point.
+_CONFIRM_RANK = 20
+
+
+def _context_words(context: str, exclude: set[str]) -> list[str]:
+    """Content words of the citing sentences, minus the party names (they
+    appear in every judgment's own header and would vouch for anything)."""
+    out: list[str] = []
+    for w in re.findall(r"[a-z]+", (context or "").lower()):
+        if len(w) > 3 and w not in _BOILERPLATE and w not in exclude and w not in out:
+            out.append(w)
+        if len(out) >= _MAX_CONTEXT_WORDS:
+            break
+    return out
+
+
+def _context_confirms(es, hit_id: str, context: str, exclude: set[str]) -> bool:
+    """Is the judgment among the top Supreme Court hits for the sentences
+    that cite it, judged on their legal content rather than the names?"""
+    from core.settings import ES_INDICES
+    words = _context_words(context, exclude)
+    if len(words) < 5:
+        return False
+    body = {
+        "size": _CONFIRM_RANK,
+        "_source": False,
+        "query": {"match": {"full_text": {"query": " ".join(words),
+                                          "minimum_should_match": "30%"}}},
+    }
+    res = es.search(index=ES_INDICES["sci_judgments"], body=body,
+                    request_timeout=PER_QUERY_TIMEOUT_S)
+    return any(h["_id"] == hit_id for h in res["hits"]["hits"])
+
+
+_SMALL_WORDS = {"of", "and", "the", "for", "through", "thr", "by", "its", "in", "at"}
+_FIXED_CASE = {"m/s": "M/s", "m/s.": "M/s", "llp": "LLP", "nct": "NCT", "uoi": "UOI",
+               "cbi": "CBI", "sebi": "SEBI", "rbi": "RBI", "lic": "LIC", "dda": "DDA"}
+
+
+def _pretty_party(name: str) -> str:
+    """"CHANDRA SHASHI" -> "Chandra Shashi"; initials, abbreviations and
+    connectors kept the way a citation writes them."""
+    out: list[str] = []
+    for i, w in enumerate(name.split()):
+        low = w.lower()
+        if low in _FIXED_CASE:
+            out.append(_FIXED_CASE[low])
+        elif i and low.rstrip(".") in _SMALL_WORDS:
+            out.append(low)
+        elif re.fullmatch(r"(?:[A-Za-z]\.)+[A-Za-z]?\.?", w) or (len(w) <= 2 and w.isalpha()):
+            out.append(w.upper())                     # initials: "B.L.", "U.P.", "K"
+        else:
+            out.append(w[:1].upper() + w[1:].lower())
+    return " ".join(out)
+
+
+def _repair_sci(es, case: CitedCase) -> FoundJudgment | None:
+    """The citation as written is not in the index. If its petitioner names
+    exactly one Supreme Court judgment, and the sentences citing it share a
+    distinctive phrase with that judgment's text, that judgment is what the
+    writer meant — return it with the verified parties so the draft can be
+    corrected. Anything less certain returns None (reported as not verified).
+    """
+    from core.settings import ES_INDICES
+    want = _tokens(case.petitioner)
+    if len(want) < 2 or not case.context:
+        return None
+    body = {
+        "size": _CANDIDATES,
+        "_source": _SCI_SOURCE,
+        "query": _any_form("parties", case.petitioner, operator="and"),
+    }
+    res = es.search(index=ES_INDICES["sci_judgments"], body=body,
+                    request_timeout=PER_QUERY_TIMEOUT_S)
+    matches: dict[str, tuple[str, dict]] = {}
+    for hit in res["hits"]["hits"]:
+        src = hit["_source"]
+        parts = _sci_parts(src)
+        if parts is None or not want <= _tokens(parts[0]):
+            continue
+        key = re.sub(r"\W+", " ", (src.get("parties") or "").lower()).strip()
+        matches.setdefault(key, (hit["_id"], src))
+    if len(matches) != 1:
+        return None                                   # ambiguous or absent
+    hit_id, src = next(iter(matches.values()))
+    pet, resp = _sci_parts(src)
+    if _parties_match(case, pet, resp) and _year_ok(case, _sci_year(src)):
+        return None                                   # would have been found already
+    names = (_tokens(case.petitioner) | _tokens(case.respondent)
+             | _tokens(pet) | _tokens(resp))
+    if not _context_confirms(es, hit_id, case.context, names):
+        return None
+    log.info("Judgments Cited: citation corrected to the indexed judgment",
+             cited=case.display[:100], verified=(src.get("parties") or "")[:100])
+    return FoundJudgment("Supreme Court of India", src.get("judgment_date") or "",
+                         _sci_pdf(src), petitioner=_pretty_party(pet),
+                         respondent=_pretty_party(resp))
+
+
+def _write_back(draft: str, case: CitedCase, found: FoundJudgment) -> str:
+    """Replace the citation as written with the verified one, everywhere."""
+    if not case.raw_name:
+        return draft
+    new_name = f"{found.petitioner} v. {found.respondent}"
+    if case.raw_tail:
+        emphasis = re.match(r"[*_]*", case.raw_tail).group(0)
+        when = f", decided on {found.date}" if found.date else ""
+        draft = draft.replace(case.raw_name + case.raw_tail, new_name + emphasis + when)
+    return draft.replace(case.raw_name, new_name)
 
 
 def _lookup_hc(es, case: CitedCase) -> FoundJudgment | None:
@@ -436,7 +621,7 @@ def _lookup_hc(es, case: CitedCase) -> FoundJudgment | None:
 def _lookup_one(case: CitedCase) -> FoundJudgment | None:
     from core.clients import get_es_client
     es = get_es_client()
-    return _lookup_sci(es, case) or _lookup_hc(es, case)
+    return _lookup_sci(es, case) or _lookup_hc(es, case) or _repair_sci(es, case)
 
 
 # ---------------------------------------------------------------------------
@@ -450,11 +635,15 @@ def render_block(results: list[tuple[CitedCase, FoundJudgment | None]]) -> str:
             lines.append(f"- {case.display} — {NOT_VERIFIED}")
             continue
         meta = ", ".join(x for x in (found.court, found.date) if x)
-        line = f"- {case.display}" + (f" — {meta}" if meta else "")
+        shown = (f"*{found.petitioner} v. {found.respondent}*" if found.corrected
+                 else case.display)
+        line = f"- {shown}" + (f" — {meta}" if meta else "")
         if found.pdf_url:
             line += f" ([Judgment PDF]({found.pdf_url}))"
         else:
             line += " (in Lawttorney database; PDF not available)"
+        if found.corrected:
+            line += f" — corrected in the draft; it was cited as {case.display}"
         lines.append(line)
     return f"{HEADING}\n\n" + "\n".join(lines)
 
@@ -504,6 +693,10 @@ async def append_judgments_cited(draft: str, lookup=None, user_query: str = "") 
     cases = [c for c, _ in results]
     found = sum(1 for _, f in results if f is not None)
     linked = sum(1 for _, f in results if f is not None and f.pdf_url)
+    corrected = [(c, f) for c, f in results if f is not None and f.corrected]
+    for c, f in corrected:
+        draft = _write_back(draft, c, f)
     log.info("Judgments Cited appended", cases=len(cases), found=found,
-             with_pdf=linked, not_verified=len(cases) - found)
+             with_pdf=linked, not_verified=len(cases) - found,
+             corrected=len(corrected))
     return draft.rstrip() + "\n\n---\n\n" + render_block(results)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import re
 import time
@@ -56,6 +57,31 @@ class ChatRunnerInputs:
     enable_cache: bool = True                   # /chat disables for uploads
     enable_quality_scoring: bool = True         # 10% sampling
     skip_thread_id_event: bool = False          # caller already emitted it
+
+
+async def _draft_artifact_event(i: "ChatRunnerInputs", draft_md: str, language: str) -> dict | None:
+    """`artifact_done` for a finished draft, stored as the thread's next draft
+    version (core.artifact_followup.record_draft). Never fails a request."""
+    try:
+        from core.artifact_followup import record_draft
+        return await record_draft(i.thread_id, draft_md, language)
+    except Exception as e:
+        log.warning("Draft artifact skipped", endpoint=i.endpoint_name, error=str(e)[:200])
+        return None
+
+
+async def _partial_draft_edit(i: "ChatRunnerInputs") -> dict | None:
+    """A follow-up that changes part of the thread's draft, handled without
+    the agent graph (core.artifact_followup.try_partial_edit). None when the
+    message is anything else, and on any failure — the normal pipeline runs."""
+    if i.is_first_turn or i.file_context or i.regenerate_of or i.integration_token:
+        return None
+    try:
+        from core.artifact_followup import try_partial_edit
+        return await try_partial_edit(i.thread_id, i.query)
+    except Exception as e:
+        log.warning("Partial draft edit skipped", endpoint=i.endpoint_name, error=str(e)[:200])
+        return None
 
 
 def _fire_and_forget(coro) -> asyncio.Task:
@@ -477,6 +503,58 @@ async def run_chat_pipeline(
                      agents=cached.agents_used, turn=cached_turn)
             return
 
+    # --- Partial edit of the thread's draft ---------------------------------
+    # "Make ground B stronger" changes one section; rewriting the whole draft
+    # for it is slow and risks changing what the advocate did not ask about.
+    # Only when DRAFT_ARTIFACT_EVENTS=1 and the thread already has a draft;
+    # a question, a whole-draft request or any failure returns None here and
+    # the pipeline below runs exactly as before.
+    from core.artifact_followup import enabled as _artifact_enabled
+    if _artifact_enabled() and not i.is_first_turn:
+        yield _sse({"type": "status", "agent": "drafting", "message": "Checking your draft..."})
+        # Start the request's token tracker now so the routing and edit calls
+        # are counted; the pipeline below reuses it if the edit does not apply.
+        from core.token_tracker import get_tracker as _edit_tracker, start_request as _edit_start
+        _tk = _edit_tracker() or _edit_start()
+        _edit = await _partial_draft_edit(i)
+        if _edit is not None:
+            yield _sse(_edit["patch"])
+            yield _sse({"type": "response", "content": _edit["markdown"]})
+            _edit_turn = 0
+            try:
+                _edit_turn = await chat_store.save_turn(
+                    i.thread_id, i.query, _edit["markdown"],
+                    task="Drafting", tasks_planned_json=json.dumps(["Drafting"]),
+                    primary_artifact_kind="draft",
+                )
+            except Exception as e:
+                log.error("Failed to save chat history (partial edit)",
+                          endpoint=i.endpoint_name, error=str(e))
+            _edit_ms = (time.perf_counter() - start) * 1000
+            _edit_usage = _tk.to_dict(include_calls=True) if _tk else {}
+            _fire_and_forget(chat_store.log_request(
+                thread_id=i.thread_id, endpoint=i.endpoint_name,
+                query_preview=i.query[:200],
+                user_language=(i.preferred_language or "en"),
+                tasks_planned=["Drafting"], agents_used=["Drafting"],
+                total_latency_ms=int(_edit_ms),
+                total_tokens=int(_edit_usage.get("total_tokens") or 0),
+                fallback_used=False, is_blocked=False,
+            ))
+            yield _sse({
+                "type": "done",
+                "agents_used": ["Drafting"],
+                "token_usage": _edit_usage,
+                "thread_id": i.thread_id,
+                "conversation_turn": _edit_turn,
+                "query_rewritten": False,
+                "effective_query": None,
+                "partial_edit": True,
+            })
+            log.info("Partial draft edit served", endpoint=i.endpoint_name,
+                     sections=_edit["sections"], latency_ms=round(_edit_ms))
+            return
+
     # --- Integration URL handling ------------------------------------------
     integration_context_dict: dict | None = None
     if i.integration_token:
@@ -634,6 +712,19 @@ async def run_chat_pipeline(
                                 if optional in chunk:
                                     dp_event[optional] = chunk[optional]
                             yield _sse(dp_event)
+                        elif kind == "draft_plan":
+                            # Draft side panel: open with the section plan.
+                            from core.artifact_followup import preview_start as _pv_start
+                            _ev = await _pv_start(i.thread_id, chunk.get("sections") or [])
+                            if _ev:
+                                yield _sse(_ev)
+                        elif kind == "draft_section":
+                            # ...and fill each pair in as it is written.
+                            from core.artifact_followup import preview_section as _pv_section
+                            _ev = _pv_section(i.thread_id, chunk.get("index", 0),
+                                              chunk.get("headings") or [], chunk.get("text", ""))
+                            if _ev:
+                                yield _sse(_ev)
                         elif kind == "draft_incomplete":
                             yield _sse({
                                 "type": "draft_incomplete",
@@ -779,6 +870,16 @@ async def run_chat_pipeline(
         identical=stream_identical,
         reset_emitted=reset_emitted,
     )
+
+    # Draft side panel: the same draft as layout blocks (see
+    # docs/draft_panel_frontend_contract.md). Sent before `response` so a
+    # panel-aware client can open the panel first; clients without the panel
+    # ignore the event and render `response` as today. Off unless
+    # DRAFT_ARTIFACT_EVENTS=1.
+    if final_response and turn_primary_artifact_kind == "draft":
+        _artifact_ev = await _draft_artifact_event(i, final_response, user_language_stream)
+        if _artifact_ev:
+            yield _sse(_artifact_ev)
 
     if final_response:
         yield _sse({"type": "response", "content": final_response})

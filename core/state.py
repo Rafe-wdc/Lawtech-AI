@@ -175,6 +175,9 @@ class LegalAgentState(MessagesState):
     user_context: str           # Long-form context extracted from queries >5K chars (pasted docs/contracts)
     thread_id: str | None
     unique_string: str | None
+    user_id: str                # verified id of the signed-in lawyer; "" = unknown (memory off)
+    user_profile_block: str     # rendered user-memory block appended after the cached
+                                # drafting system prompt; "" = none (docs/user_memory_design.md)
     user_language: str          # ISO 639-1 code detected from original_query, default "en"
     user_language_source: str   # "client" (explicit preferred_language on the
                                 # request) | "detected" (langdetect + script

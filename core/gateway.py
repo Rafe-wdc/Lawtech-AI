@@ -2375,7 +2375,9 @@ def _export_artifact(raw: dict, fmt: str, title: Optional[str]):
     from pydantic import ValidationError
     from .artifact_edit import renumber
     from .draft_blocks import Artifact, to_markdown
+    from .draft_fields import RESPONSE_ONLY_KEYS
     try:
+        raw = {k: v for k, v in raw.items() if k not in RESPONSE_ONLY_KEYS}
         artifact = renumber(Artifact.model_validate(raw))
     except ValidationError as e:
         return _error_response(400, "validation_error",
@@ -2476,6 +2478,7 @@ class ArtifactRestoreRequest(BaseModel):
 
 class ArtifactFillRequest(BaseModel):
     base_version: int = Field(..., ge=1)
+    # Blanks filled from the form: field key (or label) -> value.
     values: dict[str, Union[str, int, float]] = Field(..., min_length=1, max_length=300)
 
 
@@ -2499,7 +2502,9 @@ def _stale(latest: int) -> JSONResponse:
 
 @app.get("/pyapi/artifact/{artifact_id}", dependencies=[Depends(require_user_key)])
 async def get_artifact(artifact_id: str, version: Optional[int] = None):
-    """The latest version of a draft artifact, or a specific one."""
+    """The latest version of a draft artifact, or a specific one, with the
+    blanks as form fields (`fields`, `blanks`; core/draft_fields.py) next to
+    the draft's own keys."""
     from .artifact_store import artifact_store
     try:
         art = await artifact_store.get(artifact_id, version)
@@ -2508,7 +2513,8 @@ async def get_artifact(artifact_id: str, version: Optional[int] = None):
         return _error_response(500, "artifact_error", "Failed to load the draft")
     if art is None:
         return _error_response(404, "not_found", "Draft not found")
-    return JSONResponse(art.model_dump())
+    from .draft_fields import fields_payload
+    return JSONResponse({**art.model_dump(), **fields_payload(art)})
 
 
 @app.get("/pyapi/artifact/{artifact_id}/versions", dependencies=[Depends(require_user_key)])
@@ -2531,10 +2537,12 @@ async def save_artifact(artifact_id: str, data: ArtifactSaveRequest, request: Re
     """Save what the advocate typed in the panel as a new version.
 
     Send the changed sections, complete. The response carries the sections as
-    saved (paragraph numbers are re-assigned), which the panel should render.
+    saved (paragraph numbers are re-assigned), which the panel should render,
+    and the blanks still to fill (`fields`, `blanks`).
     """
     from .artifact_edit import EditError, apply_user_sections, changed_sections
     from .artifact_store import SOURCE_USER, StaleVersion, artifact_store
+    from .draft_fields import fields_payload
     try:
         current = await artifact_store.get(artifact_id)
         if current is None:
@@ -2552,7 +2560,8 @@ async def save_artifact(artifact_id: str, data: ArtifactSaveRequest, request: Re
             change_summary="Edited by hand: " + ", ".join(s.heading for s in changed[:3]),
             base_version=data.base_version)
         return JSONResponse({"artifact_id": artifact_id, "version": new.version,
-                             "sections": [s.model_dump() for s in changed]})
+                             "sections": [s.model_dump() for s in changed],
+                             **fields_payload(new)})
     except StaleVersion as e:
         return _stale(e.latest)
     except EditError as e:
@@ -2562,56 +2571,36 @@ async def save_artifact(artifact_id: str, data: ArtifactSaveRequest, request: Re
         return _error_response(500, "artifact_error", "Failed to save the draft")
 
 
-@app.get("/pyapi/artifact/{artifact_id}/fields", dependencies=[Depends(require_user_key)])
-async def list_artifact_fields(artifact_id: str, version: Optional[int] = None):
-    """The draft's blanks as form fields, one per distinct blank
-    (core/draft_fields.py). `blanks` counts every place still to fill."""
-    from .artifact_store import artifact_store
-    from .draft_fields import fields
-    try:
-        art = await artifact_store.get(artifact_id, version)
-    except Exception as e:
-        log.error("Artifact load failed", error=short_err(e))
-        return _error_response(500, "artifact_error", "Failed to load the draft")
-    if art is None:
-        return _error_response(404, "not_found", "Draft not found")
-    found = fields(art)
-    return JSONResponse({"artifact_id": artifact_id, "version": art.version, "fields": found,
-                         "blanks": sum(f["count"] for f in found)})
-
-
 @app.post("/pyapi/artifact/{artifact_id}/fill", dependencies=[Depends(require_user_key)])
 @limiter.limit(_get_limit_for_request)
 async def fill_artifact_blanks(artifact_id: str, data: ArtifactFillRequest, request: Request):
-    """Fill blanks from the form as a new version. Each value fills every
-    blank with that key; the response carries the changed sections and the
-    fields still to fill."""
-    from .artifact_edit import changed_sections
+    """Fill blanks from the form as a new version (core/draft_fields.py).
+
+    Each value fills every blank with that key. The response is the whole
+    draft as saved, as GET returns it, plus `filled` and `unknown` (keys that
+    match no blank in this draft).
+    """
     from .artifact_store import SOURCE_USER, StaleVersion, artifact_store
-    from .draft_fields import fields, fill
+    from .draft_fields import fields, fields_payload, fill
     try:
         current = await artifact_store.get(artifact_id)
         if current is None:
             return _error_response(404, "not_found", "Draft not found")
         if data.base_version != current.version:
             return _stale(current.version)
-        before = fields(current)
         new, filled, unknown = fill(current, data.values)
-        changed = changed_sections(current, new)
-        if not changed:
-            return JSONResponse({"artifact_id": artifact_id, "version": current.version,
-                                 "sections": [], "unchanged": True, "filled": [],
-                                 "unknown": unknown, "fields": before})
-        labels = {f["key"]: f["label"] for f in before}
+        if not filled:
+            return JSONResponse({**current.model_dump(), **fields_payload(current),
+                                 "filled": [], "unknown": unknown, "unchanged": True})
+        labels = {f["key"]: f["label"] for f in fields(current)}
         names = [labels.get(k, k) for k in filled]
         thread_id = await artifact_store.thread_of(artifact_id) or ""
         new = await artifact_store.save(
             new, thread_id=thread_id, source=SOURCE_USER,
             change_summary="Filled blanks: " + ", ".join(names[:3]) + ("…" if len(names) > 3 else ""),
             base_version=data.base_version)
-        return JSONResponse({"artifact_id": artifact_id, "version": new.version,
-                             "sections": [s.model_dump() for s in changed],
-                             "filled": filled, "unknown": unknown, "fields": fields(new)})
+        return JSONResponse({**new.model_dump(), **fields_payload(new),
+                             "filled": filled, "unknown": unknown})
     except StaleVersion as e:
         return _stale(e.latest)
     except Exception as e:
@@ -2631,7 +2620,8 @@ async def restore_artifact(artifact_id: str, data: ArtifactRestoreRequest, reque
         thread_id = await artifact_store.thread_of(artifact_id) or ""
         new = await artifact_store.save(old, thread_id=thread_id, source=SOURCE_RESTORE,
                                         change_summary=f"Restored version {data.version}")
-        return JSONResponse(new.model_dump())
+        from .draft_fields import fields_payload
+        return JSONResponse({**new.model_dump(), **fields_payload(new)})
     except Exception as e:
         log.error("Artifact restore failed", error=short_err(e), exc_info=True)
         return _error_response(500, "artifact_error", "Failed to restore the version")
@@ -2651,6 +2641,7 @@ async def edit_artifact(data: ArtifactEditRequest, request: Request):
     from .artifact_edit import EditError, apply_instruction, route_instruction
     from .artifact_store import SOURCE_ASSISTANT, StaleVersion, artifact_store
     from .chat_runner import _sse
+    from .draft_fields import fields_payload
 
     try:
         current = await artifact_store.get(data.artifact_id)
@@ -2694,7 +2685,8 @@ async def edit_artifact(data: ArtifactEditRequest, request: Request):
             yield _sse({"type": "artifact_patch", "artifact_id": new.artifact_id,
                         "base_version": data.base_version, "version": new.version,
                         "summary": summary, "edited_section_ids": [s.id for s in edited],
-                        "sections": [s.model_dump() for s in changed]})
+                        "sections": [s.model_dump() for s in changed],
+                        **fields_payload(new)})
             yield _sse({"type": "done", "version": new.version})
         except StaleVersion as e:
             yield _sse({"type": "error", "error": "stale_version", "latest_version": e.latest,

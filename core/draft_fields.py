@@ -99,6 +99,18 @@ def fields(artifact: Artifact) -> list[dict]:
     return list(out.values())
 
 
+# Keys the API sends next to a draft but never stores; a client may send a
+# whole draft back (Word export), so they are dropped before validating.
+RESPONSE_ONLY_KEYS = frozenset({"fields", "blanks", "filled", "unknown"})
+
+
+def fields_payload(artifact: Artifact) -> dict:
+    """`fields` and `blanks` (every place still to fill), sent next to the
+    draft in responses and events."""
+    found = fields(artifact)
+    return {"fields": found, "blanks": sum(f["count"] for f in found)}
+
+
 def clean_value(value) -> str:
     """A form value as inline text: one line, no blank markers, bounded."""
     s = str(value if value is not None else "")

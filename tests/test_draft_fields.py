@@ -1,5 +1,5 @@
-"""Filling a draft's blanks from one form (core/draft_fields.py and the
-/pyapi/artifact/{id}/fields and /fill endpoints)."""
+"""Filling a draft's blanks from one form (core/draft_fields.py): the fields in
+every draft response and event, and POST /pyapi/artifact/{id}/fill."""
 
 from __future__ import annotations
 
@@ -141,9 +141,10 @@ def client(tmp_path, monkeypatch):
         gw.app.dependency_overrides.pop(gw.require_user_key, None)
 
 
-def test_fields_and_fill_endpoints(client):
-    r = client.get("/pyapi/artifact/art_fill/fields").json()
+def test_the_draft_object_carries_its_fields_and_post_fill_returns_it(client):
+    r = client.get("/pyapi/artifact/art_fill").json()
     assert r["version"] == 1 and r["blanks"] == 12 and len(r["fields"]) == 9
+    assert Artifact.model_validate({k: v for k, v in r.items() if k not in ("fields", "blanks")})
 
     r = client.post("/pyapi/artifact/art_fill/fill", json={
         "base_version": 1, "values": {"district": "Pune", "fathers name": "Ramesh Kumar", "nope": "x"}})
@@ -151,18 +152,42 @@ def test_fields_and_fill_endpoints(client):
     body = r.json()
     assert body["version"] == 2 and body["filled"] == ["district", "fathers name"]
     assert body["unknown"] == ["nope"]
-    assert [s["id"] for s in body["sections"]] == ["s1", "s2", "s3"]
-    assert "district" not in {f["key"] for f in body["fields"]}
+    assert [s["id"] for s in body["sections"]] == ["s1", "s2", "s3"]      # the whole draft
+    assert "district" not in {f["key"] for f in body["fields"]} and body["blanks"] == 7
+    assert "IN THE COURT OF SESSIONS AT PUNE" in body["sections"][0]["blocks"][0]["text"]
 
     vs = client.get("/pyapi/artifact/art_fill/versions").json()["versions"]
     assert vs[-1]["source"] == "user" and vs[-1]["change_summary"] == "Filled blanks: District, Father's Name"
-    assert client.get("/pyapi/artifact/art_fill/fields?version=1").json()["blanks"] == 12
+    assert client.get("/pyapi/artifact/art_fill?version=1").json()["blanks"] == 12
+
+    # the typed save is unchanged apart from carrying the fields
+    sec = next(x for x in body["sections"] if x["id"] == "s3")
+    sec["blocks"][-1]["text"] = "Date: 1 May 2026"
+    typed = client.put("/pyapi/artifact/art_fill", json={"base_version": 2, "sections": [sec]}).json()
+    assert set(typed) == {"artifact_id", "version", "sections", "fields", "blanks"}
+    assert typed["version"] == 3 and "date" not in {f["key"] for f in typed["fields"]}
+    assert client.put("/pyapi/artifact/art_fill", json={"base_version": 3}).status_code == 422
+
+    restored = client.post("/pyapi/artifact/art_fill/restore", json={"version": 1}).json()
+    assert restored["version"] == 4 and restored["blanks"] == 12
+
+    # a draft object sent back whole still exports
+    docx = client.post("/pyapi/export", json={"artifact": restored, "format": "docx"})
+    assert docx.status_code == 200 and "wordprocessingml" in docx.headers["content-type"]
 
     stale = client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 1, "values": {"age": "34"}})
-    assert stale.status_code == 409 and stale.json()["latest_version"] == 2
-    same = client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 2, "values": {"nope": "x"}})
-    assert same.json()["unchanged"] is True and same.json()["version"] == 2
-    assert client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 2, "values": {}}).status_code == 422
-    assert client.get("/pyapi/artifact/art_none/fields").status_code == 404
+    assert stale.status_code == 409 and stale.json()["latest_version"] == 4
+    same = client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 4, "values": {"nope": "x"}})
+    assert same.json()["unchanged"] is True and same.json()["version"] == 4
+    assert client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 4, "values": {}}).status_code == 422
     assert client.post("/pyapi/artifact/art_none/fill",
                        json={"base_version": 1, "values": {"a": "b"}}).status_code == 404
+    assert client.get("/pyapi/artifact/art_none").status_code == 404
+
+
+def test_artifact_done_carries_the_fields_next_to_the_draft(client, monkeypatch):
+    from core import artifact_followup as af
+    monkeypatch.setenv("DRAFT_ARTIFACT_EVENTS", "1")
+    ev = asyncio.run(af.record_draft("9b1c-thread", BAIL))
+    assert ev["type"] == "artifact_done" and ev["blanks"] == 12 and len(ev["fields"]) == 9
+    Artifact.model_validate(ev["artifact"])                     # the draft itself is unchanged

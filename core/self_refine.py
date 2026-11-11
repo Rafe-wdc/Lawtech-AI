@@ -734,11 +734,20 @@ violations specific to Indian drafting practice:
     from memory. Bail: 437/439 CrPC -> 480/483 BNSS; anticipatory bail:
     438 CrPC -> 482 BNSS; magistrate complaint: 200 CrPC -> 223 BNSS.
     MAJOR.
+    ALSO a violation: a NEW complaint, petition or application (the
+    document being drafted now) captioned or prayed under the CrPC
+    because its offences are IPC offences committed before 01.07.2024.
+    The offence date picks the penal law; the filing date picks the
+    procedure. Section 531(2)(a) BNSS keeps the CrPC only for
+    proceedings pending on 01.07.2024. Observed: a fresh private
+    complaint about 2016 offences under Sections 384-506 IPC captioned
+    "UNDER SECTION 200 OF THE CODE OF CRIMINAL PROCEDURE, 1973" — it is
+    Section 223 BNSS. MAJOR.
     NOT a violation when the old code is named in its own right: quoting
     a pre-2024 judgment, describing a proceeding that began before
-    01.07.2024, or giving the old provision alongside the new one as a
-    cross-reference. Only the operative provision the document proceeds
-    under is in scope.
+    01.07.2024, charging pre-2024 conduct under the IPC, or giving the
+    old provision alongside the new one as a cross-reference. Only the
+    operative provision the document proceeds under is in scope.
 
   bail_provision_mismatch — the bail section cited does not match the
     relief the draft actually seeks. Read the facts of the draft itself:

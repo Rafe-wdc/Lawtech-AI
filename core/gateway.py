@@ -2467,16 +2467,13 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
 
 class ArtifactSaveRequest(BaseModel):
     base_version: int = Field(..., ge=1)
-    sections: list[dict] = Field(..., min_length=1, max_length=60)
+    sections: Optional[list[dict]] = Field(None, min_length=1, max_length=60)
+    # Blanks filled from the form: field key (or label) -> value.
+    values: Optional[dict[str, Union[str, int, float]]] = Field(None, min_length=1, max_length=300)
 
 
 class ArtifactRestoreRequest(BaseModel):
     version: int = Field(..., ge=1)
-
-
-class ArtifactFillRequest(BaseModel):
-    base_version: int = Field(..., ge=1)
-    values: dict[str, Union[str, int, float]] = Field(..., min_length=1, max_length=300)
 
 
 class ArtifactEditTarget(BaseModel):
@@ -2498,8 +2495,13 @@ def _stale(latest: int) -> JSONResponse:
 
 
 @app.get("/pyapi/artifact/{artifact_id}", dependencies=[Depends(require_user_key)])
-async def get_artifact(artifact_id: str, version: Optional[int] = None):
-    """The latest version of a draft artifact, or a specific one."""
+async def get_artifact(artifact_id: str, version: Optional[int] = None,
+                       include: Optional[str] = None):
+    """The latest version of a draft artifact, or a specific one.
+
+    With `include=fields`, the response also carries the blanks as form
+    fields (core/draft_fields.py): `fields` and `blanks` next to the artifact.
+    """
     from .artifact_store import artifact_store
     try:
         art = await artifact_store.get(artifact_id, version)
@@ -2508,7 +2510,12 @@ async def get_artifact(artifact_id: str, version: Optional[int] = None):
         return _error_response(500, "artifact_error", "Failed to load the draft")
     if art is None:
         return _error_response(404, "not_found", "Draft not found")
-    return JSONResponse(art.model_dump())
+    body = art.model_dump()
+    if "fields" in (include or "").split(","):
+        from .draft_fields import fields
+        found = fields(art)
+        body.update(fields=found, blanks=sum(f["count"] for f in found))
+    return JSONResponse(body)
 
 
 @app.get("/pyapi/artifact/{artifact_id}/versions", dependencies=[Depends(require_user_key)])
@@ -2532,27 +2539,43 @@ async def save_artifact(artifact_id: str, data: ArtifactSaveRequest, request: Re
 
     Send the changed sections, complete. The response carries the sections as
     saved (paragraph numbers are re-assigned), which the panel should render.
+
+    `values` fills blanks from the form (core/draft_fields.py), alone or with
+    `sections`: each value fills every blank with that key. The response then
+    also carries `filled`, `unknown` and the `fields` still to fill.
     """
     from .artifact_edit import EditError, apply_user_sections, changed_sections
     from .artifact_store import SOURCE_USER, StaleVersion, artifact_store
+    if not data.sections and not data.values:
+        return _error_response(422, "validation_error", "Send sections or values")
     try:
         current = await artifact_store.get(artifact_id)
         if current is None:
             return _error_response(404, "not_found", "Draft not found")
         if data.base_version != current.version:
             return _stale(current.version)
-        new = apply_user_sections(current, data.sections)
+        new = apply_user_sections(current, data.sections) if data.sections else current
+        form: dict = {}
+        if data.values:
+            from .draft_fields import fields, fill
+            new, filled, unknown = fill(new, data.values)
+            form = {"filled": filled, "unknown": unknown, "fields": fields(new)}
         changed = changed_sections(current, new)
         if not changed:
             return JSONResponse({"artifact_id": artifact_id, "version": current.version,
-                                 "sections": [], "unchanged": True})
+                                 "sections": [], "unchanged": True, **form})
+        if data.sections:
+            summary = "Edited by hand: " + ", ".join(s.heading for s in changed[:3])
+        else:
+            labels = {f["key"]: f["label"] for f in fields(current)}
+            names = [labels.get(k, k) for k in form["filled"]]
+            summary = "Filled blanks: " + ", ".join(names[:3]) + ("…" if len(names) > 3 else "")
         thread_id = await artifact_store.thread_of(artifact_id) or ""
         new = await artifact_store.save(
-            new, thread_id=thread_id, source=SOURCE_USER,
-            change_summary="Edited by hand: " + ", ".join(s.heading for s in changed[:3]),
+            new, thread_id=thread_id, source=SOURCE_USER, change_summary=summary,
             base_version=data.base_version)
         return JSONResponse({"artifact_id": artifact_id, "version": new.version,
-                             "sections": [s.model_dump() for s in changed]})
+                             "sections": [s.model_dump() for s in changed], **form})
     except StaleVersion as e:
         return _stale(e.latest)
     except EditError as e:
@@ -2560,63 +2583,6 @@ async def save_artifact(artifact_id: str, data: ArtifactSaveRequest, request: Re
     except Exception as e:
         log.error("Artifact save failed", error=short_err(e), exc_info=True)
         return _error_response(500, "artifact_error", "Failed to save the draft")
-
-
-@app.get("/pyapi/artifact/{artifact_id}/fields", dependencies=[Depends(require_user_key)])
-async def list_artifact_fields(artifact_id: str, version: Optional[int] = None):
-    """The draft's blanks as form fields, one per distinct blank
-    (core/draft_fields.py). `blanks` counts every place still to fill."""
-    from .artifact_store import artifact_store
-    from .draft_fields import fields
-    try:
-        art = await artifact_store.get(artifact_id, version)
-    except Exception as e:
-        log.error("Artifact load failed", error=short_err(e))
-        return _error_response(500, "artifact_error", "Failed to load the draft")
-    if art is None:
-        return _error_response(404, "not_found", "Draft not found")
-    found = fields(art)
-    return JSONResponse({"artifact_id": artifact_id, "version": art.version, "fields": found,
-                         "blanks": sum(f["count"] for f in found)})
-
-
-@app.post("/pyapi/artifact/{artifact_id}/fill", dependencies=[Depends(require_user_key)])
-@limiter.limit(_get_limit_for_request)
-async def fill_artifact_blanks(artifact_id: str, data: ArtifactFillRequest, request: Request):
-    """Fill blanks from the form as a new version. Each value fills every
-    blank with that key; the response carries the changed sections and the
-    fields still to fill."""
-    from .artifact_edit import changed_sections
-    from .artifact_store import SOURCE_USER, StaleVersion, artifact_store
-    from .draft_fields import fields, fill
-    try:
-        current = await artifact_store.get(artifact_id)
-        if current is None:
-            return _error_response(404, "not_found", "Draft not found")
-        if data.base_version != current.version:
-            return _stale(current.version)
-        before = fields(current)
-        new, filled, unknown = fill(current, data.values)
-        changed = changed_sections(current, new)
-        if not changed:
-            return JSONResponse({"artifact_id": artifact_id, "version": current.version,
-                                 "sections": [], "unchanged": True, "filled": [],
-                                 "unknown": unknown, "fields": before})
-        labels = {f["key"]: f["label"] for f in before}
-        names = [labels.get(k, k) for k in filled]
-        thread_id = await artifact_store.thread_of(artifact_id) or ""
-        new = await artifact_store.save(
-            new, thread_id=thread_id, source=SOURCE_USER,
-            change_summary="Filled blanks: " + ", ".join(names[:3]) + ("…" if len(names) > 3 else ""),
-            base_version=data.base_version)
-        return JSONResponse({"artifact_id": artifact_id, "version": new.version,
-                             "sections": [s.model_dump() for s in changed],
-                             "filled": filled, "unknown": unknown, "fields": fields(new)})
-    except StaleVersion as e:
-        return _stale(e.latest)
-    except Exception as e:
-        log.error("Artifact fill failed", error=short_err(e), exc_info=True)
-        return _error_response(500, "artifact_error", "Failed to fill the blanks")
 
 
 @app.post("/pyapi/artifact/{artifact_id}/restore", dependencies=[Depends(require_user_key)])

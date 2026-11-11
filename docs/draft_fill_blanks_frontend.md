@@ -5,6 +5,13 @@
 changes: the same events, endpoints and block format, and the same yellow
 `[[blanks]]` in the page.
 
+**No new endpoints.** The form uses the two the panel already calls:
+
+| Call | Without the new option | With it |
+|---|---|---|
+| `GET /pyapi/artifact/{id}` | the draft, exactly as today | `?include=fields` also returns the form fields |
+| `PUT /pyapi/artifact/{id}` | saves typed `sections`, exactly as today | `values` fills blanks from the form |
+
 ## 1. What the user gets
 
 A form beside the draft with one input per blank. The advocate types a value
@@ -77,13 +84,14 @@ or a tab with the same list of inputs.
 ## 3. Loading the fields
 
 ```
-GET /pyapi/artifact/{artifact_id}/fields
-GET /pyapi/artifact/{artifact_id}/fields?version=2      (an older version, read only)
+GET /pyapi/artifact/{artifact_id}?include=fields
+GET /pyapi/artifact/{artifact_id}?version=2&include=fields     (an older version, read only)
 
 → 200
 {
   "artifact_id": "art_7f3c2a9e",
   "version": 3,
+  ...the draft, exactly as without include (title, page, sections)...,
   "blanks": 12,                       every place still empty, all fields together
   "fields": [
     {
@@ -111,6 +119,14 @@ GET /pyapi/artifact/{artifact_id}/fields?version=2      (an older version, read 
 → 404 {"error": "not_found"}         no stored draft with this id
 ```
 
+So one request gives the page and the form. Without `?include=fields`, the
+response is exactly what it is today.
+
+`fields` and `blanks` are not part of the draft. For Word, export by
+`artifact_id` (the usual way). If you ever send the draft object itself to
+`POST /pyapi/export`, leave these two keys out: the export rejects keys it
+doesn't know.
+
 | Field | Meaning |
 |---|---|
 | `key` | What you send back when filling. Treat it as an opaque string |
@@ -122,14 +138,15 @@ GET /pyapi/artifact/{artifact_id}/fields?version=2      (an older version, read 
 Fields come in the order their blanks first appear in the draft, from the
 cause title to the verification.
 
-**When to reload:** whenever the draft changes. That means after
-`artifact_done`, `artifact_patch`, a `PUT` save, a restore, or a fill. A fill
-already returns the new `fields`, so it doesn't need a second request.
+**When to reload:** whenever the draft changes, with
+`GET /pyapi/artifact/{id}?include=fields`. That means after `artifact_done`,
+`artifact_patch`, a typed save, or a restore. A fill already returns the new
+`fields`, so it doesn't need a second request.
 
 ## 4. Filling
 
 ```
-POST /pyapi/artifact/{artifact_id}/fill
+PUT /pyapi/artifact/{artifact_id}          (the same save the panel uses for typed text)
 {
   "base_version": 3,
   "values": {"district": "Pune", "fathers name": "Ramesh Kumar"}
@@ -146,9 +163,14 @@ POST /pyapi/artifact/{artifact_id}/fill
 }
 → 200 {"version": 3, "sections": [], "unchanged": true, ...}   nothing matched
 → 409 {"error": "stale_version", "latest_version": 5}          reload the draft and the fields, then retry
-→ 422                                                          empty "values"
+→ 422                                                          neither "sections" nor "values", or empty "values"
 → 404                                                          no stored draft
 ```
+
+- `values` and typed `sections` can go in the same request. Both are saved as
+  one version.
+- A save with only `sections` is unchanged and answers exactly as today, with
+  no `filled`, `unknown` or `fields`.
 
 - Send several fields in one request, e.g. on "Apply" or after a pause of
   about 1 to 2 seconds. Empty values are skipped, so you can send the whole
@@ -203,17 +225,17 @@ POST /pyapi/artifact/{artifact_id}/fill
 
 | Part | State |
 |---|---|
-| `GET /pyapi/artifact/{id}/fields` | built, in PR against dev |
-| `POST /pyapi/artifact/{id}/fill` | built, in PR against dev |
+| `GET /pyapi/artifact/{id}?include=fields` | built, in PR against dev |
+| `PUT /pyapi/artifact/{id}` with `values` | built, in PR against dev |
 | Layout, form, page highlights | frontend |
 
 Once deployed on dev (`https://tool.lawttorney.com/pyapi`, same `X-API-Key`):
 
 ```
-curl -H "X-API-Key: $KEY" https://tool.lawttorney.com/pyapi/artifact/<artifact_id>/fields
-curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+curl -H "X-API-Key: $KEY" "https://tool.lawttorney.com/pyapi/artifact/<artifact_id>?include=fields"
+curl -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d '{"base_version": 1, "values": {"district": "Pune"}}' \
-  https://tool.lawttorney.com/pyapi/artifact/<artifact_id>/fill
+  https://tool.lawttorney.com/pyapi/artifact/<artifact_id>
 ```
 
 Use a draft made on dev; its `artifact_id` arrives in `artifact_done`. Drafts

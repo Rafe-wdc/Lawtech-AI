@@ -1,5 +1,5 @@
-"""Filling a draft's blanks from one form (core/draft_fields.py and the
-/pyapi/artifact/{id}/fields and /fill endpoints)."""
+"""Filling a draft's blanks from one form (core/draft_fields.py), through the
+existing GET (?include=fields) and PUT (values) of /pyapi/artifact/{id}."""
 
 from __future__ import annotations
 
@@ -141,11 +141,14 @@ def client(tmp_path, monkeypatch):
         gw.app.dependency_overrides.pop(gw.require_user_key, None)
 
 
-def test_fields_and_fill_endpoints(client):
-    r = client.get("/pyapi/artifact/art_fill/fields").json()
+def test_load_and_fill_through_the_existing_endpoints(client):
+    plain = client.get("/pyapi/artifact/art_fill").json()
+    assert "fields" not in plain and "blanks" not in plain        # unchanged without include
+    r = client.get("/pyapi/artifact/art_fill?include=fields").json()
     assert r["version"] == 1 and r["blanks"] == 12 and len(r["fields"]) == 9
+    assert r["sections"] == plain["sections"]
 
-    r = client.post("/pyapi/artifact/art_fill/fill", json={
+    r = client.put("/pyapi/artifact/art_fill", json={
         "base_version": 1, "values": {"district": "Pune", "fathers name": "Ramesh Kumar", "nope": "x"}})
     assert r.status_code == 200
     body = r.json()
@@ -156,13 +159,27 @@ def test_fields_and_fill_endpoints(client):
 
     vs = client.get("/pyapi/artifact/art_fill/versions").json()["versions"]
     assert vs[-1]["source"] == "user" and vs[-1]["change_summary"] == "Filled blanks: District, Father's Name"
-    assert client.get("/pyapi/artifact/art_fill/fields?version=1").json()["blanks"] == 12
+    assert client.get("/pyapi/artifact/art_fill?version=1&include=fields").json()["blanks"] == 12
 
-    stale = client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 1, "values": {"age": "34"}})
-    assert stale.status_code == 409 and stale.json()["latest_version"] == 2
-    same = client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 2, "values": {"nope": "x"}})
-    assert same.json()["unchanged"] is True and same.json()["version"] == 2
-    assert client.post("/pyapi/artifact/art_fill/fill", json={"base_version": 2, "values": {}}).status_code == 422
-    assert client.get("/pyapi/artifact/art_none/fields").status_code == 404
-    assert client.post("/pyapi/artifact/art_none/fill",
-                       json={"base_version": 1, "values": {"a": "b"}}).status_code == 404
+    # typed text and form values in one save: one version
+    sec = next(x for x in body["sections"] if x["id"] == "s3")
+    sec["blocks"][1]["text"] = "It is most respectfully prayed that the Applicant be released on bail."
+    both = client.put("/pyapi/artifact/art_fill", json={
+        "base_version": 2, "sections": [sec], "values": {"date": "1 May 2026"}}).json()
+    assert both["version"] == 3 and both["filled"] == ["date"]
+    saved = client.get("/pyapi/artifact/art_fill").json()
+    s3 = to_markdown(Artifact.model_validate(saved))
+    assert "most respectfully prayed" in s3 and "Date: 1 May 2026" in s3
+
+    # a typed save without values answers exactly as before
+    sec["blocks"][1]["text"] = "Bail may be granted."
+    typed = client.put("/pyapi/artifact/art_fill", json={"base_version": 3, "sections": [sec]}).json()
+    assert set(typed) == {"artifact_id", "version", "sections"} and typed["version"] == 4
+
+    stale = client.put("/pyapi/artifact/art_fill", json={"base_version": 1, "values": {"age": "34"}})
+    assert stale.status_code == 409 and stale.json()["latest_version"] == 4
+    same = client.put("/pyapi/artifact/art_fill", json={"base_version": 4, "values": {"nope": "x"}})
+    assert same.json()["unchanged"] is True and same.json()["version"] == 4
+    assert client.put("/pyapi/artifact/art_fill", json={"base_version": 4}).status_code == 422
+    assert client.put("/pyapi/artifact/art_fill", json={"base_version": 4, "values": {}}).status_code == 422
+    assert client.get("/pyapi/artifact/art_none?include=fields").status_code == 404

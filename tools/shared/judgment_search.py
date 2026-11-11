@@ -35,10 +35,26 @@ _MIN_SCORE = 10.0
 # Shared helpers
 # ================================================================
 
+def _dedupe_key(src: dict, es_id: str) -> tuple:
+    """Same judgment, same key. The index holds exact copies of some
+    judgments under different ids (one Bombay HC order three times in one
+    top-10, 2026-11-10), which crowd real results out of the slots."""
+    pet = src.get("petitioner_names") or []
+    pet = pet[0] if isinstance(pet, list) and pet else pet
+    parts = (str(src.get("court_name") or "").lower(), str(src.get("case_number") or ""),
+             str(src.get("judgment_date") or ""), str(pet or "").lower())
+    return parts if any(parts) else ("id", es_id)
+
+
 def _format_hits(hits: list[dict]) -> list[dict]:
-    """Convert raw ES hits to standardized format with all metadata."""
-    return [
-        {
+    """Convert raw ES hits to standardized format with all metadata, one per judgment."""
+    out, seen = [], set()
+    for h in hits:
+        key = _dedupe_key(h["_source"], h.get("_id", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
             "content": h["_source"]["page_content"],
             "source": h["_source"].get("source", "unknown"),
             "court_name": h["_source"].get("court_name", ""),
@@ -54,9 +70,8 @@ def _format_hits(hits: list[dict]) -> list[dict]:
             "bench_judge_names": h["_source"].get("bench_judge_names", ""),
             "judgment_date": h["_source"].get("judgment_date"),
             "score": h["_score"],
-        }
-        for h in hits
-    ]
+        })
+    return out
 
 
 def _has_good_results(hits: list[dict], min_hits: int = _MIN_GOOD_HITS) -> bool:
@@ -452,6 +467,42 @@ def search_by_legal_provision(
 # Smart Multi-Strategy Search
 # ================================================================
 
+_SECTION_PHRASE_MAX = 40
+
+
+def search_by_section_phrase(
+    section: str, query: str = "", court: str | None = None,
+) -> tuple[list[dict], bool]:
+    """Judgments whose text names `section` exactly ("154B-29", "13(1)(ia)").
+
+    Returns (hits, complete): complete is True when every matching judgment
+    fits in one result page, i.e. the database holds few enough that this is
+    all of them. The query words only rank; the phrase decides membership.
+    """
+    from core.section_cases import phrase_variants
+    phrase = {"bool": {"should": [{"match_phrase": {"page_content": p}}
+                                  for p in phrase_variants(section)],
+                       "minimum_should_match": 1}}
+    filters = [phrase]
+    if court:
+        filters.append({"match_phrase": {"court_name": court.lower()}})
+    should = [{"match": {"page_content": {"query": query, "boost": 3}}}] if query else []
+    es = get_es_client()
+    # Count first (cheap, no documents); fetch only when the set is small.
+    # Fetching 40 full judgments for a common section and then discarding
+    # them added ~25 s to "498A" questions.
+    probe = es.search(index=INDEX, request_timeout=10, body={
+        "size": 0, "track_total_hits": _SECTION_PHRASE_MAX + 1,
+        "query": {"bool": {"filter": filters}}})
+    total = (probe["hits"].get("total") or {}).get("value", 0)
+    if not total or total > _SECTION_PHRASE_MAX:
+        return [], False
+    resp = es.search(index=INDEX, request_timeout=10, body={
+        "size": _SECTION_PHRASE_MAX,
+        "query": {"bool": {"filter": filters, "should": should}}})
+    return _format_hits(resp["hits"]["hits"]), True
+
+
 def smart_judgment_search(
     query: str,
     petitioner: str = "",
@@ -566,6 +617,28 @@ def smart_judgment_search(
             }
 
     # --- Strategy 4: Case type specialized search ---
+    # A distinctive section ("154B-29", "498A", "13(1)(ia)") searched as an
+    # exact phrase. Used only when the database holds few enough judgments
+    # naming it that one page is all of them; otherwise the strategies below
+    # run as before. The loose word match below returned general
+    # co-operative cases for "154B-29" and missed judgments that name it.
+    from core.section_cases import section_in
+    _sec = section_in(query) or section_in(lexical_query or "")
+    if _sec:
+        strategies_tried.append("section_phrase")
+        try:
+            results, complete = search_by_section_phrase(_sec.section, lexical_query or query, court)
+        except Exception as e:
+            log.warning("section phrase search failed", section=_sec.section, error=str(e)[:120])
+            results, complete = [], False
+        if results and complete:
+            log.info("section phrase match", section=_sec.section, hits=len(results))
+            return {
+                "hits": results,
+                "strategy_used": "section_phrase",
+                "strategies_tried": strategies_tried,
+            }
+
     case_type = detect_case_type(query)
     if case_type:
         strategies_tried.append(f"case_type:{case_type}")

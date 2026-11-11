@@ -996,6 +996,11 @@ violations specific to Indian drafting practice:
     were retrieved for this request; rely on the retrieved <other-
     court-type> authorities instead, or state the point without a
     case cite."
+    NOT a violation, and never grounds for adding cases: a case-law
+    answer that lists fewer judgments than the user asked for and says
+    our database holds only that many on the section. The honest count
+    is correct; asking the refiner to reach the requested number makes
+    it pad the list with judgments that do not concern the section.
 
   canonical_example_substitution — the draft uses canonical Indian-legal
     example names / places / dates from LLM training data as if they were

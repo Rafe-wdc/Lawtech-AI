@@ -2529,6 +2529,36 @@ def _build_source_registry(agent_results: dict[str, AgentResult]) -> SourceRegis
     return registry
 
 
+async def _with_section_case_list(user_query: str, agent_results_text: str, source_registry):
+    """Append the checked list of judgments naming the asked section, and
+    register them as sources (first, so the prompt's record cap keeps them).
+    Unchanged inputs when the request names no section, the list is
+    incomplete, or anything fails."""
+    try:
+        from core.section_cases import (asked_section, find_section_judgments,
+                                        format_block, to_sources)
+        ask = asked_section(user_query or "")
+        if ask is None:
+            return agent_results_text, source_registry
+        found, complete = await asyncio.wait_for(
+            asyncio.to_thread(find_section_judgments, ask), timeout=15)
+        if not complete:
+            log.info("Section case list not used: database holds more than one search returns",
+                     section=ask.section, found=len(found))
+            return agent_results_text, source_registry
+        progress("orchestrator", f"Checked {len(found)} judgments that name Section {ask.section}",
+                 substep=True, step="synthesize")
+        checked = SourceRegistry()
+        checked.extend(to_sources(found))
+        log.info("Section case list added", section=ask.section, found=len(found),
+                 asked=ask.count)
+        return (agent_results_text + chr(10) * 2 + format_block(ask, found),
+                merge_source_registries(checked, source_registry))
+    except Exception as e:
+        log.warning("Section case list skipped", error=f"{type(e).__name__}: {e}"[:200])
+        return agent_results_text, source_registry
+
+
 async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
     """Phase 2 — Merge results from all domain agents into final response.
 
@@ -3126,6 +3156,10 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                     content = content[:_MAX_AGENT_CONTENT] + "\n\n[... truncated for merge]"
                 merge_input += f"\n\n### SUPPORTING AGENT ({name}):\n{content}"
             merge_input += _missing_sources_note(errored)
+            # Same checked list as the generic synthesis below: case-law
+            # requests reach either path depending on the plan.
+            merge_input, source_registry = await _with_section_case_list(
+                state.get("original_query") or query, merge_input, source_registry)
 
             llm = get_gemini_flash_full(
                 temperature=0.2,
@@ -3229,6 +3263,16 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
         total_tokens += result.tokens_consumed
         all_serialized_sources.extend(_serialize_sources(result))
     agent_results_text += _missing_sources_note(errored)
+
+    # "Give me 50 case laws under Section 154B-29": hand the writer the
+    # judgments that actually name the section, checked against their text,
+    # when the database holds few enough that the list is complete. On prod
+    # (2026-11-10) the writer otherwise padded 33 entries with unrelated
+    # Supreme Court judgments and invented why each applied. Common sections
+    # (138, 498A) have more judgments than one search returns, so the list
+    # would be partial and the answer is left as before.
+    agent_results_text, source_registry = await _with_section_case_list(
+        state.get("original_query") or query, agent_results_text, source_registry)
 
     # Pick prompt template: table-mode if user asked for a comparison table,
     # else the general synthesis prompt. SYNTHESIS_TABLE_PROMPT constrains output

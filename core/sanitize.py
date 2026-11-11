@@ -299,7 +299,7 @@ def _fix_repeated_blocks(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Stray CJK glyphs
+# Stray CJK and other foreign-script glyphs
 # ---------------------------------------------------------------------------
 
 # Seen 2026-11-06 in a lawyer's draft: "In *Sci尊敬 / Chandra Shashi v. …*" —
@@ -313,41 +313,84 @@ def _fix_repeated_blocks(text: str) -> str:
 # An Indian-law answer never legitimately mixes CJK script into otherwise
 # non-CJK text, so CJK runs are removed unless the text as a whole is written
 # in a CJK language (user asked in that script). Indic scripts (Devanagari,
-# Bengali, Tamil, Telugu, …) are outside these ranges and never affected.
-_CJK_RUN_RE = re.compile(
-    "( ?)["
-    "\u3040-\u30ff"      # Hiragana, Katakana
-    "\u3400-\u4dbf"      # CJK Unified Ideographs Extension A
-    "\u4e00-\u9fff"      # CJK Unified Ideographs
-    "\uac00-\ud7af"      # Hangul syllables
-    "\uf900-\ufaff"      # CJK Compatibility Ideographs
-    "]+( ?)"
+# Bengali, Tamil, Telugu, ...) are outside these ranges and never affected.
+#
+# 2026-11-10: the same glitch in Thai, INSIDE a party name: an English
+# complaint called a witness "Dine<Thai>hbhai Mehta" (names changed here) and
+# spelt him correctly as "Dineshbhai Mehta" further down the same draft. The pass now also covers
+# other scripts no Indian legal answer uses (Thai, Lao, Khmer, Myanmar,
+# Cyrillic, Hebrew, Armenian, Georgian), and a run sitting inside a word is
+# replaced by the missing letters when the document spells that word
+# correctly elsewhere. Greek is left alone (alpha, beta, mu appear in
+# technical and medical evidence); Arabic script is Urdu, an Indian language.
+_STRAY_SCRIPT_CLASS = (
+    "["
+    "぀-ヿ"      # Hiragana, Katakana
+    "㐀-䶿"      # CJK Unified Ideographs Extension A
+    "一-鿿"      # CJK Unified Ideographs
+    "가-힯"      # Hangul syllables
+    "豈-﫿"      # CJK Compatibility Ideographs
+    "Ѐ-ӿ"      # Cyrillic
+    "԰-֏"      # Armenian
+    "֐-׿"      # Hebrew
+    "฀-๿"      # Thai
+    "຀-໿"      # Lao
+    "က-႟"      # Myanmar
+    "Ⴀ-ჿ"      # Georgian
+    "ក-៿"      # Khmer
+    "]"
 )
+_CJK_RUN_RE = re.compile(f"( ?){_STRAY_SCRIPT_CLASS}+( ?)")
 _ANY_LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
-# Below this share of all letters the text is NOT a CJK-language answer, so
-# any CJK in it -- two glyphs or a whole sentence that flipped language -- is
-# the glitch. A real Chinese / Japanese / Korean answer is almost entirely
-# CJK and sits far above it.
+# Below this share of all letters the text is NOT written in that script, so
+# any of it -- two glyphs or a whole sentence that flipped language -- is
+# the glitch. A real Chinese / Thai / Russian answer is almost entirely in
+# its own script and sits far above it.
 _CJK_LANGUAGE_SHARE = 0.5
+# A glitch inside a word swallowed at most this many of its letters.
+_IN_WORD_MAX_MISSING = 3
 
 
 def _strip_stray_cjk(text: str) -> str:
-    """Remove CJK glyphs that a non-CJK response cannot have meant to contain."""
+    """Remove foreign-script glyphs a response cannot have meant to contain.
+
+    A run between two parts of one word ("Dine" + run + "hbhai") is replaced by
+    the letters that word is missing when exactly one word elsewhere in the
+    text fits (prefix + 1-3 letters + suffix); otherwise the run is dropped.
+    """
     matches = list(_CJK_RUN_RE.finditer(text))
     if not matches:
         return text
     glyphs = sum(len(m.group(0).strip(" ")) for m in matches)
     letters = len(_ANY_LETTER_RE.findall(text))
     if letters and glyphs / letters > _CJK_LANGUAGE_SHARE:
-        return text  # genuinely CJK-language content, not a glitch
+        return text  # genuinely written in that script, not a glitch
+
+    vocabulary = set(re.findall(r"[A-Za-z]{3,}", _CJK_RUN_RE.sub(" \x00 ", text)))
+    repaired: list[str] = []
 
     def _repl(m: re.Match) -> str:
         before, after = m.group(1), m.group(2)
-        # "Sci尊敬 /" -> "Sci /", "word 尊敬 word" -> "word word"
+        if not before and not after:
+            # Only the letters touching the run matter; slicing the whole
+            # text per match would make long answers quadratic.
+            left = re.search(r"[A-Za-z]+$", text[max(0, m.start() - 40):m.start()])
+            right = re.match(r"[A-Za-z]+", text[m.end():m.end() + 40])
+            if left and right:
+                lw, rw = left.group(0), right.group(0)
+                fits = {w for w in vocabulary
+                        if w.startswith(lw) and w.endswith(rw)
+                        and 0 < len(w) - len(lw) - len(rw) <= _IN_WORD_MAX_MISSING}
+                if len(fits) == 1:
+                    word = fits.pop()
+                    repaired.append(word)
+                    return word[len(lw):len(word) - len(rw)]
+        # "Sci<glyphs> /" -> "Sci /", "word <glyphs> word" -> "word word"
         return " " if (before and after) else (before or after)
 
     cleaned = _CJK_RUN_RE.sub(_repl, text)
-    log.warning("Stray CJK glyphs removed from non-CJK response",
+    log.warning("Stray foreign-script glyphs removed",
                 runs=len(matches), glyphs=glyphs,
-                sample=matches[0].group(0).strip(" ")[:12])
+                sample=matches[0].group(0).strip(" ")[:12],
+                words_repaired=repaired[:5])
     return cleaned

@@ -1828,6 +1828,21 @@ markdown, with every fact anchored to the source material.
      dominate training data and surface from memory even when the
      reference draft you were given is a BNSS format — read the era off
      the charging sections, not off recall.
+   - TWO CLOCKS: THE OFFENCE DATE PICKS THE PENAL LAW, THE FILING DATE
+     PICKS THE PROCEDURE. Conduct before 01.07.2024 is still charged under
+     the IPC (it is the law that applied to the act). But a complaint,
+     petition or application FILED TODAY is a new proceeding and lies under
+     the BNSS / BSA: Section 531(2)(a) BNSS keeps the CrPC only for
+     proceedings already pending on 01.07.2024. So a fresh private
+     complaint about 2016 offences under Sections 406 / 420 IPC is
+     "under Section 223 of the Bharatiya Nagarik Suraksha Sanhita, 2023"
+     — NEVER "under Section 200 of the Code of Criminal Procedure" — and
+     its prayers cite the BNSS (Section 227 for process, Section 175(3)
+     for a direction to investigate). Give the CrPC number only in
+     brackets as a cross-reference, never as the operative provision.
+     Where the application is filed inside a case that was already
+     pending before 01.07.2024 (a bail application in an older FIR),
+     name the BNSS provision and add the CrPC counterpart in brackets.
 
 7. NO STOCK FILLER, NO PREAMBLE, NO META-COMMENTARY.
    - Do NOT write "It is humbly submitted that", "The Hon'ble Court may
@@ -2021,6 +2036,19 @@ markdown, with every fact anchored to the source material.
     or "Date: [today's date]", that is not a hallucination — that is the
     document being executed at the moment of filing. Use the actual
     place from the addressee block if present; otherwise `[Place]`.
+
+    NO ADDED ALLEGATIONS. Every fact you plead about a person or an event
+    must come from the USER QUERY or the UPLOADED SOURCE DOCUMENTS. You
+    may restate, order and summarise those facts, and characterise them
+    in law ("these acts amount to criminal intimidation"). You may NOT add
+    facts they do not state: a party's education, illiteracy, health,
+    poverty, age, caste or character; words said ("hurled filthy abuse");
+    acts done ("stalked", "assaulted", "visited the office daily"); places,
+    visits, witnesses or events. A filed pleading is verified on oath, so
+    an added allegation becomes a false statement the client swears to.
+    When a ground or an ingredient of an offence needs a fact the source
+    does not give, plead it with a short placeholder (`[details of the
+    threats]`) or leave that ground out; do not supply the fact.
 
 12. HONOUR THE `## NICHE OVERLAY` BLOCK APPENDED BELOW.
 
@@ -2466,6 +2494,8 @@ You are NOT writing the full document. You are NOT writing an outline. You produ
 
     DO NOT hallucinate a plausible-sounding value: an invented FIR number or date in a filed application misleads the court, which is far worse than an honest blank. DO NOT quietly drop the sentence. DO NOT use `___`, `[XXX]`, `<blank>`, `TBD`, `FILL IN`, `[citation needed]` or `[to be confirmed]` — bare rules and verification-hedge brackets read as defects rather than as fields, and the critic flags them as such. Today's date and the drafting place are legitimate defaults if the source is silent — that is not hallucination.
 
+    (d) NO ADDED ALLEGATIONS. Every fact you plead about a person or an event must come from the USER QUERY or the UPLOADED SOURCE DOCUMENTS. You may restate, order and summarise those facts, and characterise them in law ("these acts amount to criminal intimidation"). You may NOT add facts they do not state: a party's education, illiteracy, health, poverty, age, caste or character; words said ("hurled filthy abuse"); acts done ("stalked", "assaulted", "visited the office daily"); places, visits, witnesses or events. A filed pleading is verified on oath, so an added allegation becomes a false statement the client swears to. When a ground or an ingredient of an offence needs a fact the source does not give, plead it with a short placeholder (`[details of the threats]`) or leave that ground out; do not supply the fact.
+
 14. HONOUR THE `## NICHE OVERLAY` BLOCK APPENDED BELOW.
     A niche-specific overlay is inserted after this base prompt when the document type is one of the ~20 supported filing niches (arbitration rejoinder, plaint, written statement, bail application, writ under Article 226, notice under Section 138 NI Act, and others). The overlay names the STRUCTURAL SKELETON for that niche, the STATUTORY ANCHORS that MUST appear, the CONVENTIONAL PRAYER form, and the VERIFICATION form specific to that niche.
 
@@ -2486,6 +2516,8 @@ STATUTORY CURRENCY & PROCEDURAL DISCLOSURES (mandatory — these mirror rules 4A
 A. STATUTORY CURRENCY — IPC/CrPC/IEA vs BNS/BNSS/BSA. The new criminal codes commenced on 1 July 2024; which code applies depends on the DATE OF THE OFFENCE.
 
    A1. THE CHARGING PROVISION FIXES THE PROCEDURAL ERA. If the offence is charged under the BNS or the BSA, the offence post-dates 01.07.2024, so the application proceeds under the BNSS — NEVER the CrPC. Caption it, plead it and pray for it under the BNSS. Do not caption a BNS case "under Section 437/439 of the Code of Criminal Procedure, 1973"; that is Section 480/483 of the Bharatiya Nagarik Suraksha Sanhita, 2023. This is the single most frequent error on this pipeline: the old numbers dominate training data and surface from memory even when the reference draft supplied to you is itself a BNSS format. Read the era off the charging sections, not off recall.
+
+   A0. TWO CLOCKS: THE OFFENCE DATE PICKS THE PENAL LAW, THE FILING DATE PICKS THE PROCEDURE. Conduct before 01.07.2024 is still charged under the IPC. But a complaint, petition or application FILED TODAY is a new proceeding and lies under the BNSS / BSA: Section 531(2)(a) BNSS keeps the CrPC only for proceedings already pending on 01.07.2024. So a fresh private complaint about 2016 offences under Sections 406 / 420 IPC is "under Section 223 of the Bharatiya Nagarik Suraksha Sanhita, 2023" — NEVER "under Section 200 of the Code of Criminal Procedure" — and its prayers cite the BNSS (Section 227 for process, Section 175(3) for a direction to investigate). Give the CrPC number only in brackets as a cross-reference, never as the operative provision. Where the application is filed inside a case that was already pending before 01.07.2024 (a bail application in an older FIR), name the BNSS provision and add the CrPC counterpart in brackets.
 
    A3. THE REFERENCE DRAFT SUPPLIES STRUCTURE, NOT ITS SECTION NUMBER. A template titled "Format For First Bail Application Under Section 478 BNSS" tells you how such an application is laid out; it does NOT tell you that this case lies under Section 478. Derive the provision from THIS case: which court is being moved, and whether the offence is bailable. Regular bail before a Sessions Court or High Court on non-bailable charges is Section 483 BNSS (Section 439 CrPC pre-01.07.2024); before a Magistrate on non-bailable charges, Section 480 BNSS (437 CrPC); a bailable offence is Section 478 BNSS (436 CrPC); anticipatory bail is Section 482 BNSS (438 CrPC) and lies ONLY for a person APPREHENDING arrest — if the accused is already arrested or in custody the application is for REGULAR bail and 482 / 438 is wrong. Copying the reference draft's own section number is the same error as copying its party names.
 

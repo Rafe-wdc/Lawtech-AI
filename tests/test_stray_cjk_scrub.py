@@ -72,3 +72,45 @@ def test_a_whole_sentence_that_flipped_to_chinese_inside_an_english_answer_is_re
     assert not _CJK.search(out)
     assert out.startswith(english.rstrip(" "))
     assert out.endswith("The trial court convicted the accused.")
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-10: Thai inside a party name, and other scripts no Indian legal
+# answer uses. Names below are invented.
+# ---------------------------------------------------------------------------
+
+_THAI_IN_NAME = "Dine\u0e02\u0e49\u0e2dhbhai"     # "Dineshbhai" with its "s" glitched
+
+
+def test_thai_inside_a_name_is_repaired_from_the_correct_spelling_elsewhere():
+    text = (f"one {_THAI_IN_NAME} Mehta of Vadgaon introduced the parties. "
+            "Later Dineshbhai Mehta confirmed the loan.")
+    out = _strip_stray_cjk(text)
+    assert out == ("one Dineshbhai Mehta of Vadgaon introduced the parties. "
+                   "Later Dineshbhai Mehta confirmed the loan.")
+
+
+def test_thai_inside_a_name_without_a_reference_spelling_is_just_dropped():
+    assert _strip_stray_cjk(f"witness {_THAI_IN_NAME} Mehta") == "witness Dinehbhai Mehta"
+
+
+def test_two_possible_spellings_are_not_guessed_between():
+    text = f"{_THAI_IN_NAME} met Dineshbhai and Dinechbhai."
+    assert _strip_stray_cjk(text).startswith("Dinehbhai met")
+
+
+def test_stray_cyrillic_and_hebrew_are_removed():
+    assert _strip_stray_cjk("Section 138 \u0441\u0442\u0430 of the Act") == "Section 138 of the Act"
+    assert _strip_stray_cjk("the \u05e9\u05dc\u05d5\u05dd Court") == "the Court"
+
+
+def test_a_thai_language_answer_is_left_alone():
+    thai = "\u0e01\u0e32\u0e23\u0e1e\u0e34\u0e08\u0e32\u0e23\u0e13\u0e32\u0e04\u0e14\u0e35"
+    assert _strip_stray_cjk(thai) == thai
+
+
+def test_greek_and_urdu_are_never_touched():
+    greek = "the toxicology report found 2.5 \u03bcg of the alpha (\u03b1) isomer"
+    urdu = "\u0639\u062f\u0627\u0644\u062a \u0646\u06d2 \u062d\u06a9\u0645 \u062f\u06cc\u0627"
+    assert _strip_stray_cjk(greek) is greek
+    assert _strip_stray_cjk(urdu) is urdu

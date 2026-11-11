@@ -338,3 +338,100 @@ def test_concept_rule_on_prod_labels():
                  ("SHYAM KUMAR", "STATE"), ("Justice K.S. Puttaswamy (Retd.)", "Union of India"),
                  ("Tata Cellular", "Union of India"), ("Badat and Co.", "East India Trading Co.")]:
         assert not _concept_label(a, b), (a, b)
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-10: a client's file listing its own earlier suits. Names invented.
+# ---------------------------------------------------------------------------
+
+_FILE_TEXT = (
+    "(a) Special Civil Suit No. 216/2012, Ramesh Kantilal Joshi is the plaintiff "
+    "against Naresh Govind Patel and Kunal Patel; land dispute.\n"
+    "(b) Criminal Case No. 11491/2012, Mahesh Kantilal Joshi against Kunal Patel, "
+    "cheque return case.\n"
+)
+_HISTORY_DRAFT = (
+    "The accused are habitual litigants, as the following show:\n"
+    "- Plaint and docket of Special Civil Suit No. 216 of 2012 "
+    "(Ramesh Kantilal Joshi vs Naresh Govind Patel & Kunal Patel);\n"
+    "- Complaint in Criminal Case No. 11491 of 2012 (Mahesh Kantilal Joshi vs Kunal Patel).\n\n"
+    "In P.B. Desai v. State of Maharashtra, (2013) 15 SCC 481, the Court held so.\n"
+)
+
+
+def test_a_bracket_around_the_case_is_not_part_of_the_names():
+    cases = extract_cited_cases(_HISTORY_DRAFT)
+    first = cases[0]
+    assert first.petitioner == "Ramesh Kantilal Joshi"
+    assert first.respondent == "Naresh Govind Patel & Kunal Patel"
+    assert "(" not in first.display and ")" not in first.display
+
+
+def test_brackets_inside_a_name_survive():
+    case = extract_cited_cases("In Laxmi (Dead) v. State of Bihar, (2001) 3 SCC 10, it was held.")[0]
+    assert case.petitioner == "Laxmi (Dead)"
+
+
+def test_the_matters_own_suits_from_the_uploaded_file_are_left_out():
+    out = asyncio.run(append_judgments_cited(
+        _HISTORY_DRAFT, lookup=_fake_lookup, user_query="draft a private complaint",
+        source_text=_FILE_TEXT))
+    block = out.split(HEADING, 1)[1]
+    assert "Ramesh Kantilal Joshi" not in block and "Mahesh Kantilal Joshi" not in block
+    assert "P.B. Desai" in block                    # the real authority stays
+    assert out.startswith(_HISTORY_DRAFT.rstrip())  # the draft body is untouched
+
+
+def test_without_the_file_text_they_are_still_listed():
+    out = asyncio.run(append_judgments_cited(_HISTORY_DRAFT, lookup=_fake_lookup))
+    assert "Ramesh Kantilal Joshi" in out.split(HEADING, 1)[1]
+
+
+def test_a_cited_or_verified_case_from_the_file_is_kept():
+    draft = ("As held in Ramesh Kantilal Joshi v. Naresh Govind Patel, (2015) 4 SCC 99, "
+             "the suit was barred.\n")
+    out = asyncio.run(append_judgments_cited(draft, lookup=lambda c: None,
+                                             source_text=_FILE_TEXT))
+    assert "Ramesh Kantilal Joshi" in out.split(HEADING, 1)[1]   # has a citation
+
+    def found(case):
+        return FoundJudgment("Bombay High Court", "01-02-2013", None)
+    out = asyncio.run(append_judgments_cited(_HISTORY_DRAFT, lookup=found,
+                                             source_text=_FILE_TEXT))
+    assert "Ramesh Kantilal Joshi" in out.split(HEADING, 1)[1]   # verified judgment
+
+
+def test_synthesis_passes_the_uploaded_text(monkeypatch):
+    from core.state import AgentResult
+    from agents.orchestrator import orchestrator_synthesize_node
+
+    monkeypatch.setattr(jc, "_lookup_one", _fake_lookup)
+    state = {
+        "original_query": "read the file and draft a private complaint",
+        "query": "read the file and draft a private complaint",
+        "task": "Drafting",
+        "tasks_planned": ["Drafting"],
+        "file_context": {"extracted_texts": [{"name": "arji.pdf", "text": _FILE_TEXT}]},
+        "agent_results": {"Drafting": AgentResult(agent_name="Drafting", content=_HISTORY_DRAFT)},
+    }
+    answer = asyncio.run(orchestrator_synthesize_node(state))["final_response"]
+    block = answer.split(HEADING, 1)[1]
+    assert "P.B. Desai" in block and "Ramesh Kantilal Joshi" not in block
+
+
+def test_suits_listed_from_a_file_in_another_script_are_left_out():
+    """A Gujarati file, an English draft: names cannot be matched, but the
+    "(A vs B)" right after a suit number is still the matter's own history."""
+    gujarati_file = "અમો ફરીયાદી ... સ્પે.દીવાની કેસ નં.૨૧૬/૨૦૧૨ ..."
+    out = asyncio.run(append_judgments_cited(
+        _HISTORY_DRAFT, lookup=_fake_lookup, source_text=gujarati_file))
+    block = out.split(HEADING, 1)[1]
+    assert "Ramesh Kantilal Joshi" not in block and "Mahesh Kantilal Joshi" not in block
+    assert "P.B. Desai" in block
+
+
+def test_an_authority_cited_in_prose_is_kept_even_with_a_file():
+    draft = "In Anil Verma v. Sunil Mehta the Court held so, which applies here.\n"
+    out = asyncio.run(append_judgments_cited(draft, lookup=lambda c: None,
+                                             source_text="અમો ફરીયાદી"))
+    assert "Anil Verma" in out.split(HEADING, 1)[1]

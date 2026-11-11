@@ -218,8 +218,18 @@ def _trim_party(party: str, leading: bool) -> str:
     if leading:
         while words and words[0].lower().strip(",.") in _LEADING_NOISE:
             words.pop(0)
+    # A bracket that opens before the first name or closes after the last one
+    # belongs to the sentence around the case, not to the case: "(Ramesh
+    # Joshi vs Kunal Patel);" in a list of documents rendered as
+    # "*(Ramesh Joshi) v. Kunal Patel)*" (2026-11-10; names changed).
+    if words and words[0].startswith("(") and ")" not in words[0]:
+        words[0] = words[0][1:]
+    if words and words[-1].endswith(")") and \
+            sum(w.count(")") - w.count("(") for w in words) > 0:
+        words[-1] = words[-1][:-1]
+    words = [w for w in words if w]
     opened = sum(w.count("(") - w.count(")") for w in words)
-    if opened > 0:
+    if opened > 0 and words:
         words[-1] += ")" * opened
     while words and words[-1].lower().strip(",") in {"of", "and", "the", "for", "&"}:
         words.pop()
@@ -648,10 +658,31 @@ def render_block(results: list[tuple[CitedCase, FoundJudgment | None]]) -> str:
     return f"{HEADING}\n\n" + "\n".join(lines)
 
 
-async def append_judgments_cited(draft: str, lookup=None, user_query: str = "") -> str:
+_CASE_NUMBER_LEAD_RE = re.compile(
+    r"\b(?:suit|case|complaint|petition|appeal|application|revision|reference|"
+    r"dawa|darkhast|c\.\s*c\.|r\.\s*c\.\s*s\.|s\.\s*c\.\s*s\.|m\.\s*a\.)\s*"
+    r"(?:no\.?|number|nos\.?)\s*[\w/.\-]+(?:\s*of\s*\d{4})?[\s(:,-]{0,6}$",
+    re.I,
+)
+
+
+def _after_case_number(case: CitedCase) -> bool:
+    """True when the case name directly follows a case number."""
+    if not case.raw_name or case.raw_name not in case.context:
+        return False
+    lead = case.context[:case.context.index(case.raw_name)][-90:]
+    return bool(_CASE_NUMBER_LEAD_RE.search(lead))
+
+
+async def append_judgments_cited(draft: str, lookup=None, user_query: str = "",
+                                 source_text: str = "") -> str:
     """Return `draft` with a Judgments Cited block, or `draft` unchanged.
 
     `user_query` lets the draft's own parties be told apart from authorities.
+    `source_text` is the text of the uploaded documents: an unverified,
+    uncited "X v. Y" whose parties all appear in it is the matter's own
+    litigation history (a suit or complaint the client's file lists), not
+    an authority, and is left out of the list.
     `lookup` is injectable for tests; production uses the ES indices.
     """
     lookup = lookup or _lookup_one
@@ -688,6 +719,30 @@ async def append_judgments_cited(draft: str, lookup=None, user_query: str = "") 
     results = [(c, f) for c, f in results if not _heading_not_case(c, f)]
     if dropped:
         log.info("Judgments Cited: unverified heading labels left out", labels=dropped[:5])
+    if not results:
+        return draft
+    # The client's own file lists earlier suits and complaints by party
+    # names ("Special Civil Suit No. 216 of 2012 (A vs B)"). Those are
+    # facts of this matter, not judgments relied on. An entry with no
+    # reporter citation, not found in either index, whose parties all
+    # come from the uploaded documents is left out (2026-11-10: eleven
+    # such suits were listed as "not verified" judgments).
+    source_tokens = _tokens(source_text) if source_text else set()
+    def _own_history(c: CitedCase, f) -> bool:
+        if f is not None or c.citation:
+            return False
+        if source_tokens and _tokens(c.petitioner) <= source_tokens                 and _tokens(c.respondent) <= source_tokens:
+            return True
+        # The source may be in another script (a Gujarati file, an English
+        # draft), so names cannot always be matched. An unverified, uncited
+        # "(A vs B)" placed right after a lower-court number ("Special Civil
+        # Suit No. 216 of 2012 (A vs B)") is a suit in the matter's history.
+        return bool(source_text) and _after_case_number(c)
+    history = [c.display for c, f in results if _own_history(c, f)]
+    results = [(c, f) for c, f in results if not _own_history(c, f)]
+    if history:
+        log.info("Judgments Cited: the matter's own suits left out",
+                 count=len(history), sample=history[:3])
     if not results:
         return draft
     cases = [c for c, _ in results]

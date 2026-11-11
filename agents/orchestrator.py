@@ -81,6 +81,18 @@ _INTERNAL_CITE_MARKER_RE = re.compile(
 # `_resolve_wants_table`. See docs/intent_layer_implementation_plan.md.
 
 
+def _uploaded_text(state) -> str:
+    """Raw text of the files uploaded with this request, for telling the
+    matter's own litigation history apart from cited authorities."""
+    try:
+        fc = FileContextData.from_state(state)
+    except Exception:
+        return ""
+    if not fc or not fc.extracted_texts:
+        return ""
+    return (chr(10) * 2).join((e.get("text") or "") for e in fc.extracted_texts)
+
+
 def _strip_internal_cite_markers(text: str) -> str:
     """Remove unfilled `[CITE: ...]` placeholder markers from the final draft.
 
@@ -2699,7 +2711,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             # for the judgments it cites (see core/judgments_cited.py).
             from core.judgments_cited import append_judgments_cited
             cleaned = await append_judgments_cited(
-                cleaned, user_query=state.get("original_query") or query)
+                cleaned, user_query=state.get("original_query") or query,
+                source_text=_uploaded_text(state))
             return {
                 "final_response": _missing_sources_banner(errored) + cleaned,
                 "source_metadata": _serialize_sources(result),
@@ -2813,7 +2826,8 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
             # links and would otherwise be scanned too).
             from core.judgments_cited import append_judgments_cited
             enriched = await append_judgments_cited(
-                enriched, user_query=state.get("original_query") or query)
+                enriched, user_query=state.get("original_query") or query,
+                source_text=_uploaded_text(state))
             if citations_text.strip():
                 enriched += "\n\n---\n\n## REFERENCES & CITATIONS\n" + citations_text
             if research_results:

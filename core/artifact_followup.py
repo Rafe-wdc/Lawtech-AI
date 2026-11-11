@@ -21,6 +21,7 @@ from core.artifact_edit import EditError, apply_instruction, route_instruction
 from core.artifact_store import (
     SOURCE_ASSISTANT, SOURCE_DRAFT, StaleVersion, artifact_id_for_thread, artifact_store,
 )
+from core.draft_fields import fields_payload
 from core.draft_to_blocks import artifact_to_markdown, markdown_to_artifact
 from core.logger import get_logger, short_err
 
@@ -49,7 +50,7 @@ async def record_draft(thread_id: str, draft_md: str, language: str = "en") -> d
         log.info("Draft artifact emitted", version=art.version, sections=len(art.sections),
                  blocks=sum(len(s.blocks) for s in art.sections))
         return {"type": "artifact_done", "artifact_id": art.artifact_id,
-                "version": art.version, "artifact": art.model_dump()}
+                "version": art.version, "artifact": art.model_dump(), **fields_payload(art)}
     except Exception as e:
         log.warning("Draft artifact skipped", error=short_err(e))
         return None
@@ -171,6 +172,7 @@ async def try_partial_edit(thread_id: str, query: str) -> dict | None:
             "base_version": base, "version": new.version, "summary": summary,
             "edited_section_ids": [s.id for s in edited],
             "sections": [s.model_dump() for s in changed],
+            **fields_payload(new),
         },
         "markdown": artifact_to_markdown(new),
         "summary": summary,

@@ -1,9 +1,17 @@
 # Fill the blanks: frontend handoff
 
 **For:** the web and mobile app teams building the draft side panel.
-**Adds to:** `docs/draft_panel_frontend_contract.md`. Nothing in that contract
-changes: the same events, endpoints and block format, and the same yellow
-`[[blanks]]` in the page.
+**Adds to:** `docs/draft_panel_frontend_contract.md`. Everything in that
+contract still works as written: the same events, endpoints and block format,
+and the same yellow `[[blanks]]` in the page.
+
+**What's new in the API**
+
+- **No request is needed to get the fields.** Every response and event that
+  carries the draft now also carries `fields` and `blanks`, next to the draft
+  (section 3).
+- **One new endpoint,** to fill: `POST /pyapi/artifact/{id}/fill`. It returns
+  the whole draft as saved, with its fields (section 4).
 
 ## 1. What the user gets
 
@@ -74,16 +82,31 @@ Guidelines:
 **Mobile:** the draft is full screen. "Fill blanks (9)" opens a bottom sheet
 or a tab with the same list of inputs.
 
-## 3. Loading the fields
+## 3. Where the fields come from
+
+`fields` and `blanks` come with the draft, so the form is ready when the
+draft is. There is no separate request.
+
+| Where the app gets the draft | Where `fields` and `blanks` are |
+|---|---|
+| `artifact_done` (stream) | next to `artifact` in the event |
+| `artifact_patch` (stream, chat follow-up or select-to-edit) | in the event, next to `sections` |
+| `GET /pyapi/artifact/{id}` (also with `?version=n`) | next to the draft's own keys |
+| `PUT /pyapi/artifact/{id}` (typed save) | in the response, next to `sections` |
+| `POST /pyapi/artifact/{id}/restore` | next to the draft's own keys |
+| `POST /pyapi/artifact/{id}/fill` | next to the draft's own keys |
+
+Each time, replace the form with the `fields` you just received. They always
+describe the version that came with them.
 
 ```
-GET /pyapi/artifact/{artifact_id}/fields
-GET /pyapi/artifact/{artifact_id}/fields?version=2      (an older version, read only)
+GET /pyapi/artifact/{artifact_id}
 
 → 200
 {
   "artifact_id": "art_7f3c2a9e",
   "version": 3,
+  "title": "...", "page": {...}, "sections": [...],      the draft, as before
   "blanks": 12,                       every place still empty, all fields together
   "fields": [
     {
@@ -108,7 +131,10 @@ GET /pyapi/artifact/{artifact_id}/fields?version=2      (an older version, read 
     }
   ]
 }
-→ 404 {"error": "not_found"}         no stored draft with this id
+
+artifact_done in the stream:
+data: {"type": "artifact_done", "artifact_id": "art_7f3c2a9e", "version": 1,
+       "artifact": { ...the draft... }, "fields": [ ... ], "blanks": 12}
 ```
 
 | Field | Meaning |
@@ -122,9 +148,8 @@ GET /pyapi/artifact/{artifact_id}/fields?version=2      (an older version, read 
 Fields come in the order their blanks first appear in the draft, from the
 cause title to the verification.
 
-**When to reload:** whenever the draft changes. That means after
-`artifact_done`, `artifact_patch`, a `PUT` save, a restore, or a fill. A fill
-already returns the new `fields`, so it doesn't need a second request.
+`fields` and `blanks` are not stored as part of the draft. Word export accepts
+the draft object exactly as you received it; it ignores these keys.
 
 ## 4. Filling
 
@@ -135,25 +160,26 @@ POST /pyapi/artifact/{artifact_id}/fill
   "values": {"district": "Pune", "fathers name": "Ramesh Kumar"}
 }
 
-→ 200
+→ 200  the whole draft as saved, the same object GET returns, plus two keys:
 {
   "artifact_id": "art_7f3c2a9e",
   "version": 4,
-  "sections": [ ...the changed sections, complete... ],
+  "title": "...", "page": {...}, "sections": [ ...every section... ],
+  "fields": [ ...the fields still to fill... ],
+  "blanks": 7,
   "filled": ["district", "fathers name"],
-  "unknown": [],                      keys that match no blank (the draft changed); ignore or refresh
-  "fields": [ ...the fields still to fill... ]
+  "unknown": []                       keys that match no blank (the draft changed); ignore or refresh
 }
-→ 200 {"version": 3, "sections": [], "unchanged": true, ...}   nothing matched
-→ 409 {"error": "stale_version", "latest_version": 5}          reload the draft and the fields, then retry
-→ 422                                                          empty "values"
-→ 404                                                          no stored draft
+→ 200 the same object with "unchanged": true and the old version     nothing matched
+→ 409 {"error": "stale_version", "latest_version": 5}               reload the draft, then retry
+→ 422                                                               empty "values"
+→ 404                                                               no stored draft
 ```
 
 - Send several fields in one request, e.g. on "Apply" or after a pause of
   about 1 to 2 seconds. Empty values are skipped, so you can send the whole
   form.
-- Re-render the returned `sections`; they replace those sections in the page.
+- Replace the draft and the form with the response; it is the complete draft.
   Then use the returned `version` as the next `base_version`.
 - Optionally, show the value in the page while the user types, then replace it
   with the server's sections. The server's version is the one that counts.
@@ -203,14 +229,14 @@ POST /pyapi/artifact/{artifact_id}/fill
 
 | Part | State |
 |---|---|
-| `GET /pyapi/artifact/{id}/fields` | built, in PR against dev |
+| `fields` and `blanks` in every draft response and event | built, in PR against dev |
 | `POST /pyapi/artifact/{id}/fill` | built, in PR against dev |
 | Layout, form, page highlights | frontend |
 
 Once deployed on dev (`https://tool.lawttorney.com/pyapi`, same `X-API-Key`):
 
 ```
-curl -H "X-API-Key: $KEY" https://tool.lawttorney.com/pyapi/artifact/<artifact_id>/fields
+curl -H "X-API-Key: $KEY" https://tool.lawttorney.com/pyapi/artifact/<artifact_id>
 curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d '{"base_version": 1, "values": {"district": "Pune"}}' \
   https://tool.lawttorney.com/pyapi/artifact/<artifact_id>/fill

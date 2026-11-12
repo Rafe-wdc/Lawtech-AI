@@ -1039,13 +1039,15 @@ class _SqliteChatHistoryStore:
     ) -> dict | None:
         """Load a single message by thread_id + turn_number.
 
-        Returns {turn_number, user_query, ai_response, created_at} or None.
+        Returns {turn_number, user_query, ai_response, created_at,
+        primary_artifact_kind} or None.
         """
         self._ensure_schema()
         conn = self._get_connection()
         try:
             row = conn.execute("""
-                SELECT turn_number, user_query, ai_response, created_at
+                SELECT turn_number, user_query, ai_response, created_at,
+                       primary_artifact_kind
                 FROM messages
                 WHERE thread_id = ? AND turn_number = ?
             """, (thread_id, turn_number)).fetchone()
@@ -1056,6 +1058,7 @@ class _SqliteChatHistoryStore:
                 "user_query": row["user_query"],
                 "ai_response": row["ai_response"],
                 "created_at": row["created_at"],
+                "primary_artifact_kind": row["primary_artifact_kind"] or "",
             }
         finally:
             conn.close()
@@ -2431,7 +2434,8 @@ class _PostgresChatHistoryStore:
             conn.row_factory = dict_row
             row = conn.execute("""
                 SELECT turn_number, user_query, ai_response,
-                       TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at
+                       TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                       primary_artifact_kind
                 FROM messages
                 WHERE thread_id = %s AND turn_number = %s
             """, (thread_id, turn_number)).fetchone()

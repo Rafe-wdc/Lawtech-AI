@@ -250,6 +250,15 @@ judge call that decides single-pass vs per-section. Before touching
      budget the draft ships unchanged and the request is marked unverified.
      `ADDED_FACTS_CHECK=on|shadow|off`.
 
+   **Notes for the lawyer never reach the filed copy (2026-11-12).** The
+   warnings and notes a draft carries are for the screen (chat and draft
+   panel): "Details taken out", "Please check before filing", "Draft
+   incomplete", the language and case-law warnings, and the failed-search
+   line. `/pyapi/export` (Word and PDF, Markdown and panel paths) removes
+   them via `core/lawyer_notes.py`. A new note must open with a bold lead,
+   and that lead must be added to `DRAFT_NOTE_MARKERS`, or it will be
+   printed into the document the advocate files.
+
    The rule above still holds for everything else. The exception exists
    because the critic was observed mis-parsing and defaulting to `passes=True`
    on exactly these drafts, and because bug 1 (the doc-type flip) established

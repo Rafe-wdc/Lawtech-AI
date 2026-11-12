@@ -2383,6 +2383,9 @@ def _export_artifact(raw: dict, fmt: str, title: Optional[str]):
         return _error_response(400, "validation_error",
                                f"Invalid artifact: {e.error_count()} error(s), first: "
                                f"{e.errors()[0].get('msg', '')[:120]}")
+    # The panel keeps the lawyer's notes on screen; the filed copy has none.
+    from .lawyer_notes import strip_from_artifact
+    artifact = strip_from_artifact(artifact)
     if fmt == "docx":
         from .draft_docx import artifact_to_docx, docx_filename
         buf, filename = artifact_to_docx(artifact), docx_filename(artifact)
@@ -2413,6 +2416,7 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         title = data.title
         sources = None
         created_at = None
+        is_draft = False
 
         if data.artifact is not None:
             return _export_artifact(data.artifact, data.format, data.title)
@@ -2433,6 +2437,7 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
             md_text = msg["ai_response"]
             title = title or msg.get("user_query", "Lawttorney Export")[:100]
             created_at = msg.get("created_at")
+            is_draft = msg.get("primary_artifact_kind") == "draft"
         else:
             return _error_response(
                 400,
@@ -2441,6 +2446,13 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
             )
 
         if not md_text or not md_text.strip():
+            return _error_response(400, "validation_error", "No content to export")
+
+        # Notes for the lawyer (what was taken out, what to check) stay on
+        # screen and are left out of the file. See core/lawyer_notes.py.
+        from .lawyer_notes import has_draft_note, strip_from_markdown
+        md_text = strip_from_markdown(md_text, is_draft=is_draft or has_draft_note(md_text))
+        if not md_text.strip():
             return _error_response(400, "validation_error", "No content to export")
 
         buf, filename, media_type = export_document(

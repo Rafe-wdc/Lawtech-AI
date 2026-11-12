@@ -3825,6 +3825,56 @@ def _unresolved_review_banner(history) -> str:
     )
 
 
+# The added-facts check needs one find call and two confirm calls (5-20 s
+# measured). Below this much request budget it is skipped, and the request
+# is marked unverified, rather than racing the outer timeout.
+ADDED_FACTS_MIN_BUDGET_S = 30.0
+
+
+def _split_review_banner(draft: str) -> tuple[str, str]:
+    """(draft body, the closing self-refine review note or "")."""
+    i = draft.find(f"\n\n---\n\n> ⚠ {_UNRESOLVED_REVIEW_BANNER_MARKER}")
+    return (draft, "") if i < 0 else (draft[:i], draft[i:])
+
+
+async def _take_out_added_facts(draft: str, user_facts: str, user_query: str,
+                                state) -> str:
+    """Take out details the client's account does not state; see
+    core/added_facts.py. The review note, when there is one, stays last.
+    Never raises: on any failure the draft is returned unchanged and the
+    request is marked unverified."""
+    from core.added_facts import build_source, check_added_facts, mode
+    from core.added_facts import LOCAL_TIMEOUT_S as _AF_TIMEOUT
+    if mode() == "off" or not (draft or "").strip():
+        return draft
+    from core.audit_status import mark_unverified
+    try:
+        from core.deadline import remaining as _remaining
+        rem = _remaining()
+        if rem is not None and rem < ADDED_FACTS_MIN_BUDGET_S:
+            mark_unverified()
+            log.warning("added_facts_check_unavailable", reason="budget",
+                        remaining_s=round(rem, 1))
+            return draft
+        body, banner = _split_review_banner(draft)
+        source = build_source(user_facts, user_query,
+                              (state or {}).get("chat_history"),
+                              (state or {}).get("summary_text") or "")
+        progress("drafting", "Checking the draft's facts against your documents...",
+                 step="fact_check")
+        timeout = _AF_TIMEOUT if rem is None else max(10.0, min(_AF_TIMEOUT, rem - 15.0))
+        res = await check_added_facts(body, source, local_timeout=timeout)
+        if res.status == "edited":
+            progress("drafting",
+                     f"Took out {len(res.removed)} detail(s) your documents do not state",
+                     substep=True, step="fact_check")
+        return res.draft + banner
+    except Exception as e:
+        mark_unverified()
+        log.warning("added_facts_check_unavailable", reason="error", error=short_err(e))
+        return draft
+
+
 def _make_pair_clock(budget_s: float = PAIR_TOTAL_BUDGET_S):
     """Return a `remaining()` closure counting down `budget_s` from NOW.
 
@@ -6085,6 +6135,14 @@ async def drafting_node(state: LegalAgentState) -> dict:
                 "Review-and-redraft mode: self_refine skipped "
                 "(critic reliably rewrites correct redrafts into generic templates)"
             )
+
+        # --- 8. Details the client never gave -------------------------------
+        # An "illiterate" complainant, accused "accompanied by musclemen", a
+        # litigant called "the Complainant's wife": once the client verifies
+        # the complaint, each is a false statement on oath. Found and confirmed
+        # by LLM passes against the client's own account, taken out word by
+        # word in code. Why the critic cannot carry it: core/added_facts.py.
+        draft = await _take_out_added_facts(draft, user_facts, original_query, state)
 
         # --- 9. Build AgentResult with source attribution ---
         if reference_kind == "es":

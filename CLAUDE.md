@@ -214,8 +214,8 @@ judge call that decides single-pass vs per-section. Before touching
    prayer_relief_mismatch, canonical_example_substitution, etc.). Do NOT add
    per-rule regex/threshold checks anywhere — extend CRITIQUE_PROMPT instead.
 
-   **EXCEPTION (2026-09-02) — two failures are checked deterministically in
-   code, NOT through the critic.** Both were measured slipping past it:
+   **EXCEPTION (2026-09-02, extended 2026-11-11) — three failures are
+   checked outside the critic.** All three were measured slipping past it:
 
    - **Off-target language.** 4 of 42 regional drafts came back wholly or
      largely in English despite a regional request, two at a script ratio of
@@ -233,6 +233,22 @@ judge call that decides single-pass vs per-section. Before touching
      the retrieved statutes verbatim in English.
      `_missing_planned_sections` compares planned headings against emitted
      ones and repairs missing sections in pairs, capped and budget-gated.
+   - **Added facts (2026-11-11), its own LLM check, not the critic.** Drafts
+     stated details the client never gave: an "illiterate" complainant,
+     accused "accompanied by their musclemen", a litigant called "the
+     Complainant's wife", "aged parents wholly dependent on him", "no child
+     was born". On a complaint verified on oath each one is a false
+     statement. The NO ADDED ALLEGATIONS prompt rule reduced it without
+     stopping it, and the critic, given the source text, passed "filthy
+     abuse" and flagged formatting. `core.added_facts.check_added_facts`
+     runs after self-refine in `drafting_node`. Flash calls, one per ~8K-char
+     part of the draft, list details the client's account does not state;
+     two Flash confirm calls must both
+     find a detail unsupported. Code, not the model, then takes the words
+     out and refuses any correction that adds words of its own. A closing
+     note lists what was taken out. It fails closed: on error or a short
+     budget the draft ships unchanged and the request is marked unverified.
+     `ADDED_FACTS_CHECK=on|shadow|off`.
 
    The rule above still holds for everything else. The exception exists
    because the critic was observed mis-parsing and defaulting to `passes=True`

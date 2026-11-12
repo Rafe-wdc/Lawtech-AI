@@ -1,0 +1,133 @@
+{
+  "_readme": [
+    "Judges the judge-persona feature can profile, and exactly how each is recorded in our indexes.",
+    "Curated by a person: list only values that are this judge. Similar names belong to other people",
+    "(e.g. 'R. MURALIDHAR' is a tribunal member, 'DR. M.R. SHAH' sat in Gauhati HC).",
+    "Find values:  python scripts/build_judge_registry.py candidates <name>",
+    "Check file:   python scripts/build_judge_registry.py check",
+    "sources[].index: 'sci_judgments' (Supreme Court) needs bench_phrases. 'judgments' (High Courts) needs bench_values",
+    "  and court_names (exact court_name values, e.g. 'odisa high court' as spelled in the index).",
+    "aliases: names users and judgments use for the judge, including a first name a judge signs with",
+    "  (Kurian Joseph signs 'KURIAN, J.').",
+    "status: sitting | retired | unknown.  verified: true once a person has checked every value."
+  ],
+  "judges": [
+    {
+      "judge_id": "sc-mr-shah",
+      "name": "M.R. Shah",
+      "courts": ["Supreme Court of India", "High Court of Gujarat"],
+      "status": "retired",
+      "verified": false,
+      "aliases": ["M.R. Shah", "Mukeshkumar Rasikbhai Shah"],
+      "sources": [
+        {"index": "sci_judgments", "bench_phrases": ["M.R. SHAH"]},
+        {"index": "judgments", "court_names": ["gujarat high court"],
+         "bench_values": ["M.R. SHAH", "M.R. Shah", "HONOURABLE MR.JUSTICE M.R. SHAH", "M.R. Shah, J.",
+                          "MR.JUSTICE M.R. SHAH"]}
+      ]
+    },
+    {
+      "judge_id": "sc-vikram-nath",
+      "name": "Vikram Nath",
+      "courts": ["Supreme Court of India", "High Court of Gujarat"],
+      "status": "sitting",
+      "verified": false,
+      "aliases": ["Vikram Nath"],
+      "sources": [
+        {"index": "sci_judgments", "bench_phrases": ["VIKRAM NATH"]},
+        {"index": "judgments", "court_names": ["gujarat high court"],
+         "bench_values": ["VIKRAM NATH", "MR. VIKRAM NATH", "MR. JUSTICE VIKRAM NATH", "MR VIKRAM NATH",
+                          "VIKRAM NATH, CJ", "MR JUSTICE VIKRAM NATH", "Vikram Nath",
+                          "HONOURABLE THE CHIEF JUSTICE MR. VIKRAM NATH", "Mr. Vikram Nath", "VIKRAM NATH, CJ."]}
+      ]
+    },
+    {
+      "judge_id": "sc-abhay-s-oka",
+      "name": "Abhay S. Oka",
+      "courts": ["Supreme Court of India", "High Court of Bombay"],
+      "status": "retired",
+      "verified": false,
+      "aliases": ["Abhay S. Oka", "Abhay Shreeniwas Oka", "A.S. Oka"],
+      "sources": [
+        {"index": "sci_judgments", "bench_phrases": ["ABHAY S. OKA"]},
+        {"index": "judgments", "court_names": ["bombay high court"],
+         "bench_values": ["ABHAY S. OKA", "Abhay S. Oka", "ABHAY S. OKA, J.", "Abhay S. Oka, J.", "ABHAY S. OKA,J.",
+                          "Abhay S. OKA", "Hon'ble Mr. Justice Abhay S. Oka", "SHRI ABHAY S. OKA"]}
+      ]
+    },
+    {
+      "judge_id": "sc-jb-pardiwala",
+      "name": "J.B. Pardiwala",
+      "courts": ["Supreme Court of India", "High Court of Gujarat"],
+      "status": "sitting",
+      "verified": false,
+      "aliases": ["J.B. Pardiwala", "Jamshed Burjor Pardiwala"],
+      "sources": [
+        {"index": "sci_judgments", "bench_phrases": ["PARDIWALA"]},
+        {"index": "judgments", "court_names": ["gujarat high court"],
+         "bench_values": ["J.B.PARDIWALA", "J.B. PARDIWALA", "J.B. Pardiwala", "J. B. PARDIWALA",
+                          "MR.JUSTICE J.B.PARDIWALA", "J.B. Pardiwala, J", "MR. JUSTICE J.B.PARDIWALA",
+                          "J.B. Pardiwala, J.", "J.B.Pardiwala", "J. B. PARDIWALA, J",
+                          "HONOURABLE MR.JUSTICE J.B.PARDIWALA", "MR JUSTICE J.B.PARDIWALA",
+                          "HONOURABLE MR. JUSTICE J.B.PARDIWALA", "J.B. PARDIWALA, J.", "MR J.B.PARDIWALA",
+                          "J. B. Pardiwala", "MR J.B. PARDIWALA", "MR. JUSTICE J.B. PARDIWALA", "Mr. J.B.Pardiwala",
+                          "J B PARDIWALA", "J. B. PARDIWALA, J.", "J.B. PARDIWALA, J",
+                          "HONOURABLE MR. JUSTICE J. B. PARDIWALA", "J.B. Pardiwala J.", "J.B.Pardiwala, J.",
+                          "MR. J.B.PARDIWALA", "Mr. J.B. Pardiwala", "Mr. J.B.Pardiwala, J.",
+                          "Mr. Justice J.B.Pardiwala", "Mr.Justice J.B.Pardiwala"]}
+      ]
+    },
+    {
+      "judge_id": "sc-kurian-joseph",
+      "name": "Kurian Joseph",
+      "courts": ["Supreme Court of India", "High Court of Kerala"],
+      "status": "retired",
+      "verified": false,
+      "aliases": ["Kurian Joseph", "Kurian"],
+      "sources": [
+        {"index": "sci_judgments", "bench_phrases": ["KURIAN JOSEPH"]},
+        {"index": "judgments", "court_names": ["kerala high court"],
+         "bench_values": ["KURIAN JOSEPH", "Kurian Joseph", "KURIAN JOSEPH, J.", "Kurian Joseph, J.",
+                          "MR.KURIAN JOSEPH", "MR. JUSTICE KURIAN JOSEPH", "KURIAN JOSEPH J.",
+                          "Kurian Joseph, Ag.C.J.", "JUSTICE KURIAN JOSEPH", "Kurian Joseph, Ag. C.J.",
+                          "Kurian Joseph, Ag.CJ."]}
+      ]
+    },
+    {
+      "judge_id": "hc-s-muralidhar",
+      "name": "S. Muralidhar",
+      "courts": ["High Court of Delhi", "High Court of Orissa"],
+      "status": "retired",
+      "verified": false,
+      "aliases": ["S. Muralidhar", "Dr. S. Muralidhar"],
+      "sources": [
+        {"index": "judgments", "court_names": ["delhi high court", "odisa high court"],
+         "bench_values": ["Dr. S. Muralidhar", "S. MURALIDHAR", "S.MURALIDHAR", "JUSTICE S.MURALIDHAR",
+                          "JUSTICE S. MURALIDHAR", "DR. JUSTICE S.MURALIDHAR", "DR. JUSTICE S. MURALIDHAR",
+                          "S. Muralidhar", "Dr. Muralidhar", "S.MURALIDHAR, J", "HON'BLE DR. JUSTICE S. MURALIDHAR",
+                          "Dr. S. Muralidhar, CJ.", "S. MURALIDHAR, J.", "S. MURALIDHAR, J",
+                          "HON'BLE DR. JUSTICE S.MURALIDHAR", "HON’BLE DR. JUSTICE S. MURALIDHAR",
+                          "S.MURALIDHAR, J.", "DR. S. MURALIDHAR", "Dr. Justice S. Muralidhar", "Dr. S Muralidhar",
+                          "Dr.S.Muralidhar", "HON’BLE DR. JUSTICE S.MURALIDHAR", "JUSTTCE S. MURALIDHAR",
+                          "Dr. Muralidhar, CJ.", "Dr. S. MURALIDHAR", "Dr. S. Muralidhar, CJ", "Dr. S. Muralidhar, J.",
+                          "S. Muralidhar, J.", "BLE DR. JUSTICE S. MURALIDHAR", "Dr Muralidhar",
+                          "Dr. Justice S.Muralidhar", "Dr. S. Muralidhar, ACJ", "Dr. S. Muralidhar, CJ .",
+                          "Dr. S. Muralidhar, J", "HON BLE DR. JUSTICE S. MURALIDHAR",
+                          "HON’BLE DR.JUSTICE S. MURALIDHAR", "Hon'ble Dr. Justice S. Muralidhar",
+                          "S. Muralidhar, J"]}
+      ]
+    },
+    {
+      "judge_id": "hc-devan-ramachandran",
+      "name": "Devan Ramachandran",
+      "courts": ["High Court of Kerala"],
+      "status": "sitting",
+      "verified": false,
+      "aliases": ["Devan Ramachandran"],
+      "sources": [
+        {"index": "judgments", "court_names": ["kerala high court"],
+         "bench_values": ["DEVAN RAMACHANDRAN", "Devan Ramachandran"]}
+      ]
+    }
+  ]
+}

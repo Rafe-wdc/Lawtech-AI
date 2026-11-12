@@ -261,7 +261,10 @@ _DANGLING = {"a", "an", "the", "in", "at", "of", "to", "from", "by", "with", "on
 _SENTENCE_END = {".", "?", "!"}
 # "4." or "(b)" left alone on its line.
 _EMPTY_ITEM_RE = re.compile(r"(?m)^([ \t]*(?:\d{1,3}\.|\(?[a-z]\)|\(?[ivx]{1,5}\)))[ \t]*$")
-_EMPTIED_PARAGRAPH = "[details to be confirmed by the client]"
+# Capitalised on purpose: the draft panel (core/draft_to_blocks._inline)
+# offers a bracket as a blank to fill only when it starts with a capital;
+# "[details ...]" would be read as a remark and not offered.
+_EMPTIED_PARAGRAPH = "[Details to be confirmed by the client]"
 # A list marker the finder put in front of a quoted sentence: "3. ", "(b) ".
 _LEAD_MARKER_RE = re.compile(r"^[ \t]*(?:\*\*)?(?:\d{1,3}\.|\(?[a-z]\)|\(?[ivx]{1,5}\))(?:\*\*)?[ \t]+")
 # A new [placeholder] of more words than this is a claim in brackets, not a
@@ -328,6 +331,12 @@ def _bracket_groups(toks: list[_Tok]) -> list[tuple[int, int]]:
     return out
 
 
+def _capitalised(placeholder: str) -> str:
+    """"[details of the threats]" -> "[Details of the threats]", so the draft
+    panel offers it as a blank (see _EMPTIED_PARAGRAPH)."""
+    return re.sub(r"^\[(\s*)([a-z])", lambda m: "[" + m.group(1) + m.group(2).upper(), placeholder)
+
+
 def _same_stem(word: str, have: set[str]) -> bool:
     """An inflected form of a word already in the sentence. Hindi and the
     other Indic languages change a verb's ending when a phrase before it is
@@ -349,7 +358,7 @@ def _plan(span: list[_Tok], corrected: str, added: str = "") -> tuple[set[int], 
 
     A new placeholder longer than a label ("[unlawfully grabbed possession
     of the land]") is a claim in brackets; it becomes the standard
-    "[details to be confirmed by the client]".
+    "[Details to be confirmed by the client]".
     """
     ctoks = _tokens(corrected)
     # A placeholder the correction brings in is one unit, so the word inside
@@ -358,6 +367,7 @@ def _plan(span: list[_Tok], corrected: str, added: str = "") -> tuple[set[int], 
     have_ph = {tuple(t.norm for t in span[i:j]) for i, j in _bracket_groups(span)}
     cunits: list[_Tok] = []
     generic: list[_Tok] = []     # placeholders written out as the standard one
+    new_ph: list[_Tok] = []      # every placeholder the correction brings in
     pos = 0
     for i, j in _bracket_groups(ctoks):
         cunits.extend(ctoks[pos:i])
@@ -369,14 +379,16 @@ def _plan(span: list[_Tok], corrected: str, added: str = "") -> tuple[set[int], 
                         "\x00" + " ".join(t.norm for t in group), False)
             if sum(t.is_word for t in group) > _PLACEHOLDER_MAX_WORDS:
                 generic.append(unit)
+            new_ph.append(unit)
             cunits.append(unit)
         pos = j
     cunits.extend(ctoks[pos:])
 
     def written(run: list[_Tok]) -> str:
         lo, text = run[0].start, corrected[run[0].start:run[-1].end]
-        for u in reversed([u for u in generic if u in run]):
-            text = text[:u.start - lo] + _EMPTIED_PARAGRAPH + text[u.end - lo:]
+        for u in reversed([u for u in new_ph if u in run]):
+            ph = _EMPTIED_PARAGRAPH if u in generic else _capitalised(corrected[u.start:u.end])
+            text = text[:u.start - lo] + ph + text[u.end - lo:]
         return text
 
     snorm = [t.norm for t in span]
@@ -771,14 +783,17 @@ def removal_note(removed: list[str]) -> str:
         lines.append(r)
     if not lines:
         return ""
-    shown = [f'> - "{r[:140]}{"…" if len(r) > 140 else ""}"' for r in lines[:_NOTE_MAX_LINES]]
+    shown = [f'- "{r[:140]}{"…" if len(r) > 140 else ""}"' for r in lines[:_NOTE_MAX_LINES]]
     more = len(lines) - len(shown)
     if more > 0:
-        shown.append(f"> - and {more} more.")
+        shown.append(f"- and {more} more.")
+    # Plain bold text and a list, not a "> " quote: the draft panel turns
+    # the whole answer into the document, and a quote marker shows there,
+    # and in the Word download, as a literal ">".
     return (
-        f"\n\n---\n\n> {NOTE_MARKER}: these were not in your documents or "
+        f"\n\n---\n\n{NOTE_MARKER}: these were not in your documents or "
         "messages, so this draft leaves them out. Add one back only if your "
-        "client confirms it.\n" + "\n".join(shown) + "\n"
+        "client confirms it.\n\n" + "\n".join(shown) + "\n"
     )
 
 

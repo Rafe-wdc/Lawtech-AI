@@ -86,7 +86,7 @@ def test_an_emptied_numbered_paragraph_keeps_its_number_and_says_what_is_missing
         "The Complainant visited the residence of the accused on many occasions.", "",
         added="The Complainant visited the residence of the accused on many occasions")])
     assert new == ("2. On 14 March 2022 the accused took Rs. 6,50,000.\n\n"
-                   "3. [details to be confirmed by the client]\n\n"
+                   "3. [Details to be confirmed by the client]\n\n"
                    "4. The accused stopped answering calls.")
 
 
@@ -115,7 +115,7 @@ def test_an_amount_inside_a_cut_sentence_leaves_no_stray_dash():
     s = d.split("\n\n")[0][4:]
     new, landed = apply_corrections(d, [_it(s, "[details of the Accused avoiding the Complainant]", added=s)])
     assert landed
-    assert new == "10. [details to be confirmed by the client]\n\n11. Next."
+    assert new == "10. [Details to be confirmed by the client]\n\n11. Next."
 
 
 def test_a_detail_can_become_a_placeholder():
@@ -141,7 +141,7 @@ def test_a_placeholder_holding_a_word_of_the_sentence_stays_whole():
     d = "He issued threats to the family."
     new, _ = apply_corrections(d, [_it(d, "He issued [details of the threats].",
                                        added="threats to the family")])
-    assert new == "He issued [details of the threats]."
+    assert new == "He issued [Details of the threats]."
 
 
 def test_a_placeholder_already_in_the_sentence_is_kept_as_it_was():
@@ -173,7 +173,7 @@ def test_a_claim_in_brackets_becomes_the_standard_placeholder():
         d, "Accused Nos. 1 to 3 [unlawfully grabbed possession of the land].",
         added="with anti-social elements, arrived at the fields with firearms")])
     assert landed
-    assert new == "Accused Nos. 1 to 3 [details to be confirmed by the client]."
+    assert new == "Accused Nos. 1 to 3 [Details to be confirmed by the client]."
 
 
 def test_a_paragraph_number_the_finder_put_in_front_of_a_mid_paragraph_sentence_is_ignored():
@@ -182,7 +182,7 @@ def test_a_paragraph_number_the_finder_put_in_front_of_a_mid_paragraph_sentence_
                                             "3. [details of any other representation]",
                                             added="He also said it was free of all loans")])
     assert landed
-    assert new == "3. The accused claimed to own the flat. [details of any other representation]\n\n4. Next."
+    assert new == "3. The accused claimed to own the flat. [Details of any other representation]\n\n4. Next."
 
 
 def test_a_cut_that_would_strand_a_preposition_is_not_made():
@@ -540,3 +540,32 @@ def test_drafting_node_calls_the_check_after_self_refine():
     import agents.drafting as d
     src = inspect.getsource(d.drafting_node)
     assert src.index("await self_refine(") < src.index("_take_out_added_facts(") < src.index("Build AgentResult")
+
+
+# --- Draft panel (core/draft_to_blocks): the panel turns the whole answer
+# into the document, so what this check writes must read well there too.
+
+def test_note_has_no_quote_markers_in_the_panel_or_word():
+    from core.draft_to_blocks import markdown_to_artifact
+    from core.draft_blocks import to_markdown
+    note = af.removal_note(["illiterate", "accompanied by their musclemen"])
+    assert "> " not in note and af.NOTE_MARKER in note
+    body = "5. The Accused threatened the Complainant.\n\nPlace: Rampur\n\nAdvocate for the Complainant"
+    text = to_markdown(markdown_to_artifact(body + note, artifact_id="t", language="en"))
+    assert "Details taken out" in text and ">" not in text
+
+
+def test_placeholders_are_offered_as_blanks_in_the_panel():
+    from core.artifact_followup import fields_payload
+    from core.draft_to_blocks import markdown_to_artifact
+    d = ("1. The Complainant is a resident of Rampur.\n\n"
+         "2. He was illiterate and could not read the agreement.\n\n"
+         "3. He issued threats to the family.\n\n4. Next.")
+    new, _ = apply_corrections(d, [
+        _it("2. He was illiterate and could not read the agreement.", "", added="He was illiterate and could not read the agreement"),
+        _it("He issued threats to the family.", "He issued [details of the threats].", added="threats to the family"),
+    ])
+    assert "[Details to be confirmed by the client]" in new and "[Details of the threats]" in new
+    fields = fields_payload(markdown_to_artifact(new, artifact_id="t", language="en")).get("fields") or []
+    labels = {f.get("label") for f in fields}
+    assert {"Details to be confirmed by the client", "Details of the threats"} <= labels

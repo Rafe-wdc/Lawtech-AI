@@ -321,9 +321,13 @@ Contract:
 - On verifier unavailability: response ships with `x_audit_status="unverified"`
   in the SSE `done` envelope, WARN log with `reason`, in-process counter
   bump.
-- `core.audit_status.mark_unverified()` sets a request-scoped ContextVar
-  that `core.chat_runner` reads onto the `done` event. Envelope only —
-  do NOT show a user-facing banner (UI decision is Rohit's).
+- `core.audit_status.mark_unverified()` writes into a request-scoped
+  holder that `core.chat_runner` reads onto the `done` event. Envelope only —
+  do NOT show a user-facing banner (UI decision is Rohit's). The ContextVar
+  holds a mutable holder on purpose: LangGraph runs each node with a COPY
+  of the request context, so a plain `ContextVar.set` inside a node never
+  reaches `chat_runner` (it didn't until 2026-11-12). Any new request-scoped
+  flag a node must report back needs the same holder pattern.
 - Grep `agent.log` for `self_refine_critic_unavailable`,
   `stream_final_reconciled identical=False`, or a `self_refine_completed
   outcome=unverified_*` line — any hit means regression.

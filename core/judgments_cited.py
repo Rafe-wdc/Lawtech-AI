@@ -369,23 +369,69 @@ class FoundJudgment:
         return bool(self.petitioner and self.respondent)
 
 
-def _parties_match(case: CitedCase, pet_text: str, resp_text: str) -> bool:
-    """Both parties' distinctive words appear on the matching side of the hit.
+def _match_score(case: CitedCase, pet_text: str, resp_text: str) -> int | None:
+    """None unless the index entry names the cited parties; otherwise the
+    number of words that matched exactly (higher is closer). The rules are in
+    core/party_names.py: they read abbreviations ("ADDL.COMNR."), acronyms
+    and initials ("ONGC", "U.P."), joined names and spelling variants, and
+    still reject look-alikes such as "MATHEW JACOB vs PUNJAB NATIONAL BANK"
+    for Jacob Mathew v. State of Punjab."""
+    from core.party_names import match_parties
+    return match_parties(case.petitioner, case.respondent, pet_text, resp_text)
 
-    Petitioner words must all appear; respondent words at least two thirds.
-    Guards against look-alikes the full-text match returns, e.g.
-    "MATHEW JACOB vs PUNJAB NATIONAL BANK" for Jacob Mathew v. State of Punjab.
-    """
-    pet, resp = _tokens(pet_text), _tokens(resp_text)
-    want_a, want_b = _tokens(case.petitioner), _tokens(case.respondent)
-    if not want_a or not want_b or not want_a <= pet:
-        return False
-    return len(want_b & resp) * 3 >= len(want_b) * 2
+
+def _parties_match(case: CitedCase, pet_text: str, resp_text: str) -> bool:
+    return _match_score(case, pet_text, resp_text) is not None
 
 
 def _year_ok(case: CitedCase, hit_year: int | None) -> bool:
     # Reported citations can trail the decision by a year.
     return case.year is None or hit_year is None or abs(case.year - hit_year) <= 1
+
+
+# The court a reporter citation names. A Supreme Court report ("(2007) 11 SCC
+# 243", "AIR 1969 SC 128", "2023 SCC OnLine SC 326") is never a High Court
+# judgment with similar parties, and a High Court report ("1980 SCC OnLine Del
+# 336", "AIR 1999 Bom 12", "2010 (6) Mh.L.J. 401") is never a Supreme Court
+# judgment.
+_HC_CODES = {
+    "del": "delhi", "bom": "bombay", "ker": "kerala", "raj": "rajasthan",
+    "mp": "madhya pradesh", "ori": "odisa", "orissa": "odisa", "guj": "gujarat",
+    "cal": "calcutta", "gau": "gauhati", "utt": "uttarakhand", "uttra": "uttarakhand",
+    "jk": "jammu and kashmir", "j&k": "jammu and kashmir", "tri": "tripura",
+    "mani": "manipur", "megh": "meghalaya", "sikk": "sikkim", "mad": "madras",
+    "all": "allahabad", "p&h": "punjab and haryana", "kar": "karnataka", "pat": "patna",
+    "hp": "himachal pradesh", "ap": "andhra pradesh", "ts": "telangana",
+    "chh": "chhattisgarh", "jhar": "jharkhand",
+}
+_SC_REPORT_RE = re.compile(
+    r"\bSCC\b(?!\s*OnLine\s*(?!SC\b))|\bSCR\b|\bINSC\b|\bAIR\s*\d{4}\s*SC\b|\bSCALE\b|\bJT\b|\bSCC\s*OnLine\s*SC\b",
+    re.I)
+_HC_REPORT_RE = re.compile(r"(?:SCC\s*OnLine|AIR\s*\d{4})\s*(?P<code>[A-Za-z&]+)\b", re.I)
+_HC_JOURNALS = (
+    (re.compile(r"Mh\.?\s*L\.?\s*J|Bom\.?\s*(?:CR|LR)\b", re.I), "bombay"),
+    (re.compile(r"\bDLT\b", re.I), "delhi"),
+    (re.compile(r"\bK(?:er)?\.?\s*L\.?\s*[TJ]\b", re.I), "kerala"),
+    (re.compile(r"\bMPLJ\b", re.I), "madhya pradesh"),
+    (re.compile(r"\bGL[RH]\b", re.I), "gujarat"),
+    (re.compile(r"\bCWN\b|\bCal\.?\s*LT\b", re.I), "calcutta"),
+)
+
+
+def _cited_court(citation: str) -> tuple[str, str | None]:
+    """("sc", None), ("hc", "<court> high court" or None), or ("", None)
+    when the citation does not say."""
+    cit = citation or ""
+    m = _HC_REPORT_RE.search(cit)
+    if m and m.group("code").lower() != "sc":
+        name = _HC_CODES.get(m.group("code").lower())
+        return "hc", (f"{name} high court" if name else None)
+    for rx, name in _HC_JOURNALS:
+        if rx.search(cit):
+            return "hc", f"{name} high court"
+    if _SC_REPORT_RE.search(cit):
+        return "sc", None
+    return "", None
 
 
 # Common surnames ("Desai v. State of Maharashtra") match thousands of rows;
@@ -398,18 +444,86 @@ def _any_form(field: str, text: str, **opts) -> dict:
         {"match": {field: {"query": q, **opts}}} for q in _query_forms(text)]}}
 
 
-def _party_query(case: CitedCase, pet_field: str, resp_field: str) -> dict:
-    should = [
+def _query_text(text: str) -> tuple[str, str]:
+    """(words most of which the index entry must hold, every identifying word).
+
+    The first leaves out initials ("A.R.", "U.P."): the index splits or joins
+    them unpredictably ("A. R.", "U. P.", "C.P.JOSHI"), so they would turn
+    a query for "A.R. Antulay" into one that cannot match. Both add the
+    expansion of a known acronym ("CBI") and the acronym of an expansion."""
+    from core.party_names import ALIASES, words
+    ws = [w for w in words(text) if not w.stop]
+    all_words = [w.text for w in ws]
+    extra = []
+    for acr, expansion in ALIASES.items():
+        if acr in all_words:
+            extra.extend(expansion)
+        elif set(expansion) <= set(all_words):
+            extra.append(acr)
+    must = [w.text for w in ws if not w.initials and len(w.text) >= 3]
+    return (" ".join(dict.fromkeys(must + extra)),
+            " ".join(dict.fromkeys(all_words + extra)))
+
+
+def _candidate_bodies(case: CitedCase, pet_field: str, resp_field: str,
+                      source: list[str]) -> list[dict]:
+    """Two index queries: one led by the petitioner's words, one by the
+    respondent's. Most words of the leading party must be present, not all:
+    the index stores many names in a short form ("MAH.ADIWASI", "C.P.JOSHI",
+    "ADDL.COMNR.") that the cited words do not hit, and `_match_score`
+    decides on the candidates."""
+    (pet_must, pet_all), (resp_must, resp_all) = (_query_text(case.petitioner),
+                                                  _query_text(case.respondent))
+    boosts = [
         {"match_phrase": {pet_field: {"query": case.petitioner, "boost": 5}}},
         {"match_phrase": {resp_field: {"query": case.respondent, "boost": 3}}},
     ]
-    return {"bool": {
-        "must": [
-            _any_form(pet_field, case.petitioner, operator="and"),
-            _any_form(resp_field, case.respondent, minimum_should_match="60%"),
-        ],
-        "should": should,
-    }}
+    bodies = []
+    for lead_field, lead, lead_all, other_field, other in (
+            (pet_field, pet_must, pet_all, resp_field, resp_all),
+            (resp_field, resp_must, resp_all, pet_field, pet_all)):
+        if not lead:
+            continue
+        should = boosts + [{"match": {lead_field: {"query": lead_all, "boost": 2}}}]
+        if other:
+            should.append({"match": {other_field: {"query": other, "fuzziness": "AUTO"}}})
+        bodies.append({"size": _CANDIDATES, "_source": source, "query": {"bool": {
+            "must": [{"match": {lead_field: {"query": lead, "minimum_should_match": "2<-34%"}}}],
+            "should": should,
+        }}})
+    return bodies
+
+
+def _candidates(es, index: str, case: CitedCase, pet_field: str, resp_field: str,
+                source: list[str]) -> list[dict]:
+    """Sources of the hits of both queries, in rank order, without repeats."""
+    seen, out = set(), []
+    for body in _candidate_bodies(case, pet_field, resp_field, source):
+        res = es.search(index=index, body=body, request_timeout=PER_QUERY_TIMEOUT_S)
+        for hit in res["hits"]["hits"]:
+            if hit.get("_id") in seen:
+                continue
+            seen.add(hit.get("_id"))
+            out.append(hit["_source"])
+    return out
+
+
+def _best(case: CitedCase, rows: list[tuple[str, str, int | None, dict]]) -> dict | None:
+    """The row (petitioner, respondent, year, source) that names the cited
+    case. Prefers a row whose year could be checked, then the nearest year
+    (the 2017 judgment over its 2018 review order for "(2017) 6 SCC 1"), then
+    the closest names, then the index's own ranking."""
+    best_key, best = None, None
+    for rank, (pet, resp, year, src) in enumerate(rows):
+        score = _match_score(case, pet, resp)
+        if score is None or not _year_ok(case, year):
+            continue
+        checked = year is not None and case.year is not None
+        gap = abs(case.year - year) if checked else 0
+        key = (checked, -gap, score, -rank)
+        if best_key is None or key > best_key:
+            best_key, best = key, src
+    return best
 
 
 _SCI_SOURCE = ["parties", "judgment_date", "pdf_links"]
@@ -433,23 +547,19 @@ def _sci_pdf(src: dict) -> str | None:
 
 def _lookup_sci(es, case: CitedCase) -> FoundJudgment | None:
     from core.settings import ES_INDICES
-    body = {
-        "size": _CANDIDATES,
-        "_source": _SCI_SOURCE,
-        "query": _party_query(case, "parties", "parties"),
-    }
-    res = es.search(index=ES_INDICES["sci_judgments"], body=body,
-                    request_timeout=PER_QUERY_TIMEOUT_S)
-    for hit in res["hits"]["hits"]:
-        src = hit["_source"]
+    if _cited_court(case.citation)[0] == "hc":
+        return None
+    rows = []
+    for src in _candidates(es, ES_INDICES["sci_judgments"], case, "parties", "parties",
+                           _SCI_SOURCE):
         parts = _sci_parts(src)
-        if parts is None or not _parties_match(case, *parts):
-            continue
-        if not _year_ok(case, _sci_year(src)):
-            continue
-        return FoundJudgment("Supreme Court of India", src.get("judgment_date") or "",
-                             _sci_pdf(src))
-    return None
+        if parts is not None:
+            rows.append((parts[0], parts[1], _sci_year(src), src))
+    src = _best(case, rows)
+    if src is None:
+        return None
+    return FoundJudgment("Supreme Court of India", src.get("judgment_date") or "",
+                         _sci_pdf(src))
 
 
 # ---------------------------------------------------------------------------
@@ -591,31 +701,29 @@ def _write_back(draft: str, case: CitedCase, found: FoundJudgment) -> str:
 def _lookup_hc(es, case: CitedCase) -> FoundJudgment | None:
     from core.settings import ES_INDICES
     from tools.shared.storage_tools import generate_s3_link
-    body = {
-        "size": _CANDIDATES,
-        "_source": ["petitioner_names", "respondent_names", "court_name", "year",
-                    "judgment_date", "source"],
-        "query": _party_query(case, "petitioner_names", "respondent_names"),
-    }
-    res = es.search(index=ES_INDICES["judgments"], body=body,
-                    request_timeout=PER_QUERY_TIMEOUT_S)
-    candidates = []
-    for hit in res["hits"]["hits"]:
-        src = hit["_source"]
+    kind, cited_hc = _cited_court(case.citation)
+    rows = []
+    for src in _candidates(es, ES_INDICES["judgments"], case, "petitioner_names",
+                           "respondent_names",
+                           ["petitioner_names", "respondent_names", "court_name", "year",
+                            "judgment_date", "source"]):
+        court = str(src.get("court_name") or "").strip().lower()
+        # The index also holds Supreme Court judgments ("supreme court").
+        if kind == "sc" and court != "supreme court":
+            continue
+        if kind == "hc" and (court == "supreme court" or (cited_hc and court != cited_hc)):
+            continue
         pet = src.get("petitioner_names") or []
         resp = src.get("respondent_names") or []
         pet = " ".join(pet) if isinstance(pet, list) else str(pet)
         resp = " ".join(resp) if isinstance(resp, list) else str(resp)
-        if not _parties_match(case, pet, resp):
-            continue
         year = src.get("year")
         year = int(year) if str(year or "").isdigit() else None
-        if not _year_ok(case, year):
-            continue
-        candidates.append((year is not None and case.year is not None, src, pet, resp, year))
-    # Prefer a hit whose year was actually checked over one with no year.
-    candidates.sort(key=lambda c: not c[0])
-    for _, src, pet, resp, year in candidates:
+        rows.append((pet, resp, year, src))
+    src = _best(case, rows)
+    if src is not None:
+        pet, resp = next((p, r) for p, r, _, s in rows if s is src)
+        year = next(y for _, _, y, s in rows if s is src)
         court = str(src.get("court_name") or "").strip()
         source_file = str(src.get("source") or "")
         url = generate_s3_link.invoke({

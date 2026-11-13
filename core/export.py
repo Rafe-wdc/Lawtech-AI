@@ -578,8 +578,12 @@ def generate_pdf(
         writer = fitz.DocumentWriter(buf)
 
         def rectfn(rect_num, filled):
-            """Called by Story.write() to get the rectangle for each content area."""
-            return content_rect, page_rect, None  # content_rect, mediabox, None
+            """Called by Story.write() for each page: (mediabox, where, ctm).
+            The page is A4 and the text goes inside the 1-inch margins. With
+            the two swapped, every page was cropped to the text area while
+            the text started at the page edge, so the first inch of each line
+            was cut off and short lines ("Place: Rampur") vanished."""
+            return page_rect, content_rect, None
 
         story.write(writer, rectfn)
         writer.close()

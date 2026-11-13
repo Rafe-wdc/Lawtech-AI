@@ -77,6 +77,7 @@ _NON_LLM_ENDPOINTS = {
     "get_artifact",
     "list_artifact_versions",
     "save_artifact",
+    "fill_artifact_blanks",
     "restore_artifact",
     "submit_feedback",
 }

@@ -1287,6 +1287,77 @@ def _docx_page_count(path: str) -> int | None:
     return None
 
 
+# fontconfig answers per Unicode block of 128 code points (one Indian script
+# each); cached for the life of the worker.
+_script_font_cache: dict[int, bool] = {}
+
+
+def _fonts_cover(text: str) -> bool:
+    """Whether the server's fonts have glyphs for every non-Latin script in
+    `text`, so a LibreOffice PDF will not print empty boxes. The dev box had
+    no font for any Indian script (2026-11-13). A host without fontconfig
+    (Windows) is taken to have them."""
+    import shutil
+    import subprocess
+    import unicodedata
+
+    fc_list = shutil.which("fc-list")
+    if not fc_list:
+        return True
+    samples: dict[int, str] = {}
+    for ch in text:
+        if ord(ch) >= 0x0590 and unicodedata.category(ch)[0] in "LM":
+            samples.setdefault(ord(ch) >> 7, ch)
+    for block, ch in samples.items():
+        if block not in _script_font_cache:
+            try:
+                out = subprocess.run([fc_list, f":charset={ord(ch):04x}", "family"],
+                                     capture_output=True, text=True, timeout=10).stdout
+                _script_font_cache[block] = bool(out.strip())
+            except (subprocess.TimeoutExpired, OSError):
+                _script_font_cache[block] = False
+        if not _script_font_cache[block]:
+            return False
+    return True
+
+
+def _docx_to_pdf(data: bytes) -> bytes | None:
+    """A .docx as PDF, converted by LibreOffice (headless) on a warm profile
+    from the same pool as the page count, so the PDF lays out exactly as the
+    Word file. None when LibreOffice is missing or the conversion fails; the
+    caller then falls back."""
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    soffice = _find_soffice()
+    if not soffice:
+        log.warning("DOCX to PDF: LibreOffice not installed")
+        return None
+    pool = _soffice_profile_pool()
+    profile_dir = pool.get()
+    try:
+        with tempfile.TemporaryDirectory(prefix="docx_pdf_") as work:
+            src = Path(work, "draft.docx")
+            src.write_bytes(data)
+            subprocess.run(
+                [soffice, "--headless", "--norestore",
+                 f"-env:UserInstallation={profile_dir.as_uri()}",
+                 "--convert-to", "pdf", "--outdir", work, str(src)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=_DOCX_CONVERT_TIMEOUT_S, check=False,
+            )
+            pdf = Path(work, "draft.pdf")
+            if pdf.is_file() and pdf.stat().st_size > 0:
+                return pdf.read_bytes()
+            log.warning("DOCX to PDF: conversion produced no PDF")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        log.warning("DOCX to PDF: conversion failed", error=str(e)[:120])
+    finally:
+        pool.put(profile_dir)
+    return None
+
+
 def _document_page_count(path: str, ext: str) -> int | None:
     """Pages for the per-plan page budget. PDF and Word count their pages
     (None when a Word count is unavailable); any other file counts as 1."""
@@ -2359,7 +2430,8 @@ class ExportRequest(BaseModel):
     raw_text: Optional[str] = None
     # A draft in block format (core/draft_blocks.Artifact, see
     # docs/draft_panel_frontend_contract.md). Takes precedence over the
-    # other sources; docx keeps the real layout, pdf goes via Markdown.
+    # other sources; docx keeps the real layout, and pdf is that Word file
+    # converted by LibreOffice (Markdown renderer if it is missing).
     artifact: Optional[dict] = None
     # A stored draft by id (latest version unless `version` is given).
     artifact_id: Optional[str] = None
@@ -2370,8 +2442,13 @@ class ExportRequest(BaseModel):
 
 def _export_artifact(raw: dict, fmt: str, title: Optional[str]):
     """Download for a block-format draft. Word is built from the blocks so
-    centring, right-aligned party labels and hanging numbers survive; PDF
-    uses the existing Markdown renderer until a block PDF exists."""
+    centring, right-aligned party labels and hanging numbers survive. PDF is
+    that same Word file converted by LibreOffice, so the two downloads look
+    alike. Without LibreOffice, or without a server font for the draft's
+    script, it falls back to the Markdown renderer (PyMuPDF's own Noto fonts
+    cover the Indian scripts).
+
+    Blocking (the conversion takes a few seconds): call it in a thread."""
     from pydantic import ValidationError
     from .artifact_edit import renumber
     from .draft_blocks import Artifact, to_markdown
@@ -2386,11 +2463,20 @@ def _export_artifact(raw: dict, fmt: str, title: Optional[str]):
     # The panel keeps the lawyer's notes on screen; the filed copy has none.
     from .lawyer_notes import strip_from_artifact
     artifact = strip_from_artifact(artifact)
+    from .draft_docx import artifact_to_docx, docx_filename
+    pdf = None
     if fmt == "docx":
-        from .draft_docx import artifact_to_docx, docx_filename
         buf, filename = artifact_to_docx(artifact), docx_filename(artifact)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif _fonts_cover(to_markdown(artifact)):
+        pdf = _docx_to_pdf(artifact_to_docx(artifact).getvalue())
     else:
+        log.info("Draft PDF: no server font for this script; Markdown renderer used",
+                 language=artifact.language)
+    if pdf is not None:
+        buf, media_type = io.BytesIO(pdf), "application/pdf"
+        filename = docx_filename(artifact).removesuffix(".docx") + ".pdf"
+    elif fmt != "docx":
         from .export import export_document
         buf, filename, media_type = export_document(
             title=title or artifact.title, md_text=to_markdown(artifact), fmt=fmt)
@@ -2419,13 +2505,14 @@ async def export_document_endpoint(data: ExportRequest, request: Request):
         is_draft = False
 
         if data.artifact is not None:
-            return _export_artifact(data.artifact, data.format, data.title)
+            return await asyncio.to_thread(_export_artifact, data.artifact, data.format, data.title)
         if data.artifact_id:
             from .artifact_store import artifact_store
             stored = await artifact_store.get(data.artifact_id, data.version)
             if stored is None:
                 return _error_response(404, "not_found", "Draft not found")
-            return _export_artifact(stored.model_dump(), data.format, data.title)
+            return await asyncio.to_thread(_export_artifact, stored.model_dump(),
+                                           data.format, data.title)
 
         if data.raw_text:
             md_text = data.raw_text

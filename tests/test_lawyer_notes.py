@@ -207,12 +207,17 @@ def test_saved_turns_use_the_turn_kind(client):
     assert "Advocate for the Complainant" in draft
 
 
-def test_panel_download_ends_at_the_signature(client, monkeypatch):
+def test_panel_download_ends_at_the_signature(client):
+    import fitz
     c, _ = client
     art = _artifact(SAMPLE).model_dump()
     word = _docx_text(c.post("/pyapi/export", json={"artifact": art, "format": "docx"}))
     _no_notes(word)
     assert word.rstrip().endswith("Advocate for the Complainant")
-    pdf_md = _pdf_markdown(c, monkeypatch, {"artifact": art})
-    _no_notes(pdf_md)
-    assert "Advocate for the Complainant" in pdf_md
+    # The panel PDF is the Word file converted by LibreOffice, or the Markdown
+    # renderer without it; read the PDF that was actually downloaded.
+    resp = c.post("/pyapi/export", json={"artifact": art, "format": "pdf"})
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("application/pdf")
+    pdf = "\n".join(p.get_text() for p in fitz.open(stream=resp.content, filetype="pdf"))
+    _no_notes(pdf)
+    assert "Advocate for the Complainant" in pdf

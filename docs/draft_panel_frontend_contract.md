@@ -232,15 +232,16 @@ POST /pyapi/artifact/{artifact_id}/restore   {"version": 2}   → the restored a
 POST /pyapi/export   {"artifact_id": "art_7f3c2a9e", "format": "docx"}             → latest version
 POST /pyapi/export   {"artifact_id": "art_7f3c2a9e", "version": 3, "format": "docx"}
 POST /pyapi/export   {"artifact": { ...an artifact... }, "format": "docx"}          → without storing it
+POST /pyapi/export   {"artifact_id": "art_7f3c2a9e", "format": "pdf"}              → the same draft as PDF
 ```
 
 The Word file is built from the same blocks: real centring, right-aligned
 party labels on a right tab stop, hanging paragraph numbers (typed, never a
 Word auto-list, so they do not renumber when the advocate edits), highlighted
-blanks and the page margins above. `"format": "pdf"` currently goes through
-the Markdown renderer and loses the alignment; a block-based PDF is a later
-step. An invalid artifact returns `400`. The existing `raw_text` /
-`thread_id` export keeps working unchanged.
+blanks and the page margins above. The PDF is that Word file converted on the
+server, so the two look the same; it takes a few seconds longer than Word.
+Offer both buttons ("Word", "PDF"). An invalid artifact returns `400`. The
+existing `raw_text` / `thread_id` export keeps working unchanged.
 
 ## 9. Panel behaviour (suggested)
 

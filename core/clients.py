@@ -547,6 +547,40 @@ def get_gemini_vision(temperature: float = 0.0,
     )
 
 
+from langchain_core.callbacks import BaseCallbackHandler as _BaseCallbackHandler
+
+
+class _AnthropicFallbackSignal(_BaseCallbackHandler):
+    """Per-call signal that the Anthropic generation model failed and the
+    Gemini fallback is about to answer.
+
+    `.with_fallbacks()` is silent: the 2026-09-07 evaluation and again the
+    2026-11-13 production check ran entirely on Gemini because the Anthropic
+    balance was exhausted and nothing per request said so (the agent error
+    counter saw one event in three days). This handler is attached to the
+    PRIMARY only, so it fires exactly when a fallback follows: one WARN log
+    line with the error class and message, and `lawtech_fallback_total{agent=
+    "generation", tier="anthropic_to_gemini"}` so the rate is on /metrics.
+    Every other callback keeps the base class's no-op.
+    """
+
+    run_inline = True
+
+    def on_llm_error(self, error: BaseException, **kwargs) -> None:
+        try:
+            _log.warning(
+                "Anthropic generation model failed — this response will be "
+                "served by the Gemini fallback, NOT the configured model",
+                error_class=type(error).__name__, error=str(error)[:200],
+            )
+            from core.metrics import METRICS
+            METRICS["fallback_total"].labels(
+                agent="generation", tier="anthropic_to_gemini",
+            ).inc()
+        except Exception:  # pragma: no cover — telemetry must never fail a call
+            pass
+
+
 @lru_cache(maxsize=8)
 def get_drafting_llm(max_output_tokens: int = 65535,
                      thinking_budget: int | None = None,
@@ -604,6 +638,9 @@ def get_drafting_llm(max_output_tokens: int = 65535,
             timeout=180,
             **_sampling,
             **_thinking_kwargs(model_id, thinking_budget, thinking_level),
+            # Fires on the primary's failure only — i.e. exactly when the
+            # Gemini fallback below is about to answer (see the class).
+            **({"callbacks": [_AnthropicFallbackSignal()]} if provider == "anthropic" else {}),
         )
     except Exception as _e:
         # CONSTRUCTION failure — a missing provider package, a malformed model

@@ -176,6 +176,26 @@ def _normalize_court_filter(court: str | None) -> tuple[str | None, bool]:
     return None, True
 
 
+_SUPREME_COURT = "supreme court"
+
+
+def _supreme_court_route(court_name: str | None, state) -> str | None:
+    """Where a Supreme Court request to this High Court agent should go.
+
+    Returns "step_aside" when the SCI agent is in the plan (it searches its
+    own index for the same judgments), "web" when it is not (the existing
+    web-fallback path for courts this agent does not serve), and None for
+    every other court. The whole-text Supreme Court copies in the High Court
+    index are excluded from this agent's searches (tools/shared/
+    judgment_search.py), so an ES search with the Supreme Court filter would
+    only come back empty. Pure function so it is unit-testable.
+    """
+    if not court_name or court_name.strip().lower() != _SUPREME_COURT:
+        return None
+    planned = set(state.get("tasks_planned") or []) | set((state.get("agent_queries") or {}).keys())
+    return "step_aside" if "SCI_Judgment" in planned else "web"
+
+
 # --- Case Metadata Extraction ---
 
 METADATA_EXTRACTION_PROMPT = """You are an expert in legal text parsing and Elasticsearch query formulation.
@@ -359,10 +379,40 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
 
 # --- Hit Processing ---
 
+# Ceiling on the judgment text handed to the generate call, per hit and in
+# total. High Court entries are ~2k-char chunks (p50 2,011 / p90 5,411 / max
+# 41k chars, sampled 2026-11-13), so ordinary hits pass untouched; the cap
+# only bites on whole-judgment documents (a Supreme Court judgment reached
+# 231k chars) which the prompt used to carry in full — 792k input tokens on
+# one request. ~120k chars is ~30k tokens, well inside what the flash tier
+# reads reliably, and the relevance judge already works from the same parts.
+_HIT_MAX_CHARS = 12_000
+_DOCS_MAX_CHARS = 120_000
+_TRUNCATION_NOTE = "\n[… judgment text truncated for length; {n:,} more characters omitted]"
+
+
+def _cap_doc_text(content: str, budget_left: int) -> tuple[str, int]:
+    """Trim one hit's text to the per-hit cap and to what is left of the
+    total budget. Returns (text, chars_dropped)."""
+    text = content if isinstance(content, str) else str(content or "")
+    limit = min(_HIT_MAX_CHARS, max(budget_left, 0))
+    if len(text) <= limit:
+        return text, 0
+    dropped = len(text) - limit
+    if limit <= 0:
+        return "", dropped
+    return text[:limit].rstrip() + _TRUNCATION_NOTE.format(n=dropped), dropped
+
+
 def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
-    """Convert smart search hits to doc texts and SourceMetadata list."""
+    """Convert smart search hits to doc texts and SourceMetadata list.
+
+    The model-facing text is capped per hit and in total (see
+    `_HIT_MAX_CHARS` / `_DOCS_MAX_CHARS`); the source previews are not."""
     docs_text_parts = []
     sources = []
+    budget_left = _DOCS_MAX_CHARS
+    dropped_total, trimmed_hits = 0, 0
 
     for hit in hits:
         content = hit["content"]
@@ -390,7 +440,12 @@ def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
             resp_name = str(respondent) if respondent else "Unknown"
         title = f"{pet_name} vs {resp_name}"
 
-        docs_text_parts.append(content)
+        doc_text, dropped = _cap_doc_text(content, budget_left)
+        budget_left -= len(doc_text)
+        if dropped:
+            dropped_total += dropped
+            trimmed_hits += 1
+        docs_text_parts.append(doc_text)
 
         # Generate S3 link
         file_str = str(source_file) if isinstance(source_file, dict) else source_file
@@ -411,6 +466,13 @@ def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
             keywords=keywords if isinstance(keywords, list) else [],
             acts_or_sections_invoked=acts_sections if isinstance(acts_sections, list) else [],
         ))
+
+    if trimmed_hits:
+        log.info("Judgment text capped before generation",
+                 hits=len(hits), trimmed_hits=trimmed_hits,
+                 chars_dropped=dropped_total,
+                 chars_kept=sum(len(p) for p in docs_text_parts),
+                 per_hit_cap=_HIT_MAX_CHARS, total_cap=_DOCS_MAX_CHARS)
 
     return docs_text_parts, sources
 
@@ -513,6 +575,26 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # the extractor's LLM view of the court intent is more reliable
         # than the regex fallback that ran during preliminary.
         court_filter, court_not_indexed = _normalize_court_filter(metadata.court_name)
+        _sc_route = _supreme_court_route(metadata.court_name, state)
+        if _sc_route == "step_aside":
+            # The user asked this High Court agent for Supreme Court
+            # authorities and the Supreme Court agent is already in the plan.
+            # Until 2026-11-13 this agent answered anyway, from the whole-text
+            # Supreme Court copies in the High Court index (792k input tokens
+            # on one request); those are now excluded from its searches, so
+            # an empty, error-free result lets the synthesis use the SCI
+            # agent's judgments without a missing-sources banner.
+            log.info("Supreme Court authorities requested — stepping aside for "
+                     "the SCI agent", requested_court=metadata.court_name)
+            progress("judgment", "Supreme Court authorities are being researched "
+                     "by the Supreme Court agent", substep=True, step="search")
+            return {"agent_results": {"Judgment": AgentResult(
+                agent_name="Judgment", content="", sources=[],
+                meta={"stepped_aside_for": "SCI_Judgment"})}}
+        if _sc_route == "web":
+            # Supreme Court asked of this agent with no SCI agent planned:
+            # same path as a court the index does not hold.
+            court_not_indexed = True
         if court_not_indexed:
             log.info("Requested court not in ES judgements index — skipping "
                      "ES searches and routing to web fallback",

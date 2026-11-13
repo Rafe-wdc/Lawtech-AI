@@ -81,11 +81,52 @@ def _has_good_results(hits: list[dict], min_hits: int = _MIN_GOOD_HITS) -> bool:
     return (hits[0].get("score", 0) or 0) >= _MIN_SCORE
 
 
+# Supreme Court judgments do not belong to the High Court agent.
+#
+# Measured 2026-11-13: the `judgements` index holds ~3,900 documents with
+# court_name "supreme court" that are whole judgments (median 32k chars, p90
+# 125k, max 231k), while High Court entries are ~2k-char chunks. They out-score
+# the chunks on any topical query, so the agent's generate call carried 176k
+# and 792k input tokens on two probe questions (~6k each in September) — the
+# single largest token and latency cost in the product, and billed against the
+# user's plan. The Supreme Court agent searches its own index for the same
+# documents, so nothing is lost by leaving them out here. Explicit kill switch
+# for rollback: HC_SEARCH_INCLUDE_SUPREME_COURT=1.
+_SUPREME_COURT_LABEL = "supreme court"
+
+
+def _supreme_court_excluded() -> bool:
+    import os
+    return os.getenv("HC_SEARCH_INCLUDE_SUPREME_COURT", "").strip().lower() not in ("1", "true", "yes", "on")
+
+
+def _without_supreme_court(body: dict) -> dict:
+    """Return `body` with a `must_not` on the Supreme Court label added to its
+    top-level bool query (wrapping a non-bool query). The input is not
+    mutated. A no-op when the kill switch is set."""
+    if not _supreme_court_excluded():
+        return body
+    clause = {"match_phrase": {"court_name": _SUPREME_COURT_LABEL}}
+    query = body.get("query")
+    if isinstance(query, dict) and isinstance(query.get("bool"), dict):
+        bool_q = dict(query["bool"])
+        must_not = list(bool_q.get("must_not") or [])
+        if clause not in must_not:
+            must_not.append(clause)
+        bool_q["must_not"] = must_not
+        new_query = {"bool": bool_q}
+    elif query is None:
+        new_query = {"bool": {"must_not": [clause]}}
+    else:
+        new_query = {"bool": {"must": [query], "must_not": [clause]}}
+    return {**body, "query": new_query}
+
+
 def _es_search(body: dict, timeout: int = 30) -> list[dict]:
     """Execute ES search on judgment index and return formatted hits."""
     es = get_es_client()
     resp = es.search(
-        index=INDEX, body=body, request_timeout=timeout,
+        index=INDEX, body=_without_supreme_court(body), request_timeout=timeout,
     )
     return resp["hits"]["hits"]
 

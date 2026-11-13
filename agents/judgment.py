@@ -7,7 +7,7 @@ Handles: "State vs Doe 2020", "SC cases on anticipatory bail",
          "bail cases under section 438", "Kirloskar vs Kirloskar", etc.
 
 Uses: GPT-4o (metadata extraction), Gemini Flash (response generation)
-Data Source: Elasticsearch "judgements" index + AWS S3
+Data Source: Elasticsearch High Court index (judgements_v2, see core/judgment_index.py) + AWS S3
 
 Search Strategies (tried in order of specificity):
 1. Citation / case number direct lookup
@@ -36,7 +36,7 @@ from core.logger import get_logger, log_time, short_err
 from core.settings import TIMEOUT_ES_PARALLEL_SEC
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
 from tools.shared.judgment_search import smart_judgment_search
-from tools.shared.storage_tools import generate_s3_link
+from core import judgment_index as jx
 from tools.shared.llm_tools import CaseMetadata
 from core.progress import progress
 
@@ -117,10 +117,9 @@ def _is_exact_section_lookup(
 # to the web fallback.
 #
 # Two normalisation edge cases baked into `_normalize_court_filter`:
-#   1. The index stores "odisa high court" (source-data typo).
-#      Users typing the correct "odisha high court" would otherwise
-#      miss their own court's docs. Normalise both spellings to the
-#      typo'd bucket.
+#   1. The old `judgements` index stores "odisa high court" (a typo);
+#      judgements_v2 stores "odisha high court". Every spelling is
+#      normalised to the one the index in use holds (jx.ODISHA_COURT).
 #   2. The index stores "Tribunal" (capital T). `smart_judgment_search`
 #      lowercases the filter before `match_phrase`, so the comparison
 #      here is lowercase-only.
@@ -130,7 +129,8 @@ _INDEXED_COURTS: frozenset[str] = frozenset({
     "kerala high court",
     "rajasthan high court",
     "madhya pradesh high court",
-    "odisa high court",  # sic — matches the source-data typo
+    "odisa high court",  # sic — the old `judgements` index's typo
+    "odisha high court",  # judgements_v2
     "gujarat high court",
     "calcutta high court",
     "delhi high court",
@@ -163,9 +163,9 @@ def _normalize_court_filter(court: str | None) -> tuple[str | None, bool]:
     normalized = court.strip().lower()
     if not normalized:
         return None, False
-    # Fold correct Odisha / Orissa spellings into the index's typo bucket.
-    if normalized in ("odisha high court", "orissa high court"):
-        normalized = "odisa high court"
+    # Fold every Odisha / Orissa spelling into the label the index uses.
+    if normalized in ("odisha high court", "orissa high court", "odisa high court"):
+        normalized = jx.ODISHA_COURT
     if normalized in _INDEXED_COURTS:
         return normalized, False
     # Generic "high court" (no location prefix) — user did not name a
@@ -447,9 +447,10 @@ def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
             trimmed_hits += 1
         docs_text_parts.append(doc_text)
 
-        # Generate S3 link
+        # PDF link: carried by v2 entries, built from the file name for the
+        # old index (core.judgment_index.pdf_url).
         file_str = str(source_file) if isinstance(source_file, dict) else source_file
-        s3_link = generate_s3_link.invoke({"court": court, "file_name": file_str, "title": title}) if court and file_str else None
+        s3_link = jx.pdf_url(hit, title)
 
         sources.append(SourceMetadata(
             source_type="judgment",

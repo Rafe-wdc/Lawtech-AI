@@ -203,9 +203,10 @@ _HC_INDEX_TEXT_CAP = 60_000
 
 
 def _sc_judgment_in_judgements_index(petitioner: str, respondent: str) -> dict | None:
-    """A Supreme Court judgment filed in the general `judgements` index.
+    """A Supreme Court judgment filed in the general High Court index.
 
-    38,404 SC judgments sit there (court_name "supreme court"), several
+    judgements_v2 holds 38,325 SC judgments (court_name "supreme court");
+    the old `judgements` index had only 779 left by 2026-11-13. Several
     thousand of them absent from the SCI index: K. Bhaskaran v. Sankaran
     Vaidhyan Balan, Shreya Singhal v. UoI, Indra Sawhney v. UoI. The SCI
     tools cannot reach them, so the gate used to answer "not in the
@@ -217,16 +218,28 @@ def _sc_judgment_in_judgements_index(petitioner: str, respondent: str) -> dict |
     if not pet_tokens:
         return None
     try:
+        from core import judgment_index as jx
         from core.clients import get_es_client
         from core.settings import ES_INDICES
         from tools.shared.storage_tools import generate_s3_link
+        if jx.LEGACY:
+            must = [{"match": {"source": {
+                "query": " ".join(pet_tokens + ([resp_key] if resp_key else [])),
+                "operator": "and"}}}]
+        else:
+            # judgements_v2 stores `source` as one exact value, so the file
+            # name's words cannot be searched; the party names can.
+            must = [{"match": {"petitioner_names": {"query": " ".join(pet_tokens),
+                                                    "operator": "and"}}}]
+            if resp_key:
+                must.append({"match": {"respondent_names": {"query": resp_key,
+                                                            "operator": "and"}}})
         r = get_es_client().search(index=ES_INDICES["judgments"], body={
-            "size": 1, "_source": ["source", "page_content"],
+            "size": 1,
+            "_source": [jx.TEXT_FIELD, "petitioner_names", "respondent_names", *jx.LINK_FIELDS],
             "query": {"bool": {
                 "filter": [{"match_phrase": {"court_name": "supreme court"}}],
-                "must": [{"match": {"source": {
-                    "query": " ".join(pet_tokens + ([resp_key] if resp_key else [])),
-                    "operator": "and"}}}],
+                "must": must,
             }},
         }, request_timeout=15)
         hits = r["hits"]["hits"]
@@ -234,9 +247,16 @@ def _sc_judgment_in_judgements_index(petitioner: str, respondent: str) -> dict |
             return None
         src = hits[0].get("_source", {})
         file_name = src.get("source") or ""
-        title = re.sub(r"\.pdf$", "", os.path.basename(file_name.replace("\\", "/")), flags=re.IGNORECASE)
-        pdf = generate_s3_link.invoke({"court": "supreme", "file_name": file_name, "title": title})
-        return {"title": title, "text": (src.get("page_content") or "")[:_HC_INDEX_TEXT_CAP], "pdf": pdf}
+        if jx.LEGACY:
+            title = re.sub(r"\.pdf$", "", os.path.basename(file_name.replace("\\", "/")),
+                           flags=re.IGNORECASE)
+            pdf = generate_s3_link.invoke({"court": "supreme", "file_name": file_name, "title": title})
+        else:
+            pets, resps = jx.names(src.get("petitioner_names")), jx.names(src.get("respondent_names"))
+            title = (f"{pets[0]} vs. {resps[0]}" if pets and resps else
+                     re.sub(r"\.pdf$", "", os.path.basename(file_name), flags=re.IGNORECASE))
+            pdf = jx.pdf_url(src, title)
+        return {"title": title, "text": jx.text(src)[:_HC_INDEX_TEXT_CAP], "pdf": pdf}
     except Exception as e:  # noqa: BLE001
         log.warning("SC lookup in judgements index skipped (ES error)", error=short_err(e))
         return None

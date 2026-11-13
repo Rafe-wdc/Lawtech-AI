@@ -201,7 +201,9 @@ ES_USE_SSL = ELASTICSEARCH_URL.startswith("https://")
 
 ES_INDICES = {
     "legislation": "legislation",
-    "judgments": "judgements",
+    # High Court judgments. v2 holds the 2025-26 Bombay loads and correct
+    # dates; JUDGMENTS_INDEX=judgements switches back (core/judgment_index.py).
+    "judgments": os.getenv("JUDGMENTS_INDEX", "judgements_v2"),
     "drafting": "drafting",
     "newacts": "newacts_v1",
     "sci_judgments": "supreme_court_judgement",

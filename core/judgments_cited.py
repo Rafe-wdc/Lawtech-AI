@@ -699,24 +699,22 @@ def _write_back(draft: str, case: CitedCase, found: FoundJudgment) -> str:
 
 
 def _lookup_hc(es, case: CitedCase) -> FoundJudgment | None:
+    from core import judgment_index as jx
     from core.settings import ES_INDICES
-    from tools.shared.storage_tools import generate_s3_link
     kind, cited_hc = _cited_court(case.citation)
     rows = []
     for src in _candidates(es, ES_INDICES["judgments"], case, "petitioner_names",
                            "respondent_names",
-                           ["petitioner_names", "respondent_names", "court_name", "year",
-                            "judgment_date", "source"]):
+                           ["petitioner_names", "respondent_names", "year",
+                            "judgment_date", *jx.LINK_FIELDS]):
         court = str(src.get("court_name") or "").strip().lower()
         # The index also holds Supreme Court judgments ("supreme court").
         if kind == "sc" and court != "supreme court":
             continue
         if kind == "hc" and (court == "supreme court" or (cited_hc and court != cited_hc)):
             continue
-        pet = src.get("petitioner_names") or []
-        resp = src.get("respondent_names") or []
-        pet = " ".join(pet) if isinstance(pet, list) else str(pet)
-        resp = " ".join(resp) if isinstance(resp, list) else str(resp)
+        pet = " ".join(jx.names(src.get("petitioner_names")))
+        resp = " ".join(jx.names(src.get("respondent_names")))
         year = src.get("year")
         year = int(year) if str(year or "").isdigit() else None
         rows.append((pet, resp, year, src))
@@ -725,10 +723,7 @@ def _lookup_hc(es, case: CitedCase) -> FoundJudgment | None:
         pet, resp = next((p, r) for p, r, _, s in rows if s is src)
         year = next(y for _, _, y, s in rows if s is src)
         court = str(src.get("court_name") or "").strip()
-        source_file = str(src.get("source") or "")
-        url = generate_s3_link.invoke({
-            "court": court, "file_name": source_file, "title": f"{pet} vs {resp}",
-        }) if court and source_file else None
+        url = jx.pdf_url(src, f"{pet} vs {resp}")
         date = str(src.get("judgment_date") or year or "")
         court_label = ("Supreme Court of India" if court.lower() == "supreme court"
                        else court.title())

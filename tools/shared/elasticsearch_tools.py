@@ -30,6 +30,7 @@ from core.clients import (
 )
 from core.logger import get_logger
 from core.settings import ES_INDICES
+from core import judgment_index as _jx
 from tools.inline.section_parser import parse_section_info
 
 log = get_logger("ElasticsearchTools")
@@ -692,13 +693,13 @@ def search_judgments(
     # TIER 4: Lexical Query
     if lexical_query:
         should_clauses.append(
-            {"match": {"page_content": {"query": lexical_query, "boost": 8, "minimum_should_match": "95%"}}}
+            {"match": {_jx.TEXT_FIELD: {"query": lexical_query, "boost": 8, "minimum_should_match": "95%"}}}
         )
 
     # TIER 5: Full-text fallback
     if query and not lexical_query:
         should_clauses.append(
-            {"match": {"page_content": {"query": query, "boost": 3}}}
+            {"match": {_jx.TEXT_FIELD: {"query": query, "boost": 3}}}
         )
 
     # Filters
@@ -731,11 +732,11 @@ def search_judgments(
     return {
         "hits": [
             {
-                "content": h["_source"]["page_content"],
+                "content": _jx.text(h["_source"]),
                 "source": h["_source"].get("source", "unknown"),
-                "court_name": h["_source"].get("court_name", ""),
-                "petitioner_names": h["_source"].get("petitioner_names", []),
-                "respondent_names": h["_source"].get("respondent_names", []),
+                "court_name": str(h["_source"].get("court_name") or "").lower(),
+                "petitioner_names": _jx.names(h["_source"].get("petitioner_names")),
+                "respondent_names": _jx.names(h["_source"].get("respondent_names")),
                 "score": h["_score"],
             }
             for h in hits
@@ -1220,7 +1221,7 @@ def search_high_court(
     es = get_es_client()
 
     should_clauses = [
-        {"match": {"page_content": {"query": query, "boost": 5}}},
+        {"match": {_jx.TEXT_FIELD: {"query": query, "boost": 5}}},
         {"match": {"keywords": {"query": query, "boost": 10}}},
     ]
 
@@ -1250,11 +1251,11 @@ def search_high_court(
     return {
         "hits": [
             {
-                "content": h["_source"]["page_content"],
+                "content": _jx.text(h["_source"]),
                 "source": h["_source"].get("source", "unknown"),
-                "court_name": h["_source"].get("court_name", ""),
-                "petitioner_names": h["_source"].get("petitioner_names", []),
-                "respondent_names": h["_source"].get("respondent_names", []),
+                "court_name": str(h["_source"].get("court_name") or "").lower(),
+                "petitioner_names": _jx.names(h["_source"].get("petitioner_names")),
+                "respondent_names": _jx.names(h["_source"].get("respondent_names")),
                 "score": h["_score"],
             }
             for h in hits

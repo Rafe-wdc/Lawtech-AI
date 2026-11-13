@@ -10,7 +10,7 @@ query in elasticsearch_tools.py:
 - Smart multi-strategy search with automatic fallback
 
 Uses: Elasticsearch client from core.clients
-Index: ES_INDICES["judgments"] (= "judgements")
+Index: ES_INDICES["judgments"] (= "judgements_v2"; see core/judgment_index.py)
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ from typing import Optional
 from core.clients import get_es_client
 from core.settings import ES_INDICES
 from core.logger import get_logger
+from core import judgment_index as jx
+from core.judgment_index import TEXT_FIELD, CASE_NO_FIELD
 
 log = get_logger("JudgmentSearch")
 
@@ -39,9 +41,9 @@ def _dedupe_key(src: dict, es_id: str) -> tuple:
     """Same judgment, same key. The index holds exact copies of some
     judgments under different ids (one Bombay HC order three times in one
     top-10, 2026-11-10), which crowd real results out of the slots."""
-    pet = src.get("petitioner_names") or []
-    pet = pet[0] if isinstance(pet, list) and pet else pet
-    parts = (str(src.get("court_name") or "").lower(), str(src.get("case_number") or ""),
+    pet = jx.names(src.get("petitioner_names"))
+    pet = pet[0] if pet else ""
+    parts = (str(src.get("court_name") or "").lower(), jx.case_number(src),
              str(src.get("judgment_date") or ""), str(pet or "").lower())
     return parts if any(parts) else ("id", es_id)
 
@@ -54,21 +56,26 @@ def _format_hits(hits: list[dict]) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
+        src = h["_source"]
         out.append({
-            "content": h["_source"]["page_content"],
-            "source": h["_source"].get("source", "unknown"),
-            "court_name": h["_source"].get("court_name", ""),
-            "petitioner_names": h["_source"].get("petitioner_names", []),
-            "respondent_names": h["_source"].get("respondent_names", []),
+            "content": jx.text(src),
+            "source": src.get("source", "unknown"),
+            "court_name": str(src.get("court_name") or "").lower(),
+            "petitioner_names": jx.names(src.get("petitioner_names")),
+            "respondent_names": jx.names(src.get("respondent_names")),
             "year": h["_source"].get("year"),
             "keywords": h["_source"].get("keywords", []),
             "acts_or_sections_invoked": h["_source"].get("acts_or_sections_invoked", []),
             "case_type": h["_source"].get("case_type", ""),
             "citation": h["_source"].get("citation", ""),
-            "case_number": h["_source"].get("case_number", ""),
-            "judge_names": h["_source"].get("judge_names", ""),
+            "case_number": jx.case_number(src),
+            "judge_names": jx.judges(src),
             "bench_judge_names": h["_source"].get("bench_judge_names", ""),
             "judgment_date": h["_source"].get("judgment_date"),
+            # v2: the PDF link travels with the entry (core.judgment_index.pdf_url)
+            "pdf_links": src.get("pdf_links") or [],
+            "s3_bucket": src.get("s3_bucket"),
+            "s3_key": src.get("s3_key"),
             "score": h["_score"],
         })
     return out
@@ -283,8 +290,8 @@ def search_by_citation(citation: str, size: int = 3) -> list[dict]:
     """Direct lookup by citation or case number (keyword fields)."""
     should = [
         {"term": {"citation": {"value": citation.lower(), "boost": 50}}},
-        {"term": {"case_number": {"value": citation.lower(), "boost": 50}}},
-        {"match_phrase": {"page_content": {"query": citation, "boost": 10}}},
+        {"term": {CASE_NO_FIELD: {"value": citation.lower(), "boost": 50}}},
+        {"match_phrase": {TEXT_FIELD: {"query": citation, "boost": 10}}},
     ]
 
     hits = _es_search({
@@ -360,14 +367,14 @@ def search_by_case_type(
     type_keywords = CASE_TYPE_KEYWORDS.get(case_type, [case_type])
 
     should = [
-        {"match": {"page_content": {"query": query, "boost": 5}}},
+        {"match": {TEXT_FIELD: {"query": query, "boost": 5}}},
         {"match": {"keywords": {"query": query, "boost": 10}}},
     ]
 
     # Boost case type keywords in content and keywords fields
     for kw in type_keywords[:3]:
         should.append({"match": {"keywords": {"query": kw, "boost": 8}}})
-        should.append({"match_phrase": {"page_content": {"query": kw, "boost": 3}}})
+        should.append({"match_phrase": {TEXT_FIELD: {"query": kw, "boost": 3}}})
 
     # Build case_type field filter
     case_type_should = [
@@ -429,7 +436,7 @@ def search_by_judge(
 
     should = []
     if query:
-        should.append({"match": {"page_content": {"query": query, "boost": 3}}})
+        should.append({"match": {TEXT_FIELD: {"query": query, "boost": 3}}})
         should.append({"match": {"keywords": {"query": query, "boost": 5}}})
 
     filters = []
@@ -452,7 +459,7 @@ def search_by_date_range(
 ) -> list[dict]:
     """Search judgments within a date range (YYYY-MM-DD format)."""
     should = [
-        {"match": {"page_content": {"query": query, "boost": 5}}},
+        {"match": {TEXT_FIELD: {"query": query, "boost": 5}}},
         {"match": {"keywords": {"query": query, "boost": 10}}},
     ]
 
@@ -490,7 +497,7 @@ def search_by_legal_provision(
 
     should = []
     if query:
-        should.append({"match": {"page_content": {"query": query, "boost": 3}}})
+        should.append({"match": {TEXT_FIELD: {"query": query, "boost": 3}}})
         should.append({"match": {"keywords": {"query": query, "boost": 5}}})
 
     filters = []
@@ -521,13 +528,13 @@ def search_by_section_phrase(
     all of them. The query words only rank; the phrase decides membership.
     """
     from core.section_cases import phrase_variants
-    phrase = {"bool": {"should": [{"match_phrase": {"page_content": p}}
+    phrase = {"bool": {"should": [{"match_phrase": {TEXT_FIELD: p}}
                                   for p in phrase_variants(section)],
                        "minimum_should_match": 1}}
     filters = [phrase]
     if court:
         filters.append({"match_phrase": {"court_name": court.lower()}})
-    should = [{"match": {"page_content": {"query": query, "boost": 3}}}] if query else []
+    should = [{"match": {TEXT_FIELD: {"query": query, "boost": 3}}}] if query else []
     es = get_es_client()
     # Count first (cheap, no documents); fetch only when the set is small.
     # Fetching 40 full judgments for a common section and then discarding
@@ -722,11 +729,11 @@ def smart_judgment_search(
             "query": section, "boost": 15, "minimum_should_match": "90%",
         }}})
     if lq:
-        should_clauses.append({"match": {"page_content": {
+        should_clauses.append({"match": {TEXT_FIELD: {
             "query": lq, "boost": 8, "minimum_should_match": "80%",
         }}})
     if not should_clauses:
-        should_clauses.append({"match": {"page_content": {
+        should_clauses.append({"match": {TEXT_FIELD: {
             "query": query, "boost": 3,
         }}})
 
@@ -757,7 +764,7 @@ def smart_judgment_search(
         "size": size,
         "query": {"bool": {
             "should": [
-                {"match": {"page_content": {"query": query, "boost": 5}}},
+                {"match": {TEXT_FIELD: {"query": query, "boost": 5}}},
                 {"match": {"keywords": {"query": query, "boost": 10}}},
             ],
             "minimum_should_match": 1,

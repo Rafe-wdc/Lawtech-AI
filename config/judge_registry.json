@@ -1,15 +1,19 @@
 {
   "_readme": [
     "Judges the judge-persona feature can profile, and exactly how each is recorded in our indexes.",
-    "Curated by a person: list only values that are this judge. Similar names belong to other people",
-    "(e.g. 'R. MURALIDHAR' is a tribunal member, 'DR. M.R. SHAH' sat in Gauhati HC).",
+    "Curated by a person: list only values that are this judge sitting on the bench. Similar names belong",
+    "to other people, and some values name a judge who is only cited or was an arbitrator. Those go in",
+    "not_this_judge with the reason (read by the tests, ignored by the app) so nobody adds them back.",
     "Find values:  python scripts/build_judge_registry.py candidates <name>",
     "Check file:   python scripts/build_judge_registry.py check",
     "sources[].index: 'sci_judgments' (Supreme Court) needs bench_phrases. 'judgments' (High Courts) needs bench_values",
     "  and court_names (exact court_name values, e.g. 'odisa high court' as spelled in the index).",
     "aliases: names users and judgments use for the judge, including a first name a judge signs with",
     "  (Kurian Joseph signs 'KURIAN, J.').",
-    "status: sitting | retired | unknown.  verified: true once a person has checked every value."
+    "status: sitting | retired | unknown.  verified: true once a person has checked every value.",
+    "Review 16 Nov 2026: the lawyer team (Judge_Name_Review.xlsx) confirmed every listed value, the courts",
+    "  and sitting/retired status of all 7 judges. They also marked the not_this_judge values 'This judge';",
+    "  the judgment texts show otherwise (reasons below), so those stay out."
   ],
   "judges": [
     {
@@ -17,13 +21,17 @@
       "name": "M.R. Shah",
       "courts": ["Supreme Court of India", "High Court of Gujarat"],
       "status": "retired",
-      "verified": false,
+      "verified": true,
       "aliases": ["M.R. Shah", "Mukeshkumar Rasikbhai Shah"],
       "sources": [
         {"index": "sci_judgments", "bench_phrases": ["M.R. SHAH"]},
         {"index": "judgments", "court_names": ["gujarat high court"],
          "bench_values": ["M.R. SHAH", "M.R. Shah", "HONOURABLE MR.JUSTICE M.R. SHAH", "M.R. Shah, J.",
                           "MR.JUSTICE M.R. SHAH"]}
+      ],
+      "not_this_judge": [
+        {"court": "gauhati high court", "values": ["DR. M.R. SHAH", "Dr. M.R. Shah", "HON BLE JUSTICE DR. M.R. SHAH"],
+         "why": "Justice Dr. (Mrs.) Indira Shah of the Gauhati High Court; the name was misread from shifted-font text"}
       ]
     },
     {
@@ -31,7 +39,7 @@
       "name": "Vikram Nath",
       "courts": ["Supreme Court of India", "High Court of Gujarat"],
       "status": "sitting",
-      "verified": false,
+      "verified": true,
       "aliases": ["Vikram Nath"],
       "sources": [
         {"index": "sci_judgments", "bench_phrases": ["VIKRAM NATH"]},
@@ -46,7 +54,7 @@
       "name": "Abhay S. Oka",
       "courts": ["Supreme Court of India", "High Court of Bombay"],
       "status": "retired",
-      "verified": false,
+      "verified": true,
       "aliases": ["Abhay S. Oka", "Abhay Shreeniwas Oka", "A.S. Oka"],
       "sources": [
         {"index": "sci_judgments", "bench_phrases": ["ABHAY S. OKA"]},
@@ -60,7 +68,7 @@
       "name": "J.B. Pardiwala",
       "courts": ["Supreme Court of India", "High Court of Gujarat"],
       "status": "sitting",
-      "verified": false,
+      "verified": true,
       "aliases": ["J.B. Pardiwala", "Jamshed Burjor Pardiwala"],
       "sources": [
         {"index": "sci_judgments", "bench_phrases": ["PARDIWALA"]},
@@ -75,6 +83,14 @@
                           "HONOURABLE MR. JUSTICE J. B. PARDIWALA", "J.B. Pardiwala J.", "J.B.Pardiwala, J.",
                           "MR. J.B.PARDIWALA", "Mr. J.B. Pardiwala", "Mr. J.B.Pardiwala, J.",
                           "Mr. Justice J.B.Pardiwala", "Mr.Justice J.B.Pardiwala"]}
+      ],
+      "not_this_judge": [
+        {"court": "gauhati high court", "values": ["Justice J. B. Pardiwala"],
+         "why": "judgment by Ajit Borthakur, J.; a Pardiwala ruling is only cited"},
+        {"court": "gujarat high court", "values": ["J.B. Pardiwala, J. (mentioned in reference)"],
+         "why": "another judge's order citing his earlier ruling"},
+        {"court": "gujarat high court", "values": ["J.M. Pardiwala"],
+         "why": "judgment by Anant S. Dave, J.; he sat only on an earlier interim order in the case"}
       ]
     },
     {
@@ -82,7 +98,7 @@
       "name": "Kurian Joseph",
       "courts": ["Supreme Court of India", "High Court of Kerala"],
       "status": "retired",
-      "verified": false,
+      "verified": true,
       "aliases": ["Kurian Joseph", "Kurian"],
       "sources": [
         {"index": "sci_judgments", "bench_phrases": ["KURIAN JOSEPH"]},
@@ -91,6 +107,10 @@
                           "MR.KURIAN JOSEPH", "MR. JUSTICE KURIAN JOSEPH", "KURIAN JOSEPH J.",
                           "Kurian Joseph, Ag.C.J.", "JUSTICE KURIAN JOSEPH", "Kurian Joseph, Ag. C.J.",
                           "Kurian Joseph, Ag.CJ."]}
+      ],
+      "not_this_judge": [
+        {"court": "jammu and kashmir high court", "values": ["Justice Kurian Joseph"],
+         "why": "he was an arbitrator in the dispute, not on the bench"}
       ]
     },
     {
@@ -98,7 +118,7 @@
       "name": "S. Muralidhar",
       "courts": ["High Court of Delhi", "High Court of Orissa"],
       "status": "retired",
-      "verified": false,
+      "verified": true,
       "aliases": ["S. Muralidhar", "Dr. S. Muralidhar"],
       "sources": [
         {"index": "judgments", "court_names": ["delhi high court", "odisa high court"],
@@ -115,6 +135,13 @@
                           "Dr. S. Muralidhar, J", "HON BLE DR. JUSTICE S. MURALIDHAR",
                           "HON’BLE DR.JUSTICE S. MURALIDHAR", "Hon'ble Dr. Justice S. Muralidhar",
                           "S. Muralidhar, J"]}
+      ],
+      "not_this_judge": [
+        {"court": "manipur high court", "values": ["Mr.MV Muralidharan", "MR.MV MURALIDHARAN"],
+         "why": "Acting Chief Justice M.V. Muralidharan of the Manipur High Court (2023)"},
+        {"court": "Tribunal", "values": ["R. MURALIDHAR", "R. Muralidhar", "SHRI R. MURALIDHAR", "R.Muralidhar",
+                                         "Shri R. MURALIDHAR"],
+         "why": "R. Muralidhar, Member (Judicial), CESTAT Kolkata (2024-2025)"}
       ]
     },
     {
@@ -122,7 +149,7 @@
       "name": "Devan Ramachandran",
       "courts": ["High Court of Kerala"],
       "status": "sitting",
-      "verified": false,
+      "verified": true,
       "aliases": ["Devan Ramachandran"],
       "sources": [
         {"index": "judgments", "court_names": ["kerala high court"],

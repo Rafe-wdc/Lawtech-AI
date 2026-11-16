@@ -8,10 +8,12 @@ supreme_court_judgement and judgements indexes (2026-11-12).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from core.judge_registry import (
-    LAYOUTS, Judge, JudgeSource, RegistryError, bench_filter, date_range_filter,
+    LAYOUTS, REGISTRY_PATH, Judge, JudgeSource, RegistryError, bench_filter, date_range_filter,
     detect_author, load_registry, normalize_name, parse_registry,
 )
 from core.settings import ES_INDICES
@@ -43,10 +45,18 @@ def test_shipped_registry_loads_and_is_consistent():
 
 
 def test_shipped_registry_keeps_namesakes_out():
+    # Values the lawyer review and the judgment texts ruled out (other people,
+    # or the judge only cited) must never come back as a source.
+    raw = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
     reg = load_registry()
-    values = {v for j in reg.judges for s in j.sources for v in s.bench_values}
-    # other people with similar names, seen next to the right values in the index
-    assert not values & {"R. MURALIDHAR", "Mr.MV Muralidharan", "DR. M.R. SHAH", "J.M. Pardiwala"}
+    for d in raw["judges"]:
+        listed = {(c, v) for s in reg.get(d["judge_id"]).sources for c in s.court_names for v in s.bench_values}
+        for ex in d.get("not_this_judge", ()):
+            assert ex["why"] and ex["values"]
+            assert not {(ex["court"], v) for v in ex["values"]} & listed, d["judge_id"]
+    ruled_out = {v for d in raw["judges"] for ex in d.get("not_this_judge", ()) for v in ex["values"]}
+    assert {"R. MURALIDHAR", "Mr.MV Muralidharan", "DR. M.R. SHAH", "J.M. Pardiwala"} <= ruled_out
+    assert all(j.verified for j in reg.judges)
 
 
 # ---------------------------------------------------------------------------

@@ -341,8 +341,21 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
     if "supreme court" in query_lower or re.search(r'\bsc\b', query_lower):
         court_name = "supreme court"
     elif "high court" in query_lower:
-        hc = re.search(r'(\w+)\s+high court', query_lower)
-        court_name = f"{hc.group(1)} high court" if hc else "high court"
+        # A full court name first: one word before "high court" read
+        # "Madhya Pradesh High Court" as "pradesh high court", an unknown
+        # court, so this search ran with no court filter and returned
+        # Bombay, Kerala and Delhi judgments for an MP question (2026-11-17).
+        known = sorted(_INDEXED_COURTS | {"odisha high court", "orissa high court",
+                                          "punjab and haryana high court", "andhra pradesh high court",
+                                          "himachal pradesh high court", "allahabad high court",
+                                          "madras high court", "karnataka high court", "patna high court",
+                                          "telangana high court", "chhattisgarh high court",
+                                          "jharkhand high court"},
+                       key=len, reverse=True)
+        court_name = next((c for c in known if c in query_lower), None)
+        if court_name is None:
+            hc = re.search(r'(\w+)\s+high court', query_lower)
+            court_name = f"{hc.group(1)} high court" if hc else "high court"
 
     # Legal topics
     topics = [t for t in _LEGAL_TOPICS if t in query_lower]
@@ -361,9 +374,17 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
     # size: narrow if both parties known, else broader
     size = 1 if (petitioners and respondents) else (5 if topics else 10)
 
+    # A section and its Act ("Section 138 Negotiable Instruments Act",
+    # "Section 498A IPC"). Without it this first search never used the
+    # provision strategy: "2026 ... Section 138" got keyword hits, so the
+    # metadata-informed search (which only runs when this one finds nothing)
+    # never ran (2026-11-17).
+    acts = [f"section {m.group('sec')} {m.group('act')}".lower()
+            for m in _SECTION_ACT_RE.finditer(query)]
+
     log.info("Regex fallback metadata",
              petitioners=petitioners, respondents=respondents,
-             year=year, court=court_name, topics=topics, size=size)
+             year=year, court=court_name, topics=topics, acts=acts, size=size)
 
     return CaseMetadata(
         petitioner_names=petitioners,
@@ -371,7 +392,7 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
         year=year,
         court_name=court_name,
         topics=topics,
-        acts_or_sections=[],
+        acts_or_sections=acts,
         lexical_query=lexical,
         size=size,
     )
@@ -402,6 +423,36 @@ def _cap_doc_text(content: str, budget_left: int) -> tuple[str, int]:
     if limit <= 0:
         return "", dropped
     return text[:limit].rstrip() + _TRUNCATION_NOTE.format(n=dropped), dropped
+
+
+_SECTION_ACT_RE = re.compile(
+    r"\b(?:section|sec\.?|u/s\.?|s\.)\s*(?P<sec>\d{1,4}[A-Z]{0,2}(?:-\d{1,3}[A-Z]?)?(?:\(\w{1,4}\))*)\s+"
+    r"(?:of\s+(?:the\s+)?)?"
+    r"(?P<act>(?:BNSS|BNS|BSA|IPC|Cr\.P\.C\.?|CrPC|CPC|NDPS Act|N\.I\. Act|NI Act"
+    r"|(?:[A-Z][A-Za-z.&-]*\s+){1,7}(?:Act|Code|Sanhita|Adhiniyam))\b)",
+    re.I)
+
+
+def _judge_view(texts: list[str]) -> list[str]:
+    """What the relevance judge reads of each judgment: its opening (court,
+    case, parties) and its operative end (what the court did).
+
+    The judge reads a window of about 1,200-2,400 characters per document.
+    Taken from the start alone, a grouped or long judgment is nothing but
+    petition titles: the judge rejected real 2026 Bombay decisions as "only
+    cause-title listings" (2026-11-17) because the decision was at the end.
+    The judge and its rules are unchanged; only the excerpt is."""
+    from core.retrieval_relevance import _RELEVANCE_TOP_N, _adaptive_chunk_window
+    window = _adaptive_chunk_window(min(len([t for t in texts if t]), _RELEVANCE_TOP_N))
+    out = []
+    for t in texts:
+        t = " ".join((t or "").split())
+        if len(t) <= window:
+            out.append(t)
+            continue
+        head = int(window * 0.4)
+        out.append(t[:head] + " [...] " + t[-(window - head - 7):])
+    return out
 
 
 def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
@@ -744,7 +795,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
             progress("judgment", "Verifying retrieval relevance...",
                      step="relevance_check")
             is_relevant, judge_telemetry = await check_retrieval_relevance(
-                query, docs_text_parts,
+                query, _judge_view([h.get("content") or "" for h in hits]),
                 source_name=first_title or hits[0].get("source"),
                 agent_name="Judgment",
             )

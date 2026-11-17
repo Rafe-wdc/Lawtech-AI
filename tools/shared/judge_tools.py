@@ -21,6 +21,7 @@ from typing import Iterator, Literal
 from core.judge_registry import (
     Judge, JudgeSource, bench_filter, date_range_filter, detect_author, normalize_name,
 )
+from core import judgment_index as _jx
 from core.logger import get_logger
 
 log = get_logger("JudgeTools")
@@ -33,8 +34,8 @@ TEXT_PAGE_SIZE = 100            # pages carrying full text stay a few MB
 REQUEST_TIMEOUT_S = 60
 _META_FIELDS = {
     "sci_judgments": ["parties", "case_no", "judgment_date", "bench", "judgment_by", "pdf_links", "page_count"],
-    "judgments": ["petitioner_names", "respondent_names", "case_number", "judgment_date", "bench_judge_names",
-                  "court_name", "source"],
+    "judgments": ["petitioner_names", "respondent_names", _jx.CASE_NO_FIELD, "judgment_date",
+                  "bench_judge_names", *_jx.LINK_FIELDS],
 }
 
 
@@ -109,13 +110,17 @@ def _from_hit(hit: dict, source: JudgeSource) -> JudgeJudgment:
             case_no=src.get("case_no") or "", bench=bench, bench_size=len(bench) or None,
             pdf_url=(links[0].get("url") if links else None), text=text,
         )
-    bench = tuple(src.get("bench_judge_names") or ())
+    bench = tuple(_jx.names(src.get("bench_judge_names")))
     pet, res = _first(src.get("petitioner_names")), _first(src.get("respondent_names"))
+    title = f"{pet} v. {res}" if pet or res else ""
     return JudgeJudgment(
         index_key=key, db_id=str(hit["_id"]), date=_iso_date(src.get("judgment_date"), key),
-        court=src.get("court_name") or "", title=f"{pet} v. {res}" if pet or res else "",
-        case_no=str(src.get("case_number") or ""), bench=bench, bench_size=len(bench) or None,
+        court=str(src.get("court_name") or "").lower(), title=title,
+        case_no=_jx.case_number(src), bench=bench, bench_size=len(bench) or None,
         source=src.get("source") or "", text=text,
+        # judgements_v2 entries carry their link; the old index's are built
+        # from `source` when shown.
+        pdf_url=(_jx.pdf_url(src, title, check_exists=False) if src.get("pdf_links") else None),
     )
 
 

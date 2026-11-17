@@ -78,13 +78,14 @@ def _bucket_is_public(host: str, sample_url: str) -> bool:
     return _PUBLIC_BUCKETS[host]
 
 
-def pdf_url(src: dict, title: str = "") -> str | None:
+def pdf_url(src: dict, title: str = "", check_exists: bool = True) -> str | None:
     """A PDF link a reader can open, or None.
 
     v2 entries carry the link (`pdf_links`). Links into the public bucket
-    are confirmed to exist like before; links into a bucket readers cannot
-    open are left out. An old-index entry has no link field, so it is built
-    from the file name as before."""
+    are confirmed to exist like before (`check_exists=False` skips that for
+    bulk reads such as a judge's 20,000 judgments); links into a bucket
+    readers cannot open are left out. An old-index entry has no link field,
+    so it is built from the file name as before."""
     links = [ln.get("url") for ln in (src.get("pdf_links") or [])
              if isinstance(ln, dict) and ln.get("url")]
     if links:
@@ -92,7 +93,7 @@ def pdf_url(src: dict, title: str = "") -> str | None:
         if not _bucket_is_public(urlparse(url).netloc, url):
             return None
         bucket, key = src.get("s3_bucket"), src.get("s3_key")
-        if bucket == S3_BUCKET and key:
+        if check_exists and bucket == S3_BUCKET and key:
             from tools.shared.storage_tools import _s3_key_exists
             if not _s3_key_exists(bucket, key):
                 return None

@@ -15,6 +15,7 @@ Index: ES_INDICES["judgments"] (= "judgements_v2"; see core/judgment_index.py)
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Optional
 
@@ -50,13 +51,22 @@ def _dedupe_key(src: dict, es_id: str) -> tuple:
 
 def _format_hits(hits: list[dict]) -> list[dict]:
     """Convert raw ES hits to standardized format with all metadata, one per judgment."""
-    out, seen = [], set()
+    out, seen, seen_text = [], set(), set()
     for h in hits:
         key = _dedupe_key(h["_source"], h.get("_id", ""))
         if key in seen:
             continue
         seen.add(key)
         src = h["_source"]
+        # One grouped judgment is stored once per petition, each copy under
+        # its own parties (12 entries, one text, for a 24-08-2026 Bombay
+        # order): it filled all ten result slots (2026-11-17).
+        body = " ".join(jx.text(src).split())
+        if len(body) > 200:
+            digest = hashlib.sha1(body.encode("utf-8", "ignore")).hexdigest()
+            if digest in seen_text:
+                continue
+            seen_text.add(digest)
         out.append({
             "content": jx.text(src),
             "source": src.get("source", "unknown"),
@@ -85,7 +95,9 @@ def _has_good_results(hits: list[dict], min_hits: int = _MIN_GOOD_HITS) -> bool:
     """Check if results are sufficient in quantity and quality."""
     if not hits or len(hits) < min_hits:
         return False
-    return (hits[0].get("score", 0) or 0) >= _MIN_SCORE
+    # The best score, not the first hit's: topic results are reordered so
+    # that substantive judgments come first (_substantive_first).
+    return max((h.get("score", 0) or 0) for h in hits) >= _MIN_SCORE
 
 
 # Supreme Court judgments do not belong to the High Court agent.
@@ -487,8 +499,11 @@ def search_by_legal_provision(
     query: str = "",
     court: str | None = None,
     size: int = 10,
+    year: int | None = None,
 ) -> list[dict]:
-    """Search judgments that invoke a specific legal provision."""
+    """Search judgments that invoke a specific legal provision (in the year
+    asked, like the other strategies: "2026 ... Section 138" used to return
+    any year's Section 138 judgments)."""
     must = [
         {"match": {"acts_or_sections_invoked": {
             "query": provision, "boost": 20, "minimum_should_match": "80%",
@@ -503,6 +518,8 @@ def search_by_legal_provision(
     filters = []
     if court:
         filters.append({"match_phrase": {"court_name": court.lower()}})
+    if year:
+        filters.append({"term": {"year": year}})
 
     hits = _es_search({
         "size": size,
@@ -549,6 +566,29 @@ def search_by_section_phrase(
         "size": _SECTION_PHRASE_MAX,
         "query": {"bool": {"filter": filters, "should": should}}})
     return _format_hits(resp["hits"]["hits"]), True
+
+
+# Topic searches (case type, provision, keywords) fetch a wider pool and put
+# substantive judgments before routine procedural orders, query-aware
+# (core/order_kind.py). Case-name and citation lookups are left as they are:
+# there the user wants that order, whatever it is.
+_TOPIC_POOL = 30
+
+
+def _topic_pool(size: int) -> int:
+    return max(size * 3, _TOPIC_POOL)
+
+
+def _substantive_first(query: str, hits: list[dict], size: int | None = None) -> list[dict]:
+    from core.order_kind import prefer_substantive
+    ordered = prefer_substantive(query, hits)
+    kept = ordered if size is None else ordered[:size]
+    if hits:
+        log.info("topic results ordered: substantive judgments first",
+                 pool=len(hits), kept=len(kept),
+                 procedural_in_pool=sum(1 for h in hits if h.get("order_kind") == "procedural"),
+                 procedural_kept=sum(1 for h in kept if h.get("order_kind") == "procedural"))
+    return kept
 
 
 def smart_judgment_search(
@@ -680,6 +720,7 @@ def smart_judgment_search(
             log.warning("section phrase search failed", section=_sec.section, error=str(e)[:120])
             results, complete = [], False
         if results and complete:
+            results = _substantive_first(query, results)      # the whole set, reordered
             log.info("section phrase match", section=_sec.section, hits=len(results))
             return {
                 "hits": results,
@@ -690,7 +731,8 @@ def smart_judgment_search(
     case_type = detect_case_type(query)
     if case_type:
         strategies_tried.append(f"case_type:{case_type}")
-        results = search_by_case_type(query, case_type, court, year, size)
+        results = _substantive_first(
+            query, search_by_case_type(query, case_type, court, year, _topic_pool(size)), size)
         if _update_best(results):
             log.info("case type match", case_type=case_type, hits=len(best_results))
             return {
@@ -704,7 +746,8 @@ def smart_judgment_search(
     if acts_or_sections:
         strategies_tried.append("legal_provision")
         for provision in acts_or_sections:
-            results = search_by_legal_provision(provision, query, court, size)
+            results = _substantive_first(
+                query, search_by_legal_provision(provision, query, court, _topic_pool(size), year), size)
             _update_best(results)
         if _has_good_results(best_results, min_hits):
             log.info("provision match", hits=len(best_results))
@@ -744,13 +787,13 @@ def smart_judgment_search(
         filters.append({"match_phrase": {"court_name": court.lower()}})
 
     mt_hits = _es_search({
-        "size": size,
+        "size": _topic_pool(size),
         "query": {"bool": {
             "should": should_clauses, "filter": filters,
             "minimum_should_match": 1,
         }},
     }, timeout=50)
-    if _update_best(_format_hits(mt_hits)):
+    if _update_best(_substantive_first(query, _format_hits(mt_hits), size)):
         log.info("multi-tier match", hits=len(best_results))
         return {
             "hits": best_results,
@@ -761,7 +804,7 @@ def smart_judgment_search(
     # --- Strategy 7: Relaxed full-text fallback (no year/court filter) ---
     strategies_tried.append("full_text_relaxed")
     relaxed_hits = _es_search({
-        "size": size,
+        "size": _topic_pool(size),
         "query": {"bool": {
             "should": [
                 {"match": {TEXT_FIELD: {"query": query, "boost": 5}}},
@@ -770,7 +813,7 @@ def smart_judgment_search(
             "minimum_should_match": 1,
         }},
     }, timeout=50)
-    _update_best(_format_hits(relaxed_hits))
+    _update_best(_substantive_first(query, _format_hits(relaxed_hits), size))
 
     strategy_used = strategies_tried[-1] if best_results else "none"
     log.info(

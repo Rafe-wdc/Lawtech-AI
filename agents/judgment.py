@@ -303,6 +303,14 @@ def _extract_case_metadata(query: str) -> CaseMetadata:
     return result
 
 
+def _searched_as_asked(searched_court: str | None, searched_year: int | None,
+                       court: str | None, year: int | None) -> bool:
+    """Whether a search ran with exactly the court and year the question
+    asks for: neither looser (a court or year left out) nor stricter (one
+    the question does not ask for)."""
+    return (searched_court, searched_year) == (court, year)
+
+
 _LEGAL_TOPICS = [
     "bail", "anticipatory bail", "murder", "rape", "cheating", "fraud",
     "negligence", "contract", "property", "divorce", "custody", "contempt",
@@ -340,21 +348,36 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
     court_name: str | None = None
     if "supreme court" in query_lower or re.search(r'\bsc\b', query_lower):
         court_name = "supreme court"
-    elif "high court" in query_lower:
+    elif "high court" in query_lower or re.search(r'\bhc\b', query_lower):
         # A full court name first: one word before "high court" read
         # "Madhya Pradesh High Court" as "pradesh high court", an unknown
         # court, so this search ran with no court filter and returned
         # Bombay, Kerala and Delhi judgments for an MP question (2026-11-17).
-        known = sorted(_INDEXED_COURTS | {"odisha high court", "orissa high court",
-                                          "punjab and haryana high court", "andhra pradesh high court",
-                                          "himachal pradesh high court", "allahabad high court",
-                                          "madras high court", "karnataka high court", "patna high court",
-                                          "telangana high court", "chhattisgarh high court",
-                                          "jharkhand high court"},
+        # "Bombay HC" and "High Court of Bombay" are the same court, as the
+        # metadata extractor is told: unread, "Bombay HC 2026 ... divorce"
+        # searched every court and a Kerala judgment came back among the
+        # Bombay ones (2026-11-18).
+        # High Courts only: "tribunal" in the list read "High Court judgment
+        # on a Motor Accident Claims Tribunal award" as the court "tribunal".
+        known = sorted((c for c in _INDEXED_COURTS | {
+                            "odisha high court", "orissa high court",
+                            "punjab and haryana high court", "andhra pradesh high court",
+                            "himachal pradesh high court", "allahabad high court",
+                            "madras high court", "karnataka high court", "patna high court",
+                            "telangana high court", "chhattisgarh high court",
+                            "jharkhand high court"} if c.endswith(" high court")),
                        key=len, reverse=True)
-        court_name = next((c for c in known if c in query_lower), None)
+
+        def _names(court: str) -> bool:
+            place = re.escape(court.removesuffix(" high court"))
+            return bool(re.search(
+                rf"\b{place}\s+(?:high court|hc)\b"
+                rf"|\bhigh court (?:of judicature )?(?:of|at|for) (?:the )?(?:state of )?{place}\b",
+                query_lower))
+
+        court_name = next((c for c in known if _names(c)), None)
         if court_name is None:
-            hc = re.search(r'(\w+)\s+high court', query_lower)
+            hc = re.search(r'(\w+)\s+(?:high court|hc)\b', query_lower)
             court_name = f"{hc.group(1)} high court" if hc else "high court"
 
     # Legal topics
@@ -574,9 +597,10 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # Preliminary search uses regex-fallback metadata (fast) while GPT-4o extracts
         # richer metadata. If preliminary hits are found, we skip the refined search.
         
+        prelim_meta = _judgment_regex_fallback(query)
+        prelim_court, _ = _normalize_court_filter(prelim_meta.court_name)
+
         def _preliminary_search():
-            prelim_meta = _judgment_regex_fallback(query)
-            prelim_court, _ = _normalize_court_filter(prelim_meta.court_name)
             return smart_judgment_search(
                 query=query,
                 petitioner=(prelim_meta.petitioner_names or [""])[0],
@@ -664,6 +688,22 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 file_context_prefix=_file_prefix)
             fallback_result.fallback_used = True
             return {"agent_results": {"Judgment": fallback_result}}
+
+        # The quick search's hits answer the question only if it searched the
+        # court and year the question asks for, as the extractor read them.
+        # If the two readings differ, its hits are set aside and the search
+        # below runs on the extractor's reading. Otherwise a court the regex
+        # missed ("Bombay HC") was silently dropped, and a year it misread
+        # (an Act's year, "Arbitration Act, 1996") silently imposed.
+        if prelim_result["hits"] and not _searched_as_asked(
+                prelim_court, prelim_meta.year, court_filter, metadata.year):
+            log.info("Preliminary search used another court or year than the question — "
+                     "searching again with the extracted ones",
+                     preliminary_court=prelim_court, preliminary_year=prelim_meta.year,
+                     court=court_filter, year=metadata.year,
+                     preliminary_hits=len(prelim_result["hits"]))
+            prelim_result = {"hits": [], "strategy_used": "none",
+                             "strategies_tried": prelim_result.get("strategies_tried", [])}
 
         # If preliminary search found hits, use them directly
         if prelim_result["hits"]:

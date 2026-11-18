@@ -154,16 +154,16 @@ def _es_search(body: dict, timeout: int = 30) -> list[dict]:
 # Strategy 1: Party Name Search (exact → fuzzy → single)
 # ================================================================
 
-def _asked_filters(year: int | None, court: str | None, year_window: int = 0) -> list[dict]:
+def _asked_filters(year: int | None, court: str | None) -> list[dict]:
     """The court and year filters the question asked for, and only those:
-    both, either, or none. Fallback strategies use this so that a request
-    for "Bombay High Court, 2026" never quietly becomes "any court, any
-    year". `year_window` widens the year by that many years each side (a
-    case cited by its reporting year can be decided a year earlier)."""
+    both, either, or none, and the year exactly as asked. Every strategy
+    uses this, fallbacks included, so a request for "Bombay High Court,
+    2026" never quietly becomes another court or another year. A reporting
+    year that differs from the decision year is a citation question, not a
+    search one; it is not handled by widening the year here."""
     filters: list[dict] = []
     if year:
-        filters.append({"term": {"year": year}} if not year_window else
-                       {"range": {"year": {"gte": year - year_window, "lte": year + year_window}}})
+        filters.append({"term": {"year": year}})
     if court:
         filters.append({"match_phrase": {"court_name": court.lower()}})
     return filters
@@ -197,7 +197,6 @@ def search_by_party_names(
     year: int | None = None,
     court: str | None = None,
     size: int = 5,
-    year_window: int = 0,
 ) -> list[dict]:
     """Search by both petitioner and respondent names (relaxed match)."""
     must = [
@@ -209,7 +208,7 @@ def search_by_party_names(
         }}},
     ]
 
-    filters = _asked_filters(year, court, year_window)
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -250,11 +249,7 @@ def search_by_party_fuzzy(
     if not should:
         return []
 
-    filters = []
-    if year:
-        filters.append({"term": {"year": year}})
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -291,11 +286,7 @@ def search_by_single_party(
             }}},
         ]
 
-    filters = []
-    if year:
-        filters.append({"term": {"year": year}})
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -427,11 +418,7 @@ def search_by_case_type(
         {"term": {"case_type": kw.lower()}} for kw in type_keywords
     ]
 
-    filters = []
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
-    if year:
-        filters.append({"term": {"year": year}})
+    filters = _asked_filters(year, court)
 
     # Primary: filter by case_type field
     hits = _es_search({
@@ -549,11 +536,7 @@ def search_by_legal_provision(
         should.append({"match": {TEXT_FIELD: {"query": query, "boost": 3}}})
         should.append({"match": {"keywords": {"query": query, "boost": 5}}})
 
-    filters = []
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
-    if year:
-        filters.append({"term": {"year": year}})
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -683,23 +666,7 @@ def smart_judgment_search(
                 "strategies_tried": strategies_tried,
             }
 
-        # 2b: The year asked for, give or take one: a case cited by its
-        # reporting year can be decided the year before. It used to drop
-        # the year altogether (any year, same parties).
-        if year and len(best_results) < _MIN_GOOD_HITS:
-            strategies_tried.append("party_near_year")
-            results = search_by_party_names(
-                petitioner, respondent, year, court, size, year_window=1,
-            )
-            if _update_best(results):
-                log.info("party match (year +-1)", hits=len(best_results))
-                return {
-                    "hits": best_results,
-                    "strategy_used": "party_near_year",
-                    "strategies_tried": strategies_tried,
-                }
-
-        # 2c: Swapped names (petitioner/respondent reversed)
+        # 2b: Swapped names (petitioner/respondent reversed)
         strategies_tried.append("party_swapped")
         results = search_by_party_names(
             respondent, petitioner, year, court, size,
@@ -712,7 +679,7 @@ def smart_judgment_search(
                 "strategies_tried": strategies_tried,
             }
 
-        # 2d: Fuzzy party match
+        # 2c: Fuzzy party match
         strategies_tried.append("party_fuzzy")
         results = search_by_party_fuzzy(
             petitioner, respondent, year, court, size,

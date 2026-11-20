@@ -63,3 +63,19 @@ def test_an_old_index_entry_builds_its_link_from_the_file_name(monkeypatch):
 def test_every_odisha_spelling_filters_on_the_index_label(court):
     from agents.judgment import _normalize_court_filter
     assert _normalize_court_filter(court) == ("odisha high court", False)
+
+
+@pytest.mark.parametrize("court", ["Madras High Court", "jharkhand high court",
+                                   "Himachal Pradesh High Court", "patna high court"])
+def test_courts_loaded_from_the_scrape_are_searched_not_sent_to_the_web(court):
+    """judgements_v2 holds these courts since the 2026-11-19 scrape load;
+    before, every question on them skipped the index and went to the web."""
+    from agents.judgment import _normalize_court_filter
+    assert _normalize_court_filter(court) == (court.lower(), False)
+
+
+@pytest.mark.parametrize("court", ["allahabad high court", "karnataka high court",
+                                   "punjab and haryana high court"])
+def test_courts_still_missing_from_the_index_go_to_the_web(court):
+    from agents.judgment import _normalize_court_filter
+    assert _normalize_court_filter(court) == (None, True)

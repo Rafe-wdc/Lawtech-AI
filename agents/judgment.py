@@ -143,7 +143,16 @@ _INDEXED_COURTS: frozenset[str] = frozenset({
     "meghalaya high court",
     "sikkim high court",
     "tribunal",
-})
+}) | (frozenset() if jx.LEGACY else frozenset({
+    # Loaded into judgements_v2 from the 2025-26 court scrape (2026-11-19:
+    # Madras 327,671, Jharkhand 60,918, Himachal 54,699, Patna 411).
+    # `judgements` has none of them, so they count only when v2 is read;
+    # without this, every question on these courts went straight to the web.
+    "madras high court",
+    "jharkhand high court",
+    "himachal pradesh high court",
+    "patna high court",
+}))
 
 
 def _normalize_court_filter(court: str | None) -> tuple[str | None, bool]:

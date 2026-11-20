@@ -499,7 +499,8 @@ GEMINI_FLASH_MODEL_ID = GEMINI_MODELS["flash"]
 def get_gemini_flash_full(temperature: float = 0.3,
                           max_output_tokens: int = 65535,
                           thinking_budget: int | None = None,
-                          thinking_level: str | None = None):
+                          thinking_level: str | None = None,
+                          timeout: int = 120):
     """Balanced Flash tier — response generation, synthesis, ReAct agents.
 
     Model comes from settings.GEMINI_MODELS["flash"] (default
@@ -509,6 +510,11 @@ def get_gemini_flash_full(temperature: float = 0.3,
 
     For Gemini targets, thinking defaults to "low" rather than the 2.5-era
     "off". See MODEL_UPGRADE_PLAN.md §1.
+
+    `timeout` is the per-request HTTP timeout in seconds (default 120, the
+    historical value). The Document agent raises it for whole-document
+    summaries, where one call over a 300-page scan legitimately runs longer
+    than two minutes.
     """
     model_id = GEMINI_MODELS["flash"]
     provider, _bare = _split_provider(model_id)
@@ -516,7 +522,7 @@ def get_gemini_flash_full(temperature: float = 0.3,
         model_id if ":" in model_id else f"google_genai:{model_id}",
         **_output_tokens_kwarg(provider, max_output_tokens),
         max_retries=2,
-        timeout=120,
+        timeout=timeout,
         **_provider_kwargs(provider, temperature),
         **_thinking_kwargs(model_id, thinking_budget, thinking_level),
     )

@@ -24,6 +24,7 @@ from langchain_core.documents import Document
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
 from core.clients import get_gemini_flash_full
 from core.settings import TIMEOUT_CHROMADB_SEC
+from core import deadline as _deadline
 from core.language import localize_prompt, detect_source_languages
 from core.logger import get_logger, log_time, short_err
 from core.progress import progress
@@ -102,6 +103,28 @@ _SUMMARY_ABS_MIN_CHARS = 300
 # The minimum itself is capped so a 1.6M-char paperbook cannot demand more
 # than the 32,000-token output ceiling can hold. This caps the FLOOR only.
 _SUMMARY_MIN_CAP_CHARS = 24_000
+
+# How long the Document agent may wait for the one Gemini call that reads the
+# whole document. TIMEOUT_CHROMADB_SEC (90 s) used to be a fixed cap; it is
+# now the floor. 2026-11-20: a 390-page scanned writ petition and "Provide me
+# this in short" needed 60-120 s for the call. On dev it lost the race, the
+# finished (and billed) summary was discarded, and the web-search fallback
+# answered "No document ... was provided with the request". The ceiling is
+# what is left of the request deadline (core.deadline, seeded by the chat
+# runner) minus a reserve for synthesis and the output guardrail. With no
+# deadline set (unit tests, direct calls) the floor applies unchanged.
+_GENERATION_TAIL_RESERVE_S = 30.0
+
+
+def generation_timeout_s(floor: float = TIMEOUT_CHROMADB_SEC,
+                         reserve: float = _GENERATION_TAIL_RESERVE_S) -> float:
+    """Seconds the Document agent may spend on its generation call: at least
+    `floor`, and otherwise everything left of the request deadline except
+    `reserve`. Pure apart from reading the deadline context."""
+    rem = _deadline.remaining()
+    if rem is None:
+        return float(floor)
+    return max(float(floor), rem - reserve)
 
 
 def summary_length_bounds(src_chars: int) -> tuple[int, int]:
@@ -206,11 +229,14 @@ def _generate_from_docs(
     _MAX_OUT = 32000
 
     with log_time(log, f"LLM generation ({picked_model})"):
+        # The HTTP timeout follows the same budget as the agent's wait, and
+        # never drops below the client's historical 120 s.
         llm = get_gemini_flash_full(
             temperature=0.3,
             max_output_tokens=_MAX_OUT,
             thinking_budget=0 if is_short_doc else 1024,
             thinking_level=None if is_short_doc else "low",
+            timeout=max(120, int(generation_timeout_s())),
         )
         system_prompt = localize_prompt(
             """You are Lawttorney — a legal-document assistant serving Indian
@@ -781,6 +807,18 @@ async def document_node(state: LegalAgentState) -> dict:
 
         # Step 3: Generate answer (off-thread; LLM call)
         intent_obj_chromadb = state.get("user_intent")
+        # Tell the user what is happening BEFORE the long call, not after it
+        # (these two lines used to follow the await, so a 90 s summary of a
+        # large file showed no progress at all).
+        progress("document", f"Found {len(retrieved_docs)} relevant passages", found=len(retrieved_docs), substep=True, step="search")
+        progress("document", "Generating answer from documents...", step="generate")
+        _gen_timeout = generation_timeout_s()
+        log.info("Document generation budget",
+                 timeout_s=round(_gen_timeout, 1),
+                 floor_s=TIMEOUT_CHROMADB_SEC,
+                 deadline_remaining_s=(round(_deadline.remaining(), 1)
+                                       if _deadline.remaining() is not None else None),
+                 source_chars=sum(len(d.page_content) for d in retrieved_docs))
         with log_time(log, "Document QA generation"):
             answer, tokens = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -791,13 +829,10 @@ async def document_node(state: LegalAgentState) -> dict:
                     user_language,
                     intent_obj_chromadb,
                 ),
-                timeout=TIMEOUT_CHROMADB_SEC,
+                timeout=_gen_timeout,
             )
         # Note: chat history is saved by the gateway after the full graph run,
         # not by the document agent. No duplicate save needed here.
-
-        progress("document", f"Found {len(retrieved_docs)} relevant passages", found=len(retrieved_docs), substep=True, step="search")
-        progress("document", "Generating answer from documents...", step="generate")
         log.info("Agent completed",
                  collection=unique_string,
                  response_len=len(answer), tokens=tokens)

@@ -127,6 +127,46 @@ def generation_timeout_s(floor: float = TIMEOUT_CHROMADB_SEC,
     return max(float(floor), rem - reserve)
 
 
+# When the full-length attempt times out, a second, compact attempt runs if
+# enough of the request is left: same document, thinking off, a small output
+# cap, and a note that this is the short version. The user always gets a
+# summary while there is time for one; only when both attempts fail does the
+# orchestrator show its "could not finish reading" message.
+_BRIEF_RETRY_RESERVE_S = 75.0   # kept back from the first attempt for the retry
+_BRIEF_RETRY_MIN_S = 45.0       # below this a retry cannot finish; fail instead
+_BRIEF_MAX_OUT_TOKENS = 6000
+_BRIEF_LEAD = "**Short version.**"
+# Same shape as the drafting notes (a "> ⚠" quote with a registered bold
+# lead, see core/lawyer_notes.DRAFT_NOTE_MARKERS) so Word / PDF export
+# removes it. The "---" that follows it in the answer ends the note block, so
+# a summary that happens to open with a list is never stripped with it.
+_BRIEF_NOTE = (
+    f"> ⚠ {_BRIEF_LEAD} The full-length summary could not be completed in time, "
+    "so this is a compact one. Ask for any part in more detail (for example "
+    "\"expand the material facts\" or \"list all the exhibits\")."
+)
+
+
+def first_attempt_timeout_s(total: float,
+                            floor: float = TIMEOUT_CHROMADB_SEC,
+                            reserve: float = _BRIEF_RETRY_RESERVE_S) -> float:
+    """Share of `total` the full-length attempt may use so that a compact
+    retry still fits afterwards; never below `floor`."""
+    return max(float(floor), float(total) - reserve)
+
+
+def brief_size_note() -> str:
+    """Replaces `_source_size_note` on the compact retry."""
+    return (
+        "TIME IS SHORT: the full-length summary could not be completed. Write a "
+        "COMPACT summary of about one to two pages (600 to 1,200 words) and no "
+        "more: forum and parties; the material facts in date order; the key "
+        "documents relied on; the issues; the relief sought or the order "
+        "impugned. Keep every fact traceable to the document; do not pad and do "
+        "not invent. This overrides any minimum-length rule in your instructions."
+    )
+
+
 def summary_length_bounds(src_chars: int) -> tuple[int, int]:
     """(estimated_pages, min_chars) for a summary of a source of
     `src_chars` characters. Pure; used by the prompt and by tests.
@@ -184,8 +224,13 @@ def _generate_from_docs(
     history_text: str = "",
     user_language: str = "en",
     intent=None,
+    brief: bool = False,
 ) -> tuple[str, int]:
     """LLM-generate an answer from pre-retrieved chunks.
+
+    `brief=True` is the compact retry after a timed-out full-length attempt:
+    thinking off, a 6k-token output cap, `brief_size_note()` in place of the
+    length floor, and `_BRIEF_NOTE` prepended to the answer.
 
     The ChromaDB retrieval path used to ship a bare English system prompt with
     NO language directive — when the uploaded PDF was in an Indian language,
@@ -224,18 +269,20 @@ def _generate_from_docs(
         threshold=_FLASH_ROUTING_THRESHOLD_CHARS,
         model=picked_model,
         is_short_doc=is_short_doc,
+        brief=brief,
     )
 
-    _MAX_OUT = 32000
+    _MAX_OUT = _BRIEF_MAX_OUT_TOKENS if brief else 32000
+    _no_thinking = is_short_doc or brief
 
-    with log_time(log, f"LLM generation ({picked_model})"):
+    with log_time(log, f"LLM generation ({picked_model})", brief=brief):
         # The HTTP timeout follows the same budget as the agent's wait, and
         # never drops below the client's historical 120 s.
         llm = get_gemini_flash_full(
             temperature=0.3,
             max_output_tokens=_MAX_OUT,
-            thinking_budget=0 if is_short_doc else 1024,
-            thinking_level=None if is_short_doc else "low",
+            thinking_budget=0 if _no_thinking else 1024,
+            thinking_level=None if _no_thinking else "low",
             timeout=max(120, int(generation_timeout_s())),
         )
         system_prompt = localize_prompt(
@@ -530,7 +577,7 @@ the gap with general legal knowledge or invented details.""",
         invoke_args = {
             "query": query,
             "docs": docs_text,
-            "size_note": _source_size_note(len(docs_text)),
+            "size_note": brief_size_note() if brief else _source_size_note(len(docs_text)),
             "date": str(date.today()),
         }
         if history_text:
@@ -558,9 +605,12 @@ the gap with general legal knowledge or invented details.""",
     _output_truncated = _finish_reason in ("MAX_TOKENS", "LENGTH")
 
     from core.token_tracker import record as _record_tokens
-    tokens = _record_tokens("Document", "qa_chromadb", response, model=picked_model)
+    tokens = _record_tokens("Document", "qa_chromadb_brief" if brief else "qa_chromadb",
+                            response, model=picked_model)
 
     response_text = response.text or ""
+    if brief and response_text.strip():
+        response_text = _BRIEF_NOTE + "\n\n---\n\n" + response_text.lstrip()
     if _output_truncated:
         log.warning(
             "Document agent output truncated — hit max_output_tokens ceiling",
@@ -813,24 +863,61 @@ async def document_node(state: LegalAgentState) -> dict:
         progress("document", f"Found {len(retrieved_docs)} relevant passages", found=len(retrieved_docs), substep=True, step="search")
         progress("document", "Generating answer from documents...", step="generate")
         _gen_timeout = generation_timeout_s()
+        _first_timeout = first_attempt_timeout_s(_gen_timeout)
+        _source_chars = sum(len(d.page_content) for d in retrieved_docs)
         log.info("Document generation budget",
                  timeout_s=round(_gen_timeout, 1),
+                 first_attempt_s=round(_first_timeout, 1),
                  floor_s=TIMEOUT_CHROMADB_SEC,
                  deadline_remaining_s=(round(_deadline.remaining(), 1)
                                        if _deadline.remaining() is not None else None),
-                 source_chars=sum(len(d.page_content) for d in retrieved_docs))
-        with log_time(log, "Document QA generation"):
-            answer, tokens = await asyncio.wait_for(
-                asyncio.to_thread(
-                    _generate_from_docs,
-                    query,
-                    retrieved_docs,
-                    history_text,
-                    user_language,
-                    intent_obj_chromadb,
-                ),
-                timeout=_gen_timeout,
-            )
+                 source_chars=_source_chars)
+        try:
+            with log_time(log, "Document QA generation"):
+                answer, tokens = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _generate_from_docs,
+                        query,
+                        retrieved_docs,
+                        history_text,
+                        user_language,
+                        intent_obj_chromadb,
+                    ),
+                    timeout=_first_timeout,
+                )
+        except asyncio.TimeoutError:
+            # Full-length attempt lost the race. Spend what is left on a
+            # compact summary rather than hand the user nothing; the first
+            # call's thread cannot be cancelled and finishes on its own.
+            _rem = _deadline.remaining()
+            _retry_budget = (TIMEOUT_CHROMADB_SEC if _rem is None
+                             else _rem - _GENERATION_TAIL_RESERVE_S)
+            if _retry_budget < _BRIEF_RETRY_MIN_S:
+                log.error("Document generation timed out with no time left for "
+                          "a compact retry",
+                          first_attempt_s=round(_first_timeout, 1),
+                          deadline_remaining_s=(round(_rem, 1) if _rem is not None else None),
+                          source_chars=_source_chars)
+                raise
+            log.warning("Document generation timed out — retrying for a compact summary",
+                        first_attempt_s=round(_first_timeout, 1),
+                        retry_budget_s=round(_retry_budget, 1),
+                        source_chars=_source_chars)
+            progress("document", "Taking longer than expected — preparing a shorter summary...",
+                     step="generate", substep=True)
+            with log_time(log, "Document QA generation (compact retry)"):
+                answer, tokens = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _generate_from_docs,
+                        query,
+                        retrieved_docs,
+                        history_text,
+                        user_language,
+                        intent_obj_chromadb,
+                        brief=True,
+                    ),
+                    timeout=_retry_budget,
+                )
         # Note: chat history is saved by the gateway after the full graph run,
         # not by the document agent. No duplicate save needed here.
         log.info("Agent completed",

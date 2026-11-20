@@ -102,10 +102,11 @@ def _run_document_node_capturing_timeout(monkeypatch, seconds_left):
 def test_document_node_waits_for_the_remaining_deadline(monkeypatch):
     out, seen = _run_document_node_capturing_timeout(monkeypatch, 400)
     gen_timeout = seen["timeouts"][-1]           # the generation call is the last wait
-    # 400 s deadline minus the 30 s reserve minus whatever the node spent
-    # before the call (first-call imports can take seconds in a big suite):
-    # well above the old 90 s cap, never above the deadline.
-    assert TIMEOUT_CHROMADB_SEC < gen_timeout <= 370
+    # 400 s deadline minus the 30 s tail reserve minus the 75 s kept for the
+    # compact retry minus whatever the node spent before the call (first-call
+    # imports can take seconds in a big suite): well above the old 90 s cap,
+    # never above what the retry split allows.
+    assert TIMEOUT_CHROMADB_SEC < gen_timeout <= 295
     assert out["agent_results"]["Document"].content == "A short summary."
     assert not out["agent_results"]["Document"].error
 
@@ -213,3 +214,71 @@ def test_mixed_plan_with_files_keeps_the_web_fallback(monkeypatch):
     out = asyncio.run(orch.orchestrator_synthesize_node(
         _synth_state(results, planned=("Judgment", "Document"))))
     assert out["final_response"] == "web answer"
+
+
+# ------------------------------------------- compact retry after a timeout ---
+
+def test_first_attempt_leaves_room_for_the_compact_retry():
+    from agents.document import first_attempt_timeout_s
+    assert first_attempt_timeout_s(425) == 350
+    assert first_attempt_timeout_s(100) == TIMEOUT_CHROMADB_SEC     # floor wins
+    assert first_attempt_timeout_s(90) == TIMEOUT_CHROMADB_SEC
+
+
+
+def test_brief_size_note_overrides_the_length_floor():
+    from agents.document import brief_size_note
+    note = brief_size_note()
+    assert "COMPACT" in note and "overrides any minimum-length rule" in note
+
+
+def test_timed_out_first_attempt_falls_back_to_a_compact_summary(monkeypatch):
+    waits: list = []
+    real_wait_for = doc_mod.asyncio.wait_for
+
+    async def first_call_times_out(aw, timeout=None, **kw):
+        waits.append(timeout)
+        if len(waits) == 1:
+            aw.close()
+            raise asyncio.TimeoutError()
+        return await real_wait_for(aw, timeout=timeout, **kw)
+
+    seen_brief: list = []
+
+    def fake_generate(*a, brief=False, **k):
+        seen_brief.append(brief)
+        return ("Compact summary.", 7)
+
+    monkeypatch.setattr(doc_mod.asyncio, "wait_for", first_call_times_out)
+    monkeypatch.setattr(doc_mod, "_generate_from_docs", fake_generate)
+
+    async def go():
+        with deadline.deadline_scope(400):
+            return await document_node(dict(_FILE_STATE))
+
+    r = asyncio.run(go())["agent_results"]["Document"]
+    assert seen_brief == [True]          # the first attempt never ran its body; the retry was brief
+    assert r.content == "Compact summary." and not r.error
+    assert len(waits) == 2
+    assert waits[0] <= 295               # first attempt left room for the retry
+    assert 45 <= waits[1] <= 370         # retry got what remained minus the tail reserve
+
+
+def test_no_compact_retry_when_the_deadline_is_nearly_spent(monkeypatch):
+    waits: list = []
+
+    async def always_times_out(aw, timeout=None, **kw):
+        waits.append(timeout)
+        aw.close()
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(doc_mod.asyncio, "wait_for", always_times_out)
+    monkeypatch.setattr(doc_mod, "_generate_from_docs", lambda *a, **k: ("x", 1))
+
+    async def go():
+        with deadline.deadline_scope(40):   # 40 s left: retry budget 10 s < 45 s minimum
+            return await document_node(dict(_FILE_STATE))
+
+    r = asyncio.run(go())["agent_results"]["Document"]
+    assert len(waits) == 1               # no second attempt
+    assert not r.content and "timeout" in (r.error or "").lower()

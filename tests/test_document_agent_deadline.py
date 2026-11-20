@@ -102,10 +102,11 @@ def _run_document_node_capturing_timeout(monkeypatch, seconds_left):
 def test_document_node_waits_for_the_remaining_deadline(monkeypatch):
     out, seen = _run_document_node_capturing_timeout(monkeypatch, 400)
     gen_timeout = seen["timeouts"][-1]           # the generation call is the last wait
-    # 400 s deadline minus the 30 s reserve minus whatever the node spent
-    # before the call (first-call imports can take seconds in a big suite):
-    # well above the old 90 s cap, never above the deadline.
-    assert TIMEOUT_CHROMADB_SEC < gen_timeout <= 370
+    # 400 s deadline minus the 30 s tail reserve minus the 75 s kept for the
+    # compact retry minus whatever the node spent before the call (first-call
+    # imports can take seconds in a big suite): well above the old 90 s cap,
+    # never above what the retry split allows.
+    assert TIMEOUT_CHROMADB_SEC < gen_timeout <= 295
     assert out["agent_results"]["Document"].content == "A short summary."
     assert not out["agent_results"]["Document"].error
 
@@ -213,3 +214,89 @@ def test_mixed_plan_with_files_keeps_the_web_fallback(monkeypatch):
     out = asyncio.run(orch.orchestrator_synthesize_node(
         _synth_state(results, planned=("Judgment", "Document"))))
     assert out["final_response"] == "web answer"
+
+
+# ------------------------------------------- compact retry after a timeout ---
+
+def test_first_attempt_leaves_room_for_the_compact_retry():
+    from agents.document import first_attempt_timeout_s
+    assert first_attempt_timeout_s(425) == 350
+    assert first_attempt_timeout_s(100) == TIMEOUT_CHROMADB_SEC     # floor wins
+    assert first_attempt_timeout_s(90) == TIMEOUT_CHROMADB_SEC
+
+
+def test_brief_note_is_a_registered_lawyer_note():
+    """Export strips notes whose bold lead is registered; an unregistered lead
+    would be printed into the Word / PDF the advocate files."""
+    from agents.document import _BRIEF_NOTE, _BRIEF_LEAD
+    from core.lawyer_notes import DRAFT_NOTE_MARKERS
+    assert _BRIEF_NOTE.startswith(f"> ⚠ {_BRIEF_LEAD}")   # same shape as the drafting notes
+    assert _BRIEF_LEAD in DRAFT_NOTE_MARKERS
+
+
+def test_brief_size_note_overrides_the_length_floor():
+    from agents.document import brief_size_note
+    note = brief_size_note()
+    assert "COMPACT" in note and "overrides any minimum-length rule" in note
+
+
+def test_timed_out_first_attempt_falls_back_to_a_compact_summary(monkeypatch):
+    waits: list = []
+    real_wait_for = doc_mod.asyncio.wait_for
+
+    async def first_call_times_out(aw, timeout=None, **kw):
+        waits.append(timeout)
+        if len(waits) == 1:
+            aw.close()
+            raise asyncio.TimeoutError()
+        return await real_wait_for(aw, timeout=timeout, **kw)
+
+    seen_brief: list = []
+
+    def fake_generate(*a, brief=False, **k):
+        seen_brief.append(brief)
+        return ("Compact summary.", 7)
+
+    monkeypatch.setattr(doc_mod.asyncio, "wait_for", first_call_times_out)
+    monkeypatch.setattr(doc_mod, "_generate_from_docs", fake_generate)
+
+    async def go():
+        with deadline.deadline_scope(400):
+            return await document_node(dict(_FILE_STATE))
+
+    r = asyncio.run(go())["agent_results"]["Document"]
+    assert seen_brief == [True]          # the first attempt never ran its body; the retry was brief
+    assert r.content == "Compact summary." and not r.error
+    assert len(waits) == 2
+    assert waits[0] <= 295               # first attempt left room for the retry
+    assert 45 <= waits[1] <= 370         # retry got what remained minus the tail reserve
+
+
+def test_no_compact_retry_when_the_deadline_is_nearly_spent(monkeypatch):
+    waits: list = []
+
+    async def always_times_out(aw, timeout=None, **kw):
+        waits.append(timeout)
+        aw.close()
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(doc_mod.asyncio, "wait_for", always_times_out)
+    monkeypatch.setattr(doc_mod, "_generate_from_docs", lambda *a, **k: ("x", 1))
+
+    async def go():
+        with deadline.deadline_scope(40):   # 40 s left: retry budget 10 s < 45 s minimum
+            return await document_node(dict(_FILE_STATE))
+
+    r = asyncio.run(go())["agent_results"]["Document"]
+    assert len(waits) == 1               # no second attempt
+    assert not r.content and "timeout" in (r.error or "").lower()
+
+
+def test_export_strips_the_short_version_note_but_keeps_a_list_opening_summary():
+    from agents.document import _BRIEF_NOTE
+    from core.lawyer_notes import strip_from_markdown
+    body = "- **Forum:** Bombay High Court\n- **Petitioners:** K. R. Dubey and others\n\n## Material Facts\n1. 15.03.2020 SGM.\n"
+    answer = _BRIEF_NOTE + "\n\n---\n\n" + body
+    out = strip_from_markdown(answer, is_draft=False)
+    assert "Short version" not in out
+    assert "- **Forum:** Bombay High Court" in out and "## Material Facts" in out

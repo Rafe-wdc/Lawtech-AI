@@ -26,6 +26,7 @@ DRAFT_NOTE_MARKERS = (
     "**Draft incomplete**",                   # agents/drafting, a section failed
     "**This draft came back in English",      # agents/drafting, language safety net
     "**Verify the case law before filing.**",  # agents/drafting, unverifiable citation
+    "**Short version.**",                     # agents/document._BRIEF_NOTE, compact summary after a timeout
 )
 # agents/orchestrator._missing_sources_banner
 _SEARCH_FAILED_RE = re.compile(r"The .{1,80}? judgment search could not be completed in this run")

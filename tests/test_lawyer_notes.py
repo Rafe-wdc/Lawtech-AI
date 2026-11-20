@@ -56,9 +56,13 @@ def test_markers_match_the_code_that_writes_the_notes():
     from core.added_facts import NOTE_MARKER
     assert NOTE_MARKER in ln.DRAFT_NOTE_MARKERS
     assert d._UNRESOLVED_REVIEW_BANNER_MARKER in ln.DRAFT_NOTE_MARKERS
-    src = inspect.getsource(d)
+    import agents.document as doc
+    src = inspect.getsource(d) + inspect.getsource(doc)
     for marker in ln.DRAFT_NOTE_MARKERS[2:]:
-        assert f"> ⚠ {marker}" in src, marker
+        assert f"> ⚠ {marker}" in src or (
+            # agents/document builds its note from the lead constant
+            marker == doc._BRIEF_LEAD and doc._BRIEF_NOTE.startswith(f"> ⚠ {marker}")
+        ), marker
     banner = _missing_sources_banner({"SCI_Judgment": "timeout", "Judgment": "error"})
     assert ln.strip_from_markdown(banner + BODY, is_draft=True).startswith("**IN THE COURT")
 

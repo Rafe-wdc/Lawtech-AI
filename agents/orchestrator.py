@@ -2629,6 +2629,48 @@ async def orchestrator_synthesize_node(state: LegalAgentState) -> dict:
                 "tokens_consumed": 0,
             }
 
+        # Document-only plan with files attached and nothing usable back: the
+        # one agent that read the user's file failed (timed out on a large
+        # scan, Chroma outage, model error) or returned nothing. A web search
+        # on the bare question answers as if no file existed (2026-11-20: a
+        # 390-page writ petition + "Provide me this in short" came back as
+        # "No document ... was provided with the request"). Say what happened
+        # instead; the files stay attached to the thread. Mixed plans keep
+        # the web fallback: the other agents' question may still be
+        # answerable without the file.
+        if fc and fc.has_content and set(planned or [task]) <= {"Document"}:
+            file_hint = (
+                f" ({', '.join(fc.file_names[:3])})" if fc.file_names else ""
+            )
+            doc_err = str(errored.get("Document", "") or "")
+            timed_out = "timeout" in doc_err.lower() or "timed out" in doc_err.lower()
+            log.warning(
+                "Document agent returned nothing on a files-attached question — "
+                "suppressing web fallback",
+                planned=planned, file_count=len(fc.file_names),
+                document_error=doc_err[:120] or None, timed_out=timed_out,
+            )
+            if timed_out:
+                reason = (
+                    f"I could not finish reading your uploaded document{file_hint} "
+                    "in time, so I have not answered yet: an answer without your "
+                    "document would not be about your case. Please send the "
+                    "question again, or ask about a specific part of it (for "
+                    "example \"summarise pages 1 to 30\" or \"what relief is sought\")."
+                )
+            else:
+                reason = (
+                    f"I could not read your uploaded document{file_hint} this "
+                    "time, so I have not answered yet: an answer without your "
+                    "document would not be about your case. Please send the "
+                    "question again; if it fails again, upload the file once more."
+                )
+            return {
+                "final_response": reason,
+                "source_metadata": [],
+                "tokens_consumed": 0,
+            }
+
         log.warning("All agents empty — invoking web search last resort")
         from core.agent_fallback import web_search_fallback
         fallback = await web_search_fallback(

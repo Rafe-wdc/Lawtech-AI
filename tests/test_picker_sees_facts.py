@@ -169,7 +169,7 @@ class TestDraftingNodeThreadsFacts:
         import agents.drafting as d
         src = inspect.getsource(d.drafting_node)
         start = src.index("_acquire_reference_draft(")
-        call = src[start:src.index("_gather_relevant_context(query)", start)]
+        call = src[start:src.index("_gather_relevant_context(", start)]
         assert "user_facts=user_facts" in call
 
 

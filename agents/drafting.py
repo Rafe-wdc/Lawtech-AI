@@ -2026,11 +2026,16 @@ def _registry_from_hits(newacts_t, legis_t, judg_t):
     return registry
 
 
-async def _gather_relevant_context(query: str) -> dict[str, str]:
+async def _gather_relevant_context(query: str,
+                                   named_acts: list[str] | None = None) -> dict[str, str]:
     """Run the domain retrievers in parallel; return labelled blocks.
 
     Each block is a string ready to drop into the generation prompt.
     Returns {} when ES is down — generation still proceeds (degraded).
+
+    `named_acts` (UserIntent.named_acts) drives the per-Act statute retrieval
+    in core.statute_retrieval; when it does not apply, the legislation block
+    is built exactly as before.
     """
     def _safe_invoke(tool, kwargs):
         try:
@@ -2078,8 +2083,10 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
         log.info("Statute retrieval filters parsed from query",
                  sections=_sec_nums, act=_act_name)
 
+    from core import statute_retrieval as _sr
+
     # Run all retrievers in parallel.
-    newacts_t, legis_t, judg_t, sci_t = await asyncio.gather(
+    newacts_t, legis_t, judg_t, sci_t, statute_ctx = await asyncio.gather(
         _run(search_newacts, _newacts_args),
         _run(search_legislation, {"query": query}),
         _run(search_judgments, {"query": query}),
@@ -2091,8 +2098,17 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
         # on precisely the requests that ask for case law.
         _run(sci_judgment_tools.search_by_topic,
              {"query": _topical_query(query), "top_k": 3}),
+        _sr.gather_statutes(query, named_acts),
         return_exceptions=False,
     )
+    # No statute named, but the old retrieval landed on a labour Act ("a
+    # claim for unpaid gratuity" -> Payment of Gratuity Act, repealed): run
+    # the statute retrieval from that Act so the Code that replaced it, and
+    # the law-in-force note, still reach the writer.
+    if statute_ctx is None:
+        _implicit = _sr.labour_acts_in(legis_t)
+        if _implicit:
+            statute_ctx = await _sr.gather_statutes(query, _implicit)
 
     def _format_es_hits(result, label: str, max_hits: int = 3,
                        max_chars_per_hit: int = 800) -> str:
@@ -2166,7 +2182,15 @@ async def _gather_relevant_context(query: str) -> dict[str, str]:
     blocks = _ContextBlocks()
     n = _format_es_hits(newacts_t, "RELEVANT BNS / BNSS / BSA SECTIONS")
     if n: blocks["newacts"] = n
-    l = _format_es_hits(legis_t, "RELEVANT LEGISLATION SECTIONS")
+    if statute_ctx is not None and statute_ctx.hits:
+        # Sections picked per named Act, in full, behind the law-in-force
+        # note. The registry is built from the same hits.
+        legis_t = {"hits": statute_ctx.hits, "source": statute_ctx.hits[0]["source"]}
+        l = _sr.format_block(statute_ctx)
+    else:
+        l = _format_es_hits(legis_t, "RELEVANT LEGISLATION SECTIONS")
+        if statute_ctx is not None and statute_ctx.note:
+            l = statute_ctx.note + "\n" + l
     if l: blocks["legislation"] = l
     j = _format_es_hits(judg_t, "RELEVANT HIGH COURT JUDGMENTS")
     if j: blocks["judgments"] = j
@@ -2240,10 +2264,15 @@ async def _generate_single_pass(
     English legal terms of art). Empty string is a no-op — the base
     prompt handles the matter on its own.
     """
-    from config.prompts import DRAFTING_SYSTEM_PROMPT
+    from config.prompts import DRAFTING_SYSTEM_PROMPT, DRAFTING_SYSTEM_PROMPT_LABOUR_CODES
+    from core.statute_retrieval import mode as _statute_mode
     from langchain_core.messages import SystemMessage, HumanMessage
 
-    system_prompt = localize_prompt(DRAFTING_SYSTEM_PROMPT, user_language, user_intent)
+    # The Labour Codes / no-facts rules ride the same switch as the statute
+    # retrieval, so "off" (the default) is the previous prompt byte for byte.
+    _base_prompt = (DRAFTING_SYSTEM_PROMPT_LABOUR_CODES if _statute_mode() != "off"
+                    else DRAFTING_SYSTEM_PROMPT)
+    system_prompt = localize_prompt(_base_prompt, user_language, user_intent)
     if niche_overlay:
         system_prompt = system_prompt + "\n\n" + niche_overlay
     if review_and_redraft_mode:
@@ -2994,7 +3023,8 @@ async def _generate_section_pair(
     pair system prompt AFTER localisation so overlay statutory anchors
     and section headings survive the localiser.
     """
-    from config.prompts import DRAFTING_SECTION_PAIR_PROMPT
+    from config.prompts import DRAFTING_SECTION_PAIR_PROMPT, DRAFTING_SECTION_PAIR_PROMPT_LABOUR_CODES
+    from core.statute_retrieval import mode as _statute_mode
     from langchain_core.messages import SystemMessage, HumanMessage
 
     # In review-and-redraft mode, `reference_draft` is the entire uploaded
@@ -3038,7 +3068,9 @@ async def _generate_section_pair(
             )
 
     system_prompt = localize_prompt(
-        DRAFTING_SECTION_PAIR_PROMPT, user_language, user_intent,
+        DRAFTING_SECTION_PAIR_PROMPT_LABOUR_CODES if _statute_mode() != "off"
+        else DRAFTING_SECTION_PAIR_PROMPT,
+        user_language, user_intent,
     )
     if niche_overlay:
         system_prompt = system_prompt + "\n\n" + niche_overlay
@@ -5799,7 +5831,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
             # No corpus lookup happened on this path, so there is no English
             # translation to plan against; the judge falls back to `query`.
             english_query = ""
-            gathered_ctx = await _gather_relevant_context(query)
+            gathered_ctx = await _gather_relevant_context(
+                query, getattr(intent_obj, "named_acts", None))
         elif _INLINED_PRIOR_DRAFT_MARKER in query:
             # (c) Directive follow-up whose query already carries the full
             #     prior draft (inlined by agents/memory.py). The prior draft
@@ -5821,7 +5854,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
             reference_source = "<prior_turn:inlined>"
             reference_kind = "prior_turn"
             english_query = ""
-            gathered_ctx = await _gather_relevant_context(query)
+            gathered_ctx = await _gather_relevant_context(
+                query, getattr(intent_obj, "named_acts", None))
         else:
             # Resolve the niche BEFORE the reference lookup so it can pin the
             # canonical template and skip the LLM tie-break. Memoised in
@@ -5848,7 +5882,8 @@ async def drafting_node(state: LegalAgentState) -> dict:
                         niche_key=_early_niche_key,
                         user_facts=user_facts,
                     ),
-                    _gather_relevant_context(query),
+                    _gather_relevant_context(
+                        query, getattr(intent_obj, "named_acts", None)),
                 )
         if gathered_ctx:
             progress(

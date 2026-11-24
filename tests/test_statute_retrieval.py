@@ -68,17 +68,17 @@ class TestExplicitRefs:
 
 
 class TestMode:
-    def test_off_by_default(self, monkeypatch):
-        # Off unless the server sets it, so merging dev into main changes
-        # nothing on production.
+    def test_labour_by_default_unknown_value_is_off(self, monkeypatch):
+        # Unset -> labour (runs on dev without a .env change); a server that
+        # must keep the previous behaviour sets "off".
         monkeypatch.delenv("DRAFTING_STATUTE_RETRIEVAL", raising=False)
-        assert sr.mode() == "off"
-        assert not sr.applies_to(["Industrial Disputes Act, 1947"])
+        assert sr.mode() == "labour"
+        assert sr.applies_to(["Industrial Disputes Act, 1947"])
         monkeypatch.setenv("DRAFTING_STATUTE_RETRIEVAL", "nonsense")
         assert sr.mode() == "off"
 
-    def test_off_by_default_touches_nothing(self, monkeypatch):
-        monkeypatch.delenv("DRAFTING_STATUTE_RETRIEVAL", raising=False)
+    def test_off_touches_nothing(self, monkeypatch):
+        monkeypatch.setenv("DRAFTING_STATUTE_RETRIEVAL", "off")
         monkeypatch.setattr(sr, "_es", lambda: pytest.fail("no ES call expected"))
 
         async def infer(q):

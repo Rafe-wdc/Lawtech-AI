@@ -7,9 +7,10 @@ name: Toggle drafting statute retrieval / Labour Codes rules (manual)
 #           adds the "law in force" note, and uses the writer prompts with
 #           the Labour Codes and no-facts rules (core/statute_retrieval.py,
 #           config/prompts.py *_LABOUR_CODES). Non-labour drafts unchanged.
-#   off     previous behaviour, byte for byte. This is the default in code,
-#           so merging dev into main changes nothing on production until
-#           this workflow sets the value there.
+#   off     previous behaviour, byte for byte.
+# Unset means labour (the default in code). Production keeps
+# DRAFTING_STATUTE_RETRIEVAL=off in its .env until the switch is turned on
+# there, so merging dev into main does not change production drafts.
 #
 # Measured 2026-11-24 (dev code, before/after, blind judge): preferred on 10
 # of 11 labour drafts; law-in-force score 3.9 -> 8.6 of 10. The production

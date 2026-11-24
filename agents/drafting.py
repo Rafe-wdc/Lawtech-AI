@@ -2269,7 +2269,7 @@ async def _generate_single_pass(
     from langchain_core.messages import SystemMessage, HumanMessage
 
     # The Labour Codes / no-facts rules ride the same switch as the statute
-    # retrieval, so "off" (the default) is the previous prompt byte for byte.
+    # retrieval, so "off" is the previous prompt byte for byte.
     _base_prompt = (DRAFTING_SYSTEM_PROMPT_LABOUR_CODES if _statute_mode() != "off"
                     else DRAFTING_SYSTEM_PROMPT)
     system_prompt = localize_prompt(_base_prompt, user_language, user_intent)

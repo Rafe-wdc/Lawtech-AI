@@ -42,7 +42,8 @@ When the user named no statute, one Flash Lite call asks which of the 4
 Labour Codes and 29 replaced Acts (if any) the request involves; when none
 does, it returns None and drafting keeps its previous retrieval unchanged.
 
-Behind DRAFTING_STATUTE_RETRIEVAL, off by default (see `mode`).
+Behind DRAFTING_STATUTE_RETRIEVAL: labour when unset; a server sets "off"
+to keep the previous behaviour (see `mode`).
 """
 
 from __future__ import annotations
@@ -397,12 +398,14 @@ async def _gather(query: str, named_acts: list[str]) -> StatuteContext | None:
 
 
 def mode() -> str:
-    """DRAFTING_STATUTE_RETRIEVAL: 'off' (default) | 'labour' | 'all'.
+    """DRAFTING_STATUTE_RETRIEVAL: 'labour' (default) | 'off' | 'all'.
 
-    Off by default so that merging dev into main changes nothing on
-    production until the switch is set there (workflow
-    toggle-drafting-statute-retrieval.yml). The switch also selects the
-    *_LABOUR_CODES writer prompts in config/prompts.py.
+    'labour' is the default when the variable is unset, so dev runs it
+    without a server .env change (user's decision, 2026-11-24). A server
+    that must keep the previous behaviour sets DRAFTING_STATUTE_RETRIEVAL=off
+    in its .env — production does, until the lawyers confirm the
+    commencement and repeal facts in core/statute_status.py. The switch also
+    selects the *_LABOUR_CODES writer prompts in config/prompts.py.
 
     'labour' runs this retrieval only when a statute involved is one of the
     Labour Codes or the Acts they replaced — the failure that was measured.
@@ -410,7 +413,7 @@ def mode() -> str:
     statute, so it stays unused until a before/after evaluation says so.
     An unknown value is treated as 'off'."""
     import os
-    m = (os.getenv("DRAFTING_STATUTE_RETRIEVAL") or "off").strip().lower()
+    m = (os.getenv("DRAFTING_STATUTE_RETRIEVAL") or "labour").strip().lower()
     return m if m in {"labour", "all", "off"} else "off"
 
 

@@ -1709,6 +1709,56 @@ Return one of: an exact file name from the candidate list, OR the literal
 string "none". Also return one short sentence saying why."""
 
 
+# 1b) DRAFTING_STATUTE_PICKER_PROMPT — picks the statutory provisions a draft
+#     relies on from the section headings of the Acts the user named
+#     (core.statute_retrieval). Replaces a whole-instruction BM25 query that
+#     returned IR Code ss.49/54 (procedure; National Tribunal) for a recovery
+#     application and never the recovery provision, s.59.
+DRAFTING_STATUTE_PICKER_PROMPT = """You are choosing which statutory provisions an Indian lawyer must read before drafting a document.
+
+## Document requested
+{query}
+
+## Status of the law
+{law_note}
+
+## Provisions already selected (do not repeat them)
+{already}
+
+## Statutes (each line: KEY | section number | section heading)
+{listing}
+
+Pick the provisions the drafter needs in order to draft this document
+correctly: the provision under which the document is made or filed, the
+authority or forum it goes to and its procedure, any time limit, and the
+definitions or savings clause the document turns on. Prefer the law in force.
+Pick a repealed Act's provision only as the predecessor of a provision you
+picked from the Code that replaced it, or where the request is about that
+Act's period. Do not pick short titles, commencement, amendments of other
+Acts or rule-making powers unless the document is about them.
+
+Return at most {limit} picks, most important first, each as the KEY and the
+section number exactly as listed. Pick only from the lists above."""
+
+
+# 1c) DRAFTING_LABOUR_STATUTE_PROMPT — which labour statutes a drafting request
+#     involves when it names none (core.statute_retrieval.infer_labour_statutes).
+DRAFTING_LABOUR_STATUTE_PROMPT = """An Indian lawyer asked for this document:
+
+{query}
+
+Does the document concern employment or labour law governed by any of the
+statutes below — wages, bonus, gratuity, provident fund, ESI, maternity
+benefit, industrial disputes, termination or retrenchment of workers,
+standing orders, trade unions, strikes, contract labour, factories, or
+working conditions? If so, return the statutes from this list that govern
+it (at most four, the Code in force and the Act it replaced may both be
+listed). If the document is not about labour or employment law, return an
+empty list. Copy names exactly from the list.
+
+{statutes}"""
+
+
 # 2) DRAFTING_SYSTEM_PROMPT — single-pass generation. The LLM gets the
 # reference draft + the user's query + extracted case facts + user intent
 # directives, and produces the full document in one call. No outline. No
@@ -2548,6 +2598,108 @@ DRAFTING_SECTION_PAIR_PROMPT += (
     + "\n" + INDIAN_LEGAL_CITATION_GROUNDING
     + "\n" + DRAFTING_SECTIONWISE_DISCLOSURES
 )
+
+
+# --- Labour Codes + no-facts drafting rules (switch: DRAFTING_STATUTE_RETRIEVAL) ---
+# The two prompts above are what drafting uses with the switch off (the
+# default), byte for byte. With DRAFTING_STATUTE_RETRIEVAL=labour|all the
+# writers get the *_LABOUR_CODES variants below: the same prompts with these
+# passages inserted where they were evaluated (2026-11-24, before/after on
+# dev code: the blind judge preferred the variant on 10 of 11 labour drafts;
+# law-in-force score 3.9 -> 8.6 of 10; the two non-labour controls showed no
+# systematic change over four runs each).
+#   * The Labour Codes came into force on 21.11.2025 and repealed 29 Acts;
+#     drafts were still filed under s.33C(2) of the Industrial Disputes Act
+#     and cited the Bonus, Gratuity and Factories Acts as current law.
+#   * With no facts given, drafts pleaded every head of claim as the
+#     client's and padded with rhetoric.
+# Kept apart so that merging dev into main cannot change production drafts
+# until the switch is turned on there.
+_LABOUR_CODES_RULE_SINGLE_PASS = (
+    "   - THE LABOUR CODES ARE IN FORCE. The Code on Wages, 2019, the\n"
+    "     Industrial Relations Code, 2020, the Code on Social Security, 2020\n"
+    "     and the Occupational Safety, Health and Working Conditions Code, 2020\n"
+    "     came into force on 21.11.2025 and repealed 29 Acts — among them the\n"
+    "     Industrial Disputes Act, 1947, the Payment of Wages, Minimum Wages and\n"
+    "     Payment of Bonus Acts, the Payment of Gratuity Act, the EPF and ESI\n"
+    "     Acts, the Factories Act and the Contract Labour Act. A document filed\n"
+    "     today is grounded on the Code. A repealed Act still governs only what\n"
+    "     the Code's savings clause and section 6 of the General Clauses Act,\n"
+    "     1897 preserve (rights accrued, and proceedings begun, before\n"
+    "     21.11.2025). Where the facts place the matter in that period, cite the\n"
+    "     old provision with the Code's corresponding provision. Where they do\n"
+    "     not say when the right accrued, ground the document on the Code and\n"
+    "     give the old provision as one bracketed alternative — never cite the\n"
+    "     old Act and the Code together as joint bases. Code section\n"
+    "     numbers do not follow the old Acts' numbers: take them from the LAW IN\n"
+    "     FORCE note and the sections in the RELEVANT LEGAL CONTEXT block, never\n"
+    "     from memory.\n"
+)
+_NO_FACTS_RULE_SINGLE_PASS = (
+    "\n"
+    "    NO FACTS GIVEN: A FILLABLE FORMAT, NOT AN IMAGINED CASE. When the user\n"
+    "    asks for a document without giving the matter's facts, draft the\n"
+    "    standard document with placeholders. Do not decide the client's case\n"
+    "    for them: where the document could rest on several alternative heads\n"
+    "    of claim, reliefs or grounds, give the usual alternatives ONCE as a\n"
+    "    bracketed choice (`[unpaid wages / leave encashment / bonus — retain\n"
+    "    those that apply]`) instead of pleading each one as though it were the\n"
+    "    client's claim. State each legal ground once; do not restate the same\n"
+    "    proposition in later paragraphs. Do not add constitutional or\n"
+    "    policy argument (fundamental rights, unjust enrichment, hardship\n"
+    "    rhetoric) that nothing in the request calls for.\n"
+)
+_NO_FACTS_RULE_SECTIONWISE = (
+    "\n"
+    "    (e) NO FACTS GIVEN: A FILLABLE FORMAT, NOT AN IMAGINED CASE. When the user asks for a "
+    "document without giving the matter's facts, draft the standard document with placeholders. "
+    "Do not decide the client's case for them: where the document could rest on several "
+    "alternative heads of claim, reliefs or grounds, give the usual alternatives ONCE as a "
+    "bracketed choice (`[unpaid wages / leave encashment / bonus — retain those that apply]`) "
+    "instead of pleading each one as though it were the client's claim. State each legal ground "
+    "once; do not restate a proposition already made in the DOCUMENT SO FAR. Do not add "
+    "constitutional or policy argument (fundamental rights, unjust enrichment, hardship rhetoric) "
+    "that nothing in the request calls for.\n"
+)
+_LABOUR_CODES_RULE_SECTIONWISE = (
+    "\n"
+    "   A4. THE LABOUR CODES ARE IN FORCE. The Code on Wages, 2019, the Industrial Relations "
+    "Code, 2020, the Code on Social Security, 2020 and the Occupational Safety, Health and Working "
+    "Conditions Code, 2020 came into force on 21.11.2025 and repealed 29 Acts — among them the "
+    "Industrial Disputes Act, 1947, the Payment of Wages, Minimum Wages and Payment of Bonus Acts, "
+    "the Payment of Gratuity Act, the EPF and ESI Acts, the Factories Act and the Contract Labour "
+    "Act. A document filed today is grounded on the Code. A repealed Act still governs only what "
+    "the Code's savings clause and section 6 of the General Clauses Act, 1897 preserve (rights "
+    "accrued, and proceedings begun, before 21.11.2025). Where the facts place the matter in that "
+    "period, cite the old provision with the Code's corresponding provision. Where they do not "
+    "say when the right accrued, ground the document on the Code and give the old provision as "
+    "one bracketed alternative — never cite the old Act and the Code together as joint bases. "
+    "Code section numbers do not follow the old Acts' numbers: take them from the LAW IN FORCE "
+    "note and the sections in the RELEVANT LEGAL CONTEXT block, never from memory.\n"
+)
+
+
+def _insert_after(prompt: str, anchor: str, addition: str) -> str:
+    if prompt.count(anchor) != 1:
+        raise RuntimeError(f"prompt anchor not found exactly once: {anchor[:60]!r}")
+    return prompt.replace(anchor, anchor + addition)
+
+
+DRAFTING_SYSTEM_PROMPT_LABOUR_CODES = _insert_after(
+    _insert_after(DRAFTING_SYSTEM_PROMPT,
+                  "     name the BNSS provision and add the CrPC counterpart in brackets.\n",
+                  _LABOUR_CODES_RULE_SINGLE_PASS),
+    "    does not give, plead it with a short placeholder (`[details of the\n"
+    "    threats]`) or leave that ground out; do not supply the fact.\n",
+    _NO_FACTS_RULE_SINGLE_PASS)
+DRAFTING_SECTION_PAIR_PROMPT_LABOUR_CODES = _insert_after(
+    _insert_after(DRAFTING_SECTION_PAIR_PROMPT,
+                  "plead it with a short placeholder (`[details of the threats]`) or leave that "
+                  "ground out; do not supply the fact.\n",
+                  _NO_FACTS_RULE_SECTIONWISE),
+    "Take the counterpart from the mapping in the RELEVANT LEGAL CONTEXT block rather than "
+    "reciting one from memory.\n",
+    _LABOUR_CODES_RULE_SECTIONWISE)
 
 
 # --- Drafting Pipeline: Follow-up modification fast-path (Level 2) ---

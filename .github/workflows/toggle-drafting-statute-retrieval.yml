@@ -1,0 +1,160 @@
+name: Toggle drafting statute retrieval / Labour Codes rules (manual)
+
+# Sets DRAFTING_STATUTE_RETRIEVAL in the server's .env and restarts the app.
+#
+#   labour  drafting retrieves the sections a labour document turns on from
+#           every Act it names (and the Code that replaced a repealed Act),
+#           adds the "law in force" note, and uses the writer prompts with
+#           the Labour Codes and no-facts rules (core/statute_retrieval.py,
+#           config/prompts.py *_LABOUR_CODES). Non-labour drafts unchanged.
+#   off     previous behaviour, byte for byte. This is the default in code,
+#           so merging dev into main changes nothing on production until
+#           this workflow sets the value there.
+#
+# Measured 2026-11-24 (dev code, before/after, blind judge): preferred on 10
+# of 11 labour drafts; law-in-force score 3.9 -> 8.6 of 10. The production
+# switch waits for the lawyers' confirmation of the commencement and repeal
+# facts in core/statute_status.py.
+#
+# workflow_dispatch only. Idempotent: replaces the line if present, appends
+# it otherwise. Rollback: run again with value off. Same SSH secrets, app
+# directories and restart method as toggle-drafting-fast-path.yml; the prod
+# job waits for the production environment approval.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Server'
+        required: true
+        default: 'dev'
+        type: choice
+        options: ['dev', 'prod']
+      value:
+        description: 'DRAFTING_STATUTE_RETRIEVAL (labour = on for labour law, off = previous behaviour)'
+        required: true
+        default: 'labour'
+        type: choice
+        options: ['labour', 'off']
+
+jobs:
+  dev:
+    if: inputs.target == 'dev'
+    name: Flip flag on dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Set flag + restart gunicorn + verify health
+        env:
+          FLAG_VALUE: ${{ inputs.value }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
+            FLAG_VALUE="$FLAG_VALUE" bash <<'ENDSSH'
+            set -e
+            APP_DIR=/root/v2_multi_agent
+            cd $APP_DIR
+            ENV_FILE="$APP_DIR/.env"
+
+            echo "=== Before ==="
+            grep -E "^DRAFTING_STATUTE_RETRIEVAL=" "$ENV_FILE" || echo "(not set)"
+            if grep -qE "^DRAFTING_STATUTE_RETRIEVAL=" "$ENV_FILE"; then
+              sed -i.bak -E "s/^DRAFTING_STATUTE_RETRIEVAL=.*/DRAFTING_STATUTE_RETRIEVAL=${FLAG_VALUE}/" "$ENV_FILE"
+            else
+              echo "DRAFTING_STATUTE_RETRIEVAL=${FLAG_VALUE}" >> "$ENV_FILE"
+            fi
+            echo "=== After ==="
+            grep -E "^DRAFTING_STATUTE_RETRIEVAL=" "$ENV_FILE"
+
+            # preload_app=True: workers need a fresh master to read the new env.
+            MASTER_PID=$(pgrep -f 'gunicorn.*core.gateway:app' -o 2>/dev/null || echo "0")
+            if [ "$MASTER_PID" -gt "0" ] 2>/dev/null; then
+              kill -TERM "$MASTER_PID"
+              for j in $(seq 1 10); do kill -0 "$MASTER_PID" 2>/dev/null || break; sleep 1; done
+            fi
+            nohup $APP_DIR/venv/bin/gunicorn -c gunicorn.conf.py core.gateway:app > /dev/null 2>&1 &
+
+            CONSECUTIVE_OK=0
+            for i in $(seq 1 24); do
+              sleep 5
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/pyapi/health || echo "000")
+              if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
+                CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+                if [ "$CONSECUTIVE_OK" -ge 3 ]; then echo "FLAG FLIP OK (HTTP $STATUS)"; exit 0; fi
+              else
+                CONSECUTIVE_OK=0
+                echo "Waiting... attempt $i/24 (HTTP $STATUS)"
+              fi
+            done
+            echo "ERROR: app not healthy within 120s"
+            tail -50 $APP_DIR/logs/error.log
+            exit 1
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  prod:
+    if: inputs.target == 'prod'
+    name: Flip flag on prod
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_PROD }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.SERVER_HOST_PROD }}" >> ~/.ssh/known_hosts
+
+      - name: Set flag + systemctl restart + verify health
+        env:
+          FLAG_VALUE: ${{ inputs.value }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ secrets.SERVER_USER_PROD }}@${{ secrets.SERVER_HOST_PROD }}" \
+            FLAG_VALUE="$FLAG_VALUE" 'bash -s' << 'ENDSSH'
+          set -e
+          ENV_FILE=/root/Lawtech-AI/.env
+
+          echo "=== Before ==="
+          sudo grep -E '^DRAFTING_STATUTE_RETRIEVAL=' "$ENV_FILE" || echo "(not set)"
+          if sudo grep -qE '^DRAFTING_STATUTE_RETRIEVAL=' "$ENV_FILE"; then
+            sudo sed -i.bak -E "s/^DRAFTING_STATUTE_RETRIEVAL=.*/DRAFTING_STATUTE_RETRIEVAL=${FLAG_VALUE}/" "$ENV_FILE"
+          else
+            echo "DRAFTING_STATUTE_RETRIEVAL=${FLAG_VALUE}" | sudo tee -a "$ENV_FILE" >/dev/null
+          fi
+          echo "=== After ==="
+          sudo grep -E '^DRAFTING_STATUTE_RETRIEVAL=' "$ENV_FILE"
+
+          sudo systemctl restart lawttorney-v2
+
+          CONSECUTIVE_OK=0
+          for i in $(seq 1 24); do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:5001/pyapi/health 2>/dev/null) || STATUS="000"
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE_OK=$((CONSECUTIVE_OK + 1))
+              if [ "$CONSECUTIVE_OK" -ge 3 ]; then sleep 10; echo "FLAG FLIP OK"; exit 0; fi
+            else
+              CONSECUTIVE_OK=0
+              echo "Waiting... attempt $i/24 (HTTP $STATUS)"
+            fi
+          done
+          echo "ERROR: no 3 consecutive 200s within 120s"
+          sudo journalctl -u lawttorney-v2 -n 50 --no-pager
+          exit 1
+          ENDSSH
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

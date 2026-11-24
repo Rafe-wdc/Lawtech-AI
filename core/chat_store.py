@@ -91,6 +91,18 @@ New Conversation Turns:
 Updated Summary (concise, structured, preserve every legal detail):"""
 
 
+def _warn_user_id_mismatch(thread_id: str, stored: str, incoming: str) -> None:
+    """A thread already owned by one user was addressed with another user_id.
+
+    Logged, not rejected: the app is rolling the field out gradually and a
+    hard failure here would drop a finished answer. The stored owner is kept.
+    """
+    if incoming and stored and stored != incoming:
+        log.warning("thread user_id mismatch; keeping stored owner",
+                    thread_id=thread_id[:12],
+                    stored=stored[:12], incoming=incoming[:12])
+
+
 # --- Store class ---
 
 class _SqliteChatHistoryStore:
@@ -133,7 +145,8 @@ class _SqliteChatHistoryStore:
                     summary_text      TEXT NOT NULL DEFAULT '',
                     summary_turn_count INTEGER NOT NULL DEFAULT 0,
                     total_turns       INTEGER NOT NULL DEFAULT 0,
-                    file_context_json TEXT NOT NULL DEFAULT ''
+                    file_context_json TEXT NOT NULL DEFAULT '',
+                    user_id           TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS messages (
@@ -233,6 +246,16 @@ class _SqliteChatHistoryStore:
                 conn.execute("ALTER TABLE threads ADD COLUMN file_context_json TEXT NOT NULL DEFAULT ''")
                 conn.commit()
                 log.info("Migrated threads table: added file_context_json")
+
+            # Migration: user_id, the thread's owner as sent by the app in
+            # the request payload (2026-11-24). Empty for threads created
+            # before the app started sending it.
+            if "user_id" not in cols:
+                conn.execute("ALTER TABLE threads ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+                log.info("Migrated threads table: added user_id")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_threads_user ON threads(user_id)")
+            conn.commit()
 
             # Migration: create thread_files if not present (executescript cannot use
             # datetime('now') as DEFAULT on all SQLite versions, so we create it here)
@@ -449,6 +472,7 @@ class _SqliteChatHistoryStore:
         task: str = "",
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
+        user_id: str = "",
     ) -> int:
         """Save a Q&A turn. Returns the new turn_number.
 
@@ -463,19 +487,24 @@ class _SqliteChatHistoryStore:
         with self._write_lock:
             conn = self._get_connection()
             try:
-                # Upsert thread
+                # Upsert thread. user_id is written only while the thread
+                # has no owner yet: the first request that names one wins,
+                # a later request cannot re-home the thread.
                 conn.execute("""
-                    INSERT INTO threads (thread_id, total_turns)
-                    VALUES (?, 0)
-                    ON CONFLICT(thread_id) DO NOTHING
-                """, (thread_id,))
+                    INSERT INTO threads (thread_id, total_turns, user_id)
+                    VALUES (?, 0, ?)
+                    ON CONFLICT(thread_id) DO UPDATE SET
+                        user_id = CASE WHEN threads.user_id = '' THEN excluded.user_id
+                                       ELSE threads.user_id END
+                """, (thread_id, user_id or ""))
 
-                # Get current turn count
+                # Get current turn count and owner
                 row = conn.execute(
-                    "SELECT total_turns FROM threads WHERE thread_id = ?",
+                    "SELECT total_turns, user_id FROM threads WHERE thread_id = ?",
                     (thread_id,),
                 ).fetchone()
                 new_turn = (row["total_turns"] if row else 0) + 1
+                _warn_user_id_mismatch(thread_id, row["user_id"] if row else "", user_id)
 
                 # Insert message
                 conn.execute("""
@@ -533,6 +562,7 @@ class _SqliteChatHistoryStore:
         task: str = "",
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
+        user_id: str = "",
     ) -> int:
         """Async wrapper — runs SQLite write in thread pool.
 
@@ -546,7 +576,23 @@ class _SqliteChatHistoryStore:
             task=task,
             tasks_planned_json=tasks_planned_json,
             primary_artifact_kind=primary_artifact_kind,
+            user_id=user_id,
         )
+
+    def _get_thread_user_id_sync(self, thread_id: str) -> str:
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT user_id FROM threads WHERE thread_id = ?", (thread_id,)
+            ).fetchone()
+            return (row["user_id"] or "") if row else ""
+        finally:
+            conn.close()
+
+    async def get_thread_user_id(self, thread_id: str) -> str:
+        """Owner of a thread as sent by the app; '' when unknown."""
+        return await asyncio.to_thread(self._get_thread_user_id_sync, thread_id)
 
     # ------------------------------------------------------------------
     # Summary management
@@ -1763,7 +1809,8 @@ class _PostgresChatHistoryStore:
                         summary_text       TEXT NOT NULL DEFAULT '',
                         summary_turn_count INTEGER NOT NULL DEFAULT 0,
                         total_turns        INTEGER NOT NULL DEFAULT 0,
-                        file_context_json  TEXT NOT NULL DEFAULT ''
+                        file_context_json  TEXT NOT NULL DEFAULT '',
+                        user_id            TEXT NOT NULL DEFAULT ''
                     )""",
                     """CREATE TABLE IF NOT EXISTS messages (
                         id          BIGSERIAL PRIMARY KEY,
@@ -1858,6 +1905,22 @@ class _PostgresChatHistoryStore:
                 for stmt in stmts:
                     conn.execute(stmt)
                 conn.commit()
+                # Migration: thread owner (user_id), sent by the app in the
+                # request payload from 2026-11-24. IF NOT EXISTS makes this
+                # safe to re-run on every start.
+                try:
+                    conn.execute(
+                        "ALTER TABLE threads ADD COLUMN IF NOT EXISTS "
+                        "user_id TEXT NOT NULL DEFAULT ''"
+                    )
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_threads_user ON threads(user_id)"
+                    )
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    log.warning("PG migration: threads.user_id failed",
+                                error=str(e)[:200])
             # Migration: add ocr_status to thread_files if missing
             try:
                 conn.execute(
@@ -1992,6 +2055,7 @@ class _PostgresChatHistoryStore:
         task: str = "",
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
+        user_id: str = "",
     ) -> int:
         """Save a Q&A turn atomically. Returns the new turn_number.
 
@@ -2003,15 +2067,20 @@ class _PostgresChatHistoryStore:
         with self._get_pool().connection() as conn:
             conn.row_factory = dict_row
             # Atomic upsert: increment total_turns, get new value in one statement
+            # user_id is written only while the thread has no owner yet:
+            # the first request that names one wins (see the SQLite backend).
             row = conn.execute("""
-                INSERT INTO threads (thread_id, total_turns)
-                VALUES (%s, 1)
+                INSERT INTO threads (thread_id, total_turns, user_id)
+                VALUES (%s, 1, %s)
                 ON CONFLICT(thread_id) DO UPDATE SET
                     total_turns = threads.total_turns + 1,
-                    updated_at  = NOW()
-                RETURNING total_turns
-            """, (thread_id,)).fetchone()
+                    updated_at  = NOW(),
+                    user_id     = CASE WHEN threads.user_id = '' THEN EXCLUDED.user_id
+                                       ELSE threads.user_id END
+                RETURNING total_turns, user_id
+            """, (thread_id, user_id or "")).fetchone()
             new_turn = row["total_turns"]
+            _warn_user_id_mismatch(thread_id, row["user_id"] or "", user_id)
 
             conn.execute("""
                 INSERT INTO messages (
@@ -2046,6 +2115,7 @@ class _PostgresChatHistoryStore:
         task: str = "",
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
+        user_id: str = "",
     ) -> int:
         return await asyncio.to_thread(
             self._save_turn_sync, thread_id, user_query, ai_response,
@@ -2053,7 +2123,22 @@ class _PostgresChatHistoryStore:
             task=task,
             tasks_planned_json=tasks_planned_json,
             primary_artifact_kind=primary_artifact_kind,
+            user_id=user_id,
         )
+
+    def _get_thread_user_id_sync(self, thread_id: str) -> str:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT user_id FROM threads WHERE thread_id = %s", (thread_id,)
+            ).fetchone()
+            return (row["user_id"] or "") if row else ""
+
+    async def get_thread_user_id(self, thread_id: str) -> str:
+        """Owner of a thread as sent by the app; '' when unknown."""
+        return await asyncio.to_thread(self._get_thread_user_id_sync, thread_id)
 
     # ------------------------------------------------------------------
     # Summary management

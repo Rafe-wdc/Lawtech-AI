@@ -54,6 +54,7 @@ class ChatRunnerInputs:
     integration_token: str | None = None        # FSD JWT for Google/Notion
     cite_appendix: bool | None = None           # Drafting: include REFERENCES & CITATIONS block
     regenerate_of: str | None = None            # Sagar bug #5: refine previous response
+    user_id: str | None = None                  # app user id from the payload -> threads.user_id
     enable_cache: bool = True                   # /chat disables for uploads
     enable_quality_scoring: bool = True         # 10% sampling
     skip_thread_id_event: bool = False          # caller already emitted it
@@ -435,6 +436,7 @@ async def run_chat_pipeline(
                     task="",
                     tasks_planned_json=json.dumps(cached.agents_used or []),
                     primary_artifact_kind="",
+                    user_id=i.user_id or "",
                 )
             except Exception as e:
                 log.error("Failed to save cached turn to chat history",
@@ -526,6 +528,7 @@ async def run_chat_pipeline(
                     i.thread_id, i.query, _edit["markdown"],
                     task="Drafting", tasks_planned_json=json.dumps(["Drafting"]),
                     primary_artifact_kind="draft",
+                    user_id=i.user_id or "",
                 )
             except Exception as e:
                 log.error("Failed to save chat history (partial edit)",
@@ -959,6 +962,7 @@ async def run_chat_pipeline(
                 task=turn_task,
                 tasks_planned_json=json.dumps(tasks_planned_stream or []),
                 primary_artifact_kind=turn_primary_artifact_kind,
+                user_id=i.user_id or "",
             )
         except Exception as e:
             log.error("Failed to save chat history",

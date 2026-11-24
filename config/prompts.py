@@ -2601,8 +2601,9 @@ DRAFTING_SECTION_PAIR_PROMPT += (
 
 
 # --- Labour Codes + no-facts drafting rules (switch: DRAFTING_STATUTE_RETRIEVAL) ---
-# The two prompts above are what drafting uses with the switch off (the
-# default), byte for byte. With DRAFTING_STATUTE_RETRIEVAL=labour|all the
+# The two prompts above are what drafting uses with the switch off
+# (DRAFTING_STATUTE_RETRIEVAL=off), byte for byte. With labour (the default
+# when unset) or all, the
 # writers get the *_LABOUR_CODES variants below: the same prompts with these
 # passages inserted where they were evaluated (2026-11-24, before/after on
 # dev code: the blind judge preferred the variant on 10 of 11 labour drafts;
@@ -2613,8 +2614,8 @@ DRAFTING_SECTION_PAIR_PROMPT += (
 #     and cited the Bonus, Gratuity and Factories Acts as current law.
 #   * With no facts given, drafts pleaded every head of claim as the
 #     client's and padded with rhetoric.
-# Kept apart so that merging dev into main cannot change production drafts
-# until the switch is turned on there.
+# Kept apart so that a server with the switch off (production, via its .env)
+# keeps the previous prompts.
 _LABOUR_CODES_RULE_SINGLE_PASS = (
     "   - THE LABOUR CODES ARE IN FORCE. The Code on Wages, 2019, the\n"
     "     Industrial Relations Code, 2020, the Code on Social Security, 2020\n"

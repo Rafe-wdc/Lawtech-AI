@@ -39,7 +39,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, File, Form, Upload
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from werkzeug.utils import secure_filename
@@ -540,6 +540,20 @@ class SearchRequest(BaseModel):
         None, max_length=200000,
         description="Previous assistant response to refine.",
     )
+    # Who is asking (2026-11-24). The app sends its own user id so the
+    # thread can be tied to its owner in threads.user_id; the first step
+    # towards telling a user their answer finished without asking Node.
+    # Optional while the app rolls the field out. Not used for
+    # authorisation: the X-API-Key still gates access.
+    user_id: Optional[str] = Field(None, max_length=128)
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def _clean_user_id(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip()
+        return v or None
 
 
 class SearchResponse(BaseModel):
@@ -692,7 +706,8 @@ async def search(data: SearchRequest, request: Request):
 
     log.info("Search request received",
              query=data.prompt_query[:100], thread_id=thread_id,
-             query_len=len(data.prompt_query))
+             query_len=len(data.prompt_query),
+             has_user_id=bool(data.user_id))
 
     # --- Cache check: skip graph for repeated first-turn queries ---
     _is_first_turn = not data.globalThreadId  # no thread = first turn
@@ -732,6 +747,7 @@ async def search(data: SearchRequest, request: Request):
                     task="",
                     tasks_planned_json=json.dumps(cached.agents_used or []),
                     primary_artifact_kind="",
+                    user_id=data.user_id or "",
                 )
             except Exception as e:
                 log.error("Failed to save cached turn to chat history",
@@ -948,6 +964,7 @@ async def search(data: SearchRequest, request: Request):
                 task=_turn_task,
                 tasks_planned_json=json.dumps(_turn_tasks_planned),
                 primary_artifact_kind=_turn_artifact_kind,
+                user_id=data.user_id or "",
             )
             log.debug("Chat history saved",
                       thread_id=thread_id[:12], turn=conversation_turn)
@@ -1063,7 +1080,8 @@ async def search_stream(data: SearchRequest, request: Request):
 
     log.info("Stream request received",
              query=data.prompt_query[:100], thread_id=thread_id,
-             has_integration_token=bool(getattr(data, "integration_token", None)))
+             has_integration_token=bool(getattr(data, "integration_token", None)),
+             has_user_id=bool(data.user_id))
 
     from core.chat_runner import ChatRunnerInputs, run_chat_pipeline
     pipeline_inputs = ChatRunnerInputs(
@@ -1077,6 +1095,7 @@ async def search_stream(data: SearchRequest, request: Request):
         integration_token=getattr(data, "integration_token", None),
         cite_appendix=getattr(data, "cite_appendix", None),
         regenerate_of=getattr(data, "regenerate_of", None),
+        user_id=data.user_id,
         enable_cache=True,
         enable_quality_scoring=True,
     )
@@ -1347,6 +1366,8 @@ async def chat_with_files(
     integration_token: Optional[str] = Form(None),
     cite_appendix: Optional[bool] = Form(None),
     regenerate_of: Optional[str] = Form(None),  # Sagar bug #5
+    # The app's user id (2026-11-24): stored on the thread as its owner.
+    user_id: Optional[str] = Form(None, max_length=128),
     # "Use it anyway" — the user's override for the blur gate. When true,
     # newly-uploaded images skip the sharpness check, AND any image this
     # thread whose OCR output was withheld as unreadable is retried and
@@ -1844,6 +1865,7 @@ async def chat_with_files(
                 integration_token=integration_token,
                 cite_appendix=cite_appendix,
                 regenerate_of=regenerate_of,
+                user_id=(user_id or "").strip() or None,
                 enable_cache=False,   # uploads / integration context make caching unsafe
                 enable_quality_scoring=True,
                 skip_thread_id_event=True,  # /chat already emitted before file processing
@@ -2720,6 +2742,7 @@ class SaveTurnRequest(BaseModel):
     thread_id: str
     user_query: str
     ai_response: str
+    user_id: Optional[str] = Field(None, max_length=128)
 
 
 @app.post("/pyapi/save-turn", dependencies=[Depends(require_user_key)])
@@ -2729,7 +2752,10 @@ async def save_turn_endpoint(data: SaveTurnRequest, request: Request):
     from .chat_store import chat_store
 
     try:
-        turn = await chat_store.save_turn(data.thread_id, data.user_query, data.ai_response)
+        turn = await chat_store.save_turn(
+            data.thread_id, data.user_query, data.ai_response,
+            user_id=(data.user_id or "").strip(),
+        )
         return JSONResponse({"turn_number": turn})
     except Exception as e:
         log.error("Save turn failed", error=short_err(e), exc_info=True)

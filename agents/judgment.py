@@ -7,7 +7,7 @@ Handles: "State vs Doe 2020", "SC cases on anticipatory bail",
          "bail cases under section 438", "Kirloskar vs Kirloskar", etc.
 
 Uses: GPT-4o (metadata extraction), Gemini Flash (response generation)
-Data Source: Elasticsearch "judgements" index + AWS S3
+Data Source: Elasticsearch High Court index (judgements_v2, see core/judgment_index.py) + AWS S3
 
 Search Strategies (tried in order of specificity):
 1. Citation / case number direct lookup
@@ -36,7 +36,7 @@ from core.logger import get_logger, log_time, short_err
 from core.settings import TIMEOUT_ES_PARALLEL_SEC
 from config.prompts import JUDGMENT_SYSTEM_PROMPT
 from tools.shared.judgment_search import smart_judgment_search
-from tools.shared.storage_tools import generate_s3_link
+from core import judgment_index as jx
 from tools.shared.llm_tools import CaseMetadata
 from core.progress import progress
 
@@ -117,10 +117,9 @@ def _is_exact_section_lookup(
 # to the web fallback.
 #
 # Two normalisation edge cases baked into `_normalize_court_filter`:
-#   1. The index stores "odisa high court" (source-data typo).
-#      Users typing the correct "odisha high court" would otherwise
-#      miss their own court's docs. Normalise both spellings to the
-#      typo'd bucket.
+#   1. The old `judgements` index stores "odisa high court" (a typo);
+#      judgements_v2 stores "odisha high court". Every spelling is
+#      normalised to the one the index in use holds (jx.ODISHA_COURT).
 #   2. The index stores "Tribunal" (capital T). `smart_judgment_search`
 #      lowercases the filter before `match_phrase`, so the comparison
 #      here is lowercase-only.
@@ -130,7 +129,8 @@ _INDEXED_COURTS: frozenset[str] = frozenset({
     "kerala high court",
     "rajasthan high court",
     "madhya pradesh high court",
-    "odisa high court",  # sic — matches the source-data typo
+    "odisa high court",  # sic — the old `judgements` index's typo
+    "odisha high court",  # judgements_v2
     "gujarat high court",
     "calcutta high court",
     "delhi high court",
@@ -143,7 +143,16 @@ _INDEXED_COURTS: frozenset[str] = frozenset({
     "meghalaya high court",
     "sikkim high court",
     "tribunal",
-})
+}) | (frozenset() if jx.LEGACY else frozenset({
+    # Loaded into judgements_v2 from the 2025-26 court scrape (2026-11-19:
+    # Madras 327,671, Jharkhand 60,918, Himachal 54,699, Patna 411).
+    # `judgements` has none of them, so they count only when v2 is read;
+    # without this, every question on these courts went straight to the web.
+    "madras high court",
+    "jharkhand high court",
+    "himachal pradesh high court",
+    "patna high court",
+}))
 
 
 def _normalize_court_filter(court: str | None) -> tuple[str | None, bool]:
@@ -163,9 +172,9 @@ def _normalize_court_filter(court: str | None) -> tuple[str | None, bool]:
     normalized = court.strip().lower()
     if not normalized:
         return None, False
-    # Fold correct Odisha / Orissa spellings into the index's typo bucket.
-    if normalized in ("odisha high court", "orissa high court"):
-        normalized = "odisa high court"
+    # Fold every Odisha / Orissa spelling into the label the index uses.
+    if normalized in ("odisha high court", "orissa high court", "odisa high court"):
+        normalized = jx.ODISHA_COURT
     if normalized in _INDEXED_COURTS:
         return normalized, False
     # Generic "high court" (no location prefix) — user did not name a
@@ -303,6 +312,14 @@ def _extract_case_metadata(query: str) -> CaseMetadata:
     return result
 
 
+def _searched_as_asked(searched_court: str | None, searched_year: int | None,
+                       court: str | None, year: int | None) -> bool:
+    """Whether a search ran with exactly the court and year the question
+    asks for: neither looser (a court or year left out) nor stricter (one
+    the question does not ask for)."""
+    return (searched_court, searched_year) == (court, year)
+
+
 _LEGAL_TOPICS = [
     "bail", "anticipatory bail", "murder", "rape", "cheating", "fraud",
     "negligence", "contract", "property", "divorce", "custody", "contempt",
@@ -340,9 +357,37 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
     court_name: str | None = None
     if "supreme court" in query_lower or re.search(r'\bsc\b', query_lower):
         court_name = "supreme court"
-    elif "high court" in query_lower:
-        hc = re.search(r'(\w+)\s+high court', query_lower)
-        court_name = f"{hc.group(1)} high court" if hc else "high court"
+    elif "high court" in query_lower or re.search(r'\bhc\b', query_lower):
+        # A full court name first: one word before "high court" read
+        # "Madhya Pradesh High Court" as "pradesh high court", an unknown
+        # court, so this search ran with no court filter and returned
+        # Bombay, Kerala and Delhi judgments for an MP question (2026-11-17).
+        # "Bombay HC" and "High Court of Bombay" are the same court, as the
+        # metadata extractor is told: unread, "Bombay HC 2026 ... divorce"
+        # searched every court and a Kerala judgment came back among the
+        # Bombay ones (2026-11-18).
+        # High Courts only: "tribunal" in the list read "High Court judgment
+        # on a Motor Accident Claims Tribunal award" as the court "tribunal".
+        known = sorted((c for c in _INDEXED_COURTS | {
+                            "odisha high court", "orissa high court",
+                            "punjab and haryana high court", "andhra pradesh high court",
+                            "himachal pradesh high court", "allahabad high court",
+                            "madras high court", "karnataka high court", "patna high court",
+                            "telangana high court", "chhattisgarh high court",
+                            "jharkhand high court"} if c.endswith(" high court")),
+                       key=len, reverse=True)
+
+        def _names(court: str) -> bool:
+            place = re.escape(court.removesuffix(" high court"))
+            return bool(re.search(
+                rf"\b{place}\s+(?:high court|hc)\b"
+                rf"|\bhigh court (?:of judicature )?(?:of|at|for) (?:the )?(?:state of )?{place}\b",
+                query_lower))
+
+        court_name = next((c for c in known if _names(c)), None)
+        if court_name is None:
+            hc = re.search(r'(\w+)\s+(?:high court|hc)\b', query_lower)
+            court_name = f"{hc.group(1)} high court" if hc else "high court"
 
     # Legal topics
     topics = [t for t in _LEGAL_TOPICS if t in query_lower]
@@ -361,9 +406,17 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
     # size: narrow if both parties known, else broader
     size = 1 if (petitioners and respondents) else (5 if topics else 10)
 
+    # A section and its Act ("Section 138 Negotiable Instruments Act",
+    # "Section 498A IPC"). Without it this first search never used the
+    # provision strategy: "2026 ... Section 138" got keyword hits, so the
+    # metadata-informed search (which only runs when this one finds nothing)
+    # never ran (2026-11-17).
+    acts = [f"section {m.group('sec')} {m.group('act')}".lower()
+            for m in _SECTION_ACT_RE.finditer(query)]
+
     log.info("Regex fallback metadata",
              petitioners=petitioners, respondents=respondents,
-             year=year, court=court_name, topics=topics, size=size)
+             year=year, court=court_name, topics=topics, acts=acts, size=size)
 
     return CaseMetadata(
         petitioner_names=petitioners,
@@ -371,7 +424,7 @@ def _judgment_regex_fallback(query: str) -> CaseMetadata:
         year=year,
         court_name=court_name,
         topics=topics,
-        acts_or_sections=[],
+        acts_or_sections=acts,
         lexical_query=lexical,
         size=size,
     )
@@ -402,6 +455,36 @@ def _cap_doc_text(content: str, budget_left: int) -> tuple[str, int]:
     if limit <= 0:
         return "", dropped
     return text[:limit].rstrip() + _TRUNCATION_NOTE.format(n=dropped), dropped
+
+
+_SECTION_ACT_RE = re.compile(
+    r"\b(?:section|sec\.?|u/s\.?|s\.)\s*(?P<sec>\d{1,4}[A-Z]{0,2}(?:-\d{1,3}[A-Z]?)?(?:\(\w{1,4}\))*)\s+"
+    r"(?:of\s+(?:the\s+)?)?"
+    r"(?P<act>(?:BNSS|BNS|BSA|IPC|Cr\.P\.C\.?|CrPC|CPC|NDPS Act|N\.I\. Act|NI Act"
+    r"|(?:[A-Z][A-Za-z.&-]*\s+){1,7}(?:Act|Code|Sanhita|Adhiniyam))\b)",
+    re.I)
+
+
+def _judge_view(texts: list[str]) -> list[str]:
+    """What the relevance judge reads of each judgment: its opening (court,
+    case, parties) and its operative end (what the court did).
+
+    The judge reads a window of about 1,200-2,400 characters per document.
+    Taken from the start alone, a grouped or long judgment is nothing but
+    petition titles: the judge rejected real 2026 Bombay decisions as "only
+    cause-title listings" (2026-11-17) because the decision was at the end.
+    The judge and its rules are unchanged; only the excerpt is."""
+    from core.retrieval_relevance import _RELEVANCE_TOP_N, _adaptive_chunk_window
+    window = _adaptive_chunk_window(min(len([t for t in texts if t]), _RELEVANCE_TOP_N))
+    out = []
+    for t in texts:
+        t = " ".join((t or "").split())
+        if len(t) <= window:
+            out.append(t)
+            continue
+        head = int(window * 0.4)
+        out.append(t[:head] + " [...] " + t[-(window - head - 7):])
+    return out
 
 
 def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
@@ -447,9 +530,10 @@ def _process_hits(hits: list[dict]) -> tuple[list[str], list[SourceMetadata]]:
             trimmed_hits += 1
         docs_text_parts.append(doc_text)
 
-        # Generate S3 link
+        # PDF link: carried by v2 entries, built from the file name for the
+        # old index (core.judgment_index.pdf_url).
         file_str = str(source_file) if isinstance(source_file, dict) else source_file
-        s3_link = generate_s3_link.invoke({"court": court, "file_name": file_str, "title": title}) if court and file_str else None
+        s3_link = jx.pdf_url(hit, title)
 
         sources.append(SourceMetadata(
             source_type="judgment",
@@ -522,9 +606,10 @@ async def judgment_node(state: LegalAgentState) -> dict:
         # Preliminary search uses regex-fallback metadata (fast) while GPT-4o extracts
         # richer metadata. If preliminary hits are found, we skip the refined search.
         
+        prelim_meta = _judgment_regex_fallback(query)
+        prelim_court, _ = _normalize_court_filter(prelim_meta.court_name)
+
         def _preliminary_search():
-            prelim_meta = _judgment_regex_fallback(query)
-            prelim_court, _ = _normalize_court_filter(prelim_meta.court_name)
             return smart_judgment_search(
                 query=query,
                 petitioner=(prelim_meta.petitioner_names or [""])[0],
@@ -612,6 +697,22 @@ async def judgment_node(state: LegalAgentState) -> dict:
                 file_context_prefix=_file_prefix)
             fallback_result.fallback_used = True
             return {"agent_results": {"Judgment": fallback_result}}
+
+        # The quick search's hits answer the question only if it searched the
+        # court and year the question asks for, as the extractor read them.
+        # If the two readings differ, its hits are set aside and the search
+        # below runs on the extractor's reading. Otherwise a court the regex
+        # missed ("Bombay HC") was silently dropped, and a year it misread
+        # (an Act's year, "Arbitration Act, 1996") silently imposed.
+        if prelim_result["hits"] and not _searched_as_asked(
+                prelim_court, prelim_meta.year, court_filter, metadata.year):
+            log.info("Preliminary search used another court or year than the question — "
+                     "searching again with the extracted ones",
+                     preliminary_court=prelim_court, preliminary_year=prelim_meta.year,
+                     court=court_filter, year=metadata.year,
+                     preliminary_hits=len(prelim_result["hits"]))
+            prelim_result = {"hits": [], "strategy_used": "none",
+                             "strategies_tried": prelim_result.get("strategies_tried", [])}
 
         # If preliminary search found hits, use them directly
         if prelim_result["hits"]:
@@ -743,7 +844,7 @@ async def judgment_node(state: LegalAgentState) -> dict:
             progress("judgment", "Verifying retrieval relevance...",
                      step="relevance_check")
             is_relevant, judge_telemetry = await check_retrieval_relevance(
-                query, docs_text_parts,
+                query, _judge_view([h.get("content") or "" for h in hits]),
                 source_name=first_title or hits[0].get("source"),
                 agent_name="Judgment",
             )

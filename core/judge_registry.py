@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Literal
 
 from core.settings import ES_INDICES
+from core import judgment_index as _jx
 
 REGISTRY_PATH = Path(__file__).resolve().parent.parent / "config" / "judge_registry.json"
 
@@ -61,11 +62,14 @@ LAYOUTS: dict[str, IndexLayout] = {
         date_field="judgment_date", date_format="dd-MM-yyyy",
         bench_kind="text", bench_field="bench", author_field="judgment_by.keyword",
     ),
+    # The High Court index in use (core/judgment_index.py): judgements_v2
+    # names the text `full_text` and its court_name is already a keyword
+    # (no .keyword sub-field).
     "judgments": IndexLayout(
-        key="judgments", text_field="page_content",
+        key="judgments", text_field=_jx.TEXT_FIELD,
         date_field="judgment_date", date_format="yyyy-MM-dd",
         bench_kind="keyword", bench_field="bench_judge_names.keyword",
-        court_field="court_name.keyword",
+        court_field="court_name.keyword" if _jx.LEGACY else "court_name",
     ),
 }
 
@@ -312,9 +316,13 @@ def bench_filter(source: JudgeSource) -> dict:
     """Query clause: judgments where this judge sat on the bench."""
     lay = source.layout
     if lay.bench_kind == "keyword":
+        # The registry spells Odisha as the old index did ("odisa"); the
+        # court filter uses the spelling of the index in use.
+        courts = [_jx.ODISHA_COURT if c in ("odisa high court", "odisha high court", "orissa high court")
+                  else c for c in source.court_names]
         return {"bool": {"filter": [
             {"terms": {lay.bench_field: list(source.bench_values)}},
-            {"terms": {lay.court_field: list(source.court_names)}},
+            {"terms": {lay.court_field: courts}},
         ]}}
     should = []
     for p in source.bench_phrases:

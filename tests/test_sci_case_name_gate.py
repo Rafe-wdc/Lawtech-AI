@@ -248,6 +248,35 @@ class _Link:
 
 
 def test_sc_judgment_found_in_judgements_index(monkeypatch):
+    # judgements_v2 (the default): `source` is one exact value there, so the
+    # lookup searches the party names, and the PDF link comes with the entry.
+    pdf = ("https://lawttorney.s3.ap-south-1.amazonaws.com/supreme%20court/"
+           "K.%20BHASKARAN%20vs.%20SANKARAN%20VAIDHYAN%20BALAN%20AND%20ANR..pdf")
+    es = _HcES([{"source": "K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR..pdf",
+                 "petitioner_names": ["K. BHASKARAN"],
+                 "respondent_names": ["SANKARAN VAIDHYAN BALAN AND ANR."],
+                 "full_text": "K. BHASKARAN v. SANKARAN VAIDHYAN BALAN ... Appeal partly allowed.",
+                 "pdf_links": [{"label": "PDF (S3)", "url": pdf}],
+                 "s3_bucket": "lawttorney",
+                 "s3_key": "supreme court/K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR..pdf"}])
+    monkeypatch.setattr("core.clients.get_es_client", lambda: es)
+    monkeypatch.setattr("tools.shared.storage_tools._s3_key_exists", lambda bucket, key: True)
+    found = sj._sc_judgment_in_judgements_index("K. Bhaskaran", "Sankaran Vaidhyan Balan")
+    assert found["title"] == "K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR."
+    assert found["pdf"] == pdf and "Appeal partly allowed" in found["text"]
+    index, body = es.bodies[0]
+    assert index == "judgements_v2"
+    assert body["query"]["bool"]["filter"] == [{"match_phrase": {"court_name": "supreme court"}}]
+    must = body["query"]["bool"]["must"]
+    assert must[0]["match"]["petitioner_names"] == {"query": "bhaskaran", "operator": "and"}
+    assert must[1]["match"]["respondent_names"]["query"] == "sankaran"
+
+
+def test_sc_judgment_found_in_the_old_judgements_index(monkeypatch):
+    # JUDGMENTS_INDEX=judgements: the file name is searched and the link built.
+    import core.judgment_index as jx
+    monkeypatch.setattr(jx, "LEGACY", True)
+    monkeypatch.setattr(jx, "TEXT_FIELD", "page_content")
     es = _HcES([{"source": "K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR..pdf",
                  "page_content": "K. BHASKARAN v. SANKARAN VAIDHYAN BALAN ... Appeal partly allowed."}])
     link = _Link()
@@ -256,9 +285,7 @@ def test_sc_judgment_found_in_judgements_index(monkeypatch):
     found = sj._sc_judgment_in_judgements_index("K. Bhaskaran", "Sankaran Vaidhyan Balan")
     assert found["title"] == "K. BHASKARAN vs. SANKARAN VAIDHYAN BALAN AND ANR."
     assert found["pdf"].endswith(".pdf") and "Appeal partly allowed" in found["text"]
-    index, body = es.bodies[0]
-    assert index == "judgements"
-    assert body["query"]["bool"]["filter"] == [{"match_phrase": {"court_name": "supreme court"}}]
+    _, body = es.bodies[0]
     assert body["query"]["bool"]["must"][0]["match"]["source"] == {"query": "bhaskaran sankaran", "operator": "and"}
     assert link.calls[0]["court"] == "supreme"
 

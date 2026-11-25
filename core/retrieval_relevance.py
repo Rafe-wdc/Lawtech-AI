@@ -45,6 +45,7 @@ DESIGN
 from __future__ import annotations
 
 import asyncio
+from datetime import date as _date
 from typing import Optional
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -283,6 +284,14 @@ jurisdiction, wrong-statute, or wrong-direction citations.
 USER QUERY
 ===============================================================
 {query}
+
+===============================================================
+TODAY'S DATE
+===============================================================
+{today}. A judgment dated on or before today is not from the future: a
+query for judgments of the current year, or of any year up to today's,
+asks for judgments that already exist. Never reject a document as
+"future" or "anachronistic" unless its date is after today.
 
 ===============================================================
 RETRIEVED DOCUMENTS   (top {n_chunks} hits, source: "{source}")
@@ -570,6 +579,9 @@ async def check_retrieval_relevance(
             raw_and_parsed = await asyncio.wait_for(
                 chain.ainvoke({
                     "query": query,
+                    # 2026-11-13: without it the judge called 2026 Bombay HC
+                    # orders "from the future/anachronistic year 2026".
+                    "today": _date.today().strftime("%d %B %Y"),
                     "n_chunks": n_chunks,
                     "source": source_name or "unknown",
                     "chunks_block": chunks_block,

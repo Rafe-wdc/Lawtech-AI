@@ -44,7 +44,11 @@ _ACT_AFTER_RE = re.compile(r"^\s*(?:of\s+(?:the\s+)?)?(?P<act>[^.,;?\n]{3,90}?(?
                            re.I)
 _COUNT_RE = re.compile(r"\b(\d{1,3})\s+(?:case|judg|citation|precedent|ruling|authorit|decision)", re.I)
 
-MAX_PER_INDEX = 40
+# The whole set is listed only when it fits. judgements_v2 holds the 2025-26
+# Bombay loads: Section 154B-29 MCS Act went from 10 matching judgments to
+# 89 (2026-11-13), past the old cap of 40, which silently dropped the checked
+# list. At ~370 characters a judgment, 100 is about 37k characters.
+MAX_PER_INDEX = 100
 PER_QUERY_TIMEOUT_S = 8
 SNIPPET_CHARS = 240
 
@@ -149,6 +153,37 @@ def _highlight(ask: SectionAsk, field: str) -> dict:
                                "highlight_query": _section_phrases(ask, field)}}}
 
 
+_PASSAGE_BATCH = 20
+
+
+def _fetch_with_passages(es, index: str, ask: SectionAsk, field: str, size: int,
+                         source: list[str]) -> list[dict]:
+    """The matching judgments, each with its passages, in rank order.
+
+    One search ranks them without text. Passages are then fetched in parallel
+    batches of 20: one request for 100 long judgments took 15-28 s on a cold
+    cache (2026-11-13), past the 8 s limit, while the batches finish in about
+    a second."""
+    ranked = es.search(index=index, request_timeout=PER_QUERY_TIMEOUT_S, body={
+        "size": size, "_source": False, "query": _query(ask, field)})["hits"]["hits"]
+    ids = [h["_id"] for h in ranked if h.get("_id") is not None]
+    if not ids:
+        return []
+    batches = [ids[i:i + _PASSAGE_BATCH] for i in range(0, len(ids), _PASSAGE_BATCH)]
+
+    def one(part: list) -> list[dict]:
+        return es.search(index=index, request_timeout=PER_QUERY_TIMEOUT_S, body={
+            "size": len(part), "_source": source,
+            "query": {"bool": {"filter": [{"ids": {"values": part}}], "must": [_query(ask, field)]}},
+            "highlight": _highlight(ask, field)})["hits"]["hits"]
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(5, len(batches))) as pool:
+        got = [h for part in pool.map(one, batches) for h in part]
+    order = {i: n for n, i in enumerate(ids)}
+    return sorted(got, key=lambda h: order.get(h.get("_id"), len(order)))
+
+
 def _passage(h: dict, field: str, rx: re.Pattern) -> str:
     """A passage naming the section: the first highlighted fragment that shows
     it in full, else the first fragment (the phrase filter already proved the
@@ -159,39 +194,33 @@ def _passage(h: dict, field: str, rx: re.Pattern) -> str:
 
 
 def _hc_judgments(es, ask: SectionAsk, rx: re.Pattern, size: int) -> tuple[list[SectionJudgment], bool]:
-    from tools.shared.storage_tools import generate_s3_link
+    from core import judgment_index as jx
+    text_field = jx.TEXT_FIELD
     probe = es.search(index=ES_INDICES["judgments"], request_timeout=PER_QUERY_TIMEOUT_S, body={
         "size": 0, "track_total_hits": size + 1,
-        "query": {"bool": {"filter": [_section_phrases(ask, "page_content")]}}})
+        "query": {"bool": {"filter": [_section_phrases(ask, text_field)]}}})
     total = (probe["hits"].get("total") or {}).get("value", 0)
     if total > size:
         return [], False              # more than one page: not the complete set
-    res = es.search(index=ES_INDICES["judgments"], request_timeout=PER_QUERY_TIMEOUT_S, body={
-        "size": size, "query": _query(ask, "page_content"),
-        "_source": ["petitioner_names", "respondent_names", "court_name", "judgment_date",
-                    "source", "case_number"],
-        "highlight": _highlight(ask, "page_content")})
+    hits = _fetch_with_passages(es, ES_INDICES["judgments"], ask, text_field, size,
+                                ["petitioner_names", "respondent_names", "judgment_date",
+                                 jx.CASE_NO_FIELD, *jx.LINK_FIELDS])
     out, seen = [], set()
-    for h in res["hits"]["hits"]:
+    for h in hits:
         s = h["_source"]
-        pet = (s.get("petitioner_names") or ["?"])
-        resp = (s.get("respondent_names") or ["?"])
-        pet = pet[0] if isinstance(pet, list) else pet
-        resp = resp[0] if isinstance(resp, list) else resp
+        pet = (jx.names(s.get("petitioner_names")) or ["?"])[0]
+        resp = (jx.names(s.get("respondent_names")) or ["?"])[0]
         # The index holds exact copies of some judgments under different ids.
-        key = (str(s.get("court_name")).lower(), str(s.get("case_number")), s.get("judgment_date"),
+        key = (str(s.get("court_name")).lower(), jx.case_number(s), s.get("judgment_date"),
                str(pet).lower())
         if key in seen:
             continue
         seen.add(key)
-        snippet = _passage(h, "page_content", rx)
+        snippet = _passage(h, text_field, rx)
         title = f"{pet} v. {resp}"
         court = (s.get("court_name") or "").title()
-        link = None
         try:
-            if s.get("court_name") and s.get("source"):
-                link = generate_s3_link.invoke({"court": s["court_name"], "file_name": s["source"],
-                                                "title": title})
+            link = jx.pdf_url(s, title)
         except Exception:
             link = None
         out.append(SectionJudgment(title, court, s.get("judgment_date") or "", link, snippet))
@@ -205,12 +234,10 @@ def _sc_judgments(es, ask: SectionAsk, rx: re.Pattern, size: int) -> tuple[list[
     total = (probe["hits"].get("total") or {}).get("value", 0)
     if total > size:
         return [], False              # more than one page: not the complete set
-    res = es.search(index=ES_INDICES["sci_judgments"], request_timeout=PER_QUERY_TIMEOUT_S, body={
-        "size": size, "query": _query(ask, "full_text"),
-        "_source": ["parties", "judgment_date", "pdf_links"],
-        "highlight": _highlight(ask, "full_text")})
+    hits = _fetch_with_passages(es, ES_INDICES["sci_judgments"], ask, "full_text", size,
+                                ["parties", "judgment_date", "pdf_links"])
     out, seen = [], set()
-    for h in res["hits"]["hits"]:
+    for h in hits:
         s = h["_source"]
         key = ((s.get("parties") or "").lower(), s.get("judgment_date"))
         if key in seen:
@@ -238,7 +265,10 @@ def find_section_judgments(ask: SectionAsk) -> tuple[list[SectionJudgment], bool
     """
     from core.clients import get_es_client
     rx = _mention_re(ask.section)
-    size = min(MAX_PER_INDEX, max(20, ask.count or 0))
+    # Fetch the whole set up to the cap, not just the number asked for: with
+    # 89 judgments on a section, "50 cases" should list the 89 checked ones
+    # and let the writer pick 50, not fall back to an unchecked answer.
+    size = MAX_PER_INDEX
     out: list[SectionJudgment] = []
     complete = True
     try:

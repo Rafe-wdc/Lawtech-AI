@@ -10,17 +10,20 @@ query in elasticsearch_tools.py:
 - Smart multi-strategy search with automatic fallback
 
 Uses: Elasticsearch client from core.clients
-Index: ES_INDICES["judgments"] (= "judgements")
+Index: ES_INDICES["judgments"] (= "judgements_v2"; see core/judgment_index.py)
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Optional
 
 from core.clients import get_es_client
 from core.settings import ES_INDICES
 from core.logger import get_logger
+from core import judgment_index as jx
+from core.judgment_index import TEXT_FIELD, CASE_NO_FIELD
 
 log = get_logger("JudgmentSearch")
 
@@ -39,36 +42,50 @@ def _dedupe_key(src: dict, es_id: str) -> tuple:
     """Same judgment, same key. The index holds exact copies of some
     judgments under different ids (one Bombay HC order three times in one
     top-10, 2026-11-10), which crowd real results out of the slots."""
-    pet = src.get("petitioner_names") or []
-    pet = pet[0] if isinstance(pet, list) and pet else pet
-    parts = (str(src.get("court_name") or "").lower(), str(src.get("case_number") or ""),
+    pet = jx.names(src.get("petitioner_names"))
+    pet = pet[0] if pet else ""
+    parts = (str(src.get("court_name") or "").lower(), jx.case_number(src),
              str(src.get("judgment_date") or ""), str(pet or "").lower())
     return parts if any(parts) else ("id", es_id)
 
 
 def _format_hits(hits: list[dict]) -> list[dict]:
     """Convert raw ES hits to standardized format with all metadata, one per judgment."""
-    out, seen = [], set()
+    out, seen, seen_text = [], set(), set()
     for h in hits:
         key = _dedupe_key(h["_source"], h.get("_id", ""))
         if key in seen:
             continue
         seen.add(key)
+        src = h["_source"]
+        # One grouped judgment is stored once per petition, each copy under
+        # its own parties (12 entries, one text, for a 24-08-2026 Bombay
+        # order): it filled all ten result slots (2026-11-17).
+        body = " ".join(jx.text(src).split())
+        if len(body) > 200:
+            digest = hashlib.sha1(body.encode("utf-8", "ignore")).hexdigest()
+            if digest in seen_text:
+                continue
+            seen_text.add(digest)
         out.append({
-            "content": h["_source"]["page_content"],
-            "source": h["_source"].get("source", "unknown"),
-            "court_name": h["_source"].get("court_name", ""),
-            "petitioner_names": h["_source"].get("petitioner_names", []),
-            "respondent_names": h["_source"].get("respondent_names", []),
+            "content": jx.text(src),
+            "source": src.get("source", "unknown"),
+            "court_name": str(src.get("court_name") or "").lower(),
+            "petitioner_names": jx.names(src.get("petitioner_names")),
+            "respondent_names": jx.names(src.get("respondent_names")),
             "year": h["_source"].get("year"),
             "keywords": h["_source"].get("keywords", []),
             "acts_or_sections_invoked": h["_source"].get("acts_or_sections_invoked", []),
             "case_type": h["_source"].get("case_type", ""),
             "citation": h["_source"].get("citation", ""),
-            "case_number": h["_source"].get("case_number", ""),
-            "judge_names": h["_source"].get("judge_names", ""),
+            "case_number": jx.case_number(src),
+            "judge_names": jx.judges(src),
             "bench_judge_names": h["_source"].get("bench_judge_names", ""),
             "judgment_date": h["_source"].get("judgment_date"),
+            # v2: the PDF link travels with the entry (core.judgment_index.pdf_url)
+            "pdf_links": src.get("pdf_links") or [],
+            "s3_bucket": src.get("s3_bucket"),
+            "s3_key": src.get("s3_key"),
             "score": h["_score"],
         })
     return out
@@ -78,7 +95,9 @@ def _has_good_results(hits: list[dict], min_hits: int = _MIN_GOOD_HITS) -> bool:
     """Check if results are sufficient in quantity and quality."""
     if not hits or len(hits) < min_hits:
         return False
-    return (hits[0].get("score", 0) or 0) >= _MIN_SCORE
+    # The best score, not the first hit's: topic results are reordered so
+    # that substantive judgments come first (_substantive_first).
+    return max((h.get("score", 0) or 0) for h in hits) >= _MIN_SCORE
 
 
 # Supreme Court judgments do not belong to the High Court agent.
@@ -135,6 +154,43 @@ def _es_search(body: dict, timeout: int = 30) -> list[dict]:
 # Strategy 1: Party Name Search (exact → fuzzy → single)
 # ================================================================
 
+def _asked_filters(year: int | None, court: str | None) -> list[dict]:
+    """The court and year filters the question asked for, and only those:
+    both, either, or none, and the year exactly as asked. Every strategy
+    uses this, fallbacks included, so a request for "Bombay High Court,
+    2026" never quietly becomes another court or another year. A reporting
+    year that differs from the decision year is a citation question, not a
+    search one; it is not handled by widening the year here."""
+    filters: list[dict] = []
+    if year:
+        filters.append({"term": {"year": year}})
+    if court:
+        filters.append({"match_phrase": {"court_name": court.lower()}})
+    return filters
+
+
+_GENERIC_WORDS = frozenset("""
+judgment judgments judgement judgements order orders case cases ruling rulings decision decisions
+latest recent new show me give find list all any some delivered decided passed pronounced
+high court courts hc bench hon ble honble the of on in and for by to a an with from under
+regarding about related relating please year years
+""".split())
+
+
+def _subject_words(text: str, year: int | None, court: str | None) -> str:
+    """The question's subject: its words without the court and year it named
+    (those are filters) and without generic words ("judgments", "latest",
+    "high court"). Empty when the question has no subject of its own."""
+    t = (text or "").lower()
+    if year:
+        t = re.sub(rf"\b{year}\b", " ", t)
+    drop = set(_GENERIC_WORDS)
+    if court:
+        drop |= {w for w in re.findall(r"[a-z]+", court.lower())}
+    words = [w for w in re.findall(r"[\w./()-]+", t) if w.strip(".()/-") not in drop]
+    return " ".join(words)
+
+
 def search_by_party_names(
     petitioner: str,
     respondent: str,
@@ -152,11 +208,7 @@ def search_by_party_names(
         }}},
     ]
 
-    filters = []
-    if year:
-        filters.append({"term": {"year": year}})
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -197,11 +249,7 @@ def search_by_party_fuzzy(
     if not should:
         return []
 
-    filters = []
-    if year:
-        filters.append({"term": {"year": year}})
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -238,11 +286,7 @@ def search_by_single_party(
             }}},
         ]
 
-    filters = []
-    if year:
-        filters.append({"term": {"year": year}})
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -283,8 +327,8 @@ def search_by_citation(citation: str, size: int = 3) -> list[dict]:
     """Direct lookup by citation or case number (keyword fields)."""
     should = [
         {"term": {"citation": {"value": citation.lower(), "boost": 50}}},
-        {"term": {"case_number": {"value": citation.lower(), "boost": 50}}},
-        {"match_phrase": {"page_content": {"query": citation, "boost": 10}}},
+        {"term": {CASE_NO_FIELD: {"value": citation.lower(), "boost": 50}}},
+        {"match_phrase": {TEXT_FIELD: {"query": citation, "boost": 10}}},
     ]
 
     hits = _es_search({
@@ -360,25 +404,21 @@ def search_by_case_type(
     type_keywords = CASE_TYPE_KEYWORDS.get(case_type, [case_type])
 
     should = [
-        {"match": {"page_content": {"query": query, "boost": 5}}},
+        {"match": {TEXT_FIELD: {"query": query, "boost": 5}}},
         {"match": {"keywords": {"query": query, "boost": 10}}},
     ]
 
     # Boost case type keywords in content and keywords fields
     for kw in type_keywords[:3]:
         should.append({"match": {"keywords": {"query": kw, "boost": 8}}})
-        should.append({"match_phrase": {"page_content": {"query": kw, "boost": 3}}})
+        should.append({"match_phrase": {TEXT_FIELD: {"query": kw, "boost": 3}}})
 
     # Build case_type field filter
     case_type_should = [
         {"term": {"case_type": kw.lower()}} for kw in type_keywords
     ]
 
-    filters = []
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
-    if year:
-        filters.append({"term": {"year": year}})
+    filters = _asked_filters(year, court)
 
     # Primary: filter by case_type field
     hits = _es_search({
@@ -429,7 +469,7 @@ def search_by_judge(
 
     should = []
     if query:
-        should.append({"match": {"page_content": {"query": query, "boost": 3}}})
+        should.append({"match": {TEXT_FIELD: {"query": query, "boost": 3}}})
         should.append({"match": {"keywords": {"query": query, "boost": 5}}})
 
     filters = []
@@ -452,7 +492,7 @@ def search_by_date_range(
 ) -> list[dict]:
     """Search judgments within a date range (YYYY-MM-DD format)."""
     should = [
-        {"match": {"page_content": {"query": query, "boost": 5}}},
+        {"match": {TEXT_FIELD: {"query": query, "boost": 5}}},
         {"match": {"keywords": {"query": query, "boost": 10}}},
     ]
 
@@ -480,8 +520,11 @@ def search_by_legal_provision(
     query: str = "",
     court: str | None = None,
     size: int = 10,
+    year: int | None = None,
 ) -> list[dict]:
-    """Search judgments that invoke a specific legal provision."""
+    """Search judgments that invoke a specific legal provision (in the year
+    asked, like the other strategies: "2026 ... Section 138" used to return
+    any year's Section 138 judgments)."""
     must = [
         {"match": {"acts_or_sections_invoked": {
             "query": provision, "boost": 20, "minimum_should_match": "80%",
@@ -490,12 +533,10 @@ def search_by_legal_provision(
 
     should = []
     if query:
-        should.append({"match": {"page_content": {"query": query, "boost": 3}}})
+        should.append({"match": {TEXT_FIELD: {"query": query, "boost": 3}}})
         should.append({"match": {"keywords": {"query": query, "boost": 5}}})
 
-    filters = []
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
+    filters = _asked_filters(year, court)
 
     hits = _es_search({
         "size": size,
@@ -512,7 +553,7 @@ _SECTION_PHRASE_MAX = 40
 
 
 def search_by_section_phrase(
-    section: str, query: str = "", court: str | None = None,
+    section: str, query: str = "", court: str | None = None, year: int | None = None,
 ) -> tuple[list[dict], bool]:
     """Judgments whose text names `section` exactly ("154B-29", "13(1)(ia)").
 
@@ -521,13 +562,11 @@ def search_by_section_phrase(
     all of them. The query words only rank; the phrase decides membership.
     """
     from core.section_cases import phrase_variants
-    phrase = {"bool": {"should": [{"match_phrase": {"page_content": p}}
+    phrase = {"bool": {"should": [{"match_phrase": {TEXT_FIELD: p}}
                                   for p in phrase_variants(section)],
                        "minimum_should_match": 1}}
-    filters = [phrase]
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
-    should = [{"match": {"page_content": {"query": query, "boost": 3}}}] if query else []
+    filters = [phrase] + _asked_filters(year, court)
+    should = [{"match": {TEXT_FIELD: {"query": query, "boost": 3}}}] if query else []
     es = get_es_client()
     # Count first (cheap, no documents); fetch only when the set is small.
     # Fetching 40 full judgments for a common section and then discarding
@@ -542,6 +581,29 @@ def search_by_section_phrase(
         "size": _SECTION_PHRASE_MAX,
         "query": {"bool": {"filter": filters, "should": should}}})
     return _format_hits(resp["hits"]["hits"]), True
+
+
+# Topic searches (case type, provision, keywords) fetch a wider pool and put
+# substantive judgments before routine procedural orders, query-aware
+# (core/order_kind.py). Case-name and citation lookups are left as they are:
+# there the user wants that order, whatever it is.
+_TOPIC_POOL = 30
+
+
+def _topic_pool(size: int) -> int:
+    return max(size * 3, _TOPIC_POOL)
+
+
+def _substantive_first(query: str, hits: list[dict], size: int | None = None) -> list[dict]:
+    from core.order_kind import prefer_substantive
+    ordered = prefer_substantive(query, hits)
+    kept = ordered if size is None else ordered[:size]
+    if hits:
+        log.info("topic results ordered: substantive judgments first",
+                 pool=len(hits), kept=len(kept),
+                 procedural_in_pool=sum(1 for h in hits if h.get("order_kind") == "procedural"),
+                 procedural_kept=sum(1 for h in kept if h.get("order_kind") == "procedural"))
+    return kept
 
 
 def smart_judgment_search(
@@ -604,21 +666,7 @@ def smart_judgment_search(
                 "strategies_tried": strategies_tried,
             }
 
-        # 2b: Without year filter
-        if year and len(best_results) < _MIN_GOOD_HITS:
-            strategies_tried.append("party_no_year")
-            results = search_by_party_names(
-                petitioner, respondent, None, court, size,
-            )
-            if _update_best(results):
-                log.info("party match (no year)", hits=len(best_results))
-                return {
-                    "hits": best_results,
-                    "strategy_used": "party_no_year",
-                    "strategies_tried": strategies_tried,
-                }
-
-        # 2c: Swapped names (petitioner/respondent reversed)
+        # 2b: Swapped names (petitioner/respondent reversed)
         strategies_tried.append("party_swapped")
         results = search_by_party_names(
             respondent, petitioner, year, court, size,
@@ -631,7 +679,7 @@ def smart_judgment_search(
                 "strategies_tried": strategies_tried,
             }
 
-        # 2d: Fuzzy party match
+        # 2c: Fuzzy party match
         strategies_tried.append("party_fuzzy")
         results = search_by_party_fuzzy(
             petitioner, respondent, year, court, size,
@@ -668,11 +716,12 @@ def smart_judgment_search(
     if _sec:
         strategies_tried.append("section_phrase")
         try:
-            results, complete = search_by_section_phrase(_sec.section, lexical_query or query, court)
+            results, complete = search_by_section_phrase(_sec.section, lexical_query or query, court, year)
         except Exception as e:
             log.warning("section phrase search failed", section=_sec.section, error=str(e)[:120])
             results, complete = [], False
         if results and complete:
+            results = _substantive_first(query, results)      # the whole set, reordered
             log.info("section phrase match", section=_sec.section, hits=len(results))
             return {
                 "hits": results,
@@ -683,7 +732,8 @@ def smart_judgment_search(
     case_type = detect_case_type(query)
     if case_type:
         strategies_tried.append(f"case_type:{case_type}")
-        results = search_by_case_type(query, case_type, court, year, size)
+        results = _substantive_first(
+            query, search_by_case_type(query, case_type, court, year, _topic_pool(size)), size)
         if _update_best(results):
             log.info("case type match", case_type=case_type, hits=len(best_results))
             return {
@@ -697,7 +747,8 @@ def smart_judgment_search(
     if acts_or_sections:
         strategies_tried.append("legal_provision")
         for provision in acts_or_sections:
-            results = search_by_legal_provision(provision, query, court, size)
+            results = _substantive_first(
+                query, search_by_legal_provision(provision, query, court, _topic_pool(size), year), size)
             _update_best(results)
         if _has_good_results(best_results, min_hits):
             log.info("provision match", hits=len(best_results))
@@ -711,7 +762,15 @@ def smart_judgment_search(
     strategies_tried.append("multi_tier")
     should_clauses = []
     topics = topics or []
-    lq = lexical_query or query
+    # The court and year are filters, not words to match: left in, "Bombay
+    # High Court 2026 judgments on trademark ..." matched every long 2026
+    # Bombay order that repeats those words, and the 28 trademark judgments
+    # of 2026 never surfaced (2026-11-17).
+    # The regex reading's lexical query can hold only the year ("2026"); then
+    # the subject comes from the question itself.
+    lq = _subject_words(lexical_query, year, court) if lexical_query else ""
+    if not lq:
+        lq = _subject_words(query, year, court)
 
     for topic in topics:
         should_clauses.append({"match": {"keywords": {
@@ -722,28 +781,34 @@ def smart_judgment_search(
             "query": section, "boost": 15, "minimum_should_match": "90%",
         }}})
     if lq:
-        should_clauses.append({"match": {"page_content": {
+        should_clauses.append({"match": {TEXT_FIELD: {
             "query": lq, "boost": 8, "minimum_should_match": "80%",
         }}})
-    if not should_clauses:
-        should_clauses.append({"match": {"page_content": {
-            "query": query, "boost": 3,
-        }}})
-
-    filters = []
-    if year:
-        filters.append({"term": {"year": year}})
-    if court:
-        filters.append({"match_phrase": {"court_name": court.lower()}})
+    filters = _asked_filters(year, court)
+    if should_clauses:
+        mt_query = {"bool": {"should": should_clauses, "filter": filters, "minimum_should_match": 1}}
+    elif filters:
+        # Nothing to match but a court and/or year ("Bombay High Court
+        # judgments delivered in 2026"): everything in them; decisions are
+        # put first below.
+        mt_query = {"bool": {"must": [{"match_all": {}}], "filter": filters}}
+    else:
+        mt_query = {"bool": {"should": [{"match": {TEXT_FIELD: {"query": query, "boost": 3}}}],
+                             "minimum_should_match": 1}}
 
     mt_hits = _es_search({
-        "size": size,
-        "query": {"bool": {
-            "should": should_clauses, "filter": filters,
-            "minimum_should_match": 1,
-        }},
+        "size": _topic_pool(size),
+        "query": mt_query,
     }, timeout=50)
-    if _update_best(_format_hits(mt_hits)):
+    if not should_clauses and filters and len(mt_hits) >= min_hits:
+        # A question with no subject of its own: everything in the court and
+        # year asked, decisions first, is the answer (the scores are flat,
+        # so the score test below does not apply).
+        best_results = _substantive_first(query, _format_hits(mt_hits), size)
+        log.info("court/year listing", hits=len(best_results))
+        return {"hits": best_results, "strategy_used": "court_year_listing",
+                "strategies_tried": strategies_tried}
+    if _update_best(_substantive_first(query, _format_hits(mt_hits), size)):
         log.info("multi-tier match", hits=len(best_results))
         return {
             "hits": best_results,
@@ -751,19 +816,28 @@ def smart_judgment_search(
             "strategies_tried": strategies_tried,
         }
 
-    # --- Strategy 7: Relaxed full-text fallback (no year/court filter) ---
+    # --- Strategy 7: Relaxed full-text fallback ---
+    # Loose on the words, never on what was asked: the court and year the
+    # question named stay (both, either, or none). It used to drop both, so
+    # "Bombay High Court 2026" questions got 2008-2024 judgments from five
+    # courts (2026-11-13). Nothing found here means nothing in our database
+    # fits, and the agent says so or searches the web.
     strategies_tried.append("full_text_relaxed")
+    relaxed_filters = _asked_filters(year, court)
+    relaxed_words = _subject_words(query, year, court) or query
+    log.info("last-resort search", kept_year=year, kept_court=court, words=relaxed_words[:80])
     relaxed_hits = _es_search({
-        "size": size,
+        "size": _topic_pool(size),
         "query": {"bool": {
             "should": [
-                {"match": {"page_content": {"query": query, "boost": 5}}},
-                {"match": {"keywords": {"query": query, "boost": 10}}},
+                {"match": {TEXT_FIELD: {"query": relaxed_words, "boost": 5}}},
+                {"match": {"keywords": {"query": relaxed_words, "boost": 10}}},
             ],
             "minimum_should_match": 1,
+            "filter": relaxed_filters,
         }},
     }, timeout=50)
-    _update_best(_format_hits(relaxed_hits))
+    _update_best(_substantive_first(query, _format_hits(relaxed_hits), size))
 
     strategy_used = strategies_tried[-1] if best_results else "none"
     log.info(

@@ -33,6 +33,13 @@ from core.section_cases import (
 # Reading the request
 # ---------------------------------------------------------------------------
 
+from core import judgment_index as jx  # noqa: E402
+from core.settings import ES_INDICES  # noqa: E402
+
+# The High Court index the code reads (judgements_v2 unless JUDGMENTS_INDEX says otherwise).
+_HC_INDEX = ES_INDICES["judgments"]
+
+
 @pytest.mark.parametrize("query, section, act, count", [
     ("Provide me 50 Case laws or Citation u/s 154B-29 of Maharashtra Copreative Socitey act 1960",
      "154B-29", "Maharashtra Copreative Socitey act 1960", 50),
@@ -105,7 +112,7 @@ def _hc(pet, resp, date, case_no, passage):
             "_source": {"petitioner_names": [pet], "respondent_names": [resp],
                         "court_name": "bombay high court", "judgment_date": date,
                         "source": f"bombay/{case_no}.pdf", "case_number": case_no},
-            "highlight": {"page_content": [passage]}}
+            "highlight": {jx.TEXT_FIELD: [passage]}}
 
 
 _HC_DOCS = [
@@ -135,8 +142,8 @@ def _use(monkeypatch, fake):
 
 
 def test_complete_set_is_returned_once_per_judgment(monkeypatch, no_links):
-    fake = _FakeES(totals={"judgements": 3, "supreme_court_judgement": 0},
-                   docs={"judgements": _HC_DOCS})
+    fake = _FakeES(totals={_HC_INDEX: 3, "supreme_court_judgement": 0},
+                   docs={_HC_INDEX: _HC_DOCS})
     _use(monkeypatch, fake)
     found, complete = find_section_judgments(SectionAsk("154B-29", "MCS Act", 50))
     assert complete is True
@@ -146,7 +153,7 @@ def test_complete_set_is_returned_once_per_judgment(monkeypatch, no_links):
 
 
 def test_a_common_section_is_not_the_complete_set(monkeypatch, no_links):
-    fake = _FakeES(totals={"judgements": 5000, "supreme_court_judgement": 900}, docs={})
+    fake = _FakeES(totals={_HC_INDEX: 5000, "supreme_court_judgement": 900}, docs={})
     _use(monkeypatch, fake)
     found, complete = find_section_judgments(SectionAsk("498A", "", None))
     assert complete is False and found == []
@@ -154,7 +161,7 @@ def test_a_common_section_is_not_the_complete_set(monkeypatch, no_links):
 
 
 def test_a_failed_search_makes_the_list_incomplete(monkeypatch, no_links):
-    fake = _FakeES(totals={"judgements": 3}, docs={"judgements": _HC_DOCS},
+    fake = _FakeES(totals={_HC_INDEX: 3}, docs={_HC_INDEX: _HC_DOCS},
                    fail={"supreme_court_judgement"})
     _use(monkeypatch, fake)
     found, complete = find_section_judgments(SectionAsk("154B-29", "", None))

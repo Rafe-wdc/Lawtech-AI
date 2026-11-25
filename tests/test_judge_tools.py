@@ -44,7 +44,9 @@ REG = parse_registry({"judges": [
 ]})
 NATH = REG.get("sc-vikram-nath")
 DEVAN = REG.get("hc-devan-ramachandran")
-SC, HC = "supreme_court_judgement", "judgements"
+# The High Court index in use and its field names (core/judgment_index.py).
+from core import judgment_index as _jx  # noqa: E402
+SC, HC = "supreme_court_judgement", _jx.INDEX
 
 
 def _sc(i, text, judgment_by="HON'BLE MR. JUSTICE VIKRAM NATH",
@@ -57,9 +59,9 @@ def _sc(i, text, judgment_by="HON'BLE MR. JUSTICE VIKRAM NATH",
 
 def _hc(i, bench=("DEVAN RAMACHANDRAN",), text="Disposed of.", case="WP 1/2018", date="2018-10-03", pet="K.SASIKALA"):
     return {"_id": f"h{i:04d}", "_source": {
-        "petitioner_names": [pet], "respondent_names": ["STATE OF KERALA"], "case_number": case,
+        "petitioner_names": [pet], "respondent_names": ["STATE OF KERALA"], _jx.CASE_NO_FIELD: case,
         "judgment_date": date, "bench_judge_names": list(bench), "court_name": "kerala high court",
-        "source": f"kerala/{i}.pdf", "page_content": text}}
+        "source": f"kerala/{i}.pdf", _jx.TEXT_FIELD: text}}
 
 
 WROTE = "J U D G M E N T \nVIKRAM NATH, J.\n1. Leave granted."

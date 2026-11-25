@@ -229,9 +229,10 @@ def test_single_word_phrase_gets_no_wildcards():
 def test_hc_bench_filter_uses_exact_values_and_court():
     src = JudgeSource(index_key="judgments", bench_values=("S. MURALIDHAR", "Dr. S. Muralidhar"),
                       court_names=("delhi high court", "odisa high court"))
+    # judgements_v2: court_name is itself a keyword, and Odisha is spelled correctly
     assert bench_filter(src) == {"bool": {"filter": [
         {"terms": {"bench_judge_names.keyword": ["S. MURALIDHAR", "Dr. S. Muralidhar"]}},
-        {"terms": {"court_name.keyword": ["delhi high court", "odisa high court"]}},
+        {"terms": {"court_name": ["delhi high court", "odisha high court"]}},
     ]}}
 
 

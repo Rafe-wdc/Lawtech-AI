@@ -157,7 +157,7 @@ async def start_run(
     staged = None
     temp_paths = list(uploads[2]) if uploads else []
     try:
-        if uploads is not None:
+        if uploads is not None and uploads[0]:
             file_tuples, page_counts, _ = uploads
             files, counts, staged = await asyncio.to_thread(
                 _stage_uploads, run_id, file_tuples, page_counts, temp_paths)

@@ -729,7 +729,11 @@ async def search(data: SearchRequest, request: Request):
                                payload_user_id=data.user_id)
     data.user_id = _ident.user_id or None
     # One answer at a time per thread: a background run in progress owns it.
-    if _run_api.background_runs_enabled() and data.globalThreadId:
+    # Only while a runner is serving: with none alive, a stuck run would
+    # otherwise lock the thread until the runner returns (its sweeper is
+    # what clears stuck runs).
+    if (_run_api.background_runs_enabled() and data.globalThreadId
+            and await _run_api.runner_available()):
         _busy = await _run_api.conflict_response(thread_id, endpoint="/pyapi/search")
         if _busy is not None:
             return _busy
@@ -1725,7 +1729,12 @@ async def chat_with_files(
     _ident = _request_identity(request, integration_token=integration_token,
                                payload_user_id=user_id)
     user_id = _ident.user_id or None
-    if _run_api.background_runs_enabled() and globalThreadId:
+    # Decided once, before any upload is read. With no runner alive the
+    # request is answered inline and the busy check is skipped (see
+    # /pyapi/search).
+    _background = (_run_api.background_runs_enabled()
+                   and await _run_api.runner_available_counted())
+    if _background and globalThreadId:
         _busy = await _run_api.conflict_response(thread_id, endpoint="/pyapi/chat")
         if _busy is not None:
             return _busy
@@ -1994,7 +2003,7 @@ async def chat_with_files(
 
     # Background run: the runner does the work below; this request only
     # streams it, so closing the app no longer stops the answer.
-    if _run_api.background_runs_enabled() and await _run_api.runner_available_counted():
+    if _background:
         return await _run_api.start_run(
             endpoint="/pyapi/chat",
             thread_id=thread_id,

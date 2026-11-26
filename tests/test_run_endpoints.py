@@ -504,3 +504,29 @@ class TestMetrics:
         assert "lawtech_background_runners_alive 1" in text
         assert "lawtech_background_runs_queued 0" in text
         assert "lawtech_background_run_event_delay_seconds_count" in text
+
+
+class TestRunnerDownWithStuckRun:
+    def test_a_stuck_run_does_not_lock_the_thread_while_no_runner_serves(self, store, server):
+        """With no runner alive nothing clears a stuck run (the sweeper lives
+        in the runner), so the busy check must not apply: answer inline."""
+        store.create_run(thread_id="T-stuck", endpoint="/pyapi/search/stream",
+                         request={"query": "never claimed"})
+        evs = stream(server, {"Promptquery": "still answered", "globalThreadId": "T-stuck"})
+        assert evs[-1]["type"] == "done" and CALLS[-1]["run_id"] is None
+        with httpx.stream("POST", server.url + "/pyapi/chat",
+                          data={"query": "chat too", "globalThreadId": "T-stuck"}, timeout=30) as r:
+            assert r.status_code == 200
+            chat_evs = events_of(r)
+        assert chat_evs[-1]["type"] == "done" and CALLS[-1]["endpoint"] == "/pyapi/chat"
+        assert not os.listdir(S.RUN_STAGING_ROOT) if os.path.isdir(S.RUN_STAGING_ROOT) else True
+
+    def test_chat_without_files_creates_no_staging_folder(self, store, server, runner):
+        evs = stream(server, {"Promptquery": "x"})          # warm the runner check
+        with httpx.stream("POST", server.url + "/pyapi/chat", data={"query": "no files"},
+                          timeout=30) as r:
+            assert r.status_code == 200
+            chat_evs = events_of(r)
+        run_id = chat_evs[1]["data"]
+        assert chat_evs[-1]["type"] == "done"
+        assert not os.path.exists(os.path.join(S.RUN_STAGING_ROOT, run_id))

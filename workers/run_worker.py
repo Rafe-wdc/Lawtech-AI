@@ -250,6 +250,8 @@ class RunWorker:
         on_run_finished: Callable[[Claim], Awaitable[None] | None] | None = None,
         exit_when_idle: bool = False,
         worker_id: str | None = None,
+        staging_root: str | None = None,
+        staging_max_age_s: float = 3600.0,
     ):
         self.store = store
         self.executor = executor
@@ -266,6 +268,8 @@ class RunWorker:
         self.outbox_dispatcher = outbox_dispatcher
         self.on_run_finished = on_run_finished
         self.exit_when_idle = exit_when_idle
+        self.staging_root = staging_root
+        self.staging_max_age_s = staging_max_age_s
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
         self._slots = asyncio.Semaphore(self.concurrency)
         self._runs: dict[str, _RunState] = {}
@@ -385,6 +389,35 @@ class RunWorker:
 
     async def _sweep_once(self) -> None:
         await self.store.aio.sweep(self.turn_lookup)
+        if self.staging_root:
+            await asyncio.to_thread(self._clean_staging)
+
+    def _clean_staging(self) -> int:
+        """Delete staged uploads of runs that will never read them (finished,
+        cancelled while queued, expired, or gone) once they are an hour old.
+        A run that executes deletes its own folder; this catches the rest."""
+        import shutil
+        try:
+            names = os.listdir(self.staging_root)
+        except FileNotFoundError:
+            return 0
+        removed = 0
+        cutoff = time.time() - self.staging_max_age_s
+        for name in names:
+            path = os.path.join(self.staging_root, name)
+            try:
+                if not os.path.isdir(path) or os.path.getmtime(path) > cutoff:
+                    continue
+                run = self.store.get_run(name)
+                if run is not None and run.is_active:
+                    continue
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+            except Exception as e:
+                log.warning("Staging cleanup skipped a folder", folder=name, error=str(e)[:160])
+        if removed:
+            log.info("Staging cleanup", removed=removed)
+        return removed
 
     async def _liveness(self) -> None:
         await self.store.aio.worker_heartbeat(self.worker_id, concurrency=self.concurrency,
@@ -557,6 +590,7 @@ async def _amain() -> None:
         outbox_dispatcher=dispatcher.dispatch_once,
         on_run_finished=executor.cleanup,
         exit_when_idle=not S.BACKGROUND_RUNS,
+        staging_root=S.RUN_STAGING_ROOT,
     )
     _install_signals(asyncio.get_running_loop(), worker)
 

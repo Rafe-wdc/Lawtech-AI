@@ -90,6 +90,9 @@ _NON_LLM_ENDPOINTS = {
     "get_run_status",
     "stream_run",
     "thread_active_run",
+    "cancel_run",
+    "health_runs",
+    "admin_outbox_retry",
 }
 
 

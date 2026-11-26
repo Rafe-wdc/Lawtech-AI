@@ -183,6 +183,7 @@ class OutboxItem:
     kind: str
     payload: dict
     attempts: int
+    created_at: datetime | None = None
 
 
 @dataclass
@@ -943,13 +944,18 @@ class RunStore:
                 cx.execute("UPDATE run_outbox SET next_attempt_at = ? WHERE outbox_id = ?",
                            (self._ts(now + timedelta(seconds=hold_s)), r["outbox_id"]))
         return [OutboxItem(outbox_id=int(r["outbox_id"]), run_id=r["run_id"], kind=r["kind"],
-                           payload=_loads(r["payload_json"], {}), attempts=int(r["attempts"]))
+                           payload=_loads(r["payload_json"], {}), attempts=int(r["attempts"]),
+                           created_at=_parse_ts(r["created_at"]))
                 for r in rows]
 
     def mark_outbox_sent(self, outbox_id: int) -> None:
         with self._tx() as cx:
             cx.execute("UPDATE run_outbox SET status = 'sent', sent_at = ?, attempts = attempts + 1, "
                        "last_error = '' WHERE outbox_id = ?", (self._ts(self._now()), outbox_id))
+
+    def now(self) -> datetime:
+        """The store's clock (injected in tests)."""
+        return self._now()
 
     def mark_outbox_retry(self, outbox_id: int, error: str, next_attempt_at: datetime) -> None:
         with self._tx() as cx:

@@ -24,6 +24,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.logger import get_logger
+from core.metrics import METRICS
 from core.run_store import ActiveRunExists, RunRow, TERMINAL_STATUSES, get_run_store
 from core.user_auth import Identity, may_access_run
 
@@ -75,12 +76,19 @@ async def runner_available() -> bool:
     return ok
 
 
+async def runner_available_counted() -> bool:
+    ok = await runner_available()
+    if not ok:
+        METRICS["background_runs_inline_fallback_total"].inc()
+    return ok
+
+
 def _busy_payload(run: RunRow) -> dict:
     return {"detail": BUSY_DETAIL, "active_run_id": run.run_id, "status": run.status,
             "last_seq": run.last_seq, "thread_id": run.thread_id}
 
 
-async def conflict_response(thread_id: str) -> JSONResponse | None:
+async def conflict_response(thread_id: str, endpoint: str = "") -> JSONResponse | None:
     """409 when the thread already has a queued or running run (the app
     attaches to `active_run_id`), else None."""
     try:
@@ -91,6 +99,7 @@ async def conflict_response(thread_id: str) -> JSONResponse | None:
         return None
     if run is None:
         return None
+    METRICS["background_runs_busy_total"].labels(endpoint=endpoint).inc()
     log.info("Thread busy: request answered 409", thread_id=thread_id[:12],
              active_run=run.run_id[:12], status=run.status)
     return JSONResponse(status_code=409, content=_busy_payload(run))
@@ -162,6 +171,7 @@ async def start_run(
     except ActiveRunExists as e:
         if staged:
             shutil.rmtree(staged, ignore_errors=True)
+        METRICS["background_runs_busy_total"].labels(endpoint=endpoint).inc()
         log.info("Thread busy: request answered 409", thread_id=thread_id[:12],
                  active_run=e.run.run_id[:12])
         return JSONResponse(status_code=409, content=_busy_payload(e.run))
@@ -170,6 +180,7 @@ async def start_run(
             shutil.rmtree(staged, ignore_errors=True)
         _remove_paths(temp_paths)
         raise
+    METRICS["background_runs_started_total"].labels(endpoint=endpoint).inc()
     log.info("Background run queued", run_id=run_id[:12], thread_id=thread_id[:12],
              endpoint=endpoint, user=(ident.user_id or "")[:12], identity=ident.source,
              files=len(request.get("files") or []))
@@ -201,6 +212,8 @@ async def tail_run(run: RunRow, *, after: int = 0,
     sub = bus.subscribe(run_id)
     last_touch = -1e9
     last_out = time.monotonic()
+    tail_since = store.now()
+    delay_hist = METRICS["background_run_event_delay_seconds"]
     try:
         while True:
             now = time.monotonic()
@@ -212,6 +225,9 @@ async def tail_run(run: RunRow, *, after: int = 0,
                 yield e.sse()
                 last = e.seq
                 last_out = time.monotonic()
+                if e.created_at is not None and e.created_at >= tail_since:
+                    # live delivery only (replayed history would skew it)
+                    delay_hist.observe(max(0.0, (store.now() - e.created_at).total_seconds()))
                 if e.type == "done":
                     return
             if events:
@@ -250,6 +266,63 @@ async def thread_run(thread_id: str, ident: Identity, *, admin: bool = False) ->
     if run is None or not may_access_run(run.user_id, ident, admin=admin):
         raise HTTPException(status_code=404, detail="No run for this thread")
     return run
+
+
+async def cancel_run(run_id: str, ident: Identity, *, admin: bool = False) -> JSONResponse:
+    """Stop button. The run turns terminal at once, so the thread is free for
+    the next question immediately; the runner's next write hits the fence
+    and its pipeline is cancelled. 409 when the run had already finished."""
+    run = await owned_run(run_id, ident, admin=admin)
+    cancelled = await _store().aio.cancel(run.run_id)
+    if cancelled is None:
+        cur = await _store().aio.get_run(run.run_id)
+        return JSONResponse(status_code=409, content={
+            "detail": "This answer has already finished",
+            "run_id": run.run_id, "status": cur.status if cur else run.status})
+    return JSONResponse(content={"run_id": cancelled.run_id, "status": cancelled.status,
+                                 "thread_id": cancelled.thread_id})
+
+
+async def health() -> dict:
+    """Runner liveness and queue sizes, for /pyapi/health/runs."""
+    from core import settings as S
+    from core.run_bus import get_bus
+    store = _store()
+    try:
+        counts = await store.aio.counts()
+        workers = await store.aio.live_workers()
+        status = "ok" if workers or not S.BACKGROUND_RUNS else "no_runner"
+    except Exception as e:
+        return {"status": "error", "enabled": bool(S.BACKGROUND_RUNS), "detail": str(e)[:120]}
+    return {
+        "status": status,
+        "enabled": bool(S.BACKGROUND_RUNS),
+        "backend": "postgresql" if store.pg else "sqlite",
+        "runners": len(workers),
+        "capacity": sum(w["concurrency"] for w in workers),
+        "running_here": sum(w["running"] for w in workers),
+        "listener_connected": get_bus(store).connected,
+        **counts,
+    }
+
+
+async def prometheus_lines() -> str:
+    """Queue gauges in Prometheus text format, read from the run store at
+    scrape time (no single process holds these numbers)."""
+    try:
+        c = await _store().aio.counts()
+        runners = len(await _store().aio.live_workers())
+    except Exception as e:
+        log.warning("Run gauges unavailable", error=str(e)[:120])
+        return ""
+    rows = [
+        ("lawtech_background_runs_queued", "Background runs waiting for a runner", c["queued"]),
+        ("lawtech_background_runs_running", "Background runs being generated", c["running"]),
+        ("lawtech_background_runs_outbox_pending", "Run-complete messages not yet delivered to Node", c["outbox_pending"]),
+        ("lawtech_background_runs_outbox_dead", "Run-complete messages Node never accepted", c["outbox_dead"]),
+        ("lawtech_background_runners_alive", "Runner processes seen recently", runners),
+    ]
+    return "".join(f"# HELP {n} {h}\n# TYPE {n} gauge\n{n} {v}\n" for n, h, v in rows)
 
 
 async def shutdown() -> None:

@@ -386,3 +386,26 @@ class TestLatency:
               f"persist_p95_ms={p95:.1f} elapsed_s={elapsed:.2f}")
         assert sink.tokens_in == 400 and sink.token_rows < 100
         assert p95 < 150
+
+
+class TestStagingCleanup:
+    def test_removes_only_old_folders_of_runs_that_will_not_read_them(self, store, tmp_path):
+        import os
+        root = tmp_path / "staging"
+        root.mkdir()
+        active = queue(store, "ta")                         # still queued: keep
+        gone = queue(store, "tb")
+        store.cancel(gone.run_id)                            # cancelled while queued: delete
+        for name in (active.run_id, gone.run_id, "no-such-run", "fresh-folder"):
+            (root / name).mkdir()
+            (root / name / "00.pdf").write_bytes(b"%PDF")
+        old = time.time() - 7200
+        for name in (active.run_id, gone.run_id, "no-such-run"):
+            os.utime(root / name, (old, old))
+        w = worker(store, Script([]), staging_root=str(root))
+        assert w._clean_staging() == 2
+        assert sorted(os.listdir(root)) == sorted([active.run_id, "fresh-folder"])
+
+    def test_missing_root_is_fine(self, store, tmp_path):
+        w = worker(store, Script([]), staging_root=str(tmp_path / "nope"))
+        assert w._clean_staging() == 0

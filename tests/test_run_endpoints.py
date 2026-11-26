@@ -418,3 +418,89 @@ class TestOwnership:
                        json={"Promptquery": "anon", "user_id": "u"}, timeout=10)
         assert r.status_code == 401
         assert CALLS == []
+
+
+class TestCancelAndHealth:
+    def test_stop_ends_the_open_stream_and_frees_the_thread(self, store, server, runner):
+        GATES["stopme"] = threading.Event()
+        got: list[dict] = []
+        opened = threading.Event()
+
+        def watch():
+            with httpx.stream("POST", server.url + "/pyapi/search/stream",
+                              json={"Promptquery": "stopme", "globalThreadId": "T-stop"},
+                              timeout=30) as r:
+                for line in r.iter_lines():
+                    if line.startswith("data: "):
+                        got.append(json.loads(line[6:]))
+                        if any(e["type"] == "token" for e in got):
+                            opened.set()
+
+        t = threading.Thread(target=watch, daemon=True)
+        t.start()
+        assert opened.wait(10)
+        run_id = got[1]["data"]
+        t0 = time.time()
+        r = httpx.post(f"{server.url}/pyapi/runs/{run_id}/cancel", timeout=10)
+        assert r.status_code == 200 and r.json()["status"] == "cancelled"
+        t.join(10)
+        assert not t.is_alive(), "open stream did not end after Stop"
+        assert time.time() - t0 < 3
+        assert got[-1]["type"] == "done" and got[-1].get("cancelled") is True
+        # the thread is free at once: no 409 for the next question
+        nxt = stream(server, {"Promptquery": "next one", "globalThreadId": "T-stop"})
+        assert nxt[-1]["type"] == "done"
+        run = store.get_run(run_id)
+        assert run.status == "cancelled" and run.response_text == "w0 w1 w2 "
+        GATES["stopme"].set()                    # release the parked fake-pipeline thread
+        time.sleep(0.3)
+        assert store.get_run(run_id).status == "cancelled"   # the runner never overwrote it
+
+    def test_stop_after_finish_is_409(self, store, server, runner):
+        evs = stream(server, {"Promptquery": "done already"})
+        run_id = evs[1]["data"]
+        wait_status(store, run_id)
+        r = httpx.post(f"{server.url}/pyapi/runs/{run_id}/cancel", timeout=10)
+        assert r.status_code == 409 and r.json()["status"] == "done"
+
+    def test_cannot_stop_someone_elses_run(self, store, server, runner, monkeypatch):
+        monkeypatch.setattr(S, "USER_AUTH_MODE", "optional")
+        GATES["alice-run"] = threading.Event()
+        a = {"Authorization": f"Bearer {token('alice')}"}
+        first = stream(server, {"Promptquery": "alice-run"}, headers=a,
+                       stop_after=lambda es: any(e["type"] == "token" for e in es))
+        run_id = first[1]["data"]
+        r = httpx.post(f"{server.url}/pyapi/runs/{run_id}/cancel",
+                       headers={"Authorization": f"Bearer {token('bob')}"}, timeout=10)
+        assert r.status_code == 404 and store.get_run(run_id).status == "running"
+        assert httpx.post(f"{server.url}/pyapi/runs/{run_id}/cancel", headers=a,
+                          timeout=10).status_code == 200
+        GATES["alice-run"].set()
+
+    def test_health_shows_runner_and_queue(self, store, server, runner):
+        h = httpx.get(server.url + "/pyapi/health/runs", timeout=10).json()
+        assert h["status"] == "ok" and h["enabled"] is True and h["runners"] == 1
+        assert h["capacity"] == 2 and h["queued"] == 0 and h["outbox_dead"] == 0
+
+    def test_health_reports_missing_runner(self, store, server):
+        h = httpx.get(server.url + "/pyapi/health/runs", timeout=10).json()
+        assert h["status"] == "no_runner" and h["runners"] == 0
+
+
+class TestMetrics:
+    def test_counters_and_queue_gauges(self, store, server, runner):
+        from core.auth import require_admin_key
+        from core.metrics import METRICS
+        started = METRICS["background_runs_started_total"].labels(endpoint="/pyapi/search/stream")
+        before = started._value.get()
+        evs = stream(server, {"Promptquery": "count me"})
+        assert evs[-1]["type"] == "done"
+        assert started._value.get() == before + 1
+        gw.app.dependency_overrides[require_admin_key] = lambda: "admin"
+        try:
+            text = httpx.get(server.url + "/pyapi/metrics", timeout=10).text
+        finally:
+            gw.app.dependency_overrides.pop(require_admin_key, None)
+        assert "lawtech_background_runners_alive 1" in text
+        assert "lawtech_background_runs_queued 0" in text
+        assert "lawtech_background_run_event_delay_seconds_count" in text

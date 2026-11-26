@@ -133,6 +133,27 @@ METRICS: dict = {
 
     # --- Per-worker in-flight gate (Phase 3 backpressure) ---
 
+    # --- Background runs (core/run_api.py) ---
+    "background_runs_started_total": Counter(
+        "lawtech_background_runs_started_total",
+        "Requests queued as background runs",
+        ["endpoint"],
+    ),
+    "background_runs_busy_total": Counter(
+        "lawtech_background_runs_busy_total",
+        "Requests answered 409 because the thread already had a run in progress",
+        ["endpoint"],
+    ),
+    "background_runs_inline_fallback_total": Counter(
+        "lawtech_background_runs_inline_fallback_total",
+        "Requests answered inline because no runner was alive (BACKGROUND_RUNS on)",
+    ),
+    "background_run_event_delay_seconds": Histogram(
+        "lawtech_background_run_event_delay_seconds",
+        "Time from an event being stored by the runner to its delivery by a live tail",
+        buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+    ),
+
     "inflight_gate_rejections_total": Counter(
         "lawtech_inflight_gate_rejections_total",
         "Requests rejected because the per-worker in-flight cap was hit",

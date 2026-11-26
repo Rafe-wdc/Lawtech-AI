@@ -164,7 +164,9 @@ class RunEvent:
         """The stored event as one SSE message, carrying its seq."""
         body = dict(self.payload)
         body["seq"] = self.seq
-        return f"data: {json.dumps(body, ensure_ascii=False)}\n\n"
+        # json.dumps defaults, as core/chat_runner._sse: replayed events are
+        # byte-compatible with live ones (non-ASCII escaped)
+        return f"data: {json.dumps(body)}\n\n"
 
 
 @dataclass

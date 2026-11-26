@@ -572,7 +572,11 @@ async def _amain() -> None:
 
 
 def main() -> None:
-    asyncio.run(_amain())
+    import sys
+    # psycopg's async mode (LISTEN for queued runs) cannot use Windows'
+    # default ProactorEventLoop; Linux keeps the default loop.
+    factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
+    asyncio.run(_amain(), loop_factory=factory)
 
 
 if __name__ == "__main__":

@@ -290,6 +290,106 @@ bash /root/Lawtech-AI/run_v2.sh
 
 ---
 
+## Background runs (answers keep going after the app closes)
+
+Off by default. With `BACKGROUND_RUNS=on`, `/pyapi/chat` and
+`/pyapi/search/stream` stop generating inside the HTTP request. They queue a
+*run* in Postgres and stream its stored events; a separate **runner**
+process (`workers/run_worker.py`) generates the answer. Closing the app, a
+dropped connection, or gunicorn recycling a worker only ends the stream. The
+app can reattach and gets everything it missed. When the run finishes, Python
+tells Node (`RUN_CALLBACK_URL`), which stores the turn and sends a push if
+nobody was watching. Design: `Background_Runs_Implementation_Plan.md`.
+
+### Processes
+
+| Process | Unit | Does |
+|---|---|---|
+| Web (FastAPI under gunicorn) | `lawttorney-v2` | auth, queue the run, stream stored events, reattach, Stop |
+| Runner | `lawttorney-runner@1` (template; `@2` adds one) | claims runs, runs the unchanged pipeline, saves the turn, notifies Node |
+| Postgres | `postgresql` | `runs`, `run_events`, `run_watchers`, `run_outbox`, `run_workers` (created on first use) |
+
+The runner has no HTTP port. It needs the same `.env`, `models/` and
+`POSTGRES_URL` as the web tier. If no runner has reported alive for 45 s,
+the web tier answers inline as before and logs `runner_unavailable_fallback`.
+
+### Settings (.env)
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `BACKGROUND_RUNS` | `off` | `on` routes chat and stream through the runner |
+| `RUNNER_CONCURRENCY` | `8` | runs one runner works on at once (prod peak is ~8-10 in flight) |
+| `RUN_LEASE_S` | `60` | runner lease; renewed every 15 s; a dead runner's runs are recovered after it expires |
+| `RUN_CALLBACK_URL` | empty | Node run-complete endpoint; empty = nothing is sent |
+| `RUN_CALLBACK_SECRET` | empty | sent as `X-Service-Secret` |
+| `USER_AUTH_MODE` | `off` | `optional` / `required`: verify the Node login JWT (`USER_JWT_SECRET`) |
+| `USER_JWT_SECRET` | empty | HS256 key that verifies the app's user token |
+
+Others (`RUN_TOKEN_FLUSH_MS`, `RUN_WATCHER_TTL_S`, `RUN_EVENT_RETENTION_DAYS`,
+`RUN_QUEUE_MAX_WAIT_S`, `RUNNER_WARMUP`, `USER_JWT_*`) are documented in
+`core/settings.py`.
+
+### Memory
+
+The runner loads its own copy of the embedding models (~1.4 GB; gunicorn's
+copy is shared by its workers and does not help) plus libraries: about
+2.5-3 GB idle. Prod had 5.5 GB available on 2026-11-25. The unit caps the
+runner at `MemoryHigh=4500M`, `MemoryMax=5500M`. Before switching prod on,
+measure on dev (`systemctl status lawttorney-runner@1` shows memory) and
+consider `GUNICORN_WORKERS=3`: the web workers no longer generate.
+
+### Switching it on (dev first)
+
+1. Deploy. The workflow installs `lawttorney-runner@.service`, enables `@1`
+   and restarts it. With the flag off it exits at once (inactive is correct).
+2. In `.env`: `BACKGROUND_RUNS=on` (and later `RUN_CALLBACK_URL`,
+   `RUN_CALLBACK_SECRET`, `USER_AUTH_MODE`, `USER_JWT_SECRET`).
+3. `systemctl restart lawttorney-runner@1 lawttorney-v2` (dev: rerun the
+   deploy, or start `python -m workers.run_worker` as the deploy does).
+4. `curl -s localhost:5001/pyapi/health/runs` must show `"status":"ok"`,
+   `"runners":1`, `"listener_connected":true` once a stream has been opened.
+5. `python scripts/background_runs_smoke.py --base http://127.0.0.1:5001`
+   (real questions; checks disconnect + reattach, 409 on a busy thread, Stop).
+   Then by hand with `--pause-for-restart`: restart `lawttorney-v2` while it
+   waits, then the runner, and confirm the answer still completes.
+
+Rollback: `BACKGROUND_RUNS=off`, restart `lawttorney-v2`. Runs in flight
+finish in the runner; it then exits.
+
+### Operations
+
+```bash
+curl -s localhost:5001/pyapi/health/runs           # runners, queue, outbox
+journalctl -u 'lawttorney-runner@*' -f              # runner log
+systemctl restart lawttorney-runner@1               # drains (<= 540 s), then restarts
+systemctl enable --now lawttorney-runner@2          # second runner (~3 GB more RAM)
+# a run-complete message Node never accepted:
+curl -s -X POST -H "X-API-Key: $ADMIN_API_KEY" localhost:5001/pyapi/admin/runs/outbox/<id>/retry
+```
+
+Grep for: `runner_unavailable_fallback` (no runner; answered inline),
+`Lease lost` (Stop or a runner that stalled), `Sweep:` (recovery after a
+runner died), `outbox_dead` (Node rejected or was unreachable for 24 h),
+`run_completed` (one line per run: events, token batches, persist p95,
+queue wait, duration). Prometheus: `lawtech_background_runs_*`,
+`lawtech_background_run_event_delay_seconds`.
+
+### Endpoints
+
+| Method and path | Purpose |
+|---|---|
+| `POST /pyapi/chat`, `POST /pyapi/search/stream` | unchanged request; SSE starts with `thread_id`, then `run_id`; every event carries `seq` |
+| `GET /pyapi/runs/{id}/stream?after=N` | reattach: replay after N, then live |
+| `GET /pyapi/runs/{id}` | status |
+| `GET /pyapi/threads/{id}/active-run` | the thread's run in progress, else its latest |
+| `POST /pyapi/runs/{id}/cancel` | Stop (thread free at once) |
+| `GET /pyapi/health/runs` | runner and queue health |
+
+A second question on a thread that is still answering gets **409** with
+`active_run_id`; the app should attach to that run.
+
+---
+
 ## Directory Layout on Server
 
 ```

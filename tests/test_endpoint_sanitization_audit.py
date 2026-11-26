@@ -42,9 +42,10 @@ _LLM_ENDPOINTS = [
     # (handler_attr_name_in_gateway,         "expected_via")
     # Graph-routed endpoints -- covered by guardrail_output_node automatically:
     ("search",                                "run_chat_pipeline|agent_graph"),
-    ("search_stream",                         "run_chat_pipeline"),
-    ("chat_with_files",                       "run_chat_pipeline"),
-    ("continue_draft",                        "agent_graph|continue_draft_node"),
+    # Both reach run_chat_pipeline through a shared generator (inline, and in
+    # the runner for background runs).
+    ("search_stream",                         "_search_stream_events"),
+    ("chat_with_files",                       "_chat_request_events"),
     # Direct-LLM endpoints -- must call sanitize_output() in the handler chain:
     ("export_document_endpoint",              "sanitize_output"),
     ("fix_draft_endpoint",                    "sanitize_output"),
@@ -79,6 +80,19 @@ _NON_LLM_ENDPOINTS = {
     "save_artifact",
     "restore_artifact",
     "submit_feedback",
+    # Draft panel fill-the-blanks: user values into stored blocks (core.draft_fields), no model call.
+    "fill_artifact_blanks",
+    # Admin pruning and counters.
+    "admin_expire_threads",
+    "health_verifier_stats",
+    # Background runs: status and stored events of a run the pipeline already
+    # produced (and sanitized); nothing new is generated here.
+    "get_run_status",
+    "stream_run",
+    "thread_active_run",
+    "cancel_run",
+    "health_runs",
+    "admin_outbox_retry",
 }
 
 

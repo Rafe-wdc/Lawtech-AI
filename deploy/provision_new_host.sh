@@ -198,7 +198,7 @@ info "Runtime dirs ready."
 
 # ── systemd units ─────────────────────────────────────────────────────────────
 section "systemd units"
-for unit in lawttorney-v2.service lawttorney-embed.service lawttorney-chroma.service; do
+for unit in lawttorney-v2.service lawttorney-embed.service lawttorney-chroma.service lawttorney-runner@.service; do
     if [[ -f "$PROJECT_DIR/deploy/systemd/$unit" ]]; then
         cp "$PROJECT_DIR/deploy/systemd/$unit" "/etc/systemd/system/$unit"
         info "Installed $unit"

@@ -401,6 +401,48 @@ Byte-for-byte after layout normalization:
   covering BR / HR / table rows / split tags / adversarial `<script>`
   fragments / safety valve).
 
+## Background runs (do not regress)
+
+`BACKGROUND_RUNS=on` moves generation for `/pyapi/chat` and
+`/pyapi/search/stream` out of the HTTP request into the runner process
+(`workers/run_worker.py`, unit `lawttorney-runner@.service`). Both talk only
+through `core/run_store.py` (Postgres; SQLite locally). Operations:
+DEPLOYMENT.md "Background runs". Design: `Background_Runs_Implementation_Plan.md`.
+
+- **The endpoints and the runner share one code path.** `/pyapi/chat`'s
+  file processing + pipeline is `gateway._chat_request_events`;
+  `/pyapi/search/stream`'s is `gateway._search_stream_events`. Change
+  behaviour there, never in a copy, or inline and background answers drift.
+- **Every runner write is fenced** by its lease token (`append_events`,
+  `heartbeat`, `finalize` match `lease_token` and `status='running'`). A new
+  write path for the holder must do the same, or a runner whose lease
+  expired can corrupt a run another runner now owns.
+- **A run saves its turn at most once.** The pipeline passes `run_id` to
+  `chat_store.save_turn` (`messages.run_id`, partial unique index). Any new
+  save_turn call inside the pipeline must pass `run_id=i.run_id or ""`.
+- **One active run per thread** (partial unique index on `runs(thread_id)`).
+  It also protects the LangGraph checkpoint, which is keyed by thread. A
+  second request on a busy thread gets 409 with `active_run_id`.
+- **The outbox row is written in the same transaction as the terminal
+  status** (`finalize`, `cancel`, sweeper). Never notify Node from anywhere
+  else; Node dedupes on `Idempotency-Key: run_id`.
+- **Retry only before output.** LangGraph does not resume a crashed run; the
+  sweeper re-queues a run only if it stored nothing but progress events
+  (`SAFE_PRE_OUTPUT_TYPES`). A new event type that shows text or causes a
+  side effect (files saved, a draft stored) must NOT be added to that set.
+- **Replayed events are the stored events.** Each carries `seq`; live and
+  reattach use the same "seq > N" read, so nothing is sent twice. Do not
+  emit events to a tail that are not in `run_events` (except the front
+  door's `thread_id` / `run_id` preface and `: ping` comments).
+- Run endpoints are owner-only when `USER_AUTH_MODE` is `optional` or
+  `required` (`core/user_auth.py`; 404, not 403). `core/identity.py` is a
+  different thing: it keeps the model provider out of answers.
+
+Tests: `tests/test_run_store.py`, `test_run_worker.py`,
+`test_run_endpoints.py` (real uvicorn + runner over TCP), `test_run_outbox.py`,
+`test_run_bus.py`, `test_chat_store_run_id.py`, `test_user_auth.py`. Set
+`TEST_POSTGRES_URL` to a scratch database to run the Postgres variants.
+
 ## Code Style
 
 - Python 3.12+

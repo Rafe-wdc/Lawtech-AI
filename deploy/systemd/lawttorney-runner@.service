@@ -1,0 +1,61 @@
+[Unit]
+# Background-run runner (workers/run_worker.py): generates the answers that
+# /pyapi/chat and /pyapi/search/stream queue when BACKGROUND_RUNS=on, so an
+# answer keeps going after the user closes the app. Independent of gunicorn,
+# which recycles its workers. See DEPLOYMENT.md "Background runs".
+#
+# Template unit: one instance per runner process.
+#   systemctl enable --now lawttorney-runner@1     (the default single runner)
+#   systemctl enable --now lawttorney-runner@2     (more capacity, ~3 GB more RAM)
+Description=Lawttorney background runner %i
+Documentation=file:///root/Lawtech-AI/DEPLOYMENT.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Lawtech-AI
+EnvironmentFile=/root/Lawtech-AI/.env
+
+# Same thread caps as lawttorney-v2 (torch / OpenMP oversubscription).
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=TOKENIZERS_PARALLELISM=false
+
+ExecStart=/root/Lawtech-AI/venv/bin/python -m workers.run_worker
+
+# SIGTERM = stop taking runs, finish the ones in flight, exit 0. The longest
+# run is bounded by CHAT_REQUEST_TIMEOUT_S (480 s); allow a little more.
+# Runs still going after that are cancelled and their leases released, so
+# the next runner recovers them.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=540
+
+# Restart on crash only. With BACKGROUND_RUNS=off the runner finishes any
+# run left over and exits 0, and stays down.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+LimitNOFILE=16384
+
+# The runner holds its own copy of the embedding models (~1.4 GB, loaded at
+# import; gunicorn's copy is shared by its workers and does not help here)
+# plus libraries and per-run working memory: ~2.5-3 GB idle. Prod had
+# 5.5 GB available on 2026-11-25, so the limits leave the box room: above
+# MemoryHigh the kernel reclaims and throttles; MemoryMax kills the runner,
+# systemd restarts it, and the sweeper recovers its runs. Raise both only
+# when the box has the memory (e.g. after GUNICORN_WORKERS 4 -> 3).
+MemoryHigh=4500M
+MemoryMax=5500M
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawttorney-runner-%i
+
+[Install]
+WantedBy=multi-user.target

@@ -152,6 +152,21 @@ jobs:
           echo "=== Install any new Python dependencies ==="
           sudo $APP_DIR/venv/bin/pip install --quiet -r $APP_DIR/requirements.txt
 
+          echo "=== Background runner (BACKGROUND_RUNS; DEPLOYMENT.md 'Background runs') ==="
+          sudo cp $APP_DIR/deploy/systemd/lawttorney-runner@.service /etc/systemd/system/
+          sudo systemctl daemon-reload
+          sudo systemctl enable lawttorney-runner@1 >/dev/null 2>&1 || true
+          # Restart every runner instance without waiting: each stops taking
+          # runs, finishes the ones in flight (up to 540 s), then starts on the
+          # new code. Meanwhile new questions are answered inline. With
+          # BACKGROUND_RUNS off a runner exits by itself when nothing is left.
+          RUNNERS=$(systemctl list-units 'lawttorney-runner@*' --all --no-legend --plain | awk '{print $1}')
+          [ -n "$RUNNERS" ] || RUNNERS="lawttorney-runner@1.service"
+          for r in $RUNNERS; do
+            sudo systemctl restart --no-block "$r"
+            echo "  restart queued: $r"
+          done
+
           echo "=== Restart v2 via systemd (clean import of new code) ==="
           sudo systemctl restart lawttorney-v2
 
@@ -184,6 +199,10 @@ jobs:
 
           if [ "$HEALTHY" = "1" ]; then
             echo "DEPLOY OK"
+            echo "=== Background runner (informational) ==="
+            curl -s --max-time 5 http://localhost:5001/pyapi/health/runs || true
+            echo
+            systemctl list-units 'lawttorney-runner@*' --all --no-legend --plain || true
           else
             echo "ERROR: no $NEEDED consecutive 200s within 120s. journalctl tail:"
             sudo journalctl -u lawttorney-v2 -n 50 --no-pager

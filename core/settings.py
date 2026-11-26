@@ -380,9 +380,17 @@ USER_JWT_REQUIRE_EXP = os.getenv("USER_JWT_REQUIRE_EXP", "on").strip().lower() i
 # (workers/run_worker.py) executes, and stream it from Postgres, so closing
 # the app no longer stops the answer.
 BACKGROUND_RUNS = os.getenv("BACKGROUND_RUNS", "off").strip().lower() in ("1", "true", "yes", "on")
-# Runs one runner process works on at once. Conservative: prod had 5.5 GB
-# free on 2026-11-25 and every run loads the same models as a web worker.
-RUNNER_CONCURRENCY = max(1, int(os.getenv("RUNNER_CONCURRENCY", "2")))
+# Runs one runner process works on at once. Sized from prod (admin
+# usage_stats, 12-26 Nov 2026): 1,100-1,850 answers/day at 73-90 s each, i.e.
+# 1.0-1.6 in flight on a 24 h average, ~4 in business hours, peaks ~8-10.
+# Runs are I/O-bound (model and search calls), so one process carries 8; add
+# a second runner instance (lawttorney-runner@2) when
+# lawtech_background_runs_queued stays above 0. Memory, not CPU, is the limit:
+# the models load once per runner process.
+RUNNER_CONCURRENCY = max(1, int(os.getenv("RUNNER_CONCURRENCY", "8")))
+# Open search and model connections when the runner starts (as gunicorn's
+# post_worker_init does for web workers). Off only for tests and local runs.
+RUNNER_WARMUP = os.getenv("RUNNER_WARMUP", "on").strip().lower() in ("1", "true", "yes", "on")
 RUN_LEASE_S = max(10, int(os.getenv("RUN_LEASE_S", "60")))           # heartbeat every quarter
 RUN_WORKER_STALE_S = int(os.getenv("RUN_WORKER_STALE_S", "45"))      # no runner seen -> inline
 RUN_QUEUE_MAX_WAIT_S = int(os.getenv("RUN_QUEUE_MAX_WAIT_S", "900"))  # queued longer -> failed

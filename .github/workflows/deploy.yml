@@ -185,6 +185,16 @@ jobs:
             source venv/bin/activate
             pip install -q -r requirements.txt
 
+            # Background runner (workers/run_worker.py; DEPLOYMENT.md
+            # "Background runs"). The old runner stops taking runs on SIGTERM
+            # and finishes what it has; the new one starts at once and takes
+            # over. With BACKGROUND_RUNS off it exits when nothing is left.
+            pkill -TERM -f 'python -m workers.run_worker' 2>/dev/null && echo "Old runner draining" || true
+            OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false \
+              nohup /root/v2_multi_agent/venv/bin/python -m workers.run_worker \
+              >> /root/v2_multi_agent/logs/runner.log 2>&1 &
+            echo "Runner started (PID $!)"
+
             # Full restart required because preload_app=True means HUP only
             # respawns workers with the SAME preloaded code — new .py files
             # on disk are never re-imported. Stop → start ensures fresh import.

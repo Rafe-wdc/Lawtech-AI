@@ -365,6 +365,13 @@ class RunWorker:
             return False
 
     async def _drain(self) -> None:
+        # Stop advertising this runner first: while it drains, the front door
+        # either uses another runner or answers inline, instead of queueing
+        # work nobody here will claim.
+        try:
+            await self.store.aio.remove_worker(self.worker_id)
+        except Exception as e:
+            log.warning("Could not remove runner liveness row", error=str(e)[:200])
         tasks = [st.task for st in self._runs.values() if st.task]
         if not tasks:
             return
@@ -420,6 +427,8 @@ class RunWorker:
         return removed
 
     async def _liveness(self) -> None:
+        if self._stopping.is_set():
+            return                      # draining: no longer taking runs
         await self.store.aio.worker_heartbeat(self.worker_id, concurrency=self.concurrency,
                                               running=len(self._runs))
 
@@ -574,8 +583,15 @@ async def _amain() -> None:
     store = get_run_store()
     store.ensure_schema()
 
+    if not S.BACKGROUND_RUNS:
+        counts = store.counts()
+        if counts["queued"] == 0 and counts["running"] == 0:
+            log.info("BACKGROUND_RUNS off and no run left to finish; exiting")
+            store.close()
+            return
+
     from core.run_executor import PipelineExecutor
-    executor = await PipelineExecutor.create()
+    executor = await PipelineExecutor.create(warm_up=S.RUNNER_WARMUP)
 
     from core.run_outbox import OutboxDispatcher
     dispatcher = OutboxDispatcher(store)

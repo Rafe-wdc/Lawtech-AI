@@ -352,6 +352,53 @@ POSTGRES_URL = os.getenv("POSTGRES_URL", "")
 API_KEYS = os.getenv("API_KEYS", "")
 # Single admin key for /pyapi/admin/* and /pyapi/metrics
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+
+# --- User identity (background runs, 2026-11-26) ---
+# The app's user, proven by the Node login JWT (HS256 today) sent as
+# `Authorization: Bearer` or, as before, `integration_token`.
+#   off       the token is not checked; the payload user_id is stored as sent
+#   optional  a valid token sets the user; a bad token is 401; no token falls
+#             back to the payload user_id (rollout mode)
+#   required  no valid token is 401
+USER_AUTH_MODE = os.getenv("USER_AUTH_MODE", "off").strip().lower()
+USER_JWT_SECRET = os.getenv("USER_JWT_SECRET", "")
+USER_JWT_PUBLIC_KEY = os.getenv("USER_JWT_PUBLIC_KEY", "")
+USER_JWT_ALGORITHMS = [a.strip() for a in os.getenv("USER_JWT_ALGORITHMS", "HS256").split(",") if a.strip()]
+USER_JWT_ISSUER = os.getenv("USER_JWT_ISSUER", "").strip()
+USER_JWT_AUDIENCE = os.getenv("USER_JWT_AUDIENCE", "").strip()
+# First claim present wins. Pin this once a real Node token has been seen.
+# Dotted names reach nested claims ("user._id").
+USER_JWT_USER_CLAIM = [c.strip() for c in os.getenv(
+    "USER_JWT_USER_CLAIM", "sub,userId,id,_id,user._id,user.id").split(",") if c.strip()]
+USER_JWT_LEEWAY_S = int(os.getenv("USER_JWT_LEEWAY_S", "30"))
+# Reject tokens without an expiry. Turn off only if Node issues tokens without exp.
+USER_JWT_REQUIRE_EXP = os.getenv("USER_JWT_REQUIRE_EXP", "on").strip().lower() in ("1", "true", "yes", "on")
+
+# --- Background runs (Background_Runs_Implementation_Plan.md) ---
+# off: /pyapi/chat and /pyapi/search/stream generate inside the request, as
+# before. on: they queue a run that the separate runner process
+# (workers/run_worker.py) executes, and stream it from Postgres, so closing
+# the app no longer stops the answer.
+BACKGROUND_RUNS = os.getenv("BACKGROUND_RUNS", "off").strip().lower() in ("1", "true", "yes", "on")
+# Runs one runner process works on at once. Conservative: prod had 5.5 GB
+# free on 2026-11-25 and every run loads the same models as a web worker.
+RUNNER_CONCURRENCY = max(1, int(os.getenv("RUNNER_CONCURRENCY", "2")))
+RUN_LEASE_S = max(10, int(os.getenv("RUN_LEASE_S", "60")))           # heartbeat every quarter
+RUN_WORKER_STALE_S = int(os.getenv("RUN_WORKER_STALE_S", "45"))      # no runner seen -> inline
+RUN_QUEUE_MAX_WAIT_S = int(os.getenv("RUN_QUEUE_MAX_WAIT_S", "900"))  # queued longer -> failed
+RUN_MAX_ATTEMPTS = max(1, int(os.getenv("RUN_MAX_ATTEMPTS", "2")))   # retry only before output
+RUN_TOKEN_FLUSH_MS = int(os.getenv("RUN_TOKEN_FLUSH_MS", "250"))
+RUN_TOKEN_FLUSH_BYTES = int(os.getenv("RUN_TOKEN_FLUSH_BYTES", "2048"))
+RUN_WATCHER_TTL_S = int(os.getenv("RUN_WATCHER_TTL_S", "15"))
+RUN_EVENT_RETENTION_DAYS = int(os.getenv("RUN_EVENT_RETENTION_DAYS", "7"))
+RUN_ROW_RETENTION_DAYS = int(os.getenv("RUN_ROW_RETENTION_DAYS", "90"))
+RUN_STAGING_ROOT = os.getenv("RUN_STAGING_ROOT", str(_PROJECT_ROOT / "data" / "run_staging"))
+# Node run-complete callback. Empty URL: outbox rows are written as
+# 'skipped' and nothing is sent.
+RUN_CALLBACK_URL = os.getenv("RUN_CALLBACK_URL", "").strip()
+RUN_CALLBACK_SECRET = os.getenv("RUN_CALLBACK_SECRET", "").strip()
+RUN_CALLBACK_SEND_CANCELLED = os.getenv("RUN_CALLBACK_SEND_CANCELLED", "off").strip().lower() in ("1", "true", "yes", "on")
+RUN_CALLBACK_TIMEOUT_S = float(os.getenv("RUN_CALLBACK_TIMEOUT_S", "10"))
 # CORS allowed origins. "*" = open (dev). Set to domain(s) in production.
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
 

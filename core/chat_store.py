@@ -103,6 +103,13 @@ def _warn_user_id_mismatch(thread_id: str, stored: str, incoming: str) -> None:
                     stored=stored[:12], incoming=incoming[:12])
 
 
+def _turn_for_run(row) -> int | None:
+    """turn_number from a `SELECT turn_number ... WHERE run_id` row, or None."""
+    if row is None:
+        return None
+    return int(row["turn_number"])
+
+
 # --- Store class ---
 
 class _SqliteChatHistoryStore:
@@ -347,6 +354,19 @@ class _SqliteChatHistoryStore:
                     conn.commit()
                     log.info("Migrated messages: added column", column=col_name)
 
+            # Migration: messages.run_id (background runs, 2026-11-26). A run
+            # saves its turn at most once: a retried or recovered run finds its
+            # turn by run_id instead of writing a second one.
+            if "run_id" not in msg_cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN run_id TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+                log.info("Migrated messages: added column", column="run_id")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_run "
+                "ON messages(run_id) WHERE run_id <> ''"
+            )
+            conn.commit()
+
             self._initialized = True
             log.info("Schema initialized", db_path=self._db_path)
         finally:
@@ -473,6 +493,7 @@ class _SqliteChatHistoryStore:
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
         user_id: str = "",
+        run_id: str = "",
     ) -> int:
         """Save a Q&A turn. Returns the new turn_number.
 
@@ -487,6 +508,14 @@ class _SqliteChatHistoryStore:
         with self._write_lock:
             conn = self._get_connection()
             try:
+                if run_id:
+                    saved = _turn_for_run(conn.execute(
+                        "SELECT turn_number FROM messages WHERE run_id = ?", (run_id,),
+                    ).fetchone())
+                    if saved is not None:
+                        log.info("save_turn: run already saved, returning its turn",
+                                 thread_id=thread_id[:12], run_id=run_id[:12], turn=saved)
+                        return saved
                 # Upsert thread. user_id is written only while the thread
                 # has no owner yet: the first request that names one wins,
                 # a later request cannot re-home the thread.
@@ -511,12 +540,12 @@ class _SqliteChatHistoryStore:
                     INSERT INTO messages (
                         thread_id, turn_number, user_query, ai_response,
                         user_intent_json, task, tasks_planned_json,
-                        primary_artifact_kind
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        primary_artifact_kind, run_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     thread_id, new_turn, user_query, ai_response,
                     user_intent_json, task, tasks_planned_json,
-                    primary_artifact_kind,
+                    primary_artifact_kind, run_id or "",
                 ))
 
                 # Update thread metadata
@@ -529,6 +558,16 @@ class _SqliteChatHistoryStore:
                 conn.commit()
                 log.debug("Turn saved",
                           thread_id=thread_id[:12], turn=new_turn)
+            except sqlite3.IntegrityError:
+                # Another process saved this run's turn between our check and
+                # our insert (uq_messages_run). Return that turn.
+                conn.rollback()
+                saved = _turn_for_run(conn.execute(
+                    "SELECT turn_number FROM messages WHERE run_id = ?", (run_id,),
+                ).fetchone()) if run_id else None
+                if saved is None:
+                    raise
+                return saved
             except Exception as e:
                 conn.rollback()
                 log.error("save_turn failed; rolled back",
@@ -563,6 +602,7 @@ class _SqliteChatHistoryStore:
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
         user_id: str = "",
+        run_id: str = "",
     ) -> int:
         """Async wrapper — runs SQLite write in thread pool.
 
@@ -577,6 +617,7 @@ class _SqliteChatHistoryStore:
             tasks_planned_json=tasks_planned_json,
             primary_artifact_kind=primary_artifact_kind,
             user_id=user_id,
+            run_id=run_id,
         )
 
     def _get_thread_user_id_sync(self, thread_id: str) -> str:
@@ -593,6 +634,25 @@ class _SqliteChatHistoryStore:
     async def get_thread_user_id(self, thread_id: str) -> str:
         """Owner of a thread as sent by the app; '' when unknown."""
         return await asyncio.to_thread(self._get_thread_user_id_sync, thread_id)
+
+    def _get_turn_by_run_id_sync(self, run_id: str) -> dict | None:
+        self._ensure_schema()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT thread_id, turn_number, user_query, ai_response "
+                "FROM messages WHERE run_id = ?", (run_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    async def get_turn_by_run_id(self, run_id: str) -> dict | None:
+        """The turn a background run saved, or None. Keys: thread_id,
+        turn_number, user_query, ai_response."""
+        if not run_id:
+            return None
+        return await asyncio.to_thread(self._get_turn_by_run_id_sync, run_id)
 
     # ------------------------------------------------------------------
     # Summary management
@@ -1949,6 +2009,22 @@ class _PostgresChatHistoryStore:
                 except Exception:
                     conn.rollback()  # column already exists
 
+            # Migration: messages.run_id (background runs, 2026-11-26). A run
+            # saves its turn at most once; see the SQLite backend.
+            try:
+                conn.execute(
+                    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
+                    "run_id TEXT NOT NULL DEFAULT ''"
+                )
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_run "
+                    "ON messages(run_id) WHERE run_id <> ''"
+                )
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                log.warning("PG migration: messages.run_id failed", error=str(e)[:200])
+
             self._schema_ok = True
             log.info("PostgreSQL chat-store schema ensured")
 
@@ -2056,6 +2132,7 @@ class _PostgresChatHistoryStore:
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
         user_id: str = "",
+        run_id: str = "",
     ) -> int:
         """Save a Q&A turn atomically. Returns the new turn_number.
 
@@ -2063,6 +2140,54 @@ class _PostgresChatHistoryStore:
         `_SqliteChatHistoryStore._save_turn_sync` for the contract.
         """
         self._ensure_schema()
+        if run_id:
+            saved = self._turn_for_run_sync(run_id)
+            if saved is not None:
+                log.info("save_turn: run already saved, returning its turn",
+                         thread_id=thread_id[:12], run_id=run_id[:12], turn=saved)
+                return saved
+        try:
+            new_turn = self._insert_turn_pg(
+                thread_id, user_query, ai_response,
+                user_intent_json=user_intent_json, task=task,
+                tasks_planned_json=tasks_planned_json,
+                primary_artifact_kind=primary_artifact_kind,
+                user_id=user_id, run_id=run_id,
+            )
+        except Exception as e:
+            # uq_messages_run: another process saved this run's turn between
+            # our check and our insert. The transaction (turn counter included)
+            # was rolled back; return the turn that won.
+            from psycopg.errors import UniqueViolation
+            saved = (self._turn_for_run_sync(run_id)
+                     if (run_id and isinstance(e, UniqueViolation)) else None)
+            if saved is None:
+                raise
+            return saved
+
+        # Summary regeneration outside the write transaction (LLM call ~1-3s)
+        try:
+            self._maybe_regenerate_summary_sync(thread_id)
+        except Exception as e:
+            log.error("Post-save summary regeneration failed",
+                      thread_id=thread_id[:12], error=str(e))
+
+        return new_turn
+
+    def _turn_for_run_sync(self, run_id: str) -> int | None:
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT turn_number FROM messages WHERE run_id = %s", (run_id,),
+            ).fetchone()
+        return _turn_for_run(row)
+
+    def _insert_turn_pg(
+        self, thread_id: str, user_query: str, ai_response: str, *,
+        user_intent_json: str, task: str, tasks_planned_json: str,
+        primary_artifact_kind: str, user_id: str, run_id: str,
+    ) -> int:
         from psycopg.rows import dict_row
         with self._get_pool().connection() as conn:
             conn.row_factory = dict_row
@@ -2086,23 +2211,15 @@ class _PostgresChatHistoryStore:
                 INSERT INTO messages (
                     thread_id, turn_number, user_query, ai_response,
                     user_intent_json, task, tasks_planned_json,
-                    primary_artifact_kind
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    primary_artifact_kind, run_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 thread_id, new_turn, user_query, ai_response,
                 user_intent_json, task, tasks_planned_json,
-                primary_artifact_kind,
+                primary_artifact_kind, run_id or "",
             ))
             conn.commit()
             log.debug("Turn saved", thread_id=thread_id[:12], turn=new_turn)
-
-        # Summary regeneration outside the write transaction (LLM call ~1-3s)
-        try:
-            self._maybe_regenerate_summary_sync(thread_id)
-        except Exception as e:
-            log.error("Post-save summary regeneration failed",
-                      thread_id=thread_id[:12], error=str(e))
-
         return new_turn
 
     async def save_turn(
@@ -2116,6 +2233,7 @@ class _PostgresChatHistoryStore:
         tasks_planned_json: str = "[]",
         primary_artifact_kind: str = "",
         user_id: str = "",
+        run_id: str = "",
     ) -> int:
         return await asyncio.to_thread(
             self._save_turn_sync, thread_id, user_query, ai_response,
@@ -2124,6 +2242,7 @@ class _PostgresChatHistoryStore:
             tasks_planned_json=tasks_planned_json,
             primary_artifact_kind=primary_artifact_kind,
             user_id=user_id,
+            run_id=run_id,
         )
 
     def _get_thread_user_id_sync(self, thread_id: str) -> str:
@@ -2139,6 +2258,23 @@ class _PostgresChatHistoryStore:
     async def get_thread_user_id(self, thread_id: str) -> str:
         """Owner of a thread as sent by the app; '' when unknown."""
         return await asyncio.to_thread(self._get_thread_user_id_sync, thread_id)
+
+    def _get_turn_by_run_id_sync(self, run_id: str) -> dict | None:
+        self._ensure_schema()
+        from psycopg.rows import dict_row
+        with self._get_pool().connection() as conn:
+            conn.row_factory = dict_row
+            row = conn.execute(
+                "SELECT thread_id, turn_number, user_query, ai_response "
+                "FROM messages WHERE run_id = %s", (run_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    async def get_turn_by_run_id(self, run_id: str) -> dict | None:
+        """The turn a background run saved, or None (see the SQLite backend)."""
+        if not run_id:
+            return None
+        return await asyncio.to_thread(self._get_turn_by_run_id_sync, run_id)
 
     # ------------------------------------------------------------------
     # Summary management

@@ -407,6 +407,16 @@ RUN_CALLBACK_URL = os.getenv("RUN_CALLBACK_URL", "").strip()
 RUN_CALLBACK_SECRET = os.getenv("RUN_CALLBACK_SECRET", "").strip()
 RUN_CALLBACK_SEND_CANCELLED = os.getenv("RUN_CALLBACK_SEND_CANCELLED", "off").strip().lower() in ("1", "true", "yes", "on")
 RUN_CALLBACK_TIMEOUT_S = float(os.getenv("RUN_CALLBACK_TIMEOUT_S", "10"))
+# Body sent to RUN_CALLBACK_URL. "store_history" (default): Node's
+# POST /v2/api/chats/cases/ai/store-history, the same fields the app sends to
+# StoreHistory (UserId, SearchTitle, SearchResult, ThreadId, ParentId, Token,
+# source, summary) plus notify. Node stores every call as a new record and
+# deducts tokens each time, so only answers NO app was showing when they
+# finished are sent (the app saves the ones it showed, as before), and only
+# finished answers of a user with a numeric id. The `done` event says which:
+# `history_saved_by_server`. "run_complete": the generic run payload.
+RUN_CALLBACK_FORMAT = ("run_complete" if os.getenv("RUN_CALLBACK_FORMAT", "").strip().lower()
+                       == "run_complete" else "store_history")
 # CORS allowed origins. "*" = open (dev). Set to domain(s) in production.
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
 

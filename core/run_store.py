@@ -216,6 +216,36 @@ def partial_text(events: Iterable[RunEvent]) -> str:
     return response if response is not None else "".join(tokens)
 
 
+def artifact_ref(events: Iterable[RunEvent]) -> dict | None:
+    """The draft panel's reference, as the app stores it in StoreHistory's
+    `source.artifact`: {id, version, sectionCount} from `artifact_start`,
+    replaced by {id, version, title, sectionCount} from `artifact_done`.
+    None when the answer has no draft panel."""
+    ref = None
+    for e in events:
+        p = e.payload
+        if e.type == "artifact_start" and p.get("artifact_id"):
+            ref = {"id": p["artifact_id"], "version": p.get("version"),
+                   "sectionCount": len(p.get("sections") or [])}
+        elif e.type == "artifact_done" and isinstance(p.get("artifact"), dict):
+            art = p["artifact"]
+            ref = {"id": art.get("artifact_id") or p.get("artifact_id"),
+                   "version": art["version"] if art.get("version") is not None else p.get("version"),
+                   "sectionCount": len(art.get("sections") or [])}
+            if art.get("title"):
+                ref["title"] = art["title"]
+    return ref
+
+
+def with_history_flag(events: list[dict], saved_by_server: bool) -> list[dict]:
+    """Mark the `done` event(s): `history_saved_by_server` true means Python
+    saves this answer to the chat history itself, so the app must not call
+    StoreHistory for it (Node would keep it twice and charge twice); false
+    means the app saves it as before."""
+    return [{**ev, "history_saved_by_server": bool(saved_by_server)}
+            if ev.get("type") == "done" else ev for ev in events]
+
+
 def terminal_done_event(run: RunRow, **extra) -> dict:
     """A `done` for a run that did not produce its own (cancel, crash,
     recovery). Carries the keys every `done` carries so clients that read
@@ -795,8 +825,9 @@ class RunStore:
                 raise LeaseLost(run_id)
             run = self._row(r)
             before = RunRow(**{**run.__dict__, "last_seq": run.last_seq - len(final_events)})
-            self._append_locked(cx, before, final_events)
-            self._insert_outbox(cx, run, sources=sources, agents_used=agents_used)
+            saved = self._insert_outbox(cx, run, sources=sources, agents_used=agents_used,
+                                        pending=final_events)
+            self._append_locked(cx, before, with_history_flag(final_events, saved))
         log.info("Run finished", run_id=run_id[:12], status=status, turn=turn_number,
                  events=run.last_seq)
         return run
@@ -826,8 +857,9 @@ class RunStore:
             )
             run = self._row(r)
             before = RunRow(**{**run.__dict__, "last_seq": run.last_seq - 1})
-            self._append_locked(cx, before, [terminal_done_event(run, cancelled=True)])
-            self._insert_outbox(cx, run)
+            final = [terminal_done_event(run, cancelled=True)]
+            saved = self._insert_outbox(cx, run, pending=final)
+            self._append_locked(cx, before, with_history_flag(final, saved))
         log.info("Run cancelled", run_id=run_id[:12], thread_id=run.thread_id[:12])
         return run
 
@@ -889,13 +921,18 @@ class RunStore:
     # -- outbox ---------------------------------------------------------------
 
     def _insert_outbox(self, cx: _Cx, run: RunRow, *, sources: list | None = None,
-                       agents_used: list | None = None) -> None:
-        """The run-complete message for Node, inside the caller's transaction."""
-        stored = None
-        if sources is None or agents_used is None:
-            stored = [self._event(e) for e in cx.all(
-                "SELECT * FROM run_events WHERE run_id = ? AND type IN ('sources','done') "
-                "ORDER BY seq", (run.run_id,))]
+                       agents_used: list | None = None,
+                       pending: list[dict] | None = None) -> bool:
+        """The run-complete message for Node, inside the caller's transaction.
+        `pending`: the run's final events, about to be appended. Returns True
+        when Python saves the answer to the chat history itself (Node's
+        store-history format), which the caller writes onto the `done` event
+        (`with_history_flag`) so the app does not save it a second time."""
+        stored = [self._event(e) for e in cx.all(
+            "SELECT * FROM run_events WHERE run_id = ? AND type IN "
+            "('sources','done','artifact_start','artifact_done') ORDER BY seq", (run.run_id,))]
+        stored += [RunEvent(run.run_id, 0, str(ev.get("type") or ""), ev, None)
+                   for ev in pending or []]
         if sources is None:
             sources = next((e.payload.get("data") or [] for e in reversed(stored)
                             if e.type == "sources"), [])
@@ -919,14 +956,26 @@ class RunStore:
             "error": run.error,
             "started_at": iso(run.started_at),
             "finished_at": iso(run.finished_at),
+            # What the app also saves with an answer: the draft panel's
+            # reference and, for a regenerated answer, the original's id.
+            "artifact": artifact_ref(stored),
+            "parent_id": (run.request or {}).get("parent_id"),
         }
+        from core import settings as S
+        from core.run_outbox import plan_delivery
         status = "pending" if self._callback_enabled(run.status) else "skipped"
+        if status == "pending":
+            send, why = plan_delivery(payload)
+            if not send:
+                status = "skipped"
+                log.info("Run-complete not sent to Node", run_id=run.run_id[:12], reason=why)
         now = self._ts(self._now())
         cx.execute(
             "INSERT INTO run_outbox (run_id, kind, payload_json, status, next_attempt_at, created_at) "
             "VALUES (?, 'run_complete', ?, ?, ?, ?) ON CONFLICT (run_id) DO NOTHING",
             (run.run_id, json.dumps(payload, ensure_ascii=False), status, now, now),
         )
+        return status == "pending" and S.RUN_CALLBACK_FORMAT == "store_history"
 
     def claim_outbox(self, limit: int = 10, hold_s: int = 60) -> list[OutboxItem]:
         """Pending messages that are due. Each is held for `hold_s` (its
@@ -1082,9 +1131,15 @@ class RunStore:
                      int(saved.get("turn_number") or 0), len(final), run_id),
                 )
                 done = self._row(r2)
+                saved_by_server = self._insert_outbox(cx, done, pending=final)
+                for e in events:          # a done stored before finalize was lost
+                    if e.type == "done":
+                        cx.execute("UPDATE run_events SET payload_json = ? WHERE run_id = ? AND seq = ?",
+                                   (json.dumps(with_history_flag([e.payload], saved_by_server)[0],
+                                               ensure_ascii=False), run_id, e.seq))
                 self._append_locked(cx, RunRow(**{**done.__dict__,
-                                                  "last_seq": done.last_seq - len(final)}), final)
-                self._insert_outbox(cx, done)
+                                                  "last_seq": done.last_seq - len(final)}),
+                                    with_history_flag(final, saved_by_server))
                 report.repaired.append(run_id)
                 log.warning("Sweep: run had saved its turn, finalize was lost; marked done",
                             run_id=run_id[:12], turn=done.turn_number)
@@ -1124,9 +1179,10 @@ class RunStore:
             (self._ts(self._now()), error, partial_text(events), len(final), True, run.run_id),
         )
         failed = self._row(r)
+        saved = self._insert_outbox(cx, failed, pending=final)
         self._append_locked(cx, RunRow(**{**failed.__dict__,
-                                          "last_seq": failed.last_seq - len(final)}), final)
-        self._insert_outbox(cx, failed)
+                                          "last_seq": failed.last_seq - len(final)}),
+                            with_history_flag(final, saved))
         return failed
 
     def _retention(self, now: datetime, event_days: int, row_days: int) -> tuple[int, int]:

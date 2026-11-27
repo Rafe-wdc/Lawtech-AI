@@ -425,7 +425,16 @@ DEPLOYMENT.md "Background runs". Design: `Background_Runs_Implementation_Plan.md
   second request on a busy thread gets 409 with `active_run_id`.
 - **The outbox row is written in the same transaction as the terminal
   status** (`finalize`, `cancel`, sweeper). Never notify Node from anywhere
-  else; Node dedupes on `Idempotency-Key: run_id`.
+  else.
+- **Exactly one side saves an answer to Node's chat history.** Node's
+  store-history endpoint keeps every call as a new record and deducts tokens
+  each time (it does not dedupe). Python sends only finished answers no app
+  was showing (`run_outbox.plan_delivery`); the app saves the ones it showed.
+  The decision is made before the final events are written and stamped on
+  the `done` event as `history_saved_by_server`, so an app replaying a run
+  knows whether to call StoreHistory. A new terminal path must call
+  `_insert_outbox(..., pending=final)` before appending and pass the events
+  through `with_history_flag`.
 - **Retry only before output.** LangGraph does not resume a crashed run; the
   sweeper re-queues a run only if it stored nothing but progress events
   (`SAFE_PRE_OUTPUT_TYPES`). A new event type that shows text or causes a

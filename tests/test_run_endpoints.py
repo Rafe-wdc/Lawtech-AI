@@ -530,3 +530,27 @@ class TestRunnerDownWithStuckRun:
         run_id = chat_evs[1]["data"]
         assert chat_evs[-1]["type"] == "done"
         assert not os.path.exists(os.path.join(S.RUN_STAGING_ROOT, run_id))
+
+
+class TestNodeHistoryFields:
+    def test_parent_id_never_fails_a_request(self):
+        for value, want in [(5521, "5521"), ("5521", "5521"), (" 77 ", "77"), ("", None),
+                            (None, None), (True, None)]:
+            assert gw.SearchRequest(Promptquery="q", parent_id=value).parent_id == want
+
+    def test_parent_id_is_stored_and_done_says_the_app_saves_a_watched_answer(
+            self, store, server, runner):
+        evs = stream(server, {"Promptquery": "regenerate this", "user_id": "101",
+                              "parent_id": 5521})
+        run = wait_status(store, evs[1]["data"])
+        assert run.request["parent_id"] == "5521"
+        assert evs[-1]["type"] == "done" and evs[-1]["history_saved_by_server"] is False
+
+    def test_chat_form_accepts_parent_id(self, store, server, runner):
+        for sent, want in [("77", "77"), ("", None)]:
+            with httpx.stream("POST", server.url + "/pyapi/chat",
+                              data={"query": "q", "parent_id": sent, "user_id": "101"},
+                              timeout=30) as r:
+                assert r.status_code == 200
+                evs = events_of(r)
+            assert wait_status(store, evs[1]["data"]).request["parent_id"] == want

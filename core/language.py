@@ -68,11 +68,26 @@ _ROMANIZED_HINTS: dict[str, list[str]] = {
     "kn": ["hege", "enu", "helri", "madbekhu", "ide", "alla"],
     "ml": ["engane", "enna", "cheyyuka", "aanu", "undo"],
     "gu": ["kem", "shu", "karo", "che", "nathi", "tame"],
-    "pa": ["kiwe", "ki", "karo", "hai", "nahi", "tenu", "saanu"],
+    # Punjabi markers only. "ki", "karo", "hai" and "nahi" are ordinary
+    # Hindi and used to be listed here, which sent Hinglish prompts to
+    # Punjabi and got them answered in Gurmukhi (lawyer test report,
+    # 2026-11-25). They are deliberately NOT moved to the Hindi list:
+    # that would switch everyday Hinglish questions that are answered in
+    # English today ("anticipatory bail kaise milti hai?") to Devanagari
+    # Hindi answers, a product decision of its own.
+    "pa": ["kiwe", "kive", "tenu", "tainu", "saanu", "sanu", "tuhanu",
+           "tuhada", "tusi", "tussi", "mainu", "kado", "kithe", "ithe",
+           "othe", "kinni", "kinna", "ohnu", "sade", "saada", "chahida",
+           "chahide", "karde", "jande"],
 }
 
 # Minimum keyword hits to trigger Romanized detection
 _ROMANIZED_MIN_HITS = 2
+# ... and the hits must be a real share of the distinct words. A 100-word
+# English drafting instruction that ends "client ne kaha hai ki sale deed
+# nahi hogi" is an English prompt; until 2026-11-25 two hits anywhere in
+# the text switched the whole answer to Hindi.
+_ROMANIZED_MIN_SHARE = 0.10
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +325,8 @@ def _detect_romanized(text: str) -> str | None:
     """
     lower = text.lower()
     tokens = set(re.findall(r"\b[a-z]+\b", lower))
+    if not tokens:
+        return None
     best_lang: str | None = None
     best_count = 0
     for lang, keywords in _ROMANIZED_HINTS.items():
@@ -317,6 +334,8 @@ def _detect_romanized(text: str) -> str | None:
         if count >= _ROMANIZED_MIN_HITS and count > best_count:
             best_count = count
             best_lang = lang
+    if best_lang and best_count / len(tokens) < _ROMANIZED_MIN_SHARE:
+        return None
     return best_lang
 
 

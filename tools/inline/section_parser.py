@@ -69,6 +69,15 @@ def _extract_act_name(query_lower: str, section_type: str) -> str:
             act_name = match.group(1).strip()
             act_name = re.sub(r'^\s*(of\s+(?:the\s+)?|the\s+)', '', act_name)
             act_name = re.sub(r'\s*,\s*\d{4}.*', '', act_name)
+            # A year without the comma ("... Interest Act 2002 action on the
+            # property ...") used to drag the rest of the sentence into the
+            # act name; everything after the year is prose. The year stays
+            # (it tells the Companies Acts of 1956 and 2013 apart). re.S:
+            # the name can run past a line break ("... Act 2002 Action on
+            # ... (Spl. C. S. No. 994/2024)\nDear Advocate"), and without it
+            # the trim silently did nothing on multi-line questions.
+            act_name = re.sub(r'(\s+(?:1[89]|20)\d{2})\b.*$', r'\1', act_name,
+                              flags=re.S)
             return act_name
     return ''
 
@@ -117,7 +126,18 @@ def parse_multi_section_info(query: str) -> dict | None:
     number_pattern = _NUMBER_PATTERN
 
     # --- Step 1: Find section type keyword ---
-    type_match = re.search(rf'({_SECTION_PATTERN})s?\s', query_lower)
+    # Use the first keyword that is actually followed by an identifier. A
+    # keyword followed by an ordinary word is prose, not a reference: "Vide
+    # order dated 12/11/2024 below Exh. 05 ... Section 13(4) or Section 14 of
+    # the SARFAESI Act" used to start at "order", scan "dated 12/11/2024
+    # below exh. 05 ..." and report Sections 12, 11 and 05 (a date and an
+    # exhibit number) while ignoring the query's own Section 13(4) (lawyer
+    # test report, 2026-11-25).
+    type_match = None
+    for candidate in re.finditer(rf'({_SECTION_PATTERN})s?\s', query_lower):
+        if re.match(number_pattern, query_lower[candidate.end():].lstrip()):
+            type_match = candidate
+            break
     if not type_match:
         return None
 

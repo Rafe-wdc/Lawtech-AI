@@ -551,6 +551,18 @@ def _search_legislation_multi_section(
         filter_clauses = []
         if best_source:
             filter_clauses.append({"term": {"source.keyword": best_source}})
+            # Within the act, the stored section number decides. The phrase
+            # variations above only hit when the act name matches the text
+            # word for word; the lawyer's SARFAESI question ("... Securities
+            # Interest Act 2002 ...", indexed as "Security Interest") asked
+            # for Sections 13 and 14 and got 36, 26D, 37, 1 and 42, and 28
+            # (2026-11-27). Only inside a known act: without the source
+            # filter this would pull Section 13 of every act in the index.
+            should_clauses.append({"match": {"section_number": {
+                "query": sec_num, "boost": 20.0}}})
+            should_clauses.append({"terms": {
+                "section_number.keyword": sorted({sec_num, sec_num.upper()}),
+                "boost": 20.0}})
 
         es_query = {
             "size": 5,

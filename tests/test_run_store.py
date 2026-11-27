@@ -16,6 +16,15 @@ from core.run_store import (
     ActiveRunExists, LeaseLost, RunStore, SAFE_PRE_OUTPUT_TYPES, partial_text,
 )
 
+
+@pytest.fixture(autouse=True)
+def _generic_callback_format(monkeypatch):
+    """These tests check delivery mechanics on the generic run-complete
+    payload. Node's store-history format has its own tests in
+    test_run_outbox.py (TestStoreHistoryFormat)."""
+    from core import settings as S
+    monkeypatch.setattr(S, "RUN_CALLBACK_FORMAT", "run_complete")
+
 PG_URL = os.getenv("TEST_POSTGRES_URL", "")
 _RUN_TABLES = ("run_outbox", "run_watchers", "run_events", "run_workers", "runs")
 
@@ -365,6 +374,24 @@ class TestSweepRecovery:
         last = store.read_events(rid)[-1]
         assert last.type == "done" and last.payload["recovered"] is True
         assert store.get_outbox(rid)["payload"]["turn"] == 4
+
+    def test_repair_marks_a_done_stored_before_the_crash(self, store, clock, monkeypatch):
+        """Node's store-history format: the replayed `done` must say Python
+        saves the answer, or an app replaying it would save it a second time."""
+        from core import settings as S
+        monkeypatch.setattr(S, "RUN_CALLBACK_FORMAT", "store_history")
+        r = _new(store, user_id="101")
+        c = store.claim("w1")
+        rid = r.run_id
+        store.append_events(rid, c.lease_token, [{"type": "response", "content": "Saved."},
+                                                 {"type": "done", "agents_used": ["A"]}])
+        clock.advance(61)
+        rep = store.sweep(turn_lookup=lambda x: {"turn_number": 2, "ai_response": "Saved."}
+                          if x == rid else None)
+        assert rep.repaired == [rid]
+        dones = [e for e in store.read_events(rid) if e.type == "done"]
+        assert len(dones) == 1 and dones[0].payload["history_saved_by_server"] is True
+        assert store.get_outbox(rid)["status"] == "pending"
 
     def test_no_retry_after_max_attempts(self, store, clock):
         c = _claimed(store)

@@ -18,6 +18,15 @@ from core.run_store import RunStore
 from workers.run_worker import EventSink, RunWorker, parse_sse
 
 
+@pytest.fixture(autouse=True)
+def _generic_callback_format(monkeypatch):
+    """These tests check delivery mechanics on the generic run-complete
+    payload. Node's store-history format has its own tests in
+    test_run_outbox.py (TestStoreHistoryFormat)."""
+    from core import settings as S
+    monkeypatch.setattr(S, "RUN_CALLBACK_FORMAT", "run_complete")
+
+
 def sse(ev: dict) -> str:
     return f"data: {json.dumps(ev)}\n\n"
 

@@ -297,9 +297,13 @@ Off by default. With `BACKGROUND_RUNS=on`, `/pyapi/chat` and
 *run* in Postgres and stream its stored events; a separate **runner**
 process (`workers/run_worker.py`) generates the answer. Closing the app, a
 dropped connection, or gunicorn recycling a worker only ends the stream. The
-app can reattach and gets everything it missed. When the run finishes, Python
-tells Node (`RUN_CALLBACK_URL`), which stores the turn and sends a push if
-nobody was watching. Design: `Background_Runs_Implementation_Plan.md`.
+app can reattach and gets everything it missed. When an answer finishes while
+nobody is watching it, Python saves it to the chat history through Node's
+store-history endpoint (`RUN_CALLBACK_URL`) with `notify: true`, and Node sends
+the push. An answer an app was showing is saved by the app itself, as before:
+Node keeps every call as a new record and deducts tokens each time, so only
+one side may save an answer. The run's `done` event says which side does
+(`history_saved_by_server`). Design: `Background_Runs_Implementation_Plan.md`.
 
 ### Processes
 
@@ -320,8 +324,9 @@ the web tier answers inline as before and logs `runner_unavailable_fallback`.
 | `BACKGROUND_RUNS` | `off` | `on` routes chat and stream through the runner |
 | `RUNNER_CONCURRENCY` | `8` | runs one runner works on at once (prod peak is ~8-10 in flight) |
 | `RUN_LEASE_S` | `60` | runner lease; renewed every 15 s; a dead runner's runs are recovered after it expires |
-| `RUN_CALLBACK_URL` | empty | Node run-complete endpoint; empty = nothing is sent |
-| `RUN_CALLBACK_SECRET` | empty | sent as `X-Service-Secret` |
+| `RUN_CALLBACK_URL` | empty | Node store-history endpoint (dev: `https://test.lawttorney.com/v2/api/chats/cases/ai/store-history`); empty = nothing is sent and the app saves every answer |
+| `RUN_CALLBACK_FORMAT` | `store_history` | body: Node's store-history fields (`UserId`, `SearchTitle`, `SearchResult`, `ThreadId`, `ParentId`, `Token`, `source`, `summary`, `notify`), as the app sends them; `run_complete` = the generic run payload |
+| `RUN_CALLBACK_SECRET` | empty | sent as `X-Service-Secret` when set (Node does not check one yet) |
 | `USER_AUTH_MODE` | `off` | `optional` / `required`: verify the Node login JWT (`USER_JWT_SECRET`) |
 | `USER_JWT_SECRET` | empty | HS256 key that verifies the app's user token |
 
@@ -342,8 +347,10 @@ consider `GUNICORN_WORKERS=3`: the web workers no longer generate.
 
 1. Deploy. The workflow installs `lawttorney-runner@.service`, enables `@1`
    and restarts it. With the flag off it exits at once (inactive is correct).
-2. In `.env`: `BACKGROUND_RUNS=on` (and later `RUN_CALLBACK_URL`,
-   `RUN_CALLBACK_SECRET`, `USER_AUTH_MODE`, `USER_JWT_SECRET`).
+2. In `.env`: `BACKGROUND_RUNS=on` and `RUN_CALLBACK_URL` (later
+   `RUN_CALLBACK_SECRET`, `USER_AUTH_MODE`, `USER_JWT_SECRET`). The callback
+   is sent by the runner, so a `RUN_CALLBACK_*` change needs only a runner
+   restart.
 3. `systemctl restart lawttorney-runner@1 lawttorney-v2` (dev: rerun the
    deploy, or start `python -m workers.run_worker` as the deploy does).
 4. `curl -s localhost:5001/pyapi/health/runs` must show `"status":"ok"`,

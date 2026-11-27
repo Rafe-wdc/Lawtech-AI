@@ -7,8 +7,20 @@ process every couple of seconds, delivers pending rows:
   POST RUN_CALLBACK_URL
   X-Service-Secret: <RUN_CALLBACK_SECRET>     Python authenticates itself (no user token)
   Idempotency-Key:  <run_id>                  Node stores and pushes once per run
-  body: the run-complete payload (run_id, thread_id, user_id, turn, status,
-        query, response, sources, agents_used, token_usage, connected, ...)
+  body (RUN_CALLBACK_FORMAT=store_history, the default): Node's
+        /v2/api/chats/cases/ai/store-history request, with the values the app
+        sends to StoreHistory (UserId, SearchTitle, SearchResult, ThreadId,
+        ParentId, Token, source, summary) plus RunId and notify;
+        (run_complete): the stored payload as is (run_id, thread_id, user_id,
+        turn, status, query, response, sources, agents_used, token_usage,
+        connected, ...)
+
+Which answers are sent (store_history) is decided when the run ends
+(plan_delivery): finished answers of a user with a numeric id that no app was
+showing when they finished. Node stores every call as a new record, so the
+ones an app showed are left to the app, which saves them itself as before.
+The run's `done` event carries the decision (`history_saved_by_server`), so
+an app that replays a finished run knows whether to save it.
 
 Outcomes:
   2xx                         sent
@@ -59,6 +71,80 @@ def _retryable(status: int) -> bool:
     return status in (408, 429) or status >= 500
 
 
+def _source_urls(sources: list) -> list[str]:
+    """One link per source, as the app builds it for StoreHistory: doc_link,
+    else web_url, else the first pdf_links url."""
+    urls = []
+    for s in sources or []:
+        if not isinstance(s, dict):
+            continue
+        url = s.get("doc_link") or s.get("web_url")
+        if not url:
+            url = next((p.get("url") for p in s.get("pdf_links") or []
+                        if isinstance(p, dict) and p.get("url")), None)
+        if url:
+            urls.append(url)
+    return urls
+
+
+def store_history_body(payload: dict) -> dict | None:
+    """The run-complete payload as Node's store-history request: the fields
+    and values the app itself sends to StoreHistory when it shows an answer,
+    plus notify (send the push: nobody was watching). None when Node cannot
+    store it: no numeric user id, or no question or answer text (Node
+    answers those with 400/404)."""
+    uid = str(payload.get("user_id") or "").strip()
+    query = (payload.get("query") or "").strip()
+    answer = payload.get("response") or ""
+    if not uid.isdigit() or not query or not answer.strip():
+        return None
+    sources = payload.get("sources") or []
+    source = {"type": "sources", "urls": _source_urls(sources), "sources": sources}
+    if payload.get("artifact"):
+        source["artifact"] = payload["artifact"]
+    usage = payload.get("token_usage")
+    total = usage.get("total_tokens") if isinstance(usage, dict) else None
+    parent = payload.get("parent_id")
+    return {
+        "UserId": int(uid),
+        "SearchTitle": payload.get("query") or "",
+        "SearchResult": answer,
+        "ThreadId": payload.get("thread_id") or None,
+        "ParentId": int(parent) if str(parent or "").strip().isdigit() else None,
+        "Token": total if isinstance(total, int) and total > 0 else 1,
+        "source": source,
+        "summary": payload.get("query") or "",
+        "notify": not payload.get("connected", False),
+    }
+
+
+def plan_delivery(payload: dict) -> tuple[bool, str]:
+    """(send it, reason when not), decided when the run ends, from the
+    run-complete payload and the settings.
+
+    store_history: Node keeps every call as a new record and deducts tokens
+    each time, so exactly one side may save an answer. An app that was
+    showing the answer when it finished got the `done` and saves it itself
+    (as before background runs); Python saves only the ones nobody saw."""
+    from core import settings as S
+    if S.RUN_CALLBACK_FORMAT != "store_history":
+        return True, ""
+    if payload.get("status") != "done":
+        return False, f"status {payload.get('status')}: only finished answers are stored"
+    if payload.get("connected"):
+        return False, "an app was showing it and saves it itself"
+    if store_history_body(payload) is None:
+        return False, "no numeric user id, or no question or answer text"
+    return True, ""
+
+
+def request_body(payload: dict) -> dict | None:
+    from core import settings as S
+    if S.RUN_CALLBACK_FORMAT == "store_history":
+        return store_history_body(payload)
+    return payload
+
+
 class OutboxDispatcher:
     def __init__(self, store: RunStore, *, url: str | None = None, secret: str | None = None,
                  timeout_s: float | None = None, post: PostFn | None = None, batch: int = 10):
@@ -93,8 +179,15 @@ class OutboxDispatcher:
         }
         if secret:
             headers["X-Service-Secret"] = secret
+        body = request_body(item.payload)
+        if body is None:
+            # The format changed after the row was queued, or the payload
+            # cannot be stored by Node: sending would only earn a 400.
+            await self.store.aio.mark_outbox_dead(item.outbox_id, "not deliverable in this format")
+            log.warning("Run-complete not deliverable; not sent", run_id=item.run_id[:12])
+            return
         try:
-            status = await self._post(url, item.payload, headers, timeout_s)
+            status = await self._post(url, body, headers, timeout_s)
             error = f"HTTP {status}"
         except Exception as e:
             status, error = 0, f"{type(e).__name__}: {str(e)[:200]}"

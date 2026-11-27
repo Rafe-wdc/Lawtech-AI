@@ -23,6 +23,15 @@ import pytest
 from core.run_outbox import OutboxDispatcher, backoff_s
 from core.run_store import RunStore
 
+
+@pytest.fixture(autouse=True)
+def _generic_callback_format(monkeypatch):
+    """These tests check delivery mechanics on the generic run-complete
+    payload. Node's store-history format has its own tests in
+    test_run_outbox.py (TestStoreHistoryFormat)."""
+    from core import settings as S
+    monkeypatch.setattr(S, "RUN_CALLBACK_FORMAT", "run_complete")
+
 SECRET = "node-callback-secret"
 
 
@@ -285,3 +294,199 @@ class TestRunnerSendsIt:
         asyncio.run(body())
         assert node.stored[r.run_id]["user_id"] == "u-7" and node.pushes == ["u-7"]
         assert st.get_outbox(r.run_id)["status"] == "sent"
+
+
+# ---------------------------------------------------------------------------
+# Node's store-history format (RUN_CALLBACK_FORMAT=store_history, the default)
+# ---------------------------------------------------------------------------
+
+class StoreHistoryNode:
+    """Node's POST /v2/api/chats/cases/ai/store-history as built: no secret,
+    every call a new record with its tokens deducted, push when notify."""
+
+    def __init__(self):
+        self.script: list[int] = []
+        self.requests: list[dict] = []
+        self.records: list[dict] = []
+        self.tokens_charged = 0
+        self.pushes: list[int] = []
+        stub = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                stub.requests.append({"headers": dict(self.headers), "body": body})
+                status = stub.script.pop(0) if stub.script else 200
+                out = {}
+                if status == 200:
+                    stub.records.append({**body, "id": 5000 + len(stub.records)})
+                    stub.tokens_charged += int(body.get("Token") or 0)
+                    if body.get("notify"):
+                        stub.pushes.append(body["UserId"])
+                    out = {"status": True, "data": stub.records[-1]}
+                data = json.dumps(out).encode()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = (f"http://127.0.0.1:{self.httpd.server_address[1]}"
+                    "/v2/api/chats/cases/ai/store-history")
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+
+
+SOURCES = [
+    {"title": "Act", "doc_link": "https://s3/act.pdf"},
+    {"title": "Web", "web_url": "https://example.org/a"},
+    {"title": "Judgment", "pdf_links": [{"name": "x"}, {"url": "https://s3/j.pdf"}]},
+    {"title": "No link"},
+]
+
+
+class TestStoreHistoryFormat:
+    @pytest.fixture(autouse=True)
+    def _store_history(self, monkeypatch):
+        from core import settings as S
+        monkeypatch.setattr(S, "RUN_CALLBACK_FORMAT", "store_history")
+
+    @pytest.fixture
+    def hist(self):
+        n = StoreHistoryNode()
+        yield n
+        n.close()
+
+    def run(self, store, *, user="101", watched=False, status="done", request=None,
+            events=None, response="Answer.", tokens=350):
+        r = store.create_run(thread_id="t-9", endpoint="/pyapi/search/stream",
+                             request=request or {"query": "What is Section 303 BNS?"},
+                             user_id=user, identity_source="payload")
+        c = store.claim("w")
+        if watched:
+            store.touch_watcher(r.run_id, "tail")
+        store.finalize(r.run_id, c.lease_token, status=status, response_text=response,
+                       turn_number=1, token_usage={"total_tokens": tokens} if tokens else None,
+                       sources=SOURCES,
+                       final_events=(events or []) + [{"type": "done", "agents_used": ["Newacts"]}])
+        return r.run_id
+
+    def done_event(self, store, run_id):
+        return [e for e in store.read_events(run_id, 0, 100) if e.type == "done"][-1].payload
+
+    def test_body_is_what_the_app_sends_plus_notify(self, store, hist):
+        run_id = self.run(store)
+        assert dispatch(dispatcher(store, hist.url)) == 1
+        req = hist.requests[0]
+        assert req["headers"]["Idempotency-Key"] == run_id
+        assert req["body"] == {
+            "UserId": 101,
+            "SearchTitle": "What is Section 303 BNS?",
+            "SearchResult": "Answer.",
+            "ThreadId": "t-9",
+            "ParentId": None,
+            "Token": 350,
+            "source": {"type": "sources",
+                       "urls": ["https://s3/act.pdf", "https://example.org/a", "https://s3/j.pdf"],
+                       "sources": SOURCES},
+            "summary": "What is Section 303 BNS?",
+            "notify": True,
+        }
+        assert store.get_outbox(run_id)["status"] == "sent"
+        assert hist.pushes == [101] and hist.tokens_charged == 350
+        assert self.done_event(store, run_id)["history_saved_by_server"] is True
+
+    def test_no_secret_configured_sends_no_secret_header(self, store, hist):
+        self.run(store)
+        dispatch(OutboxDispatcher(store, url=hist.url, secret="", timeout_s=2))
+        assert "X-Service-Secret" not in hist.requests[0]["headers"]
+        assert len(hist.records) == 1
+
+    def test_missing_token_count_is_sent_as_1_like_the_app(self, store, hist):
+        self.run(store, tokens=0)
+        dispatch(dispatcher(store, hist.url))
+        assert hist.requests[0]["body"]["Token"] == 1
+
+    def test_answer_an_app_showed_is_left_to_the_app(self, store, hist):
+        run_id = self.run(store, watched=True)
+        assert store.get_outbox(run_id)["status"] == "skipped"
+        assert dispatch(dispatcher(store, hist.url)) == 0 and hist.requests == []
+        assert self.done_event(store, run_id)["history_saved_by_server"] is False
+
+    def test_without_a_callback_url_the_app_saves_everything(self, tmp_path, clock, hist):
+        st = RunStore(sqlite_path=str(tmp_path / "off.db"), now_fn=clock,
+                      callback_enabled=lambda status: False)
+        st.ensure_schema()
+        run_id = self.run(st)                                       # nobody watching
+        assert st.get_outbox(run_id)["status"] == "skipped"
+        assert self.done_event(st, run_id)["history_saved_by_server"] is False
+
+    def test_node_down_then_back_stores_it_once(self, store, hist, clock):
+        self.run(store)
+        hist.script = [503]
+        dispatch(dispatcher(store, hist.url))
+        clock.advance(6)
+        dispatch(dispatcher(store, hist.url))
+        assert len(hist.requests) == 2
+        assert len(hist.records) == 1 and hist.tokens_charged == 350 and hist.pushes == [101]
+
+    def test_stop_and_failure_are_left_to_the_app(self, store, hist):
+        r = store.create_run(thread_id="t-c", endpoint="/pyapi/search/stream",
+                             request={"query": "q"}, user_id="101")
+        store.claim("w")
+        store.cancel(r.run_id)
+        assert self.done_event(store, r.run_id)["history_saved_by_server"] is False
+        run_id = self.run(store, status="failed")
+        assert self.done_event(store, run_id)["history_saved_by_server"] is False
+        assert dispatch(dispatcher(store, hist.url)) == 0
+
+    @pytest.mark.parametrize("kw", [{"user": "u-abc"}, {"user": ""}, {"status": "failed"},
+                                    {"response": "  "}],
+                             ids=["non-numeric user", "no user", "failed", "empty answer"])
+    def test_what_node_cannot_store_is_not_sent(self, store, hist, kw):
+        run_id = self.run(store, **kw)
+        assert store.get_outbox(run_id)["status"] == "skipped"
+        assert dispatch(dispatcher(store, hist.url)) == 0
+
+    def test_out_of_prompts_is_not_retried(self, store, hist, clock):
+        run_id = self.run(store)
+        hist.script = [403]
+        dispatch(dispatcher(store, hist.url))
+        clock.advance(3600)
+        dispatch(dispatcher(store, hist.url))
+        assert len(hist.requests) == 1 and store.get_outbox(run_id)["status"] == "dead"
+
+    def test_draft_reference_and_parent_id_as_the_app_saves_them(self, store, hist):
+        art = {"artifact_id": "art-t9", "version": 2, "title": "Legal Notice",
+               "sections": [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}]}
+        self.run(store, request={"query": "Draft a legal notice", "parent_id": "5521"},
+                 events=[{"type": "artifact_start", "artifact_id": "art-t9", "version": 2,
+                          "sections": [{"id": "p1"}, {"id": "p3"}]},
+                         {"type": "artifact_done", "artifact_id": "art-t9", "version": 2,
+                          "artifact": art}])
+        dispatch(dispatcher(store, hist.url))
+        body = hist.requests[0]["body"]
+        assert body["ParentId"] == 5521
+        assert body["source"]["artifact"] == {"id": "art-t9", "version": 2,
+                                              "title": "Legal Notice", "sectionCount": 3}
+
+    def test_draft_that_never_finished_keeps_the_start_reference(self, store, hist):
+        self.run(store, events=[{"type": "artifact_start", "artifact_id": "art-t9", "version": 1,
+                                 "sections": [{"id": "p1"}, {"id": "p3"}]}])
+        dispatch(dispatcher(store, hist.url))
+        assert hist.requests[0]["body"]["source"]["artifact"] == {
+            "id": "art-t9", "version": 1, "sectionCount": 2}
+
+    def test_row_queued_in_the_generic_format_is_not_sent_to_store_history(self, store, hist,
+                                                                           monkeypatch):
+        from core import settings as S
+        monkeypatch.setattr(S, "RUN_CALLBACK_FORMAT", "run_complete")
+        run_id = self.run(store, user="u-abc")                    # queued: generic sends all
+        monkeypatch.setattr(S, "RUN_CALLBACK_FORMAT", "store_history")
+        dispatch(dispatcher(store, hist.url))                     # Node could not store it
+        assert hist.requests == [] and store.get_outbox(run_id)["status"] == "dead"

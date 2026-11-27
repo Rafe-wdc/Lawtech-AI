@@ -562,6 +562,19 @@ class SearchRequest(BaseModel):
     # Optional while the app rolls the field out. Not used for
     # authorisation: the X-API-Key still gates access.
     user_id: Optional[str] = Field(None, max_length=128)
+    # Background runs (2026-11-27): for a regenerated answer, the Node history
+    # id of the answer it replaces (StoreHistory's ParentId). Python only
+    # passes it on when it saves the answer to Node itself; unused otherwise.
+    parent_id: Optional[Union[int, str]] = None
+
+    @field_validator("parent_id", mode="before")
+    @classmethod
+    def _clean_parent_id(cls, v):
+        # Never fails a request: anything unusable becomes None.
+        if v is None or isinstance(v, bool):
+            return None
+        v = str(v).strip()[:32]
+        return v or None
 
     @field_validator("user_id", mode="before")
     @classmethod
@@ -1172,6 +1185,7 @@ async def search_stream(data: SearchRequest, request: Request):
                 "preferred_language": data.preferred_language,
                 "cite_appendix": getattr(data, "cite_appendix", None),
                 "regenerate_of": getattr(data, "regenerate_of", None),
+                "parent_id": data.parent_id,
             },
             integration_token=getattr(data, "integration_token", None),
         )
@@ -1685,6 +1699,9 @@ async def chat_with_files(
     # Subscription plan name, e.g. "First Justice Plan" or "Basic". When set,
     # every uploaded PDF must fit that plan's page limit (PLAN_UPLOAD_LIMITS).
     plan: Optional[str] = Form(None),
+    # Background runs: Node history id of the answer a regenerate replaces
+    # (see SearchRequest.parent_id).
+    parent_id: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Chat endpoint with inline file attachments (SSE streaming).
@@ -2016,6 +2033,7 @@ async def chat_with_files(
                 "regenerate_of": regenerate_of,
                 "force_ocr": bool(force_ocr),
                 "rejected_files": rejected_files,
+                "parent_id": (parent_id or "").strip()[:32] or None,
             },
             integration_token=integration_token,
             uploads=(file_tuples, page_counts, temp_paths),

@@ -19,6 +19,7 @@ import asyncio
 import os
 from datetime import date
 
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from core.state import LegalAgentState, AgentResult, SourceMetadata, FileContextData
@@ -487,7 +488,7 @@ the gap with general legal knowledge or invented details.""",
         # whole file, 24K tokens on a 28-page PDF, was re-billed in full on
         # every follow-up because the history preceded it).
         prompt_messages = [
-            ("system", system_prompt),
+            SystemMessage(content=system_prompt),
             ("user", "Document content:\n{docs}"),
             ("user", "Source size and required length: {size_note}"),
         ]

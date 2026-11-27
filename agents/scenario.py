@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata, IntegrationContextData
@@ -96,7 +97,7 @@ async def scenario_node(state: LegalAgentState) -> dict:
                 log.info("Scenario: uploaded file context injected",
                          prefix_len=len(_file_prefix))
             template = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
+                SystemMessage(content=system_prompt),
                 MessagesPlaceholder("chat_history", optional=True),
                 ("human", "{input}"),
             ])

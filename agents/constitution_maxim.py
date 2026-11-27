@@ -23,6 +23,7 @@ import os
 from datetime import date
 
 from langchain_core.documents import Document
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
@@ -247,7 +248,7 @@ async def _handle_constitution_or_maxim(task: str, query: str, chat_history: lis
         # and prevent runaway markdown-table padding loops.
         llm = get_gemini_flash_full(temperature=0.3, max_output_tokens=8192)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
+            SystemMessage(content=system_prompt),
             MessagesPlaceholder(variable_name="chat_history", optional=True),
             ("user", "Retrieved provisions and context:\n{docs}"),
             ("user", "Current Date: {date}"),

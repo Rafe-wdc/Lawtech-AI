@@ -23,6 +23,7 @@ from datetime import date
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from core.state import LegalAgentState, AgentResult, SourceMetadata
@@ -513,7 +514,7 @@ async def legislation_node(state: LegalAgentState) -> dict:
             # and prevent runaway markdown-table padding loops.
             llm = get_gemini_flash_full(temperature=0.1, max_output_tokens=8192)
             prompt = ChatPromptTemplate.from_messages([
-                ("system", _system_prompt),
+                SystemMessage(content=_system_prompt),
                 MessagesPlaceholder(variable_name="chat_history", optional=True),
                 ("user", "Legislation provisions:\n{docs}"),
                 ("user", "Current Date: {date}"),
